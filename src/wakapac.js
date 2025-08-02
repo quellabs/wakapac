@@ -9,45 +9,136 @@
  * ║     ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝ ╚═════╝                        ║
  * ║                                                                                      ║
  * ║  PAC Framework - Presentation-Abstraction-Control for JavaScript                     ║
+ * ║  Enhanced with Deep Reactivity Support                                               ║
  * ║                                                                                      ║
  * ║  A powerful reactive framework that creates hierarchical components with two-way     ║
- * ║  data binding, event handling, and automatic DOM synchronization. Built to work      ║
- * ║  seamlessly with vanilla HTML and JavaScript for modern web applications.            ║
+ * ║  data binding, event handling, and automatic DOM synchronization. Now supports      ║
+ * ║  deep reactivity for arrays and nested objects!                                     ║
  * ║                                                                                      ║
- * ║  Key Features:                                                                       ║
- * ║  • Reactive Data Binding - Changes to JS objects automatically update the DOM        ║
- * ║  • Template Syntax - Use {{propertyName}} in HTML for dynamic content                ║
- * ║  • Event Binding - Declarative event handling via data attributes                    ║
- * ║  • Hierarchical Components - Parent-child relationships with communication           ║
- * ║  • Performance Optimized - Batched DOM updates and intelligent caching               ║
- * ║  • Multiple Update Modes - Immediate, delayed, or change-triggered updates           ║
- * ║  • Computed Properties - Reactive derived values that auto-update when deps change   ║
- * ║  • Conditional Rendering - Show/hide elements based on reactive properties           ║
+ * ║  New Deep Reactivity Features:                                                       ║
+ * ║  • Array Mutations - push(), pop(), splice(), etc. automatically trigger updates    ║
+ * ║  • Nested Object Changes - deeply nested property changes are detected              ║
+ * ║  • Collection Methods - Built-in reactive array and object manipulation             ║
+ * ║  • Path-based Updates - Track exactly what changed for optimal performance          ║
  * ║                                                                                      ║
- * ║  Example Usage:                                                                      ║
- * ║    wakaPAC('#my-component', {                                                        ║
- * ║      firstName: 'John',                                                              ║
- * ║      lastName: 'Doe',                                                                ║
- * ║      count: 0,                                                                       ║
- * ║      isVisible: true,                                                                ║
- * ║      computed: {                                                                     ║
- * ║        fullName() { return this.firstName + ' ' + this.lastName; },                 ║
- * ║        doubleCount() { return this.count * 2; }                                     ║
+ * ║  Example Usage with Deep Reactivity:                                                 ║
+ * ║    wakaPAC('#todo-app', {                                                            ║
+ * ║      todos: [],                                                                      ║
+ * ║      user: { name: 'John', preferences: { theme: 'dark' } },                        ║
+ * ║                                                                                      ║
+ * ║      addTodo() {                                                                     ║
+ * ║        // This now works! Array mutations are reactive                              ║
+ * ║        this.todos.push({ text: 'New todo', completed: false });                     ║
  * ║      },                                                                              ║
- * ║      increment() { this.count++; }                                                   ║
- * ║    });                                                                               ║
  * ║                                                                                      ║
- * ║    HTML: <div id="my-component">                                                     ║
- * ║            Hello {{fullName}}! Count: {{count}} (Double: {{doubleCount}})           ║
- * ║            <div data-pac-bind="visible:isVisible">Conditionally shown</div>          ║
- * ║            <button data-pac-bind="click:increment">+</button>                        ║
- * ║          </div>                                                                      ║
+ * ║      toggleTodo(index) {                                                             ║
+ * ║        // This now works! Nested property changes are reactive                      ║
+ * ║        this.todos[index].completed = !this.todos[index].completed;                  ║
+ * ║      },                                                                              ║
+ * ║                                                                                      ║
+ * ║      updateTheme(newTheme) {                                                         ║
+ * ║        // This now works! Deep nested changes are reactive                          ║
+ * ║        this.user.preferences.theme = newTheme;                                      ║
+ * ║      }                                                                               ║
+ * ║    });                                                                               ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
 
 (function () {
     'use strict';
+
+    /**
+     * ReactiveUtils - Utility class for reactive system operations
+     * Contains helper methods for reactivity detection, comparison, and validation
+     */
+    function ReactiveUtils() {
+    }
+
+    /**
+     * Check if environment supports Proxy for deep reactivity
+     * @returns {boolean} True if Proxy is supported
+     */
+    ReactiveUtils.SUPPORTS_PROXY = typeof Proxy !== 'undefined';
+
+    /**
+     * Check if a value should be made reactive (objects and arrays, but not DOM elements or functions)
+     * @param {*} value - Value to check
+     * @returns {boolean} True if value should be made reactive
+     */
+    ReactiveUtils.shouldBeReactive = function (value) {
+        return value !== null &&
+            typeof value === 'object' &&
+            !value.nodeType && // Not a DOM element
+            !(value instanceof Date) &&
+            !(value instanceof RegExp) &&
+            !(value instanceof File);
+    };
+
+    /**
+     * Compare two values for deep equality
+     * @param {*} a - First value
+     * @param {*} b - Second value
+     * @returns {boolean} True if values are deeply equal
+     */
+    ReactiveUtils.deepEqual = function (a, b) {
+        if (a === b) {
+            return true;
+        }
+
+        if (a == null || b == null) {
+            return a === b;
+        }
+
+        if (typeof a !== typeof b) {
+            return false;
+        }
+
+        if (typeof a === 'object') {
+            if (Array.isArray(a) !== Array.isArray(b)) {
+                return false;
+            }
+
+            const keysA = Object.keys(a);
+            const keysB = Object.keys(b);
+
+            if (keysA.length !== keysB.length) {
+                return false;
+            }
+
+            for (let i = 0; i < keysA.length; i++) {
+                const key = keysA[i];
+                if (!keysB.includes(key)) {
+                    return false;
+                }
+                if (!ReactiveUtils.deepEqual(a[key], b[key])) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    };
+
+    /**
+     * Generate a random ID for binding keys
+     * @returns {string} Unique identifier based on timestamp and random number
+     */
+    ReactiveUtils.createRandomId = function () {
+        return Date.now() + '_' + Math.floor(Math.random() * 10000);
+    };
+
+    /**
+     * Check if a string represents a DOM event type
+     * @param {string} type - String to check
+     * @returns {boolean} True if it's a recognized event type
+     */
+    ReactiveUtils.isEventType = function (type) {
+        const eventTypes = ['click', 'submit', 'change', 'input', 'focus', 'blur', 'keyup', 'keydown'];
+        return eventTypes.indexOf(type) !== -1;
+    };
 
     /**
      * PAC (Presentation-Abstraction-Control) Registry System
@@ -149,21 +240,179 @@
     window.PACRegistry = window.PACRegistry || new PACRegistry();
 
     /**
-     * Check if a string represents a DOM event type
-     * @param {string} type - String to check
-     * @returns {boolean} True if it's a recognized event type
+     * Legacy compatibility functions - these delegate to ReactiveUtils
      */
     function isEventType(type) {
-        const eventTypes = ['click', 'submit', 'change', 'input', 'focus', 'blur', 'keyup', 'keydown'];
-        return eventTypes.indexOf(type) !== -1;
+        return ReactiveUtils.isEventType(type);
+    }
+
+    function createRandomId() {
+        return ReactiveUtils.createRandomId();
     }
 
     /**
-     * Generate a random ID for binding keys
-     * @returns {string} Unique identifier based on timestamp and random number
+     * Create a deep reactive object/array using Proxy (modern browsers) or fallback methods
+     * @param {*} target - Object or array to make reactive
+     * @param {Function} onChange - Callback when changes occur
+     * @param {string} path - Current path in the object tree (for nested tracking)
+     * @returns {*} Reactive version of the target
      */
-    function createRandomId() {
-        return Date.now() + '_' + Math.floor(Math.random() * 10000);
+    function createReactiveProxy(target, onChange, path) {
+        path = path || '';
+
+        if (!ReactiveUtils.shouldBeReactive(target)) {
+            return target;
+        }
+
+        if (ReactiveUtils.SUPPORTS_PROXY) {
+            return createProxyReactive(target, onChange, path);
+        } else {
+            return createFallbackReactive(target, onChange, path);
+        }
+    }
+
+    /**
+     * Create reactive object using Proxy (for modern browsers)
+     */
+    function createProxyReactive(target, onChange, path) {
+        // Make nested objects reactive too
+        for (const key in target) {
+            if (target.hasOwnProperty(key) && ReactiveUtils.shouldBeReactive(target[key])) {
+                const nestedPath = path ? path + '.' + key : key;
+                target[key] = createReactiveProxy(target[key], onChange, nestedPath);
+            }
+        }
+
+        // Store original array methods for arrays
+        const isArray = Array.isArray(target);
+        const originalMethods = {};
+
+        if (isArray) {
+            const arrayMethods = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+            arrayMethods.forEach(method => {
+                originalMethods[method] = target[method];
+            });
+        }
+
+        return new Proxy(target, {
+            get(obj, prop) {
+                // Intercept array mutation methods
+                if (isArray && originalMethods.hasOwnProperty(prop)) {
+                    return function (...args) {
+                        const oldLength = obj.length;
+                        const result = originalMethods[prop].apply(obj, args);
+
+                        // Make any new items reactive
+                        if (prop === 'push' || prop === 'unshift' || prop === 'splice') {
+                            for (let i = 0; i < obj.length; i++) {
+                                if (ReactiveUtils.shouldBeReactive(obj[i]) && !obj[i]._isReactive) {
+                                    const itemPath = path ? path + '.' + i : i.toString();
+                                    obj[i] = createReactiveProxy(obj[i], onChange, itemPath);
+                                }
+                            }
+                        }
+
+                        // Notify of change
+                        const changePath = path || 'root';
+                        onChange(changePath, obj, 'array-mutation', {method: prop, args: args});
+
+                        return result;
+                    };
+                }
+
+                return obj[prop];
+            },
+
+            set(obj, prop, value) {
+                const oldValue = obj[prop];
+
+                // Make new value reactive if needed
+                if (ReactiveUtils.shouldBeReactive(value)) {
+                    const newPath = path ? path + '.' + prop : prop.toString();
+                    value = createReactiveProxy(value, onChange, newPath);
+                }
+
+                obj[prop] = value;
+
+                // Notify of change only if value actually changed
+                if (!ReactiveUtils.deepEqual(oldValue, value)) {
+                    const changePath = path ? path + '.' + prop : prop.toString();
+                    onChange(changePath, value, 'property-set', {oldValue: oldValue});
+                }
+
+                return true;
+            },
+
+            deleteProperty(obj, prop) {
+                const oldValue = obj[prop];
+                delete obj[prop];
+
+                const changePath = path ? path + '.' + prop : prop.toString();
+                onChange(changePath, undefined, 'property-delete', {oldValue: oldValue});
+
+                return true;
+            }
+        });
+    }
+
+    /**
+     * Create reactive object using traditional methods (fallback for older browsers)
+     */
+    function createFallbackReactive(target, onChange, path) {
+        const isArray = Array.isArray(target);
+
+        if (isArray) {
+            // For arrays in older browsers, replace mutation methods
+            const arrayMethods = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+
+            arrayMethods.forEach(method => {
+                const original = target[method];
+
+                Object.defineProperty(target, method, {
+                    value: function (...args) {
+                        const result = original.apply(this, args);
+
+                        // Make new items reactive
+                        if (method === 'push' || method === 'unshift' || method === 'splice') {
+                            for (let i = 0; i < this.length; i++) {
+                                if (ReactiveUtils.shouldBeReactive(this[i]) && !this[i]._isReactive) {
+                                    const itemPath = path ? path + '.' + i : i.toString();
+                                    this[i] = createReactiveProxy(this[i], onChange, itemPath);
+                                }
+                            }
+                        }
+
+                        const changePath = path || 'root';
+                        onChange(changePath, this, 'array-mutation', {method: method, args: args});
+
+                        return result;
+                    },
+                    enumerable: false,
+                    configurable: true
+                });
+            });
+        }
+
+        // Make nested objects reactive
+        for (const key in target) {
+            if (target.hasOwnProperty(key)) {
+                const value = target[key];
+
+                if (ReactiveUtils.shouldBeReactive(value)) {
+                    const nestedPath = path ? path + '.' + key : key;
+                    target[key] = createReactiveProxy(value, onChange, nestedPath);
+                }
+            }
+        }
+
+        // Mark as reactive to avoid double-processing
+        Object.defineProperty(target, '_isReactive', {
+            value: true,
+            enumerable: false,
+            configurable: false
+        });
+
+        return target;
     }
 
     /**
@@ -190,7 +439,8 @@
         // Default configuration options
         const config = {
             updateMode: 'immediate',  // How quickly to update: 'immediate', 'delayed', or 'change'
-            delay: 300               // Delay in milliseconds for 'delayed' mode
+            delay: 300,               // Delay in milliseconds for 'delayed' mode
+            deepReactivity: true      // Enable deep reactivity for arrays and objects
         };
 
         // Merge user options with defaults
@@ -216,6 +466,37 @@
             computedCache: new Map(),     // Cache for computed property values
             computedDependencies: new Map(), // Tracks which properties each computed property depends on
             propertyDependents: new Map(), // Tracks which computed properties depend on each property
+            reactiveProxies: new WeakMap(), // Track reactive proxies to avoid cycles
+
+            /**
+             * Handle deep reactive changes from proxied objects/arrays
+             * @param {string} path - The path that changed (e.g., 'todos.0.completed')
+             * @param {*} newValue - The new value
+             * @param {string} changeType - Type of change ('property-set', 'array-mutation', etc.)
+             * @param {Object} meta - Additional metadata about the change
+             */
+            handleDeepChange: function (path, newValue, changeType, meta) {
+                // Extract the root property name from the path
+                const rootProperty = path.split('.')[0];
+
+                // Update computed properties that depend on this root property
+                this.updateComputedProperties(rootProperty);
+
+                // Trigger DOM update for the root property
+                // The DOM update system will re-render the entire property
+                if (this.abstraction.hasOwnProperty(rootProperty)) {
+                    this.updateDOM(rootProperty, this.abstraction[rootProperty]);
+                }
+
+                // Notify parent of the change
+                this.notifyParent('propertyChange', {
+                    property: rootProperty,
+                    path: path,
+                    newValue: newValue,
+                    changeType: changeType,
+                    meta: meta
+                });
+            },
 
             /**
              * Queue a DOM update for batching
@@ -266,7 +547,9 @@
 
                     // Update all bindings for this property
                     self.bindings.forEach(function (binding) {
-                        if (binding.property !== property) return;
+                        if (binding.property !== property) {
+                            return;
+                        }
 
                         // Handle different binding types
                         switch (binding.type) {
@@ -283,7 +566,6 @@
                                 if (binding.element.value !== newValue) {
                                     binding.element.value = newValue;
                                 }
-
                                 break;
 
                             case 'visible':
@@ -331,7 +613,21 @@
             },
 
             /**
+             * Evaluate visibility condition (supports negation with !)
+             * @param {string} condition - The condition string (e.g., 'isVisible' or '!isHidden')
+             * @param {*} value - The current value of the property
+             * @returns {boolean} Whether the element should be visible
+             */
+            evaluateVisibilityCondition: function (condition, value) {
+                if (condition.startsWith('!')) {
+                    return !value;
+                }
+                return !!value;
+            },
+
+            /**
              * Update a text binding by replacing template placeholders
+             * Enhanced to handle complex object/array serialization
              * @param {Object} binding - The text binding object
              * @param {string} property - Property name
              * @param {*} newValue - New value to inject
@@ -339,7 +635,20 @@
             updateTextBinding: function (binding, property, newValue) {
                 // Create regex to match template syntax: {{propertyName}}
                 const regex = new RegExp('\\{\\{\\s*' + property + '\\s*\\}\\}', 'g');
-                const newText = binding.originalText.replace(regex, newValue);
+
+                // Convert complex values to strings
+                let displayValue = newValue;
+                if (typeof newValue === 'object' && newValue !== null) {
+                    if (Array.isArray(newValue)) {
+                        displayValue = '[' + newValue.length + ' items]';
+                    } else {
+                        displayValue = JSON.stringify(newValue, null, 2);
+                    }
+                } else if (newValue === null || newValue === undefined) {
+                    displayValue = '';
+                }
+
+                const newText = binding.originalText.replace(regex, displayValue);
 
                 // Update either the text node or element text content
                 if (binding.textNode) {
@@ -409,7 +718,7 @@
                     const newValue = computedFunction.call(self.abstraction);
 
                     // Only update if the value actually changed
-                    if (oldValue !== newValue) {
+                    if (!ReactiveUtils.deepEqual(oldValue, newValue)) {
                         self.computedCache.set(computedName, newValue);
 
                         // Trigger DOM update for the computed property
@@ -431,12 +740,8 @@
             },
 
             /**
-             * Create a new PAC (Presentation-Abstraction-Control) Unit
-             * This is the main factory function that creates reactive DOM components
-             * @param {string} selector - CSS selector for the container element
-             * @param {Object} abstraction - Object containing properties and methods for the component
-             * @param {Object} options - Configuration options for the PAC unit
-             * @returns {Object} Public API object for interacting with the PAC unit
+             * Create a reactive abstraction object with deep reactivity support
+             * @returns {Object} The reactive abstraction object
              */
             createReactiveAbstraction: function () {
                 const reactiveAbstraction = {};
@@ -491,7 +796,7 @@
                             // Bind methods to the reactive object context
                             reactiveAbstraction[key] = value.bind(reactiveAbstraction);
                         } else {
-                            // Create reactive property with getter/setter
+                            // Create reactive property with getter/setter and deep reactivity
                             this.createReactiveProperty(reactiveAbstraction, key, value);
                         }
                     }
@@ -507,6 +812,7 @@
 
             /**
              * Create a reactive property with getter/setter that triggers updates
+             * Enhanced with deep reactivity support for objects and arrays
              * @param {Object} obj - Object to add property to
              * @param {string} key - Property name
              * @param {*} initialValue - Initial value for the property
@@ -515,14 +821,29 @@
                 let value = initialValue;
                 const self = this;
 
+                // Make initial value reactive if it's an object/array and deep reactivity is enabled
+                if (this.config.deepReactivity && ReactiveUtils.shouldBeReactive(value)) {
+                    value = createReactiveProxy(value, function (path, newValue, changeType, meta) {
+                        self.handleDeepChange(path, newValue, changeType, meta);
+                    }, key);
+                }
+
                 Object.defineProperty(obj, key, {
                     get: function () {
                         return value;
                     },
                     set: function (newValue) {
                         // Only trigger updates if value actually changed
-                        if (value !== newValue) {
+                        if (!ReactiveUtils.deepEqual(value, newValue)) {
                             const oldValue = value;
+
+                            // Make new value reactive if deep reactivity is enabled
+                            if (self.config.deepReactivity && ReactiveUtils.shouldBeReactive(newValue)) {
+                                newValue = createReactiveProxy(newValue, function (path, changedValue, changeType, meta) {
+                                    self.handleDeepChange(path, changedValue, changeType, meta);
+                                }, key);
+                            }
+
                             value = newValue;
 
                             // Trigger DOM update
@@ -557,7 +878,7 @@
              * @param {Function} options.onError - Callback function called on error
              * @returns {Promise} Promise that resolves with the response data
              */
-            makeServerRequest: function(url, options) {
+            makeServerRequest: function (url, options) {
                 const self = this;
                 options = options || {};
 
@@ -888,7 +1209,9 @@
                         const method = self.abstraction[binding.method];
 
                         if (typeof method === 'function') {
-                            if (eventType === 'submit') event.preventDefault();
+                            if (eventType === 'submit') {
+                                event.preventDefault();
+                            }
                             method.call(self.abstraction, event);
                             handled = true;
                         }
@@ -1045,7 +1368,7 @@
             /**
              * Clean up the PAC unit and remove all references/listeners
              * This prevents memory leaks and ensures proper cleanup
-             * Now includes cleanup of computed property caches
+             * Now includes cleanup of computed property caches and reactive proxies
              */
             destroy: function () {
                 const self = this;
@@ -1077,6 +1400,9 @@
                 this.computedCache.clear();
                 this.computedDependencies.clear();
                 this.propertyDependents.clear();
+
+                // Clear reactive proxy tracking
+                this.reactiveProxies.clear();
 
                 // Clear all references
                 this.bindings.clear();
@@ -1160,7 +1486,6 @@
          * @param {Object} options - Request options
          */
         publicAPI.control = function (url, options) {
-            // Implementation here - this would have access to the internal control object
             return control.makeServerRequest(url, options);
         };
 
@@ -1208,6 +1533,6 @@
 
     // Module export for CommonJS/Node.js compatibility
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = {wakaPAC: wakaPAC, PACRegistry: PACRegistry};
+        module.exports = {wakaPAC: wakaPAC, PACRegistry: PACRegistry, ReactiveUtils: ReactiveUtils};
     }
 })();
