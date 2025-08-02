@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PAC Framework - Complete Feature Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .demo-section {
+            background: white;
+            margin: 20px 0;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-left: 4px solid;
+        }
+
+        .basic-demo { border-left-color: #17a2b8; }
+        .hierarchy-demo { border-left-color: #007bff; }
+
+        .pac-unit {
+            background: white;
+            margin: 15px 0;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-left: 4px solid;
+        }
+
+        #parent-app {
+            border-left-color: #007bff;
+            background: linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%);
+        }
+
+        #child-app {
+            border-left-color: #28a745;
+            margin-left: 30px;
+        }
+
+        #grandchild-app {
+            border-left-color: #ffc107;
+            margin-left: 60px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-low, .text-status-low { color: #28a745; }
+        .status-medium, .text-status-medium { color: #ffc107; }
+        .status-high, .text-status-high { color: #dc3545; }
+        .status-inactive, .text-status-inactive { color: #6c757d; }
+
+        .status-low { background: #28a745; }
+        .status-medium { background: #ffc107; }
+        .status-high { background: #dc3545; }
+        .status-inactive { background: #6c757d; }
+
+        button {
+            margin: 5px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .btn-primary { background: #007bff; color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-warning { background: #ffc107; color: #212529; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-info { background: #17a2b8; color: white; }
+
+        input[type="text"], input[type="number"] {
+            padding: 10px;
+            margin: 5px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+        }
+
+        .control-panel {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border: 1px solid #dee2e6;
+        }
+
+        .message-log {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+
+        .message-log .timestamp {
+            color: #a0aec0;
+        }
+
+        .message-log .parent { color: #63b3ed; }
+        .message-log .child { color: #68d391; }
+        .message-log .grandchild { color: #fbb6ce; }
+
+        h1, h2, h3, h4 { margin-top: 0; }
+
+        .flex-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin: 2px;
+        }
+
+        .badge-primary { background: #007bff; color: white; }
+        .badge-success { background: #28a745; color: white; }
+        .badge-warning { background: #ffc107; color: #212529; }
+
+        .hidden { display: none; }
+
+        .theme-dark {
+            background: #2d3748;
+            color: #e2e8f0;
+        }
+
+        .theme-light {
+            background: white;
+            color: #2d3748;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .demo-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<h1>🚀 WakaPAC Framework - Complete Feature Demonstration</h1>
+
+<!-- Basic Features Demo -->
+<div class="demo-section basic-demo">
+    <h2>📝 Basic Features Demo</h2>
+    <p>This section demonstrates fundamental WakaPAC features: text binding, event handling, form controls, and computed properties.</p>
+
+    <div class="demo-grid">
+        <!-- Basic Reactive Demo -->
+        <div id="basic-app">
+            <h3>🔄 Basic Reactivity</h3>
+            <p>Hello, <strong>{{name}}</strong>!</p>
+            <p>Count: <span class="status-{{status}}">{{count}}</span></p>
+            <p>Status: <span class="status-{{status}}" data-pac-bind="click:toggleStatus" style="cursor: pointer; text-decoration: underline;">{{status}}</span> (click to change)</p>
+            <p>Computed: {{fullDescription}}</p>
+
+            <div style="margin: 10px 0;">
+                <button class="btn-success" data-pac-bind="click:increment">➕ Increment</button>
+                <button class="btn-secondary" data-pac-bind="click:reset">🔄 Reset</button>
+            </div>
+
+            <div style="margin-top: 15px;">
+                <label>Name (immediate update):</label><br>
+                <input type="text" data-pac-bind="name" placeholder="Updates immediately" />
+            </div>
+
+            <div data-pac-bind="visible:showAdvanced" style="margin-top: 15px; padding: 10px; background: #f0f8ff; border-radius: 4px;">
+                <h4>🎯 Advanced Controls</h4>
+                <div>
+                    <label>Message (delayed 500ms):</label><br>
+                    <input type="text" data-pac-bind="message" data-pac-update="delayed" data-pac-delay="500" />
+                </div>
+                <div>
+                    <label>Status Text (change only):</label><br>
+                    <input type="text" data-pac-bind="statusText" data-pac-update="change" />
+                </div>
+                <p><strong>Message:</strong> {{message}} | <strong>Status Text:</strong> {{statusText}}</p>
+            </div>
+
+            <button class="btn-info" data-pac-bind="click:toggleAdvanced">
+                {{advancedButtonText}} Advanced Controls
+            </button>
+        </div>
+
+        <!-- Todo List Demo -->
+        <div id="todo-app">
+            <h3>📋 Todo List (Deep Reactivity)</h3>
+            <p><strong>Total:</strong> {{todoCount}} | <strong>Active:</strong> {{activeCount}} | <strong>Completed:</strong> {{completedCount}}</p>
+
+            <form data-pac-bind="submit:addTodo">
+                <input type="text" data-pac-bind="newTodo" placeholder="Add new todo..." style="width: 200px;" />
+                <button type="submit" class="btn-success">➕ Add</button>
+            </form>
+
+            <div style="margin: 10px 0;">
+                <button class="btn-info" data-pac-bind="click:showAll">All</button>
+                <button class="btn-warning" data-pac-bind="click:showActive">Active</button>
+                <button class="btn-secondary" data-pac-bind="click:showCompleted">Completed</button>
+            </div>
+
+            <div id="todo-list" style="margin-top: 10px;">
+                <!-- Todo items will be rendered here by the component -->
+            </div>
+
+            <div data-pac-bind="visible:todoCount" style="margin-top: 10px;">
+                <button class="btn-danger" data-pac-bind="click:clearCompleted">🗑️ Clear Completed</button>
+                <button class="btn-warning" data-pac-bind="click:toggleAllTodos">
+                    {{toggleAllButtonText}}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Hierarchical Communication Demo -->
+<div class="demo-section hierarchy-demo">
+    <h2>🔗 Bidirectional Communication Demo</h2>
+    <p>This section demonstrates parent-child communication, command forwarding, and hierarchical data flow.</p>
+
+    <!-- Parent PAC Unit -->
+    <div id="parent-app" class="pac-unit">
+        <h3>🔵 Parent PAC Unit - Dashboard Controller</h3>
+
+        <div class="flex-row">
+            <span class="status-indicator status-{{parentStatus}}"></span>
+            <strong>Status:</strong>
+            <span class="text-status-{{parentStatus}}">{{parentStatusText}}</span>
+            <span class="badge badge-primary">Children: {{childrenCount}}</span>
+            <span class="badge badge-success">Theme: {{currentTheme}}</span>
+        </div>
+
+        <div class="control-panel">
+            <h4>🎛️ Parent Controls (Command Children)</h4>
+            <div class="flex-row">
+                <button class="btn-primary" data-pac-bind="click:coordinateAllChildren">🔄 Coordinate All</button>
+                <button class="btn-success" data-pac-bind="click:broadcastThemeChange">🎨 Change Theme</button>
+                <button class="btn-warning" data-pac-bind="click:pauseAllChildren">⏸️ Pause Children</button>
+                <button class="btn-info" data-pac-bind="click:resumeAllChildren">▶️ Resume Children</button>
+                <button class="btn-danger" data-pac-bind="click:emergencyStop">🛑 Emergency Stop</button>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <label>Master Value:</label>
+                <input type="number" data-pac-bind="masterValue" placeholder="Value to broadcast" />
+                <button class="btn-secondary" data-pac-bind="click:broadcastMasterValue">📡 Broadcast to All</button>
+            </div>
+        </div>
+
+        <!-- Child PAC Unit -->
+        <div id="child-app" class="pac-unit">
+            <h4>🟢 Child PAC Unit - Task Manager</h4>
+
+            <div class="flex-row">
+                <span class="status-indicator status-{{status}}"></span>
+                <strong>Task:</strong> {{taskName}}
+                <span class="badge badge-warning">Count: {{count}}</span>
+                <span class="badge" data-pac-bind="class:pausedBadgeClass,visible:isPaused">{{pauseReason}}</span>
+            </div>
+
+            <p><strong>Worker:</strong> {{name}} | <strong>Message:</strong> {{message}}</p>
+            <p><strong>Computed Status:</strong> <span class="text-status-{{status}}">{{taskSummary}}</span></p>
+            <p data-pac-bind="visible:!isPaused"><strong>Received from Parent:</strong> {{parentData}}</p>
+
+            <div class="control-panel">
+                <h4>🔧 Child Controls</h4>
+                <div class="flex-row">
+                    <button class="btn-success" data-pac-bind="click:increment">➕ Increment</button>
+                    <button class="btn-secondary" data-pac-bind="click:reset">🔄 Reset</button>
+                    <button class="btn-warning" data-pac-bind="click:requestFocus">🎯 Request Focus</button>
+                    <button class="btn-danger" data-pac-bind="click:sendAlert">🚨 Send Alert</button>
+                    <button class="btn-info" data-pac-bind="click:createGrandchild">👶 Add Grandchild</button>
+                </div>
+            </div>
+
+            <div>
+                <label>Task Name:</label>
+                <input type="text" data-pac-bind="taskName" placeholder="Enter task name" />
+                <label>Worker Name:</label>
+                <input type="text" data-pac-bind="name" placeholder="Worker name" />
+            </div>
+
+            <!-- Grandchild PAC Unit -->
+            <div id="grandchild-app" class="pac-unit">
+                <h5>🟡 Grandchild PAC Unit - Sub-Task Worker</h5>
+
+                <div class="flex-row">
+                    <span class="status-indicator status-{{workStatus}}"></span>
+                    <strong>Sub-Task:</strong> {{subTask}}
+                    <span class="badge badge-success">Progress: {{progress}}%</span>
+                </div>
+
+                <p><strong>Worker ID:</strong> {{workerId}} | <strong>Active:</strong> {{isActive ? 'Yes' : 'No'}}</p>
+                <p data-pac-bind="visible:isActive"><strong>Parent Command:</strong> {{lastParentCommand}}</p>
+                <p data-pac-bind="visible:!isActive" style="color: #6c757d; font-style: italic;">Waiting for activation...</p>
+
+                <div class="control-panel">
+                    <h4>⚙️ Grandchild Controls</h4>
+                    <div class="flex-row">
+                        <button class="btn-success" data-pac-bind="click:doWork">⚡ Do Work</button>
+                        <button class="btn-warning" data-pac-bind="click:reportProgress">📊 Report Progress</button>
+                        <button class="btn-info" data-pac-bind="click:requestParentData">📞 Request Data</button>
+                        <button class="btn-secondary" data-pac-bind="click:toggleActive">🔄 Toggle Active</button>
+                    </div>
+                </div>
+
+                <div>
+                    <label>Sub-Task:</label>
+                    <input type="text" data-pac-bind="subTask" placeholder="Enter sub-task" />
+                    <label>Progress:</label>
+                    <input type="number" data-pac-bind="progress" min="0" max="100" />
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Communication Log -->
+<div class="message-log" id="message-log">
+    <div><span class="timestamp">[System]</span> PAC Framework Communication Log - Watch bidirectional messages below:</div>
+</div>
+
+<script src="wakapac.js"></script>
+<script>
+    // Enhanced logging function
+    function logMessage(sender, message, data = null) {
+        const log = document.getElementById('message-log');
+        const timestamp = new Date().toLocaleTimeString();
+        const dataStr = data ? ` | Data: ${JSON.stringify(data)}` : '';
+        const entry = `<div><span class="timestamp">[${timestamp}]</span> <span class="${sender}">[${sender.toUpperCase()}]</span> ${message}${dataStr}</div>`;
+        log.innerHTML += entry;
+        log.scrollTop = log.scrollHeight;
+    }
+
+    // Basic Reactive Demo
+    const basicApp = wakaPAC('#basic-app', {
+        name: 'World',
+        count: 0,
+        status: 'low',
+        message: 'Type here...',
+        statusText: 'Status text here...',
+        showAdvanced: false,
+
+        computed: {
+            fullDescription() {
+                return `${this.name} has clicked ${this.count} times (${this.status})`;
+            },
+
+            advancedButtonText() {
+                return this.showAdvanced ? 'Hide' : 'Show';
+            }
+        },
+
+        increment() {
+            this.count++;
+
+            // Update status based on count
+            if (this.count <= 2) {
+                this.status = 'low';
+            } else if (this.count <= 5) {
+                this.status = 'medium';
+            } else {
+                this.status = 'high';
+            }
+        },
+
+        toggleStatus() {
+            const statusCycle = ['low', 'medium', 'high'];
+            const currentIndex = statusCycle.indexOf(this.status);
+            this.status = statusCycle[(currentIndex + 1) % statusCycle.length];
+        },
+
+        reset() {
+            this.count = 0;
+            this.name = 'World';
+            this.status = 'low';
+            this.message = 'Reset!';
+            this.statusText = 'Status reset';
+        },
+
+        toggleAdvanced() {
+            this.showAdvanced = !this.showAdvanced;
+        }
+    });
+
+    // Todo List Demo
+    const todoApp = wakaPAC('#todo-app', {
+        newTodo: '',
+        todos: [
+            { id: 1, text: 'Learn WakaPAC', completed: true },
+            { id: 2, text: 'Build an app', completed: false },
+            { id: 3, text: 'Deploy to production', completed: false }
+        ],
+        filter: 'all',
+
+        computed: {
+            todoCount() {
+                return this.todos.length;
+            },
+
+            activeCount() {
+                return this.todos.filter(todo => !todo.completed).length;
+            },
+
+            completedCount() {
+                return this.todos.filter(todo => todo.completed).length;
+            },
+
+            filteredTodos() {
+                if (this.filter === 'active') {
+                    return this.todos.filter(todo => !todo.completed);
+                } else if (this.filter === 'completed') {
+                    return this.todos.filter(todo => todo.completed);
+                }
+                return this.todos;
+            },
+
+            allCompleted() {
+                return this.todos.length > 0 && this.todos.every(todo => todo.completed);
+            },
+
+            toggleAllButtonText() {
+                return this.allCompleted ? '↶ Mark Active' : '✓ Mark All Complete';
+            }
+        },
+
+        addTodo(event) {
+            event.preventDefault();
+            if (this.newTodo.trim()) {
+                // Demonstrate deep reactivity - this push will trigger updates
+                this.todos.push({
+                    id: Date.now(),
+                    text: this.newTodo.trim(),
+                    completed: false
+                });
+                this.newTodo = '';
+                this.renderTodos();
+            }
+        },
+
+        toggleTodo(todoId) {
+            // Demonstrate deep reactivity - nested property changes
+            const todo = this.todos.find(t => t.id === todoId);
+            if (todo) {
+                todo.completed = !todo.completed;
+                this.renderTodos();
+            }
+        },
+
+        removeTodo(todoId) {
+            const index = this.todos.findIndex(t => t.id === todoId);
+            if (index !== -1) {
+                this.todos.splice(index, 1);
+                this.renderTodos();
+            }
+        },
+
+        showAll() {
+            this.filter = 'all';
+            this.renderTodos();
+        },
+
+        showActive() {
+            this.filter = 'active';
+            this.renderTodos();
+        },
+
+        showCompleted() {
+            this.filter = 'completed';
+            this.renderTodos();
+        },
+
+        clearCompleted() {
+            this.todos = this.todos.filter(todo => !todo.completed);
+            this.renderTodos();
+        },
+
+        toggleAllTodos() {
+            const allCompleted = this.allCompleted;
+            this.todos.forEach(todo => {
+                todo.completed = !allCompleted;
+            });
+            this.renderTodos();
+        },
+
+        renderTodos() {
+            const container = document.getElementById('todo-list');
+            container.innerHTML = this.filteredTodos.map(todo => `
+            <div style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; margin: 5px 0; border-radius: 4px; ${todo.completed ? 'background: #f0f8f0;' : ''}">
+                <input type="checkbox" ${todo.completed ? 'checked' : ''} 
+                       onchange="todoApp.toggleTodo(${todo.id})" style="margin-right: 10px;">
+                <span style="flex: 1; ${todo.completed ? 'text-decoration: line-through; color: #666;' : ''}">${todo.text}</span>
+                <button onclick="todoApp.removeTodo(${todo.id})" class="btn-danger" style="padding: 4px 8px; font-size: 12px;">✕</button>
+            </div>
+        `).join('');
+        }
+    });
+
+    // Initial render of todos
+    todoApp.renderTodos();
+
+    // Hierarchical Communication Components
+    const grandchildPAC = wakaPAC('#grandchild-app', {
+        workerId: 'GC-001',
+        subTask: 'Processing data',
+        progress: 0,
+        workStatus: 'inactive',
+        isActive: false,
+        lastParentCommand: 'None',
+
+        receiveFromParent(command, data) {
+            logMessage('grandchild', `Received command: ${command}`, data);
+            this.lastParentCommand = `${command} (${JSON.stringify(data)})`;
+
+            switch(command) {
+                case 'activate':
+                    this.isActive = true;
+                    this.workStatus = 'low';
+                    this.subTask = data.task || 'Default task';
+                    break;
+                case 'deactivate':
+                    this.isActive = false;
+                    this.workStatus = 'inactive';
+                    this.progress = 0;
+                    break;
+                case 'setProgress':
+                    this.progress = data.progress || 0;
+                    this.updateWorkStatus();
+                    break;
+                case 'emergencyStop':
+                    this.isActive = false;
+                    this.workStatus = 'high';
+                    this.subTask = 'EMERGENCY STOP';
+                    this.progress = 0;
+                    break;
+                case 'updateTheme':
+                    const container = this.container;
+                    container.className = container.className.replace(/theme-\w+/g, '');
+                    container.classList.add(`theme-${data.theme}`);
+                    break;
+                case 'updateData':
+                    logMessage('grandchild', `Received requested data from parent via hierarchy`, data);
+                    break;
+            }
+        },
+
+        updateWorkStatus() {
+            if (!this.isActive) {
+                this.workStatus = 'inactive';
+            } else if (this.progress < 30) {
+                this.workStatus = 'low';
+            } else if (this.progress < 70) {
+                this.workStatus = 'medium';
+            } else {
+                this.workStatus = 'high';
+            }
+        },
+
+        doWork() {
+            if (!this.isActive) {
+                logMessage('grandchild', 'Cannot work - not active');
+                return;
+            }
+            this.progress = Math.min(100, this.progress + Math.floor(Math.random() * 20) + 10);
+            this.updateWorkStatus();
+            logMessage('grandchild', `Work completed, progress: ${this.progress}%`);
+            this.notifyParent('progressUpdate', {
+                workerId: this.workerId,
+                progress: this.progress,
+                status: this.workStatus
+            });
+        },
+
+        reportProgress() {
+            logMessage('grandchild', 'Progress report sent to parent');
+            this.notifyParent('progressReport', {
+                workerId: this.workerId,
+                subTask: this.subTask,
+                progress: this.progress,
+                isActive: this.isActive,
+                status: this.workStatus
+            });
+        },
+
+        requestParentData() {
+            logMessage('grandchild', 'Data request sent to parent');
+            this.notifyParent('dataRequest', {
+                requestedData: ['masterValue', 'currentTheme', 'taskName'],
+                requesterId: this.workerId
+            });
+        },
+
+        toggleActive() {
+            this.isActive = !this.isActive;
+            this.updateWorkStatus();
+            this.notifyParent('statusChange', {
+                workerId: this.workerId,
+                isActive: this.isActive,
+                status: this.workStatus
+            });
+            logMessage('grandchild', `Active status changed to: ${this.isActive}`);
+        }
+    });
+
+    const childPAC = wakaPAC('#child-app', {
+        name: 'Alice',
+        taskName: 'Data Processing',
+        count: 0,
+        message: 'Ready to work',
+        status: 'low',
+        isPaused: false,
+        pauseReason: '',
+        parentData: 'None received',
+
+        computed: {
+            taskSummary() {
+                return `${this.taskName} - ${this.count} tasks completed (${this.status})`;
+            },
+            pausedBadgeClass() {
+                return this.isPaused ? 'badge-warning' : 'badge-success';
+            }
+        },
+
+        receiveFromParent(command, data) {
+            logMessage('child', `Received command: ${command}`, data);
+            switch(command) {
+                case 'pause':
+                    this.isPaused = true;
+                    this.pauseReason = data.reason || 'Paused by parent';
+                    this.status = 'inactive';
+                    this.sendToChildren('deactivate', { reason: 'Parent paused' });
+                    break;
+                case 'resume':
+                    this.isPaused = false;
+                    this.pauseReason = '';
+                    this.updateStatus();
+                    this.sendToChildren('activate', { task: this.taskName });
+                    break;
+                case 'updateData':
+                    this.parentData = `Master: ${data.masterValue}`;
+                    logMessage('child', 'Received data update from parent - forwarding to grandchildren', data);
+                    this.sendToChildren('updateData', data);
+                    this.sendToChildren('setProgress', { progress: Math.min(100, data.masterValue || 0) });
+                    break;
+                case 'emergencyStop':
+                    this.isPaused = true;
+                    this.pauseReason = 'EMERGENCY STOP';
+                    this.status = 'high';
+                    this.count = 0;
+                    this.sendToChildren('emergencyStop', { reason: 'Emergency stop initiated' });
+                    break;
+                case 'blur':
+                    const inputs = this.container.querySelectorAll('input');
+                    inputs.forEach(input => input.blur());
+                    break;
+                case 'updateTheme':
+                    const container = this.container;
+                    container.className = container.className.replace(/theme-\w+/g, '');
+                    container.classList.add(`theme-${data.theme}`);
+                    this.sendToChildren('updateTheme', data);
+                    break;
+            }
+        },
+
+        onChildUpdate(eventType, data, childPAC) {
+            const childId = childPAC.container.id;
+            logMessage('child', `Received from ${childId}: ${eventType}`, data);
+
+            switch(eventType) {
+                case 'progressUpdate':
+                    logMessage('child', `Grandchild progress: ${data.progress}%`);
+                    this.notifyParent('grandchildProgress', {
+                        grandchildId: data.workerId,
+                        progress: data.progress,
+                        childTask: this.taskName
+                    });
+                    break;
+                case 'progressReport':
+                    logMessage('child', `Received progress report from ${data.workerId} - forwarding to parent`);
+                    this.notifyParent('progressReport', data);
+                    break;
+                case 'dataRequest':
+                    logMessage('child', `Received data request from ${data.requesterId} - forwarding to parent`);
+                    this.notifyParent('dataRequest', data);
+                    break;
+                case 'statusChange':
+                    logMessage('child', `Grandchild ${data.workerId} status changed to: ${data.isActive ? 'active' : 'inactive'}`);
+                    break;
+            }
+        },
+
+        updateStatus() {
+            if (this.isPaused) {
+                this.status = 'inactive';
+                return;
+            }
+            if (this.count <= 2) {
+                this.status = 'low';
+            } else if (this.count <= 5) {
+                this.status = 'medium';
+            } else {
+                this.status = 'high';
+            }
+        },
+
+        increment() {
+            if (this.isPaused) {
+                logMessage('child', 'Cannot increment - paused');
+                return;
+            }
+            this.count++;
+            this.updateStatus();
+            this.message = `Completed ${this.count} tasks`;
+            logMessage('child', `Task completed, count: ${this.count}`);
+            this.notifyParent('taskCompleted', {
+                taskName: this.taskName,
+                count: this.count,
+                status: this.status
+            });
+        },
+
+        reset() {
+            this.count = 0;
+            this.updateStatus();
+            this.message = 'Reset completed';
+            this.sendToChildren('setProgress', { progress: 0 });
+            logMessage('child', 'Reset completed');
+            this.notifyParent('reset', { taskName: this.taskName });
+        },
+
+        requestFocus() {
+            logMessage('child', 'Requesting focus from parent');
+            this.notifyParent('focusRequest', {
+                requesterId: 'child-app',
+                reason: 'User interaction required'
+            });
+        },
+
+        sendAlert() {
+            const alertMsg = `Alert from ${this.taskName} at ${new Date().toLocaleTimeString()}`;
+            logMessage('child', 'Sending alert to parent');
+            this.notifyParent('alert', {
+                message: alertMsg,
+                severity: 'high',
+                taskName: this.taskName,
+                count: this.count
+            });
+        },
+
+        createGrandchild() {
+            logMessage('child', 'Activating grandchild component');
+            this.sendToChild('#grandchild-app', 'activate', {
+                task: `Sub-task of ${this.taskName}`,
+                assignedBy: this.name
+            });
+        }
+    });
+
+    const parentPAC = wakaPAC('#parent-app', {
+        parentStatus: 'low',
+        parentStatusText: 'System Active',
+        childrenCount: 0,
+        currentTheme: 'light',
+        masterValue: 50,
+
+        onChildUpdate(eventType, data, childPAC) {
+            const childId = childPAC.container.id;
+            logMessage('parent', `Received from ${childId}: ${eventType}`, data);
+            this.updateChildrenCount();
+
+            switch(eventType) {
+                case 'taskCompleted':
+                    if (data.count >= 5) {
+                        this.parentStatus = 'high';
+                        this.parentStatusText = 'High activity detected';
+                    } else {
+                        this.parentStatus = 'medium';
+                        this.parentStatusText = 'Normal operations';
+                    }
+                    break;
+                case 'alert':
+                    this.parentStatus = 'high';
+                    this.parentStatusText = `🚨 ${data.message}`;
+                    setTimeout(() => {
+                        this.parentStatus = 'low';
+                        this.parentStatusText = 'System Active';
+                    }, 5000);
+                    break;
+                case 'focusRequest':
+                    logMessage('parent', 'Handling focus request - blurring other children');
+                    this.sendToChildren('blur');
+                    break;
+                case 'progressReport':
+                    logMessage('parent', `Progress report from grandchild ${data.workerId}: ${data.progress}%`);
+                    break;
+                case 'dataRequest':
+                    logMessage('parent', `Received data request from ${data.requesterId} for: ${data.requestedData.join(', ')}`);
+                    const requestedData = {};
+                    data.requestedData.forEach(key => {
+                        if (this.hasOwnProperty(key)) {
+                            requestedData[key] = this[key];
+                        }
+                    });
+                    logMessage('parent', `Sending requested data back to ${data.requesterId}`, requestedData);
+                    this.sendToChildren('updateData', requestedData);
+                    break;
+                case 'grandchildProgress':
+                    logMessage('parent', `Grandchild ${data.grandchildId} progress: ${data.progress}% (via ${data.childTask})`);
+                    break;
+                case 'reset':
+                    this.parentStatus = 'low';
+                    this.parentStatusText = 'Child reset completed';
+                    break;
+            }
+        },
+
+        updateChildrenCount() {
+            this.childrenCount = parentPAC.children.length;
+        },
+
+        coordinateAllChildren() {
+            logMessage('parent', 'Coordinating all children');
+            this.sendToChild('#child-app', 'updateData', {
+                masterValue: this.masterValue,
+                coordinationTime: new Date().toISOString()
+            });
+            this.sendToChildren('activate', {
+                task: 'Coordinated task',
+                priority: 'high'
+            });
+            this.parentStatusText = 'Coordination completed';
+        },
+
+        broadcastThemeChange() {
+            this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
+            logMessage('parent', `Broadcasting theme change to: ${this.currentTheme}`);
+            this.sendToChildren('updateTheme', { theme: this.currentTheme });
+            const container = this.container;
+            container.className = container.className.replace(/theme-\w+/g, '');
+            container.classList.add(`theme-${this.currentTheme}`);
+        },
+
+        pauseAllChildren() {
+            logMessage('parent', 'Pausing all children');
+            this.sendToChildren('pause', {
+                reason: 'Paused by parent',
+                timestamp: Date.now()
+            });
+            this.parentStatusText = 'All children paused';
+        },
+
+        resumeAllChildren() {
+            logMessage('parent', 'Resuming all children');
+            this.sendToChildren('resume', {
+                reason: 'Resumed by parent',
+                timestamp: Date.now()
+            });
+            this.parentStatusText = 'All children resumed';
+        },
+
+        emergencyStop() {
+            logMessage('parent', 'EMERGENCY STOP - All operations halted!');
+            this.sendToChildren('emergencyStop', {
+                reason: 'Emergency stop initiated by parent',
+                timestamp: Date.now(),
+                severity: 'critical'
+            });
+            this.parentStatus = 'high';
+            this.parentStatusText = '🛑 EMERGENCY STOP ACTIVE';
+        },
+
+        broadcastMasterValue() {
+            if (this.masterValue < 0 || this.masterValue > 100) {
+                logMessage('parent', 'Invalid master value - must be 0-100');
+                return;
+            }
+            logMessage('parent', `Broadcasting master value: ${this.masterValue}`);
+            this.sendToChildren('updateData', {
+                masterValue: this.masterValue,
+                broadcastTime: new Date().toISOString()
+            });
+        }
+    });
+
+    // Initialize
+    logMessage('parent', 'Parent PAC Unit initialized');
+    logMessage('child', 'Child PAC Unit initialized');
+    logMessage('grandchild', 'Grandchild PAC Unit initialized');
+
+    setTimeout(() => {
+        parentPAC.updateChildrenCount();
+    }, 50);
+
+    setTimeout(() => {
+        logMessage('parent', `Hierarchy established - Parent has ${parentPAC.children.length} children`);
+        logMessage('child', `Child parent: ${childPAC.parent ? 'Connected' : 'None'}`);
+        logMessage('grandchild', `Grandchild parent: ${grandchildPAC.parent ? 'Connected' : 'None'}`);
+    }, 100);
+
+    setTimeout(() => {
+        logMessage('parent', 'Auto-demo: Activating grandchild and setting initial state');
+        parentPAC.sendToChildren('activate', { task: 'Demo task', priority: 'normal' });
+    }, 2000);
+</script>
+
+</body>
+</html>
