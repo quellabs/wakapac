@@ -9,7 +9,7 @@
  * ║     ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝ ╚═════╝                        ║
  * ║                                                                                      ║
  * ║  PAC Framework - Presentation-Abstraction-Control for JavaScript                     ║
- * ║  Enhanced with Deep Reactivity Support                                               ║
+ * ║  Enhanced with Deep Reactivity Support & Bidirectional Communication                ║
  * ║                                                                                      ║
  * ║  A powerful reactive framework that creates hierarchical components with two-way     ║
  * ║  data binding, event handling, and automatic DOM synchronization. Now supports      ║
@@ -20,6 +20,13 @@
  * ║  • Nested Object Changes - deeply nested property changes are detected              ║
  * ║  • Collection Methods - Built-in reactive array and object manipulation             ║
  * ║  • Path-based Updates - Track exactly what changed for optimal performance          ║
+ * ║                                                                                      ║
+ * ║  New Bidirectional Communication Features:                                           ║
+ * ║  • Parent-to-Child Commands - Send commands and data to specific children           ║
+ * ║  • Child Broadcasting - Send messages to all children at once                       ║
+ * ║  • State Synchronization - Push data updates down the component hierarchy           ║
+ * ║  • Lifecycle Management - Parents can create, initialize, and destroy children      ║
+ * ║  • Child Query System - Find and manipulate children by various criteria            ║
  * ║                                                                                      ║
  * ║  Example Usage with Deep Reactivity:                                                 ║
  * ║    wakaPAC('#todo-app', {                                                            ║
@@ -39,6 +46,21 @@
  * ║      updateTheme(newTheme) {                                                         ║
  * ║        // This now works! Deep nested changes are reactive                          ║
  * ║        this.user.preferences.theme = newTheme;                                      ║
+ * ║        // NEW: Broadcast theme change to all children                               ║
+ * ║        this.sendToChildren('updateTheme', { theme: newTheme });                     ║
+ * ║      },                                                                              ║
+ * ║                                                                                      ║
+ * ║      // NEW: Coordinate child components                                             ║
+ * ║      selectAllTodos() {                                                              ║
+ * ║        this.sendToChildren('setSelected', { selected: true });                      ║
+ * ║      },                                                                              ║
+ * ║                                                                                      ║
+ * ║      // NEW: Handle child communication                                              ║
+ * ║      receiveFromChild(message, data, childPAC) {                                    ║
+ * ║        if (message === 'requestFocus') {                                            ║
+ * ║          this.sendToChildren('blur');                                               ║
+ * ║          childPAC.receiveFromParent('focus', { reason: 'exclusive' });             ║
+ * ║        }                                                                             ║
  * ║      }                                                                               ║
  * ║    });                                                                               ║
  * ║                                                                                      ║
@@ -108,9 +130,11 @@
 
             for (let i = 0; i < keysA.length; i++) {
                 const key = keysA[i];
+
                 if (!keysB.includes(key)) {
                     return false;
                 }
+
                 if (!ReactiveUtils.deepEqual(a[key], b[key])) {
                     return false;
                 }
@@ -807,6 +831,39 @@
                     self.notifyParent(eventType, data);
                 };
 
+                // NEW: Add child communication methods
+                reactiveAbstraction.sendToChildren = function (command, data) {
+                    self.sendToChildren(command, data);
+                };
+
+                reactiveAbstraction.sendToChild = function (selector, command, data) {
+                    self.sendToChild(selector, command, data);
+                };
+
+                reactiveAbstraction.broadcastDataUpdate = function (property, value) {
+                    self.broadcastDataUpdate(property, value);
+                };
+
+                reactiveAbstraction.syncDataToChildren = function (mapping) {
+                    self.syncDataToChildren(mapping);
+                };
+
+                reactiveAbstraction.findChild = function (predicate) {
+                    return self.findChild(predicate);
+                };
+
+                reactiveAbstraction.findChildren = function (predicate) {
+                    return self.findChildren(predicate);
+                };
+
+                reactiveAbstraction.findChildBySelector = function (selector) {
+                    return self.findChildBySelector(selector);
+                };
+
+                reactiveAbstraction.findChildByProperty = function (property, value) {
+                    return self.findChildByProperty(property, value);
+                };
+
                 return reactiveAbstraction;
             },
 
@@ -863,6 +920,145 @@
                     enumerable: true,
                     configurable: true
                 });
+            },
+
+            /**
+             * NEW: Send a command to all child PAC units
+             * @param {string} command - Command name to send
+             * @param {*} data - Data to send with the command
+             */
+            sendToChildren: function (command, data) {
+                const self = this;
+                this.children.forEach(function (child) {
+                    if (typeof child.receiveFromParent === 'function') {
+                        child.receiveFromParent(command, data);
+                    }
+                });
+            },
+
+            /**
+             * NEW: Send a command to a specific child PAC unit
+             * @param {string} selector - CSS selector to find the child
+             * @param {string} command - Command name to send
+             * @param {*} data - Data to send with the command
+             */
+            sendToChild: function (selector, command, data) {
+                const child = this.findChildBySelector(selector);
+                if (child && typeof child.receiveFromParent === 'function') {
+                    child.receiveFromParent(command, data);
+                }
+            },
+
+            /**
+             * NEW: Broadcast a data update to all children
+             * @param {string} property - Property name to update
+             * @param {*} value - New value for the property
+             */
+            broadcastDataUpdate: function (property, value) {
+                this.children.forEach(function (child) {
+                    if (child.abstraction && child.abstraction.hasOwnProperty(property)) {
+                        child.abstraction[property] = value;
+                    }
+                });
+            },
+
+            /**
+             * NEW: Synchronize specific data to specific children
+             * @param {Object} mapping - Object mapping selectors to data updates
+             */
+            syncDataToChildren: function (mapping) {
+                const self = this;
+                for (const selector in mapping) {
+                    if (mapping.hasOwnProperty(selector)) {
+                        const data = mapping[selector];
+                        const children = this.findChildrenBySelector(selector);
+
+                        children.forEach(function (child) {
+                            if (child.abstraction) {
+                                for (const key in data) {
+                                    if (data.hasOwnProperty(key)) {
+                                        child.abstraction[key] = data[key];
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            },
+
+            /**
+             * NEW: Find a child by predicate function
+             * @param {Function} predicate - Function to test each child
+             * @returns {Object|undefined} First child that matches the predicate
+             */
+            findChild: function (predicate) {
+                const children = Array.from(this.children);
+                return children.find(predicate);
+            },
+
+            /**
+             * NEW: Find all children by predicate function
+             * @param {Function} predicate - Function to test each child
+             * @returns {Array} Array of children that match the predicate
+             */
+            findChildren: function (predicate) {
+                const children = Array.from(this.children);
+                return children.filter(predicate);
+            },
+
+            /**
+             * NEW: Find a child by CSS selector
+             * @param {string} selector - CSS selector to match child container
+             * @returns {Object|undefined} First child whose container matches the selector
+             */
+            findChildBySelector: function (selector) {
+                return this.findChild(function (child) {
+                    return child.container.matches(selector);
+                });
+            },
+
+            /**
+             * NEW: Find children by CSS selector
+             * @param {string} selector - CSS selector to match child containers
+             * @returns {Array} Array of children whose containers match the selector
+             */
+            findChildrenBySelector: function (selector) {
+                return this.findChildren(function (child) {
+                    return child.container.matches(selector);
+                });
+            },
+
+            /**
+             * NEW: Find a child by property value
+             * @param {string} property - Property name to check
+             * @param {*} value - Value to match
+             * @returns {Object|undefined} First child with matching property value
+             */
+            findChildByProperty: function (property, value) {
+                return this.findChild(function (child) {
+                    return child.abstraction && child.abstraction[property] === value;
+                });
+            },
+
+            /**
+             * NEW: Receive a command from parent PAC unit
+             * This method can be overridden in the abstraction to handle parent commands
+             * @param {string} command - Command name received from parent
+             * @param {*} data - Data received with the command
+             */
+            receiveFromParent: function (command, data) {
+                // Call custom handler if defined in abstraction
+                if (this.abstraction.receiveFromParent && typeof this.abstraction.receiveFromParent === 'function') {
+                    this.abstraction.receiveFromParent(command, data);
+                }
+
+                // Dispatch custom DOM event for external listeners
+                const customEvent = new CustomEvent('pac:parentcommand', {
+                    detail: { command: command, data: data },
+                    bubbles: true
+                });
+
+                this.container.dispatchEvent(customEvent);
             },
 
             /**
@@ -1474,6 +1670,15 @@
         };
 
         /**
+         * NEW: Receive command from parent unit
+         * @param {string} command - Command name
+         * @param {*} data - Command data
+         */
+        publicAPI.receiveFromParent = function (command, data) {
+            control.receiveFromParent(command, data);
+        };
+
+        /**
          * Destroy this PAC unit and clean up resources
          */
         publicAPI.destroy = function () {
@@ -1487,6 +1692,88 @@
          */
         publicAPI.control = function (url, options) {
             return control.makeServerRequest(url, options);
+        };
+
+        /**
+         * NEW: Send command to all children
+         * @param {string} command - Command name
+         * @param {*} data - Command data
+         */
+        publicAPI.sendToChildren = function (command, data) {
+            control.sendToChildren(command, data);
+        };
+
+        /**
+         * NEW: Send command to specific child
+         * @param {string} selector - CSS selector for child
+         * @param {string} command - Command name
+         * @param {*} data - Command data
+         */
+        publicAPI.sendToChild = function (selector, command, data) {
+            control.sendToChild(selector, command, data);
+        };
+
+        /**
+         * NEW: Broadcast data update to all children
+         * @param {string} property - Property name
+         * @param {*} value - New value
+         */
+        publicAPI.broadcastDataUpdate = function (property, value) {
+            control.broadcastDataUpdate(property, value);
+        };
+
+        /**
+         * NEW: Sync data to specific children
+         * @param {Object} mapping - Selector to data mapping
+         */
+        publicAPI.syncDataToChildren = function (mapping) {
+            control.syncDataToChildren(mapping);
+        };
+
+        /**
+         * NEW: Find child by predicate
+         * @param {Function} predicate - Test function
+         * @returns {Object|undefined} Matching child
+         */
+        publicAPI.findChild = function (predicate) {
+            return control.findChild(predicate);
+        };
+
+        /**
+         * NEW: Find children by predicate
+         * @param {Function} predicate - Test function
+         * @returns {Array} Array of matching children
+         */
+        publicAPI.findChildren = function (predicate) {
+            return control.findChildren(predicate);
+        };
+
+        /**
+         * NEW: Find child by CSS selector
+         * @param {string} selector - CSS selector
+         * @returns {Object|undefined} Matching child
+         */
+        publicAPI.findChildBySelector = function (selector) {
+            return control.findChildBySelector(selector);
+        };
+
+        /**
+         * NEW: Find children by CSS selector
+         * @param {string} selector - CSS selector
+         * @returns {Array} Array of matching children
+         */
+        publicAPI.findChildrenBySelector = function (selector) {
+            return control.findChildrenBySelector(selector);
+        };
+
+        /**
+         * NEW: Find child by property value
+         * @param {string} property - Property name
+         * @param {*} value - Property value
+         * @returns {Object|undefined} Matching child
+         */
+        publicAPI.findChildByProperty = function (property, value) {
+            return control.findChildByProperty(property, value);
         };
 
         // Add read-only properties using getters

@@ -1,35 +1,40 @@
 # WakaPAC Framework
 
 A powerful reactive JavaScript framework implementing the PAC (Presentation-Abstraction-Control) architectural pattern.
-WakaPAC creates hierarchical components with two-way data binding, event handling, and automatic DOM synchronization
-while working seamlessly with vanilla HTML and JavaScript.
+WakaPAC creates hierarchical components with two-way data binding, event handling, automatic DOM synchronization,
+and **bidirectional parent-child communication** while working seamlessly with vanilla HTML and JavaScript.
 
 ## Features
 
 ### 🔄 **Reactive Data Binding**
 - Automatic DOM updates when JavaScript object properties change
+- **Deep reactivity** for nested objects and arrays with path tracking
 - Two-way binding between form inputs and data properties
 - Intelligent change detection with batched DOM updates
+- **Array mutation tracking** - `push()`, `pop()`, `splice()` automatically trigger updates
 
 ### 🎯 **Template Syntax**
 - Simple `{{propertyName}}` syntax for dynamic content in HTML
 - Support for computed properties with automatic dependency tracking
-- Conditional rendering with `data-pac-bind="visible:property"`
+- Conditional rendering with `data-pac-bind="visible:property"` and negation support `visible:!property`
 
 ### ⚡ **Event Handling**
 - Declarative event binding via data attributes
 - Method binding with `data-pac-bind="click:methodName"`
 - Automatic event delegation for performance
 
-### 🏗️ **Hierarchical Components**
-- Parent-child relationships with automatic communication
-- Component nesting with proper lifecycle management
-- Inter-component messaging system
+### 🏗️ **Hierarchical Components with Bidirectional Communication**
+- **Parent-to-child commands**: Send instructions and data down the hierarchy
+- **Child-to-parent notifications**: Report status and request resources
+- **Multi-level communication**: Messages can flow through intermediate components
+- **Child querying**: Find and manipulate children by selectors, properties, or functions
+- **Coordinated updates**: Parents can orchestrate complex interactions between children
 
 ### 🚀 **Performance Optimized**
 - Batched DOM updates using `requestAnimationFrame`
 - Intelligent caching of computed properties
 - Event delegation to minimize memory usage
+- **Proxy-based reactivity** for modern browsers with fallback for older browsers
 
 ### 🔧 **Flexible Update Modes**
 - **Immediate**: Updates happen instantly on input
@@ -47,47 +52,85 @@ while working seamlessly with vanilla HTML and JavaScript.
     <script src="wakapac.js"></script>
 </head>
 <body>
-    <div id="my-app">
-        <h1>Hello {{fullName}}!</h1>
-        <p>You clicked {{count}} times</p>
-        <p>Double count: {{doubleCount}}</p>
-        
-        <input data-pac-bind="firstName" placeholder="First name">
-        <input data-pac-bind="lastName" placeholder="Last name">
-        
-        <button data-pac-bind="click:increment">Click me!</button>
-        
-        <div data-pac-bind="visible:showMessage">
-            This message is conditionally shown!
-        </div>
-    </div>
+<div id="my-app">
+    <h1>Hello {{fullName}}!</h1>
+    <p>You clicked {{count}} times</p>
+    <p>Double count: {{doubleCount}}</p>
 
-    <script>
-        wakaPAC('#my-app', {
-            firstName: 'John',
-            lastName: 'Doe',
-            count: 0,
-            showMessage: true,
-            
-            computed: {
-                fullName() {
-                    return this.firstName + ' ' + this.lastName;
-                },
-                doubleCount() {
-                    return this.count * 2;
-                }
+    <input data-pac-bind="firstName" placeholder="First name">
+    <input data-pac-bind="lastName" placeholder="Last name">
+
+    <button data-pac-bind="click:increment">Click me!</button>
+
+    <div data-pac-bind="visible:showMessage">
+        This message is conditionally shown!
+    </div>
+    <div data-pac-bind="visible:!hideWelcome">
+        Welcome message (hidden when hideWelcome is true)
+    </div>
+</div>
+
+<script>
+    wakaPAC('#my-app', {
+        firstName: 'John',
+        lastName: 'Doe',
+        count: 0,
+        showMessage: true,
+        hideWelcome: false,
+
+        computed: {
+            fullName() {
+                return this.firstName + ' ' + this.lastName;
             },
-            
-            increment() {
-                this.count++;
-                if (this.count > 5) {
-                    this.showMessage = false;
-                }
+            doubleCount() {
+                return this.count * 2;
             }
-        });
-    </script>
+        },
+
+        increment() {
+            this.count++;
+            if (this.count > 5) {
+                this.showMessage = false;
+            }
+        }
+    });
+</script>
 </body>
 </html>
+```
+
+### Deep Reactivity Example
+
+```javascript
+wakaPAC('#app', {
+    user: {
+        name: 'John',
+        preferences: {
+            theme: 'dark',
+            notifications: true
+        }
+    },
+    todos: [],
+
+    addTodo() {
+        // This now works! Array mutations are reactive
+        this.todos.push({
+            id: Date.now(),
+            text: 'New todo',
+            completed: false
+        });
+    },
+
+    toggleTodo(index) {
+        // This now works! Deep nested changes are reactive
+        this.todos[index].completed = !this.todos[index].completed;
+    },
+
+    updateTheme(newTheme) {
+        // This now works! Deep nested property changes
+        this.user.preferences.theme = newTheme;
+    }
+});
 ```
 
 ## Core Concepts
@@ -133,16 +176,16 @@ wakaPAC('#app', {
     firstName: 'John',
     lastName: 'Doe',
     email: 'john@example.com',
-    
+
     computed: {
         fullName() {
             return `${this.firstName} ${this.lastName}`;
         },
-        
+
         displayName() {
             return this.fullName || this.email;
         },
-        
+
         initials() {
             return this.firstName.charAt(0) + this.lastName.charAt(0);
         }
@@ -167,24 +210,202 @@ Control how and when form inputs update your data:
 
 ## Advanced Features
 
-### Hierarchical Components
+### Bidirectional Parent-Child Communication
+
+#### Parent Controlling Children
 
 ```javascript
 // Parent component
-const parent = wakaPAC('#parent', {
-    parentData: 'Hello from parent',
-    
+const parent = wakaPAC('#dashboard', {
+    theme: 'light',
+    masterData: { status: 'active' },
+
+    // Send commands to all children
+    pauseAllTasks() {
+        this.sendToChildren('pause', { reason: 'Maintenance mode' });
+    },
+
+    // Send command to specific child
+    highlightTask(taskId) {
+        this.sendToChild(`[data-task-id="${taskId}"]`, 'highlight', {
+            color: 'yellow',
+            duration: 3000
+        });
+    },
+
+    // Broadcast data updates
+    changeTheme(newTheme) {
+        this.theme = newTheme;
+        this.broadcastDataUpdate('theme', newTheme);
+    },
+
+    // Coordinate multiple children
+    startWorkflow() {
+        // Step 1: Prepare all children
+        this.sendToChildren('prepare', { workflowId: 'WF-001' });
+
+        // Step 2: Start specific children in sequence
+        setTimeout(() => {
+            this.sendToChild('.step-1', 'start', { priority: 'high' });
+        }, 100);
+
+        setTimeout(() => {
+            this.sendToChild('.step-2', 'start', { dependsOn: 'step-1' });
+        }, 200);
+    },
+
+    // Handle child communications
     onChildUpdate(eventType, data, childPAC) {
-        console.log('Child updated:', eventType, data);
+        if (eventType === 'taskComplete') {
+            console.log(`Task completed by ${childPAC.container.id}`);
+
+            // Coordinate next steps
+            if (data.triggerNext) {
+                this.sendToChild('.next-task', 'activate', data);
+            }
+        }
+
+        if (eventType === 'requestData') {
+            // Send requested data back to child
+            childPAC.receiveFromParent('dataResponse', this.masterData);
+        }
+    }
+});
+```
+
+#### Child Receiving Commands
+
+```javascript
+// Child component
+const child = wakaPAC('#task-widget', {
+    taskName: 'Data Processing',
+    status: 'ready',
+    isPaused: false,
+
+    // Handle commands from parent
+    receiveFromParent(command, data) {
+        switch(command) {
+            case 'pause':
+                this.isPaused = true;
+                this.status = 'paused';
+                this.pauseReason = data.reason;
+                break;
+
+            case 'highlight':
+                this.highlightElement(data.color, data.duration);
+                break;
+
+            case 'start':
+                this.status = 'running';
+                this.priority = data.priority;
+                this.startTask();
+                break;
+
+            case 'prepare':
+                this.workflowId = data.workflowId;
+                this.status = 'prepared';
+                break;
+        }
+    },
+
+    // Notify parent of events
+    completeTask() {
+        this.status = 'completed';
+        this.notifyParent('taskComplete', {
+            taskName: this.taskName,
+            duration: this.getTaskDuration(),
+            triggerNext: true
+        });
+    },
+
+    requestDataFromParent() {
+        this.notifyParent('requestData', {
+            requestedBy: this.taskName,
+            timestamp: Date.now()
+        });
+    }
+});
+```
+
+#### Child Querying and Manipulation
+
+```javascript
+const parent = wakaPAC('#container', {
+    // Find children by various criteria
+    getAllActiveTasks() {
+        return this.findChildren(child =>
+            child.status === 'active'
+        );
+    },
+
+    getTaskById(taskId) {
+        return this.findChildByProperty('taskId', taskId);
+    },
+
+    getChildrenByType(componentType) {
+        return this.findChildrenBySelector(`[data-component="${componentType}"]`);
+    },
+
+    // Batch operations
+    pauseAllActiveTasks() {
+        this.findChildren(child => child.status === 'active')
+            .forEach(child => {
+                child.receiveFromParent('pause', { reason: 'Batch pause' });
+            });
+    },
+
+    updateTaskGroup(groupName, updates) {
+        this.syncDataToChildren({
+            [`[data-group="${groupName}"]`]: updates
+        });
+    }
+});
+```
+
+### Hierarchical Data Flow
+
+```javascript
+// Three-level hierarchy: Dashboard → TaskManager → SubTask
+const dashboard = wakaPAC('#dashboard', {
+    globalSettings: { timeout: 5000 },
+
+    onChildUpdate(eventType, data, childPAC) {
+        // Handle events from TaskManager (which may come from SubTasks)
+        if (eventType === 'subtaskProgress') {
+            console.log(`Subtask progress: ${data.progress}% via ${childPAC.container.id}`);
+        }
     }
 });
 
-// Child component
-const child = wakaPAC('#child', {
-    childData: 'Hello from child',
-    
-    notifyParent() {
-        this.notifyParent('customEvent', { message: 'Hello parent!' });
+const taskManager = wakaPAC('#task-manager', {
+    currentTask: 'Processing data',
+
+    // Forward commands to subtasks
+    receiveFromParent(command, data) {
+        if (command === 'globalUpdate') {
+            this.sendToChildren('configUpdate', data);
+        }
+    },
+
+    // Handle subtask communications and forward to dashboard
+    onChildUpdate(eventType, data, childPAC) {
+        if (eventType === 'progress') {
+            // Forward progress reports to dashboard
+            this.notifyParent('subtaskProgress', {
+                ...data,
+                taskManager: this.currentTask
+            });
+        }
+    }
+});
+
+const subTask = wakaPAC('#subtask', {
+    progress: 0,
+
+    updateProgress(newProgress) {
+        this.progress = newProgress;
+        // This will flow up: SubTask → TaskManager → Dashboard
+        this.notifyParent('progress', { progress: newProgress });
     }
 });
 ```
@@ -196,17 +417,19 @@ wakaPAC('#user-profile', {
     user: { name: '', email: '' },
     loading: false,
     error: null,
-    
+
     async loadUser() {
         this.loading = true;
         this.error = null;
-        
+
         try {
             await this.control('/api/user', {
                 method: 'GET',
                 updateProperties: true, // Auto-sync response with component
                 onSuccess(data) {
                     console.log('User loaded:', data);
+                    // Notify children of user data update
+                    this.sendToChildren('userLoaded', data);
                 },
                 onError(error) {
                     this.error = 'Failed to load user';
@@ -216,7 +439,7 @@ wakaPAC('#user-profile', {
             this.loading = false;
         }
     },
-    
+
     async saveUser() {
         await this.control('/api/user', {
             method: 'POST',
@@ -227,35 +450,15 @@ wakaPAC('#user-profile', {
 });
 ```
 
-### Component Communication
-
-```javascript
-// Components can communicate through parent-child relationships
-const parentComponent = wakaPAC('#parent', {
-    sharedData: 'Initial value',
-    
-    updateSharedData(newValue) {
-        this.sharedData = newValue;
-        // All child components automatically receive updates
-    },
-    
-    onChildUpdate(eventType, data, childPAC) {
-        if (eventType === 'dataRequest') {
-            // Send data to requesting child
-            childPAC.receiveUpdate('dataResponse', this.sharedData, this);
-        }
-    }
-});
-```
-
 ## Configuration Options
 
 ```javascript
 wakaPAC('#component', {
     // ... abstraction properties
 }, {
-    updateMode: 'immediate', // 'immediate', 'delayed', or 'change'
-    delay: 300              // Delay in milliseconds for 'delayed' mode
+    updateMode: 'immediate',    // 'immediate', 'delayed', or 'change'
+    delay: 300,                // Delay in milliseconds for 'delayed' mode
+    deepReactivity: true       // Enable deep reactivity (default: true)
 });
 ```
 
@@ -270,8 +473,22 @@ const component = wakaPAC('#app', { /* ... */ });
 component.addChild(childComponent);
 component.removeChild(childComponent);
 
-// Communication
-component.notifyParent('eventType', data);
+// Parent-to-child communication (NEW)
+component.sendToChildren(command, data);           // Send to all children
+component.sendToChild(selector, command, data);    // Send to specific child
+component.broadcastDataUpdate(property, value);    // Update property in all children
+component.syncDataToChildren(mapping);             // Sync different data to different children
+
+// Child querying (NEW)
+component.findChild(predicate);                    // Find first child matching predicate
+component.findChildren(predicate);                 // Find all children matching predicate
+component.findChildBySelector(selector);           // Find child by CSS selector
+component.findChildrenBySelector(selector);        // Find children by CSS selector
+component.findChildByProperty(property, value);    // Find child by property value
+
+// Child-to-parent communication
+component.notifyParent('eventType', data);         // Send notification to parent
+component.receiveFromParent(command, data);        // Handle command from parent (override in abstraction)
 
 // Server communication
 component.control('/api/endpoint', options);
@@ -285,6 +502,33 @@ component.children  // Array of child components
 component.container // DOM container element
 ```
 
+### Component Abstraction Methods
+
+These methods are available within your component abstraction:
+
+```javascript
+wakaPAC('#app', {
+    // ... properties ...
+
+    // Handle commands from parent
+    receiveFromParent(command, data) {
+        // Override this method to handle parent commands
+    },
+
+    // Handle updates from children
+    onChildUpdate(eventType, data, childPAC) {
+        // Override this method to handle child communications
+    },
+
+    // Communication methods (available as 'this.methodName')
+    sendToChildren: function(command, data) { /* ... */ },
+    sendToChild: function(selector, command, data) { /* ... */ },
+    findChild: function(predicate) { /* ... */ },
+    findChildren: function(predicate) { /* ... */ },
+    // ... and all other API methods
+});
+```
+
 ### Event Types
 
 The framework supports all standard DOM events:
@@ -296,7 +540,8 @@ The framework supports all standard DOM events:
 ## Browser Support
 
 WakaPAC works in all modern browsers that support:
-- ES5 (IE9+)
+- ES5 (IE9+) with fallback reactivity
+- Modern browsers get Proxy-based deep reactivity
 - `requestAnimationFrame`
 - `querySelector`/`querySelectorAll`
 - `Object.defineProperty`
@@ -306,94 +551,235 @@ WakaPAC works in all modern browsers that support:
 1. **Use computed properties** for derived values instead of calculating in templates
 2. **Prefer `change` update mode** for non-critical form inputs to reduce updates
 3. **Batch property updates** when possible to minimize DOM updates
-4. **Destroy components** when no longer needed to prevent memory leaks
+4. **Use bidirectional communication** instead of polling or manual DOM manipulation
+5. **Leverage deep reactivity** for complex data structures
+6. **Destroy components** when no longer needed to prevent memory leaks
 
 ## Examples
 
-### Todo List
+### Coordinated Dashboard
 
 ```javascript
-wakaPAC('#todo-app', {
-    newTodo: '',
-    todos: [],
-    filter: 'all', // 'all', 'active', 'completed'
-    
-    computed: {
-        filteredTodos() {
-            if (this.filter === 'active') {
-                return this.todos.filter(todo => !todo.completed);
-            } else if (this.filter === 'completed') {
-                return this.todos.filter(todo => todo.completed);
-            }
-            return this.todos;
-        },
-        
-        activeCount() {
-            return this.todos.filter(todo => !todo.completed).length;
-        }
+// Dashboard parent coordinates multiple widgets
+wakaPAC('#dashboard', {
+    theme: 'light',
+    refreshInterval: 5000,
+    isMaintenanceMode: false,
+
+    // Coordinate all widgets
+    refreshAllData() {
+        this.sendToChildren('refresh', {
+            timestamp: Date.now(),
+            force: true
+        });
     },
-    
-    addTodo() {
-        if (this.newTodo.trim()) {
-            this.todos.push({
-                id: Date.now(),
-                text: this.newTodo.trim(),
-                completed: false
+
+    enterMaintenanceMode() {
+        this.isMaintenanceMode = true;
+        this.sendToChildren('pause', {
+            reason: 'Maintenance mode activated',
+            showMessage: true
+        });
+    },
+
+    changeTheme(newTheme) {
+        this.theme = newTheme;
+        this.broadcastDataUpdate('theme', newTheme);
+    },
+
+    onChildUpdate(eventType, data, childPAC) {
+        if (eventType === 'error') {
+            // Handle widget errors
+            console.error(`Widget error in ${childPAC.container.id}:`, data);
+
+            // Pause the problematic widget
+            childPAC.receiveFromParent('pause', {
+                reason: 'Error occurred',
+                showError: true
             });
-            this.newTodo = '';
+        }
+
+        if (eventType === 'dataRequest') {
+            // Provide requested data to child widgets
+            const requestedData = this.getDataForWidget(data.requestType);
+            childPAC.receiveFromParent('dataResponse', requestedData);
+        }
+    }
+});
+
+// Widget child responds to dashboard commands
+wakaPAC('#user-widget', {
+    users: [],
+    loading: false,
+    error: null,
+    theme: 'light',
+    isPaused: false,
+
+    receiveFromParent(command, data) {
+        switch(command) {
+            case 'refresh':
+                if (!this.isPaused) {
+                    this.loadUsers(data.force);
+                }
+                break;
+
+            case 'pause':
+                this.isPaused = true;
+                this.pauseReason = data.reason;
+                if (data.showMessage) {
+                    this.showPauseMessage(data.reason);
+                }
+                break;
+
+            case 'dataResponse':
+                this.handleDataFromDashboard(data);
+                break;
         }
     },
-    
-    toggleTodo(todo) {
-        todo.completed = !todo.completed;
+
+    async loadUsers(force = false) {
+        this.loading = true;
+        this.error = null;
+
+        try {
+            const users = await this.control('/api/users', {
+                method: 'GET',
+                headers: force ? { 'Cache-Control': 'no-cache' } : {}
+            });
+            this.users = users;
+        } catch (error) {
+            this.error = error.message;
+            // Notify dashboard of error
+            this.notifyParent('error', {
+                type: 'api_error',
+                message: error.message,
+                widget: 'user-widget'
+            });
+        } finally {
+            this.loading = false;
+        }
     },
-    
-    removeTodo(todoId) {
-        this.todos = this.todos.filter(todo => todo.id !== todoId);
+
+    requestDashboardData(requestType) {
+        this.notifyParent('dataRequest', {
+            requestType: requestType,
+            requesterId: 'user-widget'
+        });
     }
 });
 ```
 
-### Form Validation
+### Multi-Step Form with Coordination
 
 ```javascript
-wakaPAC('#signup-form', {
-    email: '',
-    password: '',
-    confirmPassword: '',
-    
-    computed: {
-        isValidEmail() {
-            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.email);
-        },
-        
-        isValidPassword() {
-            return this.password.length >= 8;
-        },
-        
-        passwordsMatch() {
-            return this.password === this.confirmPassword;
-        },
-        
-        isFormValid() {
-            return this.isValidEmail && this.isValidPassword && this.passwordsMatch;
+// Form controller coordinates steps
+wakaPAC('#multi-step-form', {
+    currentStep: 1,
+    totalSteps: 3,
+    formData: {},
+
+    goToStep(stepNumber) {
+        // Hide all steps
+        this.sendToChildren('hide', { animate: true });
+
+        // Show target step
+        this.sendToChild(`[data-step="${stepNumber}"]`, 'show', {
+            animate: true,
+            direction: stepNumber > this.currentStep ? 'forward' : 'backward'
+        });
+
+        this.currentStep = stepNumber;
+
+        // Update progress indicator
+        this.sendToChild('.progress-indicator', 'updateProgress', {
+            current: stepNumber,
+            total: this.totalSteps
+        });
+    },
+
+    async validateAndProceed() {
+        // Validate current step
+        const currentStepComponent = this.findChild(child =>
+            child.stepNumber === this.currentStep
+        );
+
+        if (currentStepComponent) {
+            const isValid = await currentStepComponent.validate();
+            if (isValid && this.currentStep < this.totalSteps) {
+                this.goToStep(this.currentStep + 1);
+            }
         }
     },
-    
-    async submitForm() {
-        if (this.isFormValid) {
-            await this.control('/api/signup', {
-                method: 'POST',
-                data: {
-                    email: this.email,
-                    password: this.password
-                }
-            });
+
+    onChildUpdate(eventType, data, childPAC) {
+        if (eventType === 'stepComplete') {
+            // Merge step data into form data
+            Object.assign(this.formData, data.stepData);
+
+            // Auto-advance to next step
+            if (data.autoAdvance && this.currentStep < this.totalSteps) {
+                this.goToStep(this.currentStep + 1);
+            }
         }
+
+        if (eventType === 'validationError') {
+            // Handle validation errors
+            this.showValidationSummary(data.errors);
+        }
+    }
+});
+
+// Individual form step
+wakaPAC('#step-1', {
+    stepNumber: 1,
+    userData: { name: '', email: '' },
+    isVisible: false,
+
+    receiveFromParent(command, data) {
+        switch(command) {
+            case 'show':
+                this.isVisible = true;
+                this.animateIn(data.direction);
+                break;
+
+            case 'hide':
+                this.isVisible = false;
+                if (data.animate) {
+                    this.animateOut();
+                }
+                break;
+        }
+    },
+
+    async validate() {
+        const errors = [];
+
+        if (!this.userData.name.trim()) {
+            errors.push('Name is required');
+        }
+
+        if (!this.isValidEmail(this.userData.email)) {
+            errors.push('Valid email is required');
+        }
+
+        if (errors.length > 0) {
+            this.notifyParent('validationError', { errors, step: this.stepNumber });
+            return false;
+        }
+
+        return true;
+    },
+
+    completeStep() {
+        this.notifyParent('stepComplete', {
+            stepNumber: this.stepNumber,
+            stepData: { userData: this.userData },
+            autoAdvance: true
+        });
     }
 });
 ```
 
 ## License
 
-This framework is provided as-is for educational and development purposes. Check the source file for specific licensing terms.
+MIT License - see the source file for full license terms.
