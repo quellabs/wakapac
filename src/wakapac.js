@@ -9,406 +9,283 @@
  * ║     ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝ ╚═════╝                        ║
  * ║                                                                                      ║
  * ║  PAC Framework - Presentation-Abstraction-Control for JavaScript                     ║
- * ║  Enhanced with Deep Reactivity Support & Bidirectional Communication                ║
  * ║                                                                                      ║
  * ║  A powerful reactive framework that creates hierarchical components with two-way     ║
- * ║  data binding, event handling, and automatic DOM synchronization. Now supports      ║
- * ║  deep reactivity for arrays and nested objects!                                     ║
- * ║                                                                                      ║
- * ║  New Deep Reactivity Features:                                                       ║
- * ║  • Array Mutations - push(), pop(), splice(), etc. automatically trigger updates    ║
- * ║  • Nested Object Changes - deeply nested property changes are detected              ║
- * ║  • Collection Methods - Built-in reactive array and object manipulation             ║
- * ║  • Path-based Updates - Track exactly what changed for optimal performance          ║
- * ║                                                                                      ║
- * ║  New Bidirectional Communication Features:                                           ║
- * ║  • Parent-to-Child Commands - Send commands and data to specific children           ║
- * ║  • Child Broadcasting - Send messages to all children at once                       ║
- * ║  • State Synchronization - Push data updates down the component hierarchy           ║
- * ║  • Lifecycle Management - Parents can create, initialize, and destroy children      ║
- * ║  • Child Query System - Find and manipulate children by various criteria            ║
- * ║                                                                                      ║
- * ║  Example Usage with Deep Reactivity:                                                 ║
- * ║    wakaPAC('#todo-app', {                                                            ║
- * ║      todos: [],                                                                      ║
- * ║      user: { name: 'John', preferences: { theme: 'dark' } },                        ║
- * ║                                                                                      ║
- * ║      addTodo() {                                                                     ║
- * ║        // This now works! Array mutations are reactive                              ║
- * ║        this.todos.push({ text: 'New todo', completed: false });                     ║
- * ║      },                                                                              ║
- * ║                                                                                      ║
- * ║      toggleTodo(index) {                                                             ║
- * ║        // This now works! Nested property changes are reactive                      ║
- * ║        this.todos[index].completed = !this.todos[index].completed;                  ║
- * ║      },                                                                              ║
- * ║                                                                                      ║
- * ║      updateTheme(newTheme) {                                                         ║
- * ║        // This now works! Deep nested changes are reactive                          ║
- * ║        this.user.preferences.theme = newTheme;                                      ║
- * ║        // NEW: Broadcast theme change to all children                               ║
- * ║        this.sendToChildren('updateTheme', { theme: newTheme });                     ║
- * ║      },                                                                              ║
- * ║                                                                                      ║
- * ║      // NEW: Coordinate child components                                             ║
- * ║      selectAllTodos() {                                                              ║
- * ║        this.sendToChildren('setSelected', { selected: true });                      ║
- * ║      },                                                                              ║
- * ║                                                                                      ║
- * ║      // NEW: Handle child communication                                              ║
- * ║      receiveFromChild(message, data, childPAC) {                                    ║
- * ║        if (message === 'requestFocus') {                                            ║
- * ║          this.sendToChildren('blur');                                               ║
- * ║          childPAC.receiveFromParent('focus', { reason: 'exclusive' });             ║
- * ║        }                                                                             ║
- * ║      }                                                                               ║
- * ║    });                                                                               ║
+ * ║  data binding, event handling, and automatic DOM synchronization. Supports           ║
+ * ║  deep reactivity for arrays and nested objects!                                      ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
-
 (function () {
     'use strict';
 
     /**
-     * ReactiveUtils - Utility class for reactive system operations
-     * Contains helper methods for reactivity detection, comparison, and validation
+     * Utility functions - Consolidated helper methods for the framework
      */
-    function ReactiveUtils() {
-    }
+    const U = {
+        // Check if Proxy is supported in the current environment
+        PROXY: typeof Proxy !== 'undefined',
 
-    /**
-     * Check if environment supports Proxy for deep reactivity
-     * @returns {boolean} True if Proxy is supported
-     */
-    ReactiveUtils.SUPPORTS_PROXY = typeof Proxy !== 'undefined';
+        /**
+         * Determines if a value should be made reactive
+         * @param {*} v - Value to test
+         * @returns {boolean} - True if value should be reactive
+         */
+        isReactive: v => v && typeof v === 'object' && !v.nodeType &&
+            !(v instanceof Date) && !(v instanceof RegExp) && !(v instanceof File),
 
-    /**
-     * Check if a value should be made reactive (objects and arrays, but not DOM elements or functions)
-     * @param {*} value - Value to check
-     * @returns {boolean} True if value should be made reactive
-     */
-    ReactiveUtils.shouldBeReactive = function (value) {
-        return value !== null &&
-            typeof value === 'object' &&
-            !value.nodeType && // Not a DOM element
-            !(value instanceof Date) &&
-            !(value instanceof RegExp) &&
-            !(value instanceof File);
-    };
+        /**
+         * Deep equality comparison for objects and arrays
+         * @param {*} a - First value
+         * @param {*} b - Second value
+         * @returns {boolean} - True if values are deeply equal
+         */
+        deepEq: (a, b) => {
+            if (a === b) {
+                return true;
+            }
 
-    /**
-     * Compare two values for deep equality
-     * @param {*} a - First value
-     * @param {*} b - Second value
-     * @returns {boolean} True if values are deeply equal
-     */
-    ReactiveUtils.deepEqual = function (a, b) {
-        if (a === b) {
-            return true;
-        }
-
-        if (a == null || b == null) {
-            return a === b;
-        }
-
-        if (typeof a !== typeof b) {
-            return false;
-        }
-
-        if (typeof a === 'object') {
-            if (Array.isArray(a) !== Array.isArray(b)) {
+            if (!a || !b || typeof a !== typeof b) {
                 return false;
             }
 
-            const keysA = Object.keys(a);
-            const keysB = Object.keys(b);
-
-            if (keysA.length !== keysB.length) {
+            if (typeof a !== 'object') {
                 return false;
             }
 
-            for (let i = 0; i < keysA.length; i++) {
-                const key = keysA[i];
+            const ka = Object.keys(a), kb = Object.keys(b);
 
-                if (!keysB.includes(key)) {
-                    return false;
-                }
+            if (ka.length !== kb.length) {
+                return false;
+            }
 
-                if (!ReactiveUtils.deepEqual(a[key], b[key])) {
+            for (let i = 0; i < ka.length; i++) {
+                const k = ka[i];
+
+                if (!kb.includes(k) || !U.deepEq(a[k], b[k])) {
                     return false;
                 }
             }
-
             return true;
-        }
+        },
 
-        return false;
+        /**
+         * Generates a unique identifier
+         * @returns {string} - Unique ID string
+         */
+        id: () => Date.now() + '_' + (Math.random() * 10000 | 0),
+
+        /**
+         * Checks if a string represents a DOM event type
+         * @param {string} t - Event type to test
+         * @returns {boolean} - True if it's a valid event type
+         */
+        isEvent: t => /^(click|submit|change|input|focus|blur|key(up|down))$/.test(t)
     };
 
     /**
-     * Generate a random ID for binding keys
-     * @returns {string} Unique identifier based on timestamp and random number
+     * Registry - Manages PAC units and their hierarchical relationships
+     * Handles parent-child relationships between components and caches hierarchy lookups
      */
-    ReactiveUtils.createRandomId = function () {
-        return Date.now() + '_' + Math.floor(Math.random() * 10000);
-    };
-
-    /**
-     * Check if a string represents a DOM event type
-     * @param {string} type - String to check
-     * @returns {boolean} True if it's a recognized event type
-     */
-    ReactiveUtils.isEventType = function (type) {
-        const eventTypes = ['click', 'submit', 'change', 'input', 'focus', 'blur', 'keyup', 'keydown'];
-        return eventTypes.indexOf(type) !== -1;
-    };
-
-    /**
-     * PAC (Presentation-Abstraction-Control) Registry System
-     * Manages hierarchical relationships between PAC units and caches hierarchy computations
-     */
-    function PACRegistry() {
-        // Map of selectors to PAC units for quick lookup
-        this.units = new Map();
-
-        // WeakMap cache for hierarchy computations to improve performance
-        this.hierarchyCache = new WeakMap();
+    function Registry() {
+        this.units = new Map(); // Map of selector -> PAC unit
+        this.cache = new WeakMap(); // Cache for hierarchy lookups
     }
 
-    /**
-     * Register a new PAC unit in the registry
-     * @param {string} selector - CSS selector for the unit
-     * @param {Object} unit - The PAC unit control object
-     */
-    PACRegistry.prototype.register = function (selector, unit) {
-        this.units.set(selector, unit);
-        this.invalidateHierarchyCache();
-    };
+    Registry.prototype = {
+        /**
+         * Registers a new PAC unit
+         * @param {string} sel - CSS selector for the unit
+         * @param {Object} unit - The PAC unit control object
+         */
+        register(sel, unit) {
+            this.units.set(sel, unit);
+            this.cache = new WeakMap(); // Clear cache when units change
+        },
 
-    /**
-     * Unregister a PAC unit from the registry
-     * @param {string} selector - CSS selector for the unit to remove
-     * @returns {Object|undefined} The removed unit, if it existed
-     */
-    PACRegistry.prototype.unregister = function (selector) {
-        const unit = this.units.get(selector);
+        /**
+         * Unregisters a PAC unit
+         * @param {string} sel - CSS selector for the unit to remove
+         * @returns {Object|undefined} - The removed unit
+         */
+        unregister(sel) {
+            const unit = this.units.get(sel);
+            if (unit) {
+                this.units.delete(sel);
+                this.cache = new WeakMap(); // Clear cache when units change
+            }
+            return unit;
+        },
 
-        if (unit) {
-            this.units.delete(selector);
-            this.invalidateHierarchyCache();
-        }
-        return unit;
-    };
+        /**
+         * Gets the hierarchy (parent and children) for a given container
+         * @param {Element} container - DOM element to find hierarchy for
+         * @returns {Object} - Object with parent and children properties
+         */
+        getHierarchy(container) {
+            // Check cache first for performance
+            if (this.cache.has(container)) {
+                return this.cache.get(container);
+            }
 
-    /**
-     * Clear the hierarchy cache when registry changes
-     * This ensures hierarchy computations are recalculated when needed
-     */
-    PACRegistry.prototype.invalidateHierarchyCache = function () {
-        this.hierarchyCache = new WeakMap();
-    };
+            let parent = null;
+            const children = [];
+            let el = container.parentElement;
 
-    /**
-     * Get the hierarchy for a container (cached or computed)
-     * @param {Element} container - DOM element to get hierarchy for
-     * @returns {Object} Hierarchy object with parent and children properties
-     */
-    PACRegistry.prototype.getHierarchy = function (container) {
-        // Return cached hierarchy if available
-        if (this.hierarchyCache.has(container)) {
-            return this.hierarchyCache.get(container);
-        }
+            // Walk up the DOM tree to find parent PAC unit
+            while (el && !parent) {
+                this.units.forEach(unit => {
+                    if (unit.container === el) {
+                        parent = unit;
+                    }
+                });
+                el = el.parentElement;
+            }
 
-        // Compute and cache new hierarchy
-        const hierarchy = this.computeHierarchy(container);
-        this.hierarchyCache.set(container, hierarchy);
-        return hierarchy;
-    };
-
-    /**
-     * Compute the parent-child hierarchy for a given container
-     * @param {Element} container - DOM element to compute hierarchy for
-     * @returns {Object} Object containing parent unit and array of child units
-     */
-    PACRegistry.prototype.computeHierarchy = function (container) {
-        let parent = null;
-        const children = [];
-        const self = this;
-
-        // Walk up the DOM tree to find parent PAC unit
-        let parentElement = container.parentElement;
-
-        while (parentElement && !parent) {
-            // Check if any registered unit uses this parent element as container
-            this.units.forEach(function (unit) {
-                if (unit.container === parentElement) {
-                    parent = unit;
+            // Find all child PAC units within this container
+            this.units.forEach(unit => {
+                if (container.contains(unit.container) && unit.container !== container) {
+                    children.push(unit);
                 }
             });
 
-            parentElement = parentElement.parentElement;
+            const hierarchy = {parent, children};
+            this.cache.set(container, hierarchy); // Cache the result
+            return hierarchy;
         }
-
-        // Find child PAC units by checking if their containers are contained within this container
-        this.units.forEach(function (unit) {
-            if (container.contains(unit.container) && unit.container !== container) {
-                children.push(unit);
-            }
-        });
-
-        return {parent: parent, children: children};
     };
 
-    // Initialize global registry singleton
-    window.PACRegistry = window.PACRegistry || new PACRegistry();
+    // Global registry instance
+    window.PACRegistry = window.PACRegistry || new Registry();
 
     /**
-     * Legacy compatibility functions - these delegate to ReactiveUtils
+     * Creates a reactive proxy or fallback for an object
+     * Handles deep reactivity and change notifications
+     * @param {Object} target - Object to make reactive
+     * @param {Function} onChange - Callback for changes
+     * @param {string} path - Current property path for nested objects
+     * @returns {Object} - Reactive version of the target
      */
-    function isEventType(type) {
-        return ReactiveUtils.isEventType(type);
-    }
-
-    function createRandomId() {
-        return ReactiveUtils.createRandomId();
-    }
-
-    /**
-     * Create a deep reactive object/array using Proxy (modern browsers) or fallback methods
-     * @param {*} target - Object or array to make reactive
-     * @param {Function} onChange - Callback when changes occur
-     * @param {string} path - Current path in the object tree (for nested tracking)
-     * @returns {*} Reactive version of the target
-     */
-    function createReactiveProxy(target, onChange, path) {
-        path = path || '';
-
-        if (!ReactiveUtils.shouldBeReactive(target)) {
+    function createReactive(target, onChange, path = '') {
+        if (!U.isReactive(target)) {
             return target;
         }
 
-        if (ReactiveUtils.SUPPORTS_PROXY) {
-            return createProxyReactive(target, onChange, path);
-        } else {
-            return createFallbackReactive(target, onChange, path);
+        // Use Proxy if available, otherwise fall back to Object.defineProperty
+        if (U.PROXY) {
+            return createProxy(target, onChange, path);
         }
+        return createFallback(target, onChange, path);
     }
 
     /**
-     * Create reactive object using Proxy (for modern browsers)
+     * Creates a reactive proxy using ES6 Proxy
+     * @param {Object} target - Object to make reactive
+     * @param {Function} onChange - Change callback
+     * @param {string} path - Property path
+     * @returns {Proxy} - Proxied reactive object
      */
-    function createProxyReactive(target, onChange, path) {
-        // Make nested objects reactive too
-        for (const key in target) {
-            if (target.hasOwnProperty(key) && ReactiveUtils.shouldBeReactive(target[key])) {
-                const nestedPath = path ? path + '.' + key : key;
-                target[key] = createReactiveProxy(target[key], onChange, nestedPath);
+    function createProxy(target, onChange, path) {
+        // Make nested objects reactive recursively
+        for (const k in target) {
+            if (target.hasOwnProperty(k) && U.isReactive(target[k])) {
+                target[k] = createReactive(target[k], onChange, path ? `${path}.${k}` : k);
             }
         }
 
-        // Store original array methods for arrays
-        const isArray = Array.isArray(target);
-        const originalMethods = {};
+        const isArr = Array.isArray(target);
+        const methods = {};
 
-        if (isArray) {
-            const arrayMethods = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
-            arrayMethods.forEach(method => {
-                originalMethods[method] = target[method];
+        // Store original array methods for mutation tracking
+        if (isArr) {
+            ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'].forEach(m => {
+                methods[m] = target[m];
             });
         }
 
         return new Proxy(target, {
+            /**
+             * Proxy get trap - handles property access and array method calls
+             */
             get(obj, prop) {
-                // Intercept array mutation methods
-                if (isArray && originalMethods.hasOwnProperty(prop)) {
+                // Handle array mutation methods
+                if (isArr && methods[prop]) {
                     return function (...args) {
-                        const oldLength = obj.length;
-                        const result = originalMethods[prop].apply(obj, args);
+                        const result = methods[prop].apply(obj, args);
 
-                        // Make any new items reactive
-                        if (prop === 'push' || prop === 'unshift' || prop === 'splice') {
+                        // Make new items reactive for mutation methods
+                        if (/^(push|unshift|splice)$/.test(prop)) {
                             for (let i = 0; i < obj.length; i++) {
-                                if (ReactiveUtils.shouldBeReactive(obj[i]) && !obj[i]._isReactive) {
-                                    const itemPath = path ? path + '.' + i : i.toString();
-                                    obj[i] = createReactiveProxy(obj[i], onChange, itemPath);
+                                if (U.isReactive(obj[i]) && !obj[i]._reactive) {
+                                    obj[i] = createReactive(obj[i], onChange, `${path}.${i}`);
                                 }
                             }
                         }
 
-                        // Notify of change
-                        const changePath = path || 'root';
-                        onChange(changePath, obj, 'array-mutation', {method: prop, args: args});
-
+                        // Notify of array mutation
+                        onChange(path || 'root', obj, 'array-mutation', {method: prop, args});
                         return result;
                     };
                 }
-
                 return obj[prop];
             },
 
-            set(obj, prop, value) {
-                const oldValue = obj[prop];
+            /**
+             * Proxy set trap - handles property assignment
+             */
+            set(obj, prop, val) {
+                const old = obj[prop];
 
                 // Make new value reactive if needed
-                if (ReactiveUtils.shouldBeReactive(value)) {
-                    const newPath = path ? path + '.' + prop : prop.toString();
-                    value = createReactiveProxy(value, onChange, newPath);
+                if (U.isReactive(val)) {
+                    val = createReactive(val, onChange, path ? `${path}.${prop}` : prop);
                 }
 
-                obj[prop] = value;
+                obj[prop] = val;
 
-                // Notify of change only if value actually changed
-                if (!ReactiveUtils.deepEqual(oldValue, value)) {
-                    const changePath = path ? path + '.' + prop : prop.toString();
-                    onChange(changePath, value, 'property-set', {oldValue: oldValue});
+                // Only notify if value actually changed
+                if (!U.deepEq(old, val)) {
+                    onChange(path ? `${path}.${prop}` : prop, val, 'set', {old});
                 }
-
                 return true;
             },
 
+            /**
+             * Proxy deleteProperty trap - handles property deletion
+             */
             deleteProperty(obj, prop) {
-                const oldValue = obj[prop];
+                const old = obj[prop];
                 delete obj[prop];
-
-                const changePath = path ? path + '.' + prop : prop.toString();
-                onChange(changePath, undefined, 'property-delete', {oldValue: oldValue});
-
+                onChange(path ? `${path}.${prop}` : prop, undefined, 'delete', {old});
                 return true;
             }
         });
     }
 
     /**
-     * Create reactive object using traditional methods (fallback for older browsers)
+     * Fallback reactivity using Object.defineProperty for older browsers
+     * @param {Object} target - Object to make reactive
+     * @param {Function} onChange - Change callback
+     * @param {string} path - Property path
+     * @returns {Object} - Reactive object
      */
-    function createFallbackReactive(target, onChange, path) {
-        const isArray = Array.isArray(target);
-
-        if (isArray) {
-            // For arrays in older browsers, replace mutation methods
-            const arrayMethods = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
-
-            arrayMethods.forEach(method => {
-                const original = target[method];
-
-                Object.defineProperty(target, method, {
+    function createFallback(target, onChange, path) {
+        // Handle array mutation methods
+        if (Array.isArray(target)) {
+            ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'].forEach(m => {
+                const orig = target[m];
+                Object.defineProperty(target, m, {
                     value: function (...args) {
-                        const result = original.apply(this, args);
-
-                        // Make new items reactive
-                        if (method === 'push' || method === 'unshift' || method === 'splice') {
+                        const result = orig.apply(this, args);
+                        // Make new items reactive for mutation methods
+                        if (/^(push|unshift|splice)$/.test(m)) {
                             for (let i = 0; i < this.length; i++) {
-                                if (ReactiveUtils.shouldBeReactive(this[i]) && !this[i]._isReactive) {
-                                    const itemPath = path ? path + '.' + i : i.toString();
-                                    this[i] = createReactiveProxy(this[i], onChange, itemPath);
+                                if (U.isReactive(this[i]) && !this[i]._reactive) {
+                                    this[i] = createReactive(this[i], onChange, `${path}.${i}`);
                                 }
                             }
                         }
-
-                        const changePath = path || 'root';
-                        onChange(changePath, this, 'array-mutation', {method: method, args: args});
-
+                        onChange(path || 'root', this, 'array-mutation', {method: m, args});
                         return result;
                     },
                     enumerable: false,
@@ -418,1129 +295,820 @@
         }
 
         // Make nested objects reactive
-        for (const key in target) {
-            if (target.hasOwnProperty(key)) {
-                const value = target[key];
-
-                if (ReactiveUtils.shouldBeReactive(value)) {
-                    const nestedPath = path ? path + '.' + key : key;
-                    target[key] = createReactiveProxy(value, onChange, nestedPath);
-                }
+        for (const k in target) {
+            if (target.hasOwnProperty(k) && U.isReactive(target[k])) {
+                target[k] = createReactive(target[k], onChange, path ? `${path}.${k}` : k);
             }
         }
 
         // Mark as reactive to avoid double-processing
-        Object.defineProperty(target, '_isReactive', {
-            value: true,
-            enumerable: false,
-            configurable: false
-        });
-
+        Object.defineProperty(target, '_reactive', {value: true, enumerable: false});
         return target;
     }
 
     /**
-     * Create a new PAC (Presentation-Abstraction-Control) Unit
-     * This is the main factory function that creates reactive DOM components
-     *
+     * Main PAC Factory - Creates and manages PAC units
      * @param {string} selector - CSS selector for the container element
-     * @param {Object} abstraction - Object containing properties and methods for the component
-     * @param {Object} options - Configuration options for the PAC unit
-     * @returns {Object} Public API object for interacting with the PAC unit
+     * @param {Object} abstraction - Data and methods for the component
+     * @param {Object} options - Configuration options
+     * @returns {Object} - Public API for the PAC unit
      */
-    function wakaPAC(selector, abstraction, options) {
-        let key;
-        abstraction = abstraction || {};
-        options = options || {};
-
-        // Find the DOM container element
+    function wakaPAC(selector, abstraction = {}, options = {}) {
         const container = document.querySelector(selector);
-
         if (!container) {
-            throw new Error('Container not found for selector: ' + selector);
+            throw new Error(`Container not found: ${selector}`);
         }
 
-        // Default configuration options
-        const config = {
-            updateMode: 'immediate',  // How quickly to update: 'immediate', 'delayed', or 'change'
-            delay: 300,               // Delay in milliseconds for 'delayed' mode
-            deepReactivity: true      // Enable deep reactivity for arrays and objects
-        };
+        // Merge default configuration with user options
+        const config = Object.assign({
+            updateMode: 'immediate', // immediate, delayed, or change
+            delay: 300, // Delay for 'delayed' update mode
+            deepReactivity: true // Enable deep object reactivity
+        }, options);
 
-        // Merge user options with defaults
-        for (key in options) {
-            if (options.hasOwnProperty(key)) {
-                config[key] = options[key];
-            }
-        }
-
-        // Main control object - this is the internal implementation
+        /**
+         * Control object - Internal management of the PAC unit
+         * Handles bindings, reactivity, DOM updates, and communication
+         */
         const control = {
-            bindings: new Map(),           // Stores all data bindings (text, attribute, input, event)
-            container: container,          // Reference to the DOM container
-            abstraction: null,            // Will hold the reactive abstraction object
-            delayedUpdates: new Map(),    // Tracks delayed update timeouts
-            parent: null,                 // Parent PAC unit in hierarchy
-            children: new Set(),          // Set of child PAC units
-            eventListeners: new Map(),    // Tracks event listeners for cleanup
-            pendingDOMUpdates: null,      // Batched DOM updates awaiting flush
-            pendingUpdates: null,         // Values for pending updates
-            originalAbstraction: abstraction, // Original abstraction object
-            config: config,               // Configuration options
-            computedCache: new Map(),     // Cache for computed property values
-            computedDependencies: new Map(), // Tracks which properties each computed property depends on
-            propertyDependents: new Map(), // Tracks which computed properties depend on each property
-            reactiveProxies: new WeakMap(), // Track reactive proxies to avoid cycles
+            bindings: new Map(), // Map of binding ID -> binding config
+            container, // DOM container element
+            abstraction: null, // Reactive abstraction object
+            delays: new Map(), // Map of delayed update timeouts
+            parent: null, // Parent PAC unit
+            children: new Set(), // Set of child PAC units
+            listeners: new Map(), // Map of event type -> handler function
+            pending: null, // Set of properties pending DOM update
+            pendingVals: null, // Values for pending updates
+            orig: abstraction, // Original abstraction object
+            config, // Configuration options
+            computedCache: new Map(), // Cache for computed property values
+            computedDeps: new Map(), // Map of computed property -> dependencies
+            propDeps: new Map(), // Map of property -> dependent computed properties
 
             /**
-             * Handle deep reactive changes from proxied objects/arrays
-             * @param {string} path - The path that changed (e.g., 'todos.0.completed')
-             * @param {*} newValue - The new value
-             * @param {string} changeType - Type of change ('property-set', 'array-mutation', etc.)
-             * @param {Object} meta - Additional metadata about the change
+             * Updates a foreach binding with new array data
+             * @param {Object} binding - The foreach binding configuration
+             * @param {string} prop - Property name that changed
+             * @param {Array} val - New array value
              */
-            handleDeepChange: function (path, newValue, changeType, meta) {
-                // Extract the root property name from the path
-                const rootProperty = path.split('.')[0];
-
-                // Update computed properties that depend on this root property
-                this.updateComputedProperties(rootProperty);
-
-                // Trigger DOM update for the root property
-                // The DOM update system will re-render the entire property
-                if (this.abstraction.hasOwnProperty(rootProperty)) {
-                    this.updateDOM(rootProperty, this.abstraction[rootProperty]);
+            updateForeach(binding, prop, val) {
+                if (binding.collection !== prop) {
+                    return;
                 }
 
-                // Notify parent of the change
-                this.notifyParent('propertyChange', {
-                    property: rootProperty,
-                    path: path,
-                    newValue: newValue,
-                    changeType: changeType,
-                    meta: meta
+                let arr = val;
+                if (!Array.isArray(arr)) {
+                    console.warn('Foreach expects array, got:', typeof arr);
+                    binding.element.innerHTML = '';
+                    binding.prev = [];
+                    return;
+                }
+
+                const prev = binding.prev || [];
+                const curr = Array.from(arr);
+
+                // Skip update if arrays are identical
+                if (curr === prev) {
+                    return;
+                }
+                if (this.arrEq(prev, curr)) {
+                    binding.prev = [...curr];
+                    return;
+                }
+
+                binding.prev = [...curr];
+                const el = binding.element;
+                el.innerHTML = ''; // Clear existing content
+
+                // Render each item in the array
+                curr.forEach((item, i) => {
+                    const itemEl = this.renderItem(binding.template, item, i, binding.itemName, binding.indexName);
+                    el.appendChild(itemEl);
                 });
             },
 
             /**
-             * Queue a DOM update for batching
-             * This optimizes performance by batching multiple DOM updates together
-             * @param {string} property - Property name that changed
-             * @param {*} newValue - New value for the property
+             * Renders a single item template with data binding
+             * @param {string} tmpl - HTML template string
+             * @param {*} item - Data item to bind
+             * @param {number} idx - Index of the item
+             * @param {string} itemName - Variable name for the item
+             * @param {string} idxName - Variable name for the index
+             * @returns {Element} - Rendered DOM element
              */
-            updateDOM: function (property, newValue) {
-                const self = this;
-
-                // Initialize batching if not already started
-                if (!this.pendingDOMUpdates) {
-                    this.pendingDOMUpdates = new Set();
-                    this.pendingUpdates = {};
-
-                    // Schedule batch flush using requestAnimationFrame for optimal performance
-                    if (window.requestAnimationFrame) {
-                        requestAnimationFrame(function () {
-                            self.flushDOMUpdates();
-                        });
-                    } else {
-                        // Fallback for older browsers
-                        setTimeout(function () {
-                            self.flushDOMUpdates();
-                        }, 0);
-                    }
+            renderItem(tmpl, item, idx, itemName, idxName) {
+                const div = document.createElement('div');
+                div.innerHTML = tmpl;
+                const el = div.firstElementChild || div.firstChild;
+                if (!el) {
+                    return document.createTextNode('');
                 }
 
-                // Add to pending updates
-                this.pendingDOMUpdates.add(property);
-                this.pendingUpdates[property] = newValue;
+                const clone = el.cloneNode(true);
+                this.processText(clone, item, idx, itemName, idxName);
+                this.processAttrs(clone, item, idx, itemName, idxName);
+                return clone;
             },
 
             /**
-             * Execute all pending DOM updates in a single batch
-             * This reduces DOM manipulation overhead and prevents layout thrashing
+             * Shallow array equality check for optimization
+             * @param {Array} a - First array
+             * @param {Array} b - Second array
+             * @returns {boolean} - True if arrays are equal
              */
-            flushDOMUpdates: function () {
-                if (!this.pendingDOMUpdates) {
+            arrEq(a, b) {
+                if (a.length !== b.length) {
+                    return false;
+                }
+                for (let i = 0; i < a.length; i++) {
+                    if (!U.deepEq(a[i], b[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            },
+
+            /**
+             * Processes text nodes in a template, replacing variable placeholders
+             * @param {Element} el - Element to process
+             * @param {*} item - Data item
+             * @param {number} idx - Item index
+             * @param {string} itemName - Item variable name
+             * @param {string} idxName - Index variable name
+             */
+            processText(el, item, idx, itemName, idxName) {
+                const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                const nodes = [];
+                let node;
+                // Collect all text nodes first to avoid walker issues
+                while (node = walker.nextNode()) {
+                    nodes.push(node);
+                }
+
+                nodes.forEach(n => {
+                    let txt = n.textContent;
+                    // Replace item property references: {{item.property}}
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\.(\\w+)\\s*\\}\\}`, 'g'), (m, p) =>
+                        item && item.hasOwnProperty(p) ? item[p] : '');
+                    // Replace item references: {{item}}
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\s*\\}\\}`, 'g'), () =>
+                        typeof item === 'object' ? JSON.stringify(item) : item || '');
+                    // Replace index references: {{index}}
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${idxName}\\s*\\}\\}`, 'g'), () => idx);
+                    n.textContent = txt;
+                });
+            },
+
+            /**
+             * Processes attributes and bindings in a template
+             * @param {Element} el - Element to process
+             * @param {*} item - Data item
+             * @param {number} idx - Item index
+             * @param {string} itemName - Item variable name
+             * @param {string} idxName - Index variable name
+             */
+            processAttrs(el, item, idx, itemName, idxName) {
+                const bindable = [el, ...el.querySelectorAll('[data-pac-bind]')];
+
+                bindable.forEach(e => {
+                    const bind = e.getAttribute('data-pac-bind');
+                    if (!bind) {
+                        return;
+                    }
+
+                    // Process each binding (comma-separated)
+                    bind.split(',').forEach(b => {
+                        const [type, target] = b.trim().split(':').map(s => s.trim());
+
+                        if (U.isEvent(type)) {
+                            // Event binding: click:methodName
+                            e.addEventListener(type, ev => {
+                                if (typeof this.abstraction[target] === 'function') {
+                                    this.abstraction[target].call(this.abstraction, item, idx, ev);
+                                }
+                            });
+                        } else if (type === 'class') {
+                            // Class binding: class:condition
+                            if (this.evalExpr(target, item, idx, itemName, idxName)) {
+                                e.classList.add(target.includes('.') ? target.split('.').pop() : target);
+                            }
+                        } else if (type === 'checked') {
+                            // Checkbox binding: checked:condition
+                            e.checked = !!this.evalExpr(target, item, idx, itemName, idxName);
+                        } else {
+                            // Attribute binding: attr:value
+                            const val = this.evalExpr(target, item, idx, itemName, idxName);
+                            if (val != null) {
+                                e.setAttribute(type, val);
+                            }
+                        }
+                    });
+                });
+            },
+
+            /**
+             * Evaluates an expression in the context of item data
+             * @param {string} expr - Expression to evaluate
+             * @param {*} item - Data item
+             * @param {number} idx - Item index
+             * @param {string} itemName - Item variable name
+             * @param {string} idxName - Index variable name
+             * @returns {*} - Evaluated result
+             */
+            evalExpr(expr, item, idx, itemName, idxName) {
+                if (expr === idxName) {
+                    return idx;
+                }
+                if (expr === itemName) {
+                    return item;
+                }
+                if (expr.startsWith(`${itemName}.`)) {
+                    // Navigate object path: item.property.subproperty
+                    const path = expr.substring(itemName.length + 1).split('.');
+                    let val = item;
+                    for (const p of path) {
+                        if (val && val.hasOwnProperty(p)) {
+                            val = val[p];
+                        } else {
+                            return undefined;
+                        }
+                    }
+                    return val;
+                }
+                return expr;
+            },
+
+            /**
+             * Handles deep property changes in reactive objects
+             * @param {string} path - Property path that changed
+             * @param {*} val - New value
+             * @param {string} type - Type of change (set, delete, array-mutation)
+             * @param {Object} meta - Additional change metadata
+             */
+            handleDeepChange(path, val, type, meta) {
+                const root = path.split('.')[0];
+                this.updateComputed(root); // Update any computed properties
+
+                // Update DOM if this is a root property or array mutation
+                if (type === 'array-mutation' || this.abstraction.hasOwnProperty(root)) {
+                    this.updateDOM(root, this.abstraction[root]);
+                }
+
+                // Notify parent of the change
+                this.notifyParent('propertyChange', {property: root, path, newValue: val, changeType: type, meta});
+            },
+
+            /**
+             * Queues a DOM update for a property (batched for performance)
+             * @param {string} prop - Property name
+             * @param {*} val - New value
+             */
+            updateDOM(prop, val) {
+                if (!this.pending) {
+                    this.pending = new Set();
+                    this.pendingVals = {};
+
+                    // Batch updates using requestAnimationFrame
+                    (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => this.flushDOM());
+                }
+
+                this.pending.add(prop);
+                this.pendingVals[prop] = val;
+            },
+
+            /**
+             * Flushes all pending DOM updates
+             */
+            flushDOM() {
+                if (!this.pending) {
                     return;
                 }
 
-                const self = this;
-
-                // Process each pending update
-                this.pendingDOMUpdates.forEach(function (property) {
-                    const newValue = self.pendingUpdates[property];
+                this.pending.forEach(prop => {
+                    const val = this.pendingVals[prop];
 
                     // Update all bindings for this property
-                    self.bindings.forEach(function (binding) {
-                        if (binding.property !== property) {
+                    this.bindings.forEach(binding => {
+                        if (binding.property !== prop && binding.type !== 'foreach') {
                             return;
                         }
 
-                        // Handle different binding types
                         switch (binding.type) {
                             case 'text':
-                                self.updateTextBinding(binding, property, newValue);
+                                this.updateText(binding, prop, val);
                                 break;
-
                             case 'attribute':
-                                binding.element.setAttribute(binding.attribute, newValue);
+                                binding.element.setAttribute(binding.attribute, val);
                                 break;
-
                             case 'input':
-                                // Only update if value actually changed to prevent cursor jumping
-                                if (binding.element.value !== newValue) {
-                                    binding.element.value = newValue;
+                                if (binding.element.value !== val) {
+                                    binding.element.value = val;
                                 }
                                 break;
-
                             case 'visible':
-                                self.updateVisibilityBinding(binding, newValue);
+                                this.updateVisible(binding, val);
+                                break;
+                            case 'foreach':
+                                this.updateForeach(binding, prop, val);
                                 break;
                         }
                     });
                 });
 
                 // Clear pending updates
-                this.pendingDOMUpdates = null;
-                this.pendingUpdates = null;
+                this.pending = null;
+                this.pendingVals = null;
             },
 
             /**
-             * Update a visibility binding by showing/hiding the element
-             * @param {Object} binding - The visibility binding object
-             * @param {*} newValue - New value to determine visibility (truthy/falsy)
+             * Updates element visibility based on a condition
+             * @param {Object} binding - Visibility binding configuration
+             * @param {*} val - Value to test for visibility
              */
-            updateVisibilityBinding: function (binding, newValue) {
-                const element = binding.element;
-                const shouldShow = this.evaluateVisibilityCondition(binding.condition, newValue);
+            updateVisible(binding, val) {
+                const el = binding.element;
+                const show = binding.condition.startsWith('!') ? !val : !!val;
 
-                if (shouldShow) {
-                    // Show the element
-                    if (element.hasAttribute('data-pac-hidden')) {
-                        // Restore original display value if it was stored
-                        const originalDisplay = element.getAttribute('data-pac-original-display');
-                        element.style.display = originalDisplay || '';
-                        element.removeAttribute('data-pac-hidden');
-                        element.removeAttribute('data-pac-original-display');
+                if (show) {
+                    // Show element
+                    if (el.hasAttribute('data-pac-hidden')) {
+                        el.style.display = el.getAttribute('data-pac-orig-display') || '';
+                        el.removeAttribute('data-pac-hidden');
+                        el.removeAttribute('data-pac-orig-display');
                     }
                 } else {
-                    // Hide the element
-                    if (!element.hasAttribute('data-pac-hidden')) {
-                        // Store original display value before hiding
-                        const originalDisplay = window.getComputedStyle(element).display;
-                        if (originalDisplay !== 'none') {
-                            element.setAttribute('data-pac-original-display', originalDisplay);
+                    // Hide element
+                    if (!el.hasAttribute('data-pac-hidden')) {
+                        const orig = getComputedStyle(el).display;
+                        if (orig !== 'none') {
+                            el.setAttribute('data-pac-orig-display', orig);
                         }
-                        element.style.display = 'none';
-                        element.setAttribute('data-pac-hidden', 'true');
+                        el.style.display = 'none';
+                        el.setAttribute('data-pac-hidden', 'true');
                     }
                 }
             },
 
             /**
-             * Evaluate visibility condition (supports negation with !)
-             * @param {string} condition - The condition string (e.g., 'isVisible' or '!isHidden')
-             * @param {*} value - The current value of the property
-             * @returns {boolean} Whether the element should be visible
+             * Updates text content with interpolated values
+             * @param {Object} binding - Text binding configuration
+             * @param {string} prop - Property name
+             * @param {*} val - New value
              */
-            evaluateVisibilityCondition: function (condition, value) {
-                if (condition.startsWith('!')) {
-                    return !value;
+            updateText(binding, prop, val) {
+                const regex = new RegExp(`\\{\\{\\s*${prop}\\s*\\}\\}`, 'g');
+                let display = val;
+
+                // Format different value types for display
+                if (typeof val === 'object' && val !== null) {
+                    display = Array.isArray(val) ? `[${val.length} items]` : JSON.stringify(val, null, 2);
+                } else if (val == null) {
+                    display = '';
                 }
-                return !!value;
+
+                const txt = binding.origText.replace(regex, display);
+                (binding.textNode || binding.element).textContent = txt;
             },
 
             /**
-             * Update a text binding by replacing template placeholders
-             * Enhanced to handle complex object/array serialization
-             * @param {Object} binding - The text binding object
-             * @param {string} property - Property name
-             * @param {*} newValue - New value to inject
+             * Analyzes a computed function to find its dependencies
+             * @param {Function} fn - Computed function to analyze
+             * @returns {Array} - Array of property names the function depends on
              */
-            updateTextBinding: function (binding, property, newValue) {
-                // Create regex to match template syntax: {{propertyName}}
-                const regex = new RegExp('\\{\\{\\s*' + property + '\\s*\\}\\}', 'g');
-
-                // Convert complex values to strings
-                let displayValue = newValue;
-                if (typeof newValue === 'object' && newValue !== null) {
-                    if (Array.isArray(newValue)) {
-                        displayValue = '[' + newValue.length + ' items]';
-                    } else {
-                        displayValue = JSON.stringify(newValue, null, 2);
-                    }
-                } else if (newValue === null || newValue === undefined) {
-                    displayValue = '';
-                }
-
-                const newText = binding.originalText.replace(regex, displayValue);
-
-                // Update either the text node or element text content
-                if (binding.textNode) {
-                    binding.textNode.textContent = newText;
-                } else {
-                    binding.element.textContent = newText;
-                }
-            },
-
-            /**
-             * Analyze computed property function to determine its dependencies
-             * This uses static analysis of the function source code to find property references
-             * Also analyzes visibility conditions for negation support
-             * @param {Function} computedFunction - The computed property function
-             * @returns {Array} Array of property names this computed property depends on
-             */
-            analyzeComputedDependencies: function (computedFunction) {
-                const dependencies = [];
-                const functionSource = computedFunction.toString();
-
-                // Simple regex to find 'this.propertyName' patterns
-                // This catches most common dependency patterns in computed properties
-                const thisPropertyRegex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+            analyzeComputed(fn) {
+                const deps = [];
+                const src = fn.toString();
+                const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
                 let match;
 
-                while ((match = thisPropertyRegex.exec(functionSource)) !== null) {
-                    const propertyName = match[1];
-
-                    // Only include if it's a property we know about and not already in dependencies
-                    if (this.originalAbstraction.hasOwnProperty(propertyName) &&
-                        dependencies.indexOf(propertyName) === -1) {
-                        dependencies.push(propertyName);
+                // Find all 'this.property' references in the function
+                while ((match = regex.exec(src))) {
+                    const prop = match[1];
+                    if (this.orig.hasOwnProperty(prop) && !deps.includes(prop)) {
+                        deps.push(prop);
                     }
                 }
-
-                return dependencies;
+                return deps;
             },
 
             /**
-             * Analyze visibility condition to extract the actual property name
-             * Handles negation (!) in visibility conditions
-             * @param {string} condition - The visibility condition (e.g., 'property' or '!property')
-             * @returns {string} The actual property name without negation
+             * Updates computed properties that depend on a changed property
+             * @param {string} changed - Name of the property that changed
              */
-            analyzeVisibilityCondition: function (condition) {
-                // Remove leading ! if present to get the actual property name
-                return condition.startsWith('!') ? condition.substring(1) : condition;
-            },
+            updateComputed(changed) {
+                const deps = this.propDeps.get(changed) || [];
 
-            /**
-             * Update computed properties that depend on a changed property
-             * This implements the reactive computed property system
-             * @param {string} changedProperty - Name of the property that changed
-             */
-            updateComputedProperties: function (changedProperty) {
-                const self = this;
+                deps.forEach(computed => {
+                    const old = this.computedCache.get(computed);
+                    const fn = this.orig.computed[computed];
+                    const val = fn.call(this.abstraction);
 
-                // Get all computed properties that depend on the changed property
-                const dependentComputeds = this.propertyDependents.get(changedProperty) || [];
+                    // Check if we need foreach updates or value actually changed
+                    const hasArray = Array.from(this.bindings.values()).some(b =>
+                        b.type === 'foreach' && b.collection === computed);
 
-                // Update each dependent computed property
-                dependentComputeds.forEach(function (computedName) {
-                    const oldValue = self.computedCache.get(computedName);
-
-                    // Recalculate the computed property value
-                    const computedFunction = self.originalAbstraction.computed[computedName];
-                    const newValue = computedFunction.call(self.abstraction);
-
-                    // Only update if the value actually changed
-                    if (!ReactiveUtils.deepEqual(oldValue, newValue)) {
-                        self.computedCache.set(computedName, newValue);
-
-                        // Trigger DOM update for the computed property
-                        self.updateDOM(computedName, newValue);
-
-                        // Notify parent of computed property change
-                        self.notifyParent('propertyChange', {
-                            property: computedName,
-                            oldValue: oldValue,
-                            newValue: newValue,
+                    if (hasArray || !U.deepEq(old, val)) {
+                        this.computedCache.set(computed, val);
+                        this.updateDOM(computed, val);
+                        this.notifyParent('propertyChange', {
+                            property: computed,
+                            oldValue: old,
+                            newValue: val,
                             computed: true
                         });
-
-                        // Check if any other computed properties depend on this computed property
-                        // This handles chains of computed dependencies (computed A depends on computed B)
-                        self.updateComputedProperties(computedName);
+                        this.updateComputed(computed); // Handle cascading computed updates
                     }
                 });
             },
 
             /**
-             * Create a reactive abstraction object with deep reactivity support
-             * @returns {Object} The reactive abstraction object
+             * Creates the reactive abstraction object with getters/setters
+             * @returns {Object} - Reactive abstraction object
              */
-            createReactiveAbstraction: function () {
-                const reactiveAbstraction = {};
-                const self = this;
+            createReactiveAbs() {
+                const reactive = {};
 
-                // First, process computed properties if they exist
-                if (this.originalAbstraction.computed) {
-                    for (const computedName in this.originalAbstraction.computed) {
-                        if (this.originalAbstraction.computed.hasOwnProperty(computedName)) {
-                            const computedFunction = this.originalAbstraction.computed[computedName];
+                // Set up computed properties
+                if (this.orig.computed) {
+                    for (const name in this.orig.computed) {
+                        const fn = this.orig.computed[name];
+                        if (typeof fn === 'function') {
+                            const deps = this.analyzeComputed(fn);
+                            this.computedDeps.set(name, deps);
 
-                            if (typeof computedFunction === 'function') {
-                                // Analyze dependencies for this computed property
-                                const dependencies = this.analyzeComputedDependencies(computedFunction);
-                                this.computedDependencies.set(computedName, dependencies);
+                            // Build reverse dependency map
+                            deps.forEach(dep => {
+                                if (!this.propDeps.has(dep)) {
+                                    this.propDeps.set(dep, []);
+                                }
+                                this.propDeps.get(dep).push(name);
+                            });
 
-                                // Build reverse dependency map (property -> computed properties that depend on it)
-                                dependencies.forEach(function (dependency) {
-                                    if (!self.propertyDependents.has(dependency)) {
-                                        self.propertyDependents.set(dependency, []);
+                            // Define computed property with getter
+                            Object.defineProperty(reactive, name, {
+                                get: () => {
+                                    if (this.computedCache.has(name)) {
+                                        return this.computedCache.get(name);
                                     }
-                                    self.propertyDependents.get(dependency).push(computedName);
-                                });
-
-                                // Create getter-only property for computed value
-                                Object.defineProperty(reactiveAbstraction, computedName, {
-                                    get: function () {
-                                        // Return cached value if available
-                                        if (self.computedCache.has(computedName)) {
-                                            return self.computedCache.get(computedName);
-                                        }
-
-                                        // Calculate and cache the value
-                                        const value = computedFunction.call(reactiveAbstraction);
-                                        self.computedCache.set(computedName, value);
-                                        return value;
-                                    },
-                                    enumerable: true,
-                                    configurable: true
-                                });
-                            }
+                                    const val = fn.call(reactive);
+                                    this.computedCache.set(name, val);
+                                    return val;
+                                },
+                                enumerable: true
+                            });
                         }
                     }
                 }
 
-                // Process regular properties and methods from the original abstraction
-                for (const key in this.originalAbstraction) {
-                    if (this.originalAbstraction.hasOwnProperty(key) && key !== 'computed') {
-                        const value = this.originalAbstraction[key];
-
-                        if (typeof value === 'function') {
-                            // Bind methods to the reactive object context
-                            reactiveAbstraction[key] = value.bind(reactiveAbstraction);
+                // Set up regular properties
+                for (const key in this.orig) {
+                    if (this.orig.hasOwnProperty(key) && key !== 'computed') {
+                        const val = this.orig[key];
+                        if (typeof val === 'function') {
+                            // Bind methods to reactive object
+                            reactive[key] = val.bind(reactive);
                         } else {
-                            // Create reactive property with getter/setter and deep reactivity
-                            this.createReactiveProperty(reactiveAbstraction, key, value);
+                            // Create reactive property
+                            this.createReactiveProp(reactive, key, val);
                         }
                     }
                 }
 
-                // Add parent communication method
-                reactiveAbstraction.notifyParent = function (eventType, data) {
-                    self.notifyParent(eventType, data);
-                };
+                // Add communication methods
+                reactive.notifyParent = (type, data) => this.notifyParent(type, data);
+                reactive.sendToChildren = (cmd, data) => this.sendToChildren(cmd, data);
+                reactive.findChild = pred => Array.from(this.children).find(pred);
 
-                // NEW: Add child communication methods
-                reactiveAbstraction.sendToChildren = function (command, data) {
-                    self.sendToChildren(command, data);
-                };
-
-                reactiveAbstraction.sendToChild = function (selector, command, data) {
-                    self.sendToChild(selector, command, data);
-                };
-
-                reactiveAbstraction.broadcastDataUpdate = function (property, value) {
-                    self.broadcastDataUpdate(property, value);
-                };
-
-                reactiveAbstraction.syncDataToChildren = function (mapping) {
-                    self.syncDataToChildren(mapping);
-                };
-
-                reactiveAbstraction.findChild = function (predicate) {
-                    return self.findChild(predicate);
-                };
-
-                reactiveAbstraction.findChildren = function (predicate) {
-                    return self.findChildren(predicate);
-                };
-
-                reactiveAbstraction.findChildBySelector = function (selector) {
-                    return self.findChildBySelector(selector);
-                };
-
-                reactiveAbstraction.findChildByProperty = function (property, value) {
-                    return self.findChildByProperty(property, value);
-                };
-
-                return reactiveAbstraction;
+                return reactive;
             },
 
             /**
-             * Create a reactive property with getter/setter that triggers updates
-             * Enhanced with deep reactivity support for objects and arrays
+             * Creates a reactive property with getter/setter
              * @param {Object} obj - Object to add property to
              * @param {string} key - Property name
-             * @param {*} initialValue - Initial value for the property
+             * @param {*} init - Initial value
              */
-            createReactiveProperty: function (obj, key, initialValue) {
-                let value = initialValue;
-                const self = this;
+            createReactiveProp(obj, key, init) {
+                let val = init;
 
-                // Make initial value reactive if it's an object/array and deep reactivity is enabled
-                if (this.config.deepReactivity && ReactiveUtils.shouldBeReactive(value)) {
-                    value = createReactiveProxy(value, function (path, newValue, changeType, meta) {
-                        self.handleDeepChange(path, newValue, changeType, meta);
-                    }, key);
+                // Make initial value reactive if needed
+                if (this.config.deepReactivity && U.isReactive(val)) {
+                    val = createReactive(val, (path, newVal, type, meta) =>
+                        this.handleDeepChange(path, newVal, type, meta), key);
                 }
 
                 Object.defineProperty(obj, key, {
-                    get: function () {
-                        return value;
-                    },
-                    set: function (newValue) {
-                        // Only trigger updates if value actually changed
-                        if (!ReactiveUtils.deepEqual(value, newValue)) {
-                            const oldValue = value;
+                    get: () => val,
+                    set: newVal => {
+                        const isObj = U.isReactive(val) || U.isReactive(newVal);
+                        if (isObj || !U.deepEq(val, newVal)) {
+                            const old = val;
 
-                            // Make new value reactive if deep reactivity is enabled
-                            if (self.config.deepReactivity && ReactiveUtils.shouldBeReactive(newValue)) {
-                                newValue = createReactiveProxy(newValue, function (path, changedValue, changeType, meta) {
-                                    self.handleDeepChange(path, changedValue, changeType, meta);
-                                }, key);
+                            // Make new value reactive if needed
+                            if (this.config.deepReactivity && U.isReactive(newVal)) {
+                                newVal = createReactive(newVal, (path, changedVal, type, meta) =>
+                                    this.handleDeepChange(path, changedVal, type, meta), key);
                             }
 
-                            value = newValue;
-
-                            // Trigger DOM update
-                            self.updateDOM(key, newValue);
-
-                            // Update any computed properties that depend on this property
-                            self.updateComputedProperties(key);
-
-                            // Notify parent of property change
-                            self.notifyParent('propertyChange', {
-                                property: key,
-                                oldValue: oldValue,
-                                newValue: newValue
-                            });
+                            val = newVal;
+                            this.updateDOM(key, newVal);
+                            this.updateComputed(key);
+                            this.notifyParent('propertyChange', {property: key, oldValue: old, newValue: newVal});
                         }
                     },
-                    enumerable: true,
-                    configurable: true
+                    enumerable: true
                 });
             },
 
             /**
-             * NEW: Send a command to all child PAC units
-             * @param {string} command - Command name to send
-             * @param {*} data - Data to send with the command
+             * Sends a command to all child PAC units
+             * @param {string} cmd - Command name
+             * @param {*} data - Command data
              */
-            sendToChildren: function (command, data) {
-                const self = this;
-                this.children.forEach(function (child) {
+            sendToChildren(cmd, data) {
+                this.children.forEach(child => {
                     if (typeof child.receiveFromParent === 'function') {
-                        child.receiveFromParent(command, data);
+                        child.receiveFromParent(cmd, data);
                     }
                 });
             },
 
             /**
-             * NEW: Send a command to a specific child PAC unit
-             * @param {string} selector - CSS selector to find the child
-             * @param {string} command - Command name to send
-             * @param {*} data - Data to send with the command
+             * Sets up data bindings by scanning the DOM
              */
-            sendToChild: function (selector, command, data) {
-                const child = this.findChildBySelector(selector);
-                if (child && typeof child.receiveFromParent === 'function') {
-                    child.receiveFromParent(command, data);
-                }
+            setupBindings() {
+                this.findTextBindings();
+                this.findAttrBindings();
             },
 
             /**
-             * NEW: Broadcast a data update to all children
-             * @param {string} property - Property name to update
-             * @param {*} value - New value for the property
+             * Finds and sets up text interpolation bindings {{property}}
              */
-            broadcastDataUpdate: function (property, value) {
-                this.children.forEach(function (child) {
-                    if (child.abstraction && child.abstraction.hasOwnProperty(property)) {
-                        child.abstraction[property] = value;
-                    }
-                });
-            },
+            findTextBindings() {
+                const walker = document.createTreeWalker(this.container, NodeFilter.SHOW_TEXT);
+                const bindings = [];
+                let node;
 
-            /**
-             * NEW: Synchronize specific data to specific children
-             * @param {Object} mapping - Object mapping selectors to data updates
-             */
-            syncDataToChildren: function (mapping) {
-                const self = this;
-                for (const selector in mapping) {
-                    if (mapping.hasOwnProperty(selector)) {
-                        const data = mapping[selector];
-                        const children = this.findChildrenBySelector(selector);
+                while (node = walker.nextNode()) {
+                    const txt = node.textContent;
+                    const matches = txt.match(/\{\{\s*(\w+)\s*\}\}/g);
 
-                        children.forEach(function (child) {
-                            if (child.abstraction) {
-                                for (const key in data) {
-                                    if (data.hasOwnProperty(key)) {
-                                        child.abstraction[key] = data[key];
-                                    }
-                                }
-                            }
+                    if (matches) {
+                        matches.forEach(match => {
+                            const prop = match.replace(/[{}\s]/g, '');
+                            bindings.push([U.id(), {
+                                type: 'text',
+                                property: prop,
+                                element: node.parentElement,
+                                origText: txt,
+                                textNode: node
+                            }]);
                         });
                     }
                 }
+
+                bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
             },
 
             /**
-             * NEW: Find a child by predicate function
-             * @param {Function} predicate - Function to test each child
-             * @returns {Object|undefined} First child that matches the predicate
+             * Finds and sets up attribute bindings data-pac-bind="..."
              */
-            findChild: function (predicate) {
-                const children = Array.from(this.children);
-                return children.find(predicate);
-            },
+            findAttrBindings() {
+                // Exclude bindings inside foreach templates
+                const elements = this.container.querySelectorAll('[data-pac-bind]:not([data-pac-bind*="foreach"] [data-pac-bind])');
+                const bindings = [];
 
-            /**
-             * NEW: Find all children by predicate function
-             * @param {Function} predicate - Function to test each child
-             * @returns {Array} Array of children that match the predicate
-             */
-            findChildren: function (predicate) {
-                const children = Array.from(this.children);
-                return children.filter(predicate);
-            },
+                Array.from(elements).forEach(el => {
+                    const bindStr = el.getAttribute('data-pac-bind');
 
-            /**
-             * NEW: Find a child by CSS selector
-             * @param {string} selector - CSS selector to match child container
-             * @returns {Object|undefined} First child whose container matches the selector
-             */
-            findChildBySelector: function (selector) {
-                return this.findChild(function (child) {
-                    return child.container.matches(selector);
-                });
-            },
+                    bindStr.split(',').forEach(bind => {
+                        const [type, target] = bind.trim().split(':').map(s => s.trim());
+                        const key = `${bind}_${U.id()}`;
 
-            /**
-             * NEW: Find children by CSS selector
-             * @param {string} selector - CSS selector to match child containers
-             * @returns {Array} Array of children whose containers match the selector
-             */
-            findChildrenBySelector: function (selector) {
-                return this.findChildren(function (child) {
-                    return child.container.matches(selector);
-                });
-            },
-
-            /**
-             * NEW: Find a child by property value
-             * @param {string} property - Property name to check
-             * @param {*} value - Value to match
-             * @returns {Object|undefined} First child with matching property value
-             */
-            findChildByProperty: function (property, value) {
-                return this.findChild(function (child) {
-                    return child.abstraction && child.abstraction[property] === value;
-                });
-            },
-
-            /**
-             * NEW: Receive a command from parent PAC unit
-             * This method can be overridden in the abstraction to handle parent commands
-             * @param {string} command - Command name received from parent
-             * @param {*} data - Data received with the command
-             */
-            receiveFromParent: function (command, data) {
-                // Call custom handler if defined in abstraction
-                if (this.abstraction.receiveFromParent && typeof this.abstraction.receiveFromParent === 'function') {
-                    this.abstraction.receiveFromParent(command, data);
-                }
-
-                // Dispatch custom DOM event for external listeners
-                const customEvent = new CustomEvent('pac:parentcommand', {
-                    detail: { command: command, data: data },
-                    bubbles: true
-                });
-
-                this.container.dispatchEvent(customEvent);
-            },
-
-            /**
-             * Make a request to a server controller and handle the response
-             * This implements the Control layer's communication with external controllers
-             * @param {string} url - Server endpoint URL to communicate with
-             * @param {Object} options - Configuration options for the request
-             * @param {string} options.method - HTTP method (GET, POST, PUT, DELETE, etc.)
-             * @param {Object} options.headers - Additional HTTP headers to send
-             * @param {Object} options.data - Data to send in request body (will be JSON stringified)
-             * @param {boolean} options.updateProperties - If true, automatically update abstraction properties from response
-             * @param {Function} options.onSuccess - Callback function called on successful response
-             * @param {Function} options.onError - Callback function called on error
-             * @returns {Promise} Promise that resolves with the response data
-             */
-            makeServerRequest: function (url, options) {
-                const self = this;
-                options = options || {};
-
-                // Make HTTP request using fetch API with configured options
-                return fetch(url, {
-                    method: options.method || 'GET',
-                    headers: Object.assign({
-                        'Content-Type': 'application/json',
-                        'X-PAC-Request': 'true',
-                        'X-PAC-Version': '1.0',
-                        'X-PAC-Component': this.container.id || 'anonymous'  // Which component is making the call
-                    }, options.headers || {}),
-                    body: options.data ? JSON.stringify(options.data) : undefined
-                })
-                    .then(response => response.json())  // Parse response as JSON
-                    .then(data => {
-                        // Auto-sync: Update abstraction properties with matching keys from server response
-                        // This enables automatic UI updates when server returns new data
-                        if (options.updateProperties) {
-                            for (const key in data) {
-                                // Only update properties that already exist in the abstraction
-                                // This prevents accidental creation of new reactive properties
-                                if (self.abstraction.hasOwnProperty(key)) {
-                                    self.abstraction[key] = data[key];  // Triggers reactive update
-                                }
-                            }
-                        }
-
-                        // Call success callback with abstraction as 'this' context
-                        // This allows the callback to access other abstraction methods/properties
-                        if (options.onSuccess) {
-                            options.onSuccess.call(self.abstraction, data);
-                        }
-
-                        // Return data for promise chaining
-                        return data;
-                    })
-                    .catch(error => {
-                        // Call error callback with abstraction as 'this' context
-                        // Allows error handling to update UI state or show error messages
-                        if (options.onError) {
-                            options.onError.call(self.abstraction, error);
-                        }
-
-                        // Re-throw error to maintain promise chain behavior
-                        // Callers can still catch errors if they need custom handling
-                        throw error;
-                    });
-            },
-
-            /**
-             * Set up all data bindings by scanning the DOM
-             * This finds and registers text and attribute bindings
-             */
-            setupBindings: function () {
-                this.findTextBindings();
-                this.findAttributeBindings();
-            },
-
-            /**
-             * Find and register text bindings in the DOM
-             * Looks for {{propertyName}} syntax in text nodes
-             */
-            findTextBindings: function () {
-                let i;
-
-                // Use TreeWalker for efficient text node traversal
-                const walker = document.createTreeWalker(
-                    this.container,
-                    NodeFilter.SHOW_TEXT,  // Only text nodes
-                    null,
-                    false
-                );
-
-                const textBindings = [];
-                let node;
-
-                // Walk through all text nodes
-                while (node = walker.nextNode()) {
-                    // Look for template syntax: {{propertyName}}
-                    const text = node.textContent;
-                    const matches = text.match(/\{\{\s*(\w+)\s*\}\}/g);
-
-                    if (matches) {
-                        const element = node.parentElement;
-
-                        // Create binding for each match
-                        for (i = 0; i < matches.length; i++) {
-                            const match = matches[i];
-                            const property = match.replace(/[{}\s]/g, ''); // Extract property name
-                            const bindingKey = property + '_text_' + createRandomId();
-
-                            textBindings.push({
-                                key: bindingKey,
-                                binding: {
-                                    type: 'text',
-                                    property: property,
-                                    element: element,
-                                    originalText: text,
-                                    textNode: node
-                                }
-                            });
-                        }
-                    }
-                }
-
-                // Batch register all text bindings
-                for (i = 0; i < textBindings.length; i++) {
-                    this.bindings.set(textBindings[i].key, textBindings[i].binding);
-                }
-            },
-
-            /**
-             * Find and register attribute bindings in the DOM
-             * Looks for elements with data-pac-bind attributes
-             */
-            findAttributeBindings: function () {
-                let i;
-                const elements = this.container.querySelectorAll('[data-pac-bind]');
-                const attributeBindings = [];
-                const self = this;
-
-                // Process each element with binding attributes
-                for (i = 0; i < elements.length; i++) {
-                    const element = elements[i];
-                    const bindingString = element.getAttribute('data-pac-bind');
-                    const bindings = bindingString.split(','); // Support multiple bindings
-
-                    // Process each binding declaration
-                    for (let j = 0; j < bindings.length; j++) {
-                        const binding = bindings[j].trim();
-                        const bindingKey = binding + '_' + createRandomId();
-
-                        if (binding.indexOf(':') !== -1) {
-                            // Typed binding: "type:target" (e.g., "click:handleClick" or "class:className")
-                            const parts = binding.split(':');
-                            const type = parts[0].trim();
-                            const target = parts[1].trim();
-                            const isEvent = isEventType(type);
-
-                            if (isEvent) {
-                                // Event binding
-                                attributeBindings.push({
-                                    key: bindingKey,
-                                    binding: {
-                                        type: 'event',
-                                        event: type,
-                                        method: target,
-                                        element: element
-                                    }
-                                });
-                            } else {
-                                // Attribute binding - check if it's a visibility binding
-                                if (type === 'visible') {
-                                    attributeBindings.push({
-                                        key: bindingKey,
-                                        binding: {
-                                            type: 'visible',
-                                            property: target,
-                                            element: element,
-                                            condition: target  // Store the original condition for negation support
-                                        }
-                                    });
-                                } else {
-                                    // Regular attribute binding
-                                    attributeBindings.push({
-                                        key: bindingKey,
-                                        binding: {
-                                            type: 'attribute',
-                                            property: target,
-                                            element: element,
-                                            attribute: type
-                                        }
-                                    });
-                                }
-                            }
+                        if (type === 'foreach') {
+                            // Foreach binding: foreach:arrayProperty
+                            bindings.push([key, {
+                                type: 'foreach',
+                                property: target,
+                                collection: target,
+                                itemName: el.getAttribute('data-pac-item') || 'item',
+                                indexName: el.getAttribute('data-pac-index') || 'index',
+                                template: el.innerHTML,
+                                element: el
+                            }]);
+                            el.innerHTML = ''; // Clear template content
+                        } else if (U.isEvent(type)) {
+                            // Event binding: click:methodName
+                            bindings.push([key, {type: 'event', event: type, method: target, element: el}]);
+                        } else if (type === 'visible') {
+                            // Visibility binding: visible:property or visible:!property
+                            bindings.push([key, {
+                                type: 'visible',
+                                property: target.replace(/^!/, ''),
+                                element: el,
+                                condition: target
+                            }]);
+                        } else if (bind.indexOf(':') !== -1) {
+                            // Attribute binding: attribute:property
+                            bindings.push([key, {type: 'attribute', property: target, element: el, attribute: type}]);
                         } else {
-                            // Simple property binding for form inputs
-                            const property = binding.trim();
-                            this.setupInputElement(element, property);
-
-                            attributeBindings.push({
-                                key: bindingKey,
-                                binding: {
-                                    type: 'input',
-                                    property: property,
-                                    element: element,
-                                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
-                                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
-                                }
-                            });
+                            // Input binding: propertyName
+                            this.setupInput(el, bind.trim());
+                            bindings.push([key, {
+                                type: 'input',
+                                property: bind.trim(),
+                                element: el,
+                                updateMode: el.getAttribute('data-pac-update-mode') || this.config.updateMode,
+                                delay: parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay
+                            }]);
                         }
-                    }
-                }
-
-                // Batch register all attribute bindings and set up visibility bindings
-                for (i = 0; i < attributeBindings.length; i++) {
-                    const bindingData = attributeBindings[i];
-                    this.bindings.set(bindingData.key, bindingData.binding);
-
-                    // For visibility bindings, we need to track the actual property being watched
-                    if (bindingData.binding.type === 'visible') {
-                        const actualProperty = this.analyzeVisibilityCondition(bindingData.binding.condition);
-                        bindingData.binding.property = actualProperty;
-                    }
-                }
-            },
-
-            /**
-             * Configure an input element for property binding
-             * @param {Element} element - Input element to configure
-             * @param {string} property - Property name to bind to
-             */
-            setupInputElement: function (element, property) {
-                const updateMode = element.getAttribute('data-pac-update') || this.config.updateMode;
-                const delay = parseInt(element.getAttribute('data-pac-delay')) || this.config.delay;
-
-                // Set data attributes for later reference
-                element.setAttribute('data-pac-property', property);
-                element.setAttribute('data-pac-update-mode', updateMode);
-                element.setAttribute('data-pac-update-delay', delay.toString());
-            },
-
-            /**
-             * Set up event listeners for the container
-             * Uses event delegation for efficient event handling
-             */
-            setupEventHandlers: function () {
-                const eventTypes = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
-                const self = this;
-
-                // Add delegated event listeners
-                for (let i = 0; i < eventTypes.length; i++) {
-                    const eventType = eventTypes[i];
-                    const handler = this.createEventHandler(eventType);
-                    this.container.addEventListener(eventType, handler);
-                    this.eventListeners.set(eventType, handler);
-                }
-            },
-
-            /**
-             * Create an event handler function for a specific event type
-             * @param {string} eventType - Type of event to handle
-             * @returns {Function} Event handler function
-             */
-            createEventHandler: function (eventType) {
-                const self = this;
-
-                return function (event) {
-                    // Route to appropriate handler based on event type
-                    if (eventType === 'input') {
-                        self.handleInput(event);
-                    } else if (eventType === 'change') {
-                        self.handleChange(event);
-                    } else {
-                        self.handleEvent(event);
-                    }
-                };
-            },
-
-            /**
-             * Handle input events for form elements
-             * Respects different update modes (immediate, delayed, change)
-             * @param {Event} event - Input event
-             */
-            handleInput: function (event) {
-                const property = event.target.getAttribute('data-pac-property');
-
-                if (!property || !this.abstraction.hasOwnProperty(property)) {
-                    return;
-                }
-
-                const updateMode = event.target.getAttribute('data-pac-update-mode') || this.config.updateMode;
-
-                if (updateMode === 'change') {
-                    // Store pending value but don't update abstraction yet
-                    event.target.setAttribute('data-pac-pending-value', event.target.value);
-                } else if (updateMode === 'immediate') {
-                    // Update abstraction immediately
-                    this.abstraction[property] = event.target.value;
-                } else if (updateMode === 'delayed') {
-                    // Use delayed update with debouncing
-                    this.updatePropertyFromDOM(event.target, property, event.target.value, false);
-                }
-            },
-
-            /**
-             * Handle change events for form elements
-             * Always updates the abstraction regardless of update mode
-             * @param {Event} event - Change event
-             */
-            handleChange: function (event) {
-                const property = event.target.getAttribute('data-pac-property');
-
-                if (!property || !this.abstraction.hasOwnProperty(property)) {
-                    return;
-                }
-
-                const updateKey = property + '_' + event.target.getAttribute('data-pac-property');
-
-                // Clear any pending delayed update
-                if (this.delayedUpdates.has(updateKey)) {
-                    clearTimeout(this.delayedUpdates.get(updateKey));
-                    this.delayedUpdates.delete(updateKey);
-                }
-
-                // Update abstraction and clear pending value
-                this.abstraction[property] = event.target.value;
-                event.target.removeAttribute('data-pac-pending-value');
-            },
-
-            /**
-             * Handle general events (click, submit, etc.)
-             * Looks for bound methods in the abstraction to call
-             * @param {Event} event - DOM event
-             */
-            handleEvent: function (event) {
-                const eventType = event.type;
-                let handled = false;
-                const self = this;
-
-                // Check for bound event handlers first
-                this.bindings.forEach(function (binding) {
-                    if (binding.type === 'event' &&
-                        binding.event === eventType &&
-                        binding.element === event.target) {
-
-                        const method = self.abstraction[binding.method];
-
-                        if (typeof method === 'function') {
-                            if (eventType === 'submit') {
-                                event.preventDefault();
-                            }
-                            method.call(self.abstraction, event);
-                            handled = true;
-                        }
-                    }
+                    });
                 });
 
-                // Fallback to legacy data attribute approach
-                if (!handled) {
-                    const action = event.target.getAttribute('data-pac-' + eventType);
+                bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
+            },
 
-                    if (action) {
-                        const method = this.abstraction[action];
+            /**
+             * Sets up input element attributes for data binding
+             * @param {Element} el - Input element
+             * @param {string} prop - Property name to bind to
+             */
+            setupInput(el, prop) {
+                el.setAttribute('data-pac-property', prop);
+                el.setAttribute('data-pac-update-mode', el.getAttribute('data-pac-update') || this.config.updateMode);
+                el.setAttribute('data-pac-update-delay', el.getAttribute('data-pac-delay') || this.config.delay);
+            },
 
-                        if (typeof method === 'function') {
-                            if (eventType === 'submit') {
-                                event.preventDefault();
-                            }
+            /**
+             * Sets up event listeners for the container
+             */
+            setupEvents() {
+                const events = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
 
-                            method.call(this.abstraction, event);
-                        }
+                events.forEach(type => {
+                    const handler = ev => this.handleEvent(ev);
+                    this.container.addEventListener(type, handler);
+                    this.listeners.set(type, handler);
+                });
+            },
+
+            /**
+             * Handles all DOM events for the container
+             * @param {Event} ev - DOM event
+             */
+            handleEvent(ev) {
+                const {type, target} = ev;
+                const prop = target.getAttribute('data-pac-property');
+
+                if (type === 'input' && prop && this.abstraction.hasOwnProperty(prop)) {
+                    // Handle input events based on update mode
+                    const mode = target.getAttribute('data-pac-update-mode') || this.config.updateMode;
+
+                    if (mode === 'change') {
+                        // Wait for change event
+                        target.setAttribute('data-pac-pending-value', target.value);
+                    } else if (mode === 'immediate') {
+                        // Update immediately
+                        this.abstraction[prop] = target.value;
+                    } else if (mode === 'delayed') {
+                        // Update after delay
+                        this.updateFromDOM(target, prop, target.value);
                     }
+                } else if (type === 'change' && prop && this.abstraction.hasOwnProperty(prop)) {
+                    // Handle change events
+                    const key = `${prop}_${target.getAttribute('data-pac-property')}`;
+                    if (this.delays.has(key)) {
+                        clearTimeout(this.delays.get(key));
+                        this.delays.delete(key);
+                    }
+                    this.abstraction[prop] = target.value;
+                    target.removeAttribute('data-pac-pending-value');
+                } else {
+                    // Handle event bindings (click, submit, etc.)
+                    this.bindings.forEach(binding => {
+                        if (binding.type === 'event' && binding.event === type && binding.element === target) {
+                            const method = this.abstraction[binding.method];
+                            if (typeof method === 'function') {
+                                if (type === 'submit') {
+                                    ev.preventDefault();
+                                }
+                                method.call(this.abstraction, ev);
+                            }
+                        }
+                    });
                 }
             },
 
             /**
-             * Update a property from DOM input with optional delay/debouncing
-             * @param {Element} element - Input element
-             * @param {string} property - Property name
-             * @param {*} value - New value
-             * @param {boolean} immediate - Whether to update immediately
+             * Updates property from DOM input with configurable timing
+             * @param {Element} el - Input element
+             * @param {string} prop - Property name
+             * @param {*} val - New value
              */
-            updatePropertyFromDOM: function (element, property, value, immediate) {
-                immediate = immediate || false;
-                const updateMode = element.getAttribute('data-pac-update-mode') || this.config.updateMode;
-                const delay = parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay;
+            updateFromDOM(el, prop, val) {
+                const mode = el.getAttribute('data-pac-update-mode') || this.config.updateMode;
+                const delay = parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay;
 
-                // Update immediately if requested or in immediate mode
-                if (immediate || updateMode === 'immediate') {
-                    this.abstraction[property] = value;
+                if (mode === 'immediate') {
+                    this.abstraction[prop] = val;
                     return;
                 }
 
-                // Handle delayed updates with debouncing
-                if (updateMode === 'delayed') {
-                    const updateKey = property + '_' + (element.id || element.getAttribute('data-pac-property') || 'element');
-                    const self = this;
+                if (mode === 'delayed') {
+                    const key = `${prop}_${el.id || el.getAttribute('data-pac-property')}`;
 
-                    // Clear existing timeout for this specific element/property combination
-                    if (this.delayedUpdates.has(updateKey)) {
-                        clearTimeout(this.delayedUpdates.get(updateKey));
+                    // Clear existing timeout
+                    if (this.delays.has(key)) {
+                        clearTimeout(this.delays.get(key));
                     }
 
                     // Set new timeout
-                    const timeoutId = setTimeout(function () {
-                        self.abstraction[property] = value;
-                        self.delayedUpdates.delete(updateKey);
+                    const id = setTimeout(() => {
+                        this.abstraction[prop] = val;
+                        this.delays.delete(key);
                     }, delay);
 
-                    this.delayedUpdates.set(updateKey, timeoutId);
+                    this.delays.set(key, id);
                 }
-
-                // For 'change' mode, we don't update here - only on change event
             },
 
             /**
-             * Establish parent-child hierarchy relationships
-             * Uses the global registry to determine relationships based on DOM structure
+             * Establishes parent-child relationships with other PAC units
              */
-            establishHierarchy: function () {
-                const hierarchy = window.PACRegistry.getHierarchy(this.container);
-                const parent = hierarchy.parent;
-                const children = hierarchy.children;
+            establishHierarchy() {
+                const {parent, children} = window.PACRegistry.getHierarchy(this.container);
 
-                // Set parent relationship
+                // Set up parent relationship
                 if (parent && this.parent !== parent) {
                     this.parent = parent;
                     parent.children.add(this);
                 }
 
-                // Set child relationships
-                const self = this;
-
-                children.forEach(function (child) {
-                    if (child.parent !== self) {
-                        // Remove from old parent if necessary
+                // Set up child relationships
+                children.forEach(child => {
+                    if (child.parent !== this) {
                         if (child.parent) {
                             child.parent.children.delete(child);
                         }
-                        // Set new parent relationship
-                        child.parent = self;
-                        self.children.add(child);
+                        child.parent = this;
+                        this.children.add(child);
                     }
                 });
             },
 
             /**
-             * Send a notification to the parent PAC unit
-             * @param {string} eventType - Type of event to notify about
-             * @param {*} data - Data to send with the notification
-             */
-            notifyParent: function (eventType, data) {
-                if (this.parent && typeof this.parent.receiveUpdate === 'function') {
-                    this.parent.receiveUpdate(eventType, data, this);
-                }
-            },
-
-            /**
-             * Receive an update notification from a child PAC unit
-             * @param {string} eventType - Type of event
+             * Notifies parent PAC unit of events
+             * @param {string} type - Event type
              * @param {*} data - Event data
-             * @param {Object} childPAC - Reference to the child PAC unit
              */
-            receiveUpdate: function (eventType, data, childPAC) {
-                // Call custom handler if defined
-                if (this.abstraction.onChildUpdate && typeof this.abstraction.onChildUpdate === 'function') {
-                    this.abstraction.onChildUpdate(eventType, data, childPAC);
+            notifyParent(type, data) {
+                if (this.parent && typeof this.parent.receiveUpdate === 'function') {
+                    this.parent.receiveUpdate(type, data, this);
                 }
-
-                // Dispatch custom DOM event for external listeners
-                const customEvent = new CustomEvent('pac:childupdate', {
-                    detail: {eventType: eventType, data: data, childPAC: childPAC},
-                    bubbles: true
-                });
-
-                this.container.dispatchEvent(customEvent);
             },
 
             /**
-             * Perform initial DOM update to sync abstraction state with DOM
-             * This ensures the UI reflects the initial state of the abstraction
-             * Now includes computed properties in the initial sync
+             * Receives updates from child PAC units
+             * @param {string} type - Update type
+             * @param {*} data - Update data
+             * @param {Object} child - Child PAC unit that sent the update
              */
-            initialDOMUpdate: function () {
+            receiveUpdate(type, data, child) {
+                // Call user-defined handler if it exists
+                if (this.abstraction.onChildUpdate) {
+                    this.abstraction.onChildUpdate(type, data, child);
+                }
+
+                // Dispatch DOM event for additional handling
+                this.container.dispatchEvent(new CustomEvent('pac:childupdate', {
+                    detail: {eventType: type, data, childPAC: child},
+                    bubbles: true
+                }));
+            },
+
+            /**
+             * Receives commands from parent PAC unit
+             * @param {string} cmd - Command name
+             * @param {*} data - Command data
+             */
+            receiveFromParent(cmd, data) {
+                // Call user-defined handler if it exists
+                if (this.abstraction.receiveFromParent) {
+                    this.abstraction.receiveFromParent(cmd, data);
+                }
+
+                // Dispatch DOM event for additional handling
+                this.container.dispatchEvent(new CustomEvent('pac:parentcommand', {
+                    detail: {command: cmd, data},
+                    bubbles: true
+                }));
+            },
+
+            /**
+             * Performs initial DOM update with all property values
+             */
+            initialUpdate() {
                 // Update regular properties
                 for (const key in this.abstraction) {
                     if (this.abstraction.hasOwnProperty(key) && typeof this.abstraction[key] !== 'function') {
@@ -1548,278 +1116,190 @@
                     }
                 }
 
-                // Force initial computation of all computed properties
-                // This ensures they are cached and available for DOM binding
-                if (this.originalAbstraction.computed) {
-                    for (const computedName in this.originalAbstraction.computed) {
-                        if (this.originalAbstraction.computed.hasOwnProperty(computedName)) {
-                            // Access the computed property to trigger initial calculation
-                            var computedValue = this.abstraction[computedName];
-                            this.updateDOM(computedName, computedValue);
-                        }
+                // Update computed properties
+                if (this.orig.computed) {
+                    for (const name in this.orig.computed) {
+                        const val = this.abstraction[name];
+                        this.updateDOM(name, val);
                     }
                 }
+
+                // Initialize foreach bindings
+                this.bindings.forEach(binding => {
+                    if (binding.type === 'foreach') {
+                        binding.prev = [];
+                        const val = this.abstraction[binding.collection];
+                        if (val !== undefined) {
+                            this.updateForeach(binding, binding.collection, val);
+                        }
+                    }
+                });
             },
 
             /**
-             * Clean up the PAC unit and remove all references/listeners
-             * This prevents memory leaks and ensures proper cleanup
-             * Now includes cleanup of computed property caches and reactive proxies
+             * Cleans up the PAC unit and removes all listeners
              */
-            destroy: function () {
-                const self = this;
-
-                // Remove all event listeners
-                this.eventListeners.forEach(function (handler, eventType) {
-                    self.container.removeEventListener(eventType, handler);
+            destroy() {
+                // Remove event listeners
+                this.listeners.forEach((handler, type) => {
+                    this.container.removeEventListener(type, handler);
                 });
 
-                this.eventListeners.clear();
+                // Clear all timeouts
+                this.delays.forEach(id => clearTimeout(id));
 
-                // Clear all delayed update timeouts
-                this.delayedUpdates.forEach(function (timeoutId) {
-                    clearTimeout(timeoutId);
-                });
-
-                this.delayedUpdates.clear();
-
-                // Remove from parent-child hierarchy
+                // Remove from hierarchy
                 if (this.parent) {
                     this.parent.children.delete(this);
                 }
+                this.children.forEach(child => child.parent = null);
 
-                this.children.forEach(function (child) {
-                    child.parent = null;
-                });
-
-                // Clear computed property caches and dependency maps
+                // Clear caches and references
                 this.computedCache.clear();
-                this.computedDependencies.clear();
-                this.propertyDependents.clear();
-
-                // Clear reactive proxy tracking
-                this.reactiveProxies.clear();
-
-                // Clear all references
+                this.computedDeps.clear();
+                this.propDeps.clear();
                 this.bindings.clear();
                 this.abstraction = null;
             },
 
             /**
-             * Initialize the PAC unit
-             * This sets up all bindings, creates reactive abstraction, and performs initial updates
-             * @returns {Object} The control object itself
+             * Initializes the PAC unit
+             * @returns {Object} - The control object for chaining
              */
-            init: function () {
+            init() {
                 this.setupBindings();
-                this.abstraction = this.createReactiveAbstraction();
-                this.setupEventHandlers();
-                this.initialDOMUpdate();
+                this.abstraction = this.createReactiveAbs();
+                this.setupEvents();
+                this.initialUpdate();
                 return this;
             }
         };
 
         // Initialize the control object
-        const pacUnit = control.init();
+        const unit = control.init();
 
-        // Create public API object that exposes safe methods and properties
-        const publicAPI = {};
+        /**
+         * Public API object - External interface for the PAC unit
+         * Provides access to abstraction properties and communication methods
+         */
+        const api = {};
 
-        // Copy abstraction properties and methods to public API
-        for (key in pacUnit.abstraction) {
-            if (pacUnit.abstraction.hasOwnProperty(key)) {
-                publicAPI[key] = pacUnit.abstraction[key];
+        // Copy abstraction properties to API
+        for (const key in unit.abstraction) {
+            if (unit.abstraction.hasOwnProperty(key)) {
+                api[key] = unit.abstraction[key];
             }
         }
 
-        /**
-         * Add a child PAC unit to this unit
-         * @param {Object} childPAC - Child PAC unit to add
-         */
-        publicAPI.addChild = function (childPAC) {
-            control.children.add(childPAC);
-            childPAC.parent = control;
-        };
-
-        /**
-         * Remove a child PAC unit from this unit
-         * @param {Object} childPAC - Child PAC unit to remove
-         */
-        publicAPI.removeChild = function (childPAC) {
-            control.children.delete(childPAC);
-            childPAC.parent = null;
-        };
-
-        /**
-         * Send notification to parent unit
-         * @param {string} eventType - Type of event
-         * @param {*} data - Event data
-         */
-        publicAPI.notifyParent = function (eventType, data) {
-            control.notifyParent(eventType, data);
-        };
-
-        /**
-         * Receive update from child unit
-         * @param {string} eventType - Type of event
-         * @param {*} data - Event data
-         * @param {Object} childPAC - Child PAC unit reference
-         */
-        publicAPI.receiveUpdate = function (eventType, data, childPAC) {
-            control.receiveUpdate(eventType, data, childPAC);
-        };
-
-        /**
-         * NEW: Receive command from parent unit
-         * @param {string} command - Command name
-         * @param {*} data - Command data
-         */
-        publicAPI.receiveFromParent = function (command, data) {
-            control.receiveFromParent(command, data);
-        };
-
-        /**
-         * Destroy this PAC unit and clean up resources
-         */
-        publicAPI.destroy = function () {
-            control.destroy();
-        };
-
-        /**
-         * Make a request to a server controller
-         * @param {string} url - Server endpoint URL
-         * @param {Object} options - Request options
-         */
-        publicAPI.control = function (url, options) {
-            return control.makeServerRequest(url, options);
-        };
-
-        /**
-         * NEW: Send command to all children
-         * @param {string} command - Command name
-         * @param {*} data - Command data
-         */
-        publicAPI.sendToChildren = function (command, data) {
-            control.sendToChildren(command, data);
-        };
-
-        /**
-         * NEW: Send command to specific child
-         * @param {string} selector - CSS selector for child
-         * @param {string} command - Command name
-         * @param {*} data - Command data
-         */
-        publicAPI.sendToChild = function (selector, command, data) {
-            control.sendToChild(selector, command, data);
-        };
-
-        /**
-         * NEW: Broadcast data update to all children
-         * @param {string} property - Property name
-         * @param {*} value - New value
-         */
-        publicAPI.broadcastDataUpdate = function (property, value) {
-            control.broadcastDataUpdate(property, value);
-        };
-
-        /**
-         * NEW: Sync data to specific children
-         * @param {Object} mapping - Selector to data mapping
-         */
-        publicAPI.syncDataToChildren = function (mapping) {
-            control.syncDataToChildren(mapping);
-        };
-
-        /**
-         * NEW: Find child by predicate
-         * @param {Function} predicate - Test function
-         * @returns {Object|undefined} Matching child
-         */
-        publicAPI.findChild = function (predicate) {
-            return control.findChild(predicate);
-        };
-
-        /**
-         * NEW: Find children by predicate
-         * @param {Function} predicate - Test function
-         * @returns {Array} Array of matching children
-         */
-        publicAPI.findChildren = function (predicate) {
-            return control.findChildren(predicate);
-        };
-
-        /**
-         * NEW: Find child by CSS selector
-         * @param {string} selector - CSS selector
-         * @returns {Object|undefined} Matching child
-         */
-        publicAPI.findChildBySelector = function (selector) {
-            return control.findChildBySelector(selector);
-        };
-
-        /**
-         * NEW: Find children by CSS selector
-         * @param {string} selector - CSS selector
-         * @returns {Array} Array of matching children
-         */
-        publicAPI.findChildrenBySelector = function (selector) {
-            return control.findChildrenBySelector(selector);
-        };
-
-        /**
-         * NEW: Find child by property value
-         * @param {string} property - Property name
-         * @param {*} value - Property value
-         * @returns {Object|undefined} Matching child
-         */
-        publicAPI.findChildByProperty = function (property, value) {
-            return control.findChildByProperty(property, value);
-        };
-
-        // Add read-only properties using getters
-        Object.defineProperty(publicAPI, 'parent', {
-            get: function () {
-                return control.parent;
+        // Add public methods to API
+        Object.assign(api, {
+            /**
+             * Manually adds a child PAC unit
+             * @param {Object} child - Child PAC unit to add
+             */
+            addChild: child => {
+                control.children.add(child);
+                child.parent = control;
             },
-            enumerable: true
+
+            /**
+             * Removes a child PAC unit
+             * @param {Object} child - Child PAC unit to remove
+             */
+            removeChild: child => {
+                control.children.delete(child);
+                child.parent = null;
+            },
+
+            // Communication methods
+            notifyParent: (type, data) => control.notifyParent(type, data),
+            receiveUpdate: (type, data, child) => control.receiveUpdate(type, data, child),
+            receiveFromParent: (cmd, data) => control.receiveFromParent(cmd, data),
+            destroy: () => control.destroy(),
+
+            /**
+             * Performs server communication with automatic property updates
+             * @param {string} url - Server endpoint URL
+             * @param {Object} opts - Request options
+             * @returns {Promise} - Promise that resolves with server response
+             */
+            control: (url, opts = {}) => {
+                return fetch(url, {
+                    method: opts.method || 'GET',
+                    headers: Object.assign({
+                        'Content-Type': 'application/json',
+                        'X-PAC-Request': 'true'
+                    }, opts.headers || {}),
+                    body: opts.data ? JSON.stringify(opts.data) : undefined
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        // Automatically update properties if requested
+                        if (opts.updateProperties) {
+                            for (const k in data) {
+                                if (control.abstraction.hasOwnProperty(k)) {
+                                    control.abstraction[k] = data[k];
+                                }
+                            }
+                        }
+                        // Call success callback if provided
+                        if (opts.onSuccess) {
+                            opts.onSuccess.call(control.abstraction, data);
+                        }
+                        return data;
+                    })
+                    .catch(err => {
+                        // Call error callback if provided
+                        if (opts.onError) {
+                            opts.onError.call(control.abstraction, err);
+                        }
+                        throw err;
+                    });
+            },
+
+            // Child communication methods
+            sendToChildren: (cmd, data) => control.sendToChildren(cmd, data),
+            sendToChild: (sel, cmd, data) => {
+                const child = control.findChild(c => c.container.matches(sel));
+                if (child && child.receiveFromParent) {
+                    child.receiveFromParent(cmd, data);
+                }
+            },
+
+            // Child finding methods
+            findChild: pred => Array.from(control.children).find(pred),
+            findChildren: pred => Array.from(control.children).filter(pred),
+            findChildBySelector: sel => Array.from(control.children).find(c => c.container.matches(sel)),
+            findChildByProperty: (prop, val) => Array.from(control.children).find(c =>
+                c.abstraction && c.abstraction[prop] === val)
         });
 
-        Object.defineProperty(publicAPI, 'children', {
-            get: function () {
-                return Array.from(control.children);
-            },
-            enumerable: true
+        // Define read-only properties
+        Object.defineProperties(api, {
+            parent: {get: () => control.parent, enumerable: true},
+            children: {get: () => Array.from(control.children), enumerable: true},
+            container: {get: () => control.container, enumerable: true}
         });
 
-        Object.defineProperty(publicAPI, 'container', {
-            get: function () {
-                return control.container;
-            },
-            enumerable: true
-        });
-
-        // Register this unit in the global registry
+        // Register in global registry and establish hierarchy
         window.PACRegistry.register(selector, control);
-
-        // Establish hierarchy relationships
         control.establishHierarchy();
 
-        // Re-establish hierarchy for all existing units
-        // This ensures proper parent-child relationships when units are created dynamically
-        window.PACRegistry.units.forEach(function (existingPAC) {
-            if (existingPAC !== control && !existingPAC.parent) {
-                existingPAC.establishHierarchy();
+        // Re-establish hierarchy for existing units that might be affected
+        window.PACRegistry.units.forEach(pac => {
+            if (pac !== control && !pac.parent) {
+                pac.establishHierarchy();
             }
         });
 
-        return publicAPI;
+        return api;
     }
 
-    // Expose the main factory function globally
+    // Export to global scope
     window.wakaPAC = wakaPAC;
 
-    // Module export for CommonJS/Node.js compatibility
+    // Export for CommonJS/Node.js environments
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = {wakaPAC: wakaPAC, PACRegistry: PACRegistry, ReactiveUtils: ReactiveUtils};
+        module.exports = {wakaPAC, PACRegistry: Registry, ReactiveUtils: U};
     }
 })();
