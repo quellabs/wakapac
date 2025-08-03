@@ -406,8 +406,7 @@ const app = wakaPAC('#app', {
     name: 'John'
 }, {
     updateMode: 'delayed',
-    delay: 300,
-    deepReactivity: true
+    delay: 300
 });
 ```
 
@@ -683,8 +682,7 @@ const component = wakaPAC(selector, abstraction, options);
 ```javascript
 {
     updateMode: 'immediate',    // 'immediate', 'delayed', 'change'
-    delay: 300,                 // Delay for 'delayed' mode (ms)
-    deepReactivity: true        // Enable deep object reactivity
+    delay: 300                  // Delay for 'delayed' mode (ms)
 }
 ```
 
