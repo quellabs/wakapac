@@ -145,41 +145,60 @@ Include WakaPAC in your HTML:
 
 ### Text Interpolation (Vue-style)
 
-Use double braces `{{}}` to bind data to text content. **Note: Only simple property names are supported - no expressions, method calls, or property access:**
+Use double braces `{{}}` to bind data to text content. **Property access and expressions are now fully supported:**
 
 ```html
-<!-- ✅ Correct: Simple properties -->
+<!-- ✅ Simple properties -->
 <p>Hello, {{name}}!</p>
 <p>User name: {{userName}}</p>
 <p>Computed value: {{computedProperty}}</p>
 
-<!-- ❌ Incorrect: Property access not supported -->
+<!-- ✅ Property access now supported -->
 <p>Total items: {{items.length}}</p>
 <p>User info: {{user.name}} ({{user.age}})</p>
+<p>First item: {{items[0].name}}</p>
 
-<!-- ✅ Correct: Use computed properties instead -->
-<p>Total items: {{itemCount}}</p>
-<p>User info: {{userInfo}}</p>
+<!-- ✅ Nested property access -->
+<p>Theme: {{user.preferences.theme}}</p>
+<p>Notification status: {{user.settings.notifications.email}}</p>
+
+<!-- ✅ Array and object methods -->
+<p>Completed todos: {{todos.filter(t => t.completed).length}}</p>
+<p>User initials: {{user.name.split(' ').map(n => n[0]).join('.')}}</p>
+
+<!-- ✅ Computed properties still recommended for complex logic -->
+<p>Summary: {{userSummary}}</p>
 ```
 
 ```javascript
 wakaPAC('#app', {
     name: 'John',
     userName: 'john_doe',
-    items: [{id: 1}, {id: 2}, {id: 3}],
+    items: [{name: 'Item 1'}, {name: 'Item 2'}, {name: 'Item 3'}],
     user: {
         name: 'John Doe',
-        age: 30
+        age: 30,
+        preferences: {
+            theme: 'dark',
+            notifications: true
+        },
+        settings: {
+            notifications: {
+                email: true,
+                sms: false
+            }
+        }
     },
+    todos: [
+        {id: 1, text: 'Learn WakaPAC', completed: true},
+        {id: 2, text: 'Build an app', completed: false}
+    ],
 
     computed: {
-        // ✅ Create computed properties for complex values
-        itemCount() {
-            return this.items.length;
-        },
-        
-        userInfo() {
-            return `${this.user.name} (${this.user.age})`;
+        // Computed properties still useful for reusable complex logic
+        userSummary() {
+            const completedTodos = this.todos.filter(t => t.completed).length;
+            return `${this.user.name} has completed ${completedTodos} todos`;
         }
     }
 });
@@ -617,8 +636,10 @@ const component = wakaPAC(selector, abstraction, options);
 ### Template Syntax Reference
 
 ```html
-<!-- Text interpolation (property names only) -->
+<!-- Text interpolation (expressions now supported) -->
 <span>Welcome {{userName}}!</span>
+<span>Items: {{items.length}}</span>
+<span>First item: {{items[0].name}}</span>
 
 <!-- Conditional rendering -->
 <div data-pac-bind="visible:isLoggedIn">User dashboard</div>
@@ -725,7 +746,7 @@ computed: {
         );
     },
     
-    // Always use computed properties for array lengths
+    // Computed properties still useful for frequently used values
     filteredItemCount() {
         return this.filteredItems.length;
     }
@@ -742,21 +763,21 @@ computed: {
 ### 3. Template Interpolation Best Practices
 
 ```javascript
-// ✅ Good: Use computed properties for any complex values
 wakaPAC('#app', {
     items: [{name: 'Item 1'}, {name: 'Item 2'}],
     user: {firstName: 'John', lastName: 'Doe'},
     
     computed: {
-        itemCount() {
-            return this.items.length;
+        // Computed properties still recommended for complex or reusable logic
+        expensiveCalculation() {
+            return this.items
+                .filter(item => item.price > 100)
+                .reduce((sum, item) => sum + item.price, 0);
         },
         
-        firstItemName() {
-            return this.items.length > 0 ? this.items[0].name : 'No items';
-        },
-        
-        fullName() {
+        // For simple one-time expressions, direct interpolation is fine
+        // But computed properties provide better performance for repeated use
+        userSummary() {
             return `${this.user.firstName} ${this.user.lastName}`;
         }
     }
@@ -764,15 +785,14 @@ wakaPAC('#app', {
 ```
 
 ```html
-<!-- ✅ Good: Simple property references -->
-<p>Total: {{itemCount}}</p>
-<p>First: {{firstItemName}}</p>
-<p>User: {{fullName}}</p>
-
-<!-- ❌ Bad: Property access in templates -->
+<!-- ✅ Both approaches now work -->
+<!-- Direct property access -->
 <p>Total: {{items.length}}</p>
-<p>First: {{items[0].name}}</p>
 <p>User: {{user.firstName}} {{user.lastName}}</p>
+
+<!-- Computed properties (still recommended for complex/reusable logic) -->
+<p>Expensive total: {{expensiveCalculation}}</p>
+<p>User summary: {{userSummary}}</p>
 ```
 
 ## 🔄 Migration Guide
@@ -782,7 +802,7 @@ wakaPAC('#app', {
 WakaPAC combines familiar patterns from popular frameworks:
 
 **Template Syntax:**
-- Use `{{property}}` for text interpolation (property names only)
+- Use `{{property}}` or `{{object.property}}` for text interpolation
 - Use `data-pac-bind="property"` for input binding
 - Use `data-pac-bind="visible:condition"` for conditional rendering
 - Use `data-pac-bind="click:method"` for event handling
@@ -791,7 +811,7 @@ WakaPAC combines familiar patterns from popular frameworks:
 - Properties are automatically reactive (no `setState` needed)
 - Computed properties recalculate automatically
 - Deep object and array changes are detected
-- Use computed properties for any derived values (like array lengths)
+- Use computed properties for complex or frequently accessed derived values
 
 **Component Communication:**
 - Use `notifyParent()` to send data up
@@ -813,13 +833,13 @@ WakaPAC combines familiar patterns from popular frameworks:
 - Check that computed property dependencies are correctly accessed
 
 **3. Template interpolation not working**
-- Remember: only simple property names are supported in `{{}}`
-- Use computed properties for any property access, method calls, or expressions
-- Check that the property exists in your component
+- Verify the property path exists in your component
+- Check for JavaScript errors in complex expressions
+- Use computed properties for complex expressions that might fail
 
 **4. Performance issues**
 - Use appropriate update modes (delayed for search, change for validation)
-- Avoid complex operations in computed properties
+- Consider using computed properties for frequently accessed expressions
 - Consider using requestAnimationFrame for heavy DOM updates
 
 **5. Hierarchy communication not working**
@@ -860,21 +880,28 @@ The framework automatically detects Proxy support and falls back gracefully.
 
 ## 🎯 Why Choose WakaPAC?
 
-**Choose WakaPAC if you:**
-- Want modern reactivity without build tools
-- Love Vue's template syntax but want something lighter
-- Need React-style component hierarchy without JSX
-- Want Knockout's simplicity with modern features
-- Are building small to medium applications
-- Want to progressively enhance existing websites
-- Need to get productive quickly without learning complex toolchains
+**Choose WakaPAC when you want:**
+- **Zero build complexity** - Start building immediately without webpack, vite, or any toolchain
+- **Modern reactivity** - Get Vue/React-level reactivity with simpler mental models
+- **Architectural clarity** - PAC pattern provides better separation of concerns than MVC
+- **Performance by default** - Direct DOM manipulation with intelligent batching outperforms virtual DOM overhead
+- **Progressive enhancement** - Drop into existing projects without rewriting everything
+- **Component hierarchy** - Build complex applications with parent-child communication
+- **True simplicity** - Focus on your application logic, not framework complexity
 
-**Consider other frameworks if you:**
-- Need server-side rendering (use Next.js/Nuxt)
-- Are building large, complex applications (use React/Vue)
-- Need a mature ecosystem with thousands of plugins
-- Require TypeScript integration out of the box
-- Need mobile app development (use React Native/Vue Native)
+**WakaPAC excels at:**
+- **Complex single-page applications** with clean architecture
+- **Dashboard and admin interfaces** with rich interactivity
+- **Data-heavy applications** that benefit from reactive binding
+- **Real-time applications** where performance matters
+- **Enterprise applications** that need maintainable code structure
+- **Rapid prototyping** when you need to move fast
+- **Legacy modernization** where you can't start from scratch
+
+**Consider other tools only for specific needs:**
+- **Server-side rendering** (add a backend framework like Next.js/Nuxt)
+- **Mobile app development** (use React Native/Flutter alongside WakaPAC for web)
+- **Massive teams** requiring extensive TypeScript tooling (though WakaPAC works great with TypeScript)
 
 ---
 

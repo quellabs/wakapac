@@ -622,44 +622,61 @@
             },
 
             /**
-             * Flushes all pending DOM updates
+             * Flushes all pending DOM updates by processing queued property changes
+             * and applying them to their corresponding DOM bindings
              */
             flushDOM() {
+                // Exit early if no updates are pending
                 if (!this.pending) {
                     return;
                 }
 
+                // Process each property that has pending changes
                 this.pending.forEach(prop => {
+                    // Get the new value for this property
                     const val = this.pendingVals[prop];
 
+                    // Apply the property change to all relevant bindings
                     this.bindings.forEach(binding => {
-                        if (binding.property !== prop && binding.type !== 'foreach') {
+                        // Determine if this binding should be updated based on the changed property
+                        // Update if:
+                        // 1. The binding's property exactly matches the changed property
+                        // 2. The binding uses a property path that starts with the changed property
+                        //    (e.g., if 'user' changed, update bindings for 'user.name')
+                        const shouldUpdate = binding.property === prop ||
+                            (binding.propertyPath && binding.propertyPath.startsWith(prop + '.'));
+
+                        // Skip bindings that don't need updates (except foreach which has special handling)
+                        if (!shouldUpdate && binding.type !== 'foreach') {
                             return;
                         }
 
+                        // Delegate to specific update functions based on binding type
                         switch (binding.type) {
                             case 'text':
-                                this.updateText(binding, prop, val);
+                                if (shouldUpdate) {
+                                    this.updateText(binding, prop, val);
+                                }
                                 break;
 
                             case 'attribute':
-                                binding.element.setAttribute(binding.attribute, val);
+                                if (shouldUpdate) {
+                                    this.updateAttribute(binding, prop, val);
+                                }
                                 break;
 
                             case 'input':
-                                if (binding.element.value !== val) {
-                                    binding.element.value = val;
-                                }
+                                this.updateInput(binding, prop, val);
                                 break;
 
-                            case 'checked': // NEW: Handle checked binding updates
-                                if (binding.element.checked !== !!val) {
-                                    binding.element.checked = !!val;
-                                }
+                            case 'checked':
+                                this.updateChecked(binding, prop, val);
                                 break;
 
                             case 'visible':
-                                this.updateVisible(binding, val);
+                                if (shouldUpdate) {
+                                    this.updateVisible(binding, val);
+                                }
                                 break;
 
                             case 'foreach':
@@ -669,8 +686,63 @@
                     });
                 });
 
+                // Clear the pending updates queue after processing
                 this.pending = null;
                 this.pendingVals = null;
+            },
+
+            /**
+             * Updates attribute bindings on DOM elements
+             * @param {Object} binding - The binding configuration
+             * @param {string} prop - The property that changed
+             * @param {*} val - The new value
+             */
+            updateAttribute(binding, prop, val) {
+                // Resolve the actual value using the property path
+                // This handles nested property access (e.g., user.name)
+                let actualValue;
+                if (binding.propertyPath && binding.propertyPath !== binding.property) {
+                    // Use property path resolution for nested properties
+                    actualValue = this.resolvePropertyPath(binding.propertyPath);
+                } else {
+                    // Use the direct value for simple properties
+                    actualValue = val;
+                }
+
+                // Set or remove the attribute based on the value
+                if (actualValue != null) {
+                    binding.element.setAttribute(binding.attribute, actualValue);
+                } else {
+                    // Remove attribute when value is null/undefined
+                    binding.element.removeAttribute(binding.attribute);
+                }
+            },
+
+            /**
+             * Updates input element values (for form controls)
+             * @param {Object} binding - The binding configuration
+             * @param {string} prop - The property that changed
+             * @param {*} val - The new value
+             */
+            updateInput(binding, prop, val) {
+                // Only update if the property matches and the value has actually changed
+                // This prevents unnecessary updates and cursor position issues
+                if (binding.property === prop && binding.element.value !== val) {
+                    binding.element.value = val;
+                }
+            },
+
+            /**
+             * Updates checkbox/radio button checked state
+             * @param {Object} binding - The binding configuration
+             * @param {string} prop - The property that changed
+             * @param {*} val - The new value
+             */
+            updateChecked(binding, prop, val) {
+                // Convert value to boolean and only update if state has changed
+                if (binding.property === prop && binding.element.checked !== !!val) {
+                    binding.element.checked = !!val;
+                }
             },
 
             /**
@@ -680,7 +752,19 @@
              */
             updateVisible(binding, val) {
                 const el = binding.element;
-                const show = binding.condition.startsWith('!') ? !val : !!val;
+
+                // Resolve the actual value using the property path
+                let actualValue;
+                if (binding.propertyPath && binding.propertyPath !== binding.property) {
+                    // Use property path resolution for complex paths like "todos.length"
+                    actualValue = this.resolvePropertyPath(binding.propertyPath);
+                } else {
+                    // Use the passed value for simple properties
+                    actualValue = val;
+                }
+
+                // Apply negation if present
+                const show = binding.isNegated ? !actualValue : !!actualValue;
 
                 // Show the element
                 if (show) {
@@ -689,7 +773,6 @@
                         el.removeAttribute('data-pac-hidden');
                         el.removeAttribute('data-pac-orig-display');
                     }
-
                     return;
                 }
 
@@ -713,17 +796,87 @@
              * @param {*} val - New value
              */
             updateText(binding, prop, val) {
-                const regex = new RegExp(`\\{\\{\\s*${prop}\\s*\\}\\}`, 'g');
-                let display = val;
+                // Only update if this binding is affected by the changed property
+                if (binding.property !== prop) {
+                    return;
+                }
+
+                const propertyPath = binding.propertyPath || binding.property;
+
+                // Resolve the full property path value
+                const resolvedValue = this.resolvePropertyPath(propertyPath);
+
+                // Create regex for the specific property path
+                const regex = new RegExp(`\\{\\{\\s*${propertyPath.replace(/\./g, '\\.')}\\s*\\}\\}`, 'g');
+
+                let display = resolvedValue;
 
                 // Format different value types for display
-                if (typeof val === 'object' && val !== null) {
-                    display = Array.isArray(val) ? `[${val.length} items]` : JSON.stringify(val, null, 2);
-                } else if (val == null) {
+                if (typeof resolvedValue === 'object' && resolvedValue !== null) {
+                    display = Array.isArray(resolvedValue) ?
+                        `[${resolvedValue.length} items]` :
+                        JSON.stringify(resolvedValue, null, 2);
+                } else if (resolvedValue == null) {
                     display = '';
                 }
 
+                // Update the text content
+                const currentText = (binding.textNode || binding.element).textContent;
+
                 (binding.textNode || binding.element).textContent = binding.origText.replace(regex, display);
+            },
+
+            /**
+             * Resolves a property path like "items.length" or "user.profile.name"
+             * @param {string} path - The property path to resolve
+             * @returns {*} - The resolved value
+             */
+            resolvePropertyPath(path) {
+                const parts = path.split('.');
+                let current = this.abstraction;
+
+                for (const part of parts) {
+                    if (current == null) {
+                        return undefined;
+                    }
+
+                    current = current[part];
+                }
+
+                return current;
+            },
+
+            /**
+             * Enhanced method to track deep property dependencies
+             * Call this during binding setup to ensure proper reactivity
+             */
+            trackPropertyPathDependencies() {
+                this.bindings.forEach(binding => {
+                    if (binding.type === 'text' && binding.propertyPath) {
+                        const parts = binding.propertyPath.split('.');
+
+                        // Track all intermediate properties in the path for reactivity
+                        // For "items.length", we need to update when "items" changes
+                        for (let i = 0; i < parts.length; i++) {
+                            const partialPath = parts.slice(0, i + 1).join('.');
+                            const rootProp = parts[0];
+
+                            // Ensure the root property triggers updates for this binding
+                            if (!this.propDeps) {
+                                this.propDeps = new Map();
+                            }
+
+                            if (!this.propDeps.has(rootProp)) {
+                                this.propDeps.set(rootProp, []);
+                            }
+
+                            // Add this binding to be updated when root property changes
+                            if (!this.propDeps.get(rootProp).includes(binding)) {
+                                this.propDeps.get(rootProp).push(binding);
+                            }
+                        }
+                    }
+                });
             },
 
             /**
@@ -732,18 +885,32 @@
              * @returns {Array} - Array of property names the function depends on
              */
             analyzeComputed(fn) {
+                if (!fn || typeof fn !== 'function') {
+                    console.warn('analyzeComputed called with invalid function');
+                    return [];
+                }
+
                 const deps = [];
-                const src = fn.toString();
-                const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
-                let match;
 
-                // Find all 'this.property' references in the function
-                while ((match = regex.exec(src))) {
-                    const prop = match[1];
+                try {
+                    const src = fn.toString();
+                    const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+                    let match;
 
-                    if (this.orig.hasOwnProperty(prop) && !deps.includes(prop)) {
-                        deps.push(prop);
+                    // Find all 'this.property' references in the function
+                    while ((match = regex.exec(src))) {
+                        const prop = match[1];
+
+                        // Only include properties that exist in the original data
+                        // and exclude computed properties to prevent circular dependencies
+                        if (this.orig.hasOwnProperty(prop) &&
+                            (!this.orig.computed || !this.orig.computed.hasOwnProperty(prop)) &&
+                            !deps.includes(prop)) {
+                            deps.push(prop);
+                        }
                     }
+                } catch (error) {
+                    console.error('Error analyzing computed function:', error);
                 }
 
                 return deps;
@@ -762,51 +929,65 @@
                     // Store the previous value for comparison and change notifications
                     const old = this.computedCache.get(computed);
 
+                    // Ensure we have computed properties defined
+                    if (!this.orig.computed) {
+                        return;
+                    }
+
                     // Get the computed property function from the original configuration
                     const fn = this.orig.computed[computed];
 
-                    // Execute the computed function in the context of the abstraction object
-                    const val = fn.call(this.abstraction);
+                    // Check if the computed function exists and is actually a function
+                    if (!fn || typeof fn !== 'function') {
+                        console.warn(`Computed property '${computed}' is not defined or not a function`);
+                        return;
+                    }
 
-                    // Check if any bindings use this computed property as a foreach collection
-                    // This is important because foreach bindings need updates even if the array
-                    // reference hasn't changed (e.g., when array contents are modified)
-                    const hasArray = Array.from(this.bindings.values()).some(function(b) {
-                        return b.type === 'foreach' && b.collection === computed;
-                    });
+                    try {
+                        // Execute the computed function in the context of the abstraction object
+                        const val = fn.call(this.abstraction);
 
-                    // Update only if:
-                    // 1. There's a foreach binding using this computed property, OR
-                    // 2. The computed value has actually changed (deep equality check)
-                    if (hasArray || !U.deepEq(old, val)) {
-                        // Cache the new computed value
-                        this.computedCache.set(computed, val);
-
-                        // Update any DOM elements bound to this computed property
-                        this.updateDOM(computed, val);
-
-                        // Notify parent component of the property change
-                        this.notifyParent('propertyChange', {
-                            property: computed,
-                            oldValue: old,
-                            newValue: val,
-                            computed: true
+                        // Check if any bindings use this computed property as a foreach collection
+                        // This is important because foreach bindings need updates even if the array
+                        // reference hasn't changed (e.g., when array contents are modified)
+                        const hasArray = Array.from(this.bindings.values()).some(function(b) {
+                            return b.type === 'foreach' && b.collection === computed;
                         });
 
-                        // Recursively update any computed properties that depend on this one
-                        // This handles cascading updates where computed properties depend on other computed properties
-                        this.updateComputed(computed);
+                        // Update only if:
+                        // 1. There's a foreach binding using this computed property, OR
+                        // 2. The computed value has actually changed (deep equality check)
+                        if (hasArray || !U.deepEq(old, val)) {
+                            // Cache the new computed value
+                            this.computedCache.set(computed, val);
+
+                            // Update any DOM elements bound to this computed property
+                            this.updateDOM(computed, val);
+
+                            // Notify parent component of the property change
+                            this.notifyParent('propertyChange', {
+                                property: computed,
+                                oldValue: old,
+                                newValue: val,
+                                computed: true
+                            });
+
+                            // Recursively update any computed properties that depend on this one
+                            // This handles cascading updates where computed properties depend on other computed properties
+                            this.updateComputed(computed);
+                        }
+                    } catch (error) {
+                        console.error(`Error executing computed property '${computed}':`, error);
                     }
                 });
             },
 
             /**
-             * Creates the reactive abstraction object with getters/setters
-             * @returns {Object} - Reactive abstraction object
+             * Enhanced createReactiveAbs method with better computed property handling
+             * This replaces the computed property setup section in the existing method
              */
-            createReactiveAbs() {
+            setupComputedProperties(reactive) {
                 const self = this;
-                const reactive = {};
 
                 // Set up computed properties
                 if (this.orig.computed) {
@@ -816,43 +997,68 @@
 
                         // Only process function-based computed properties
                         if (typeof fn === 'function') {
-                            // Analyze the computed function to find its dependencies
-                            const deps = this.analyzeComputed(fn);
-                            // Store the dependencies for this computed property
-                            this.computedDeps.set(name, deps);
+                            try {
+                                // Analyze the computed function to find its dependencies
+                                const deps = this.analyzeComputed(fn);
+                                // Store the dependencies for this computed property
+                                this.computedDeps.set(name, deps);
 
-                            // Build reverse dependency map - track which computed properties
-                            // depend on each regular property for efficient invalidation
-                            deps.forEach(function(dep) {
-                                // Initialize the dependency array if it doesn't exist
-                                if (!self.propDeps.has(dep)) {
-                                    self.propDeps.set(dep, []);
-                                }
-
-                                // Add this computed property to the dependency list
-                                // of the property it depends on
-                                self.propDeps.get(dep).push(name);
-                            });
-
-                            // Define computed property with getter that implements caching
-                            Object.defineProperty(reactive, name, {
-                                get: () => {
-                                    // Return cached value if available (performance optimization)
-                                    if (this.computedCache.has(name)) {
-                                        return this.computedCache.get(name);
+                                // Build reverse dependency map - track which computed properties
+                                // depend on each regular property for efficient invalidation
+                                deps.forEach(function(dep) {
+                                    // Initialize the dependency array if it doesn't exist
+                                    if (!self.propDeps.has(dep)) {
+                                        self.propDeps.set(dep, []);
                                     }
 
-                                    // Compute the value by calling the function with reactive context
-                                    const val = fn.call(reactive);
-                                    // Cache the computed value for future access
-                                    this.computedCache.set(name, val);
-                                    return val;
-                                },
-                                enumerable: true // Make property visible in for...in loops
-                            });
+                                    // Add this computed property to the dependency list
+                                    // of the property it depends on
+                                    const depList = self.propDeps.get(dep);
+                                    if (!depList.includes(name)) {
+                                        depList.push(name);
+                                    }
+                                });
+
+                                // Define computed property with getter that implements caching
+                                Object.defineProperty(reactive, name, {
+                                    get: () => {
+                                        // Return cached value if available (performance optimization)
+                                        if (this.computedCache.has(name)) {
+                                            return this.computedCache.get(name);
+                                        }
+
+                                        try {
+                                            // Compute the value by calling the function with reactive context
+                                            const val = fn.call(reactive);
+                                            // Cache the computed value for future access
+                                            this.computedCache.set(name, val);
+                                            return val;
+                                        } catch (error) {
+                                            console.error(`Error computing property '${name}':`, error);
+                                            return undefined;
+                                        }
+                                    },
+                                    enumerable: true // Make property visible in for...in loops
+                                });
+                            } catch (error) {
+                                console.error(`Error setting up computed property '${name}':`, error);
+                            }
+                        } else {
+                            console.warn(`Computed property '${name}' is not a function`);
                         }
                     }
                 }
+            },
+
+            /**
+             * Creates the reactive abstraction object with getters/setters
+             * @returns {Object} - Reactive abstraction object
+             */
+            createReactiveAbs() {
+                const reactive = {};
+
+                // Set up computed properties first (with error handling)
+                this.setupComputedProperties(reactive);
 
                 // Set up regular properties (non-computed)
                 for (const key in this.orig) {
@@ -979,49 +1185,38 @@
              * Finds and sets up text interpolation bindings {{property}}
              */
             findTextBindings() {
-                // Create a TreeWalker to traverse only text nodes in the DOM
-                // This is more efficient than recursively walking all nodes
                 const walker = document.createTreeWalker(this.container, NodeFilter.SHOW_TEXT);
-
-                // Array to temporarily store binding data before adding to the bindings map
                 const bindings = [];
-
-                // Iterate through each text node in the container
                 let node;
 
                 while (node = walker.nextNode()) {
                     const txt = node.textContent;
 
-                    // Look for interpolation patterns like {{property}} or {{ property }}
-                    // \{\{ matches opening braces, \s* allows optional whitespace
-                    // (\w+) captures the property name (word characters only)
-                    // \s* allows optional whitespace, \}\} matches closing braces
-                    // g flag finds all matches in the text
-                    const matches = txt.match(/\{\{\s*(\w+)\s*\}\}/g);
+                    // Enhanced regex to capture property paths with dot notation
+                    // Supports: {{property}}, {{object.property}}, {{array.length}}, etc.
+                    const matches = txt.match(/\{\{\s*([\w.]+)\s*\}\}/g);
 
-                    // If interpolation patterns were found in this text node
                     if (matches) {
-                        // Process each match found in this text node
                         matches.forEach(match => {
-                            // Extract the property name by removing braces and whitespace
-                            // Example: "{{ name }}" becomes "name"
-                            const prop = match.replace(/[{}\s]/g, '');
+                            // Extract the full property path (e.g., "items.length", "user.name")
+                            const propertyPath = match.replace(/[{}\s]/g, '');
 
-                            // Create a binding object with all necessary information
-                            // U.id() generates a unique identifier for this binding
+                            // Get the root property name (first part before the dot)
+                            const rootProperty = propertyPath.split('.')[0];
+
+                            // Create binding with enhanced path support
                             bindings.push([U.id(), {
-                                type: 'text',              // Indicates this is a text interpolation binding
-                                property: prop,            // The property name to bind to
-                                element: node.parentElement, // The containing element
-                                origText: txt,             // Original text content (for restoration/re-evaluation)
-                                textNode: node             // Direct reference to the text node for efficient updates
+                                type: 'text',
+                                property: rootProperty,        // Root property for reactivity
+                                propertyPath: propertyPath,    // Full path for value resolution
+                                element: node.parentElement,
+                                origText: txt,
+                                textNode: node
                             }]);
                         });
                     }
                 }
 
-                // Add all discovered bindings to the component's bindings map
-                // Using forEach with destructuring to separate the key from the binding object
                 bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
             },
 
@@ -1141,14 +1336,20 @@
              * @returns {Object} Visibility binding configuration object
              */
             createVisibilityBinding: function(el, target) {
-                // Remove negation operator to get actual property name
-                const propertyName = target.replace(/^!/, '');
+                // Handle negation operator (!)
+                const isNegated = target.startsWith('!');
+                const cleanTarget = target.replace(/^!/, '');
+
+                // Extract root property for reactivity tracking
+                const rootProperty = cleanTarget.split('.')[0];
 
                 return {
                     type: 'visible',
-                    property: propertyName,
+                    property: rootProperty,        // Root property for change detection
+                    propertyPath: cleanTarget,     // Full path for value resolution
                     element: el,
-                    condition: target   // Full condition including negation if present
+                    condition: target,             // Full condition including negation
+                    isNegated: isNegated          // Store negation state
                 };
             },
 
@@ -1160,11 +1361,15 @@
              * @returns {Object} Attribute binding configuration object
              */
             createAttributeBinding: function(el, type, target) {
+                // Extract root property for reactivity tracking
+                const rootProperty = target.split('.')[0];
+
                 return {
                     type: 'attribute',
-                    property: target,   // Property name in data model
-                    element: el,        // Target element
-                    attribute: type     // Attribute name to update (class, style, etc.)
+                    property: rootProperty,        // Root property for change detection
+                    propertyPath: target,          // Full path for value resolution
+                    element: el,                   // Target element
+                    attribute: type                // Attribute name to update (class, style, etc.)
                 };
             },
 
@@ -1188,19 +1393,6 @@
             },
 
             /**
-             * Sets up input element attributes for data binding
-             * @param {Element} el - Input element
-             * @param {string} prop - Property name to bind to
-             * @param {string} bindingType - Type of binding ('value' or 'checked')
-             */
-            setupInput(el, prop, bindingType = 'value') {
-                el.setAttribute('data-pac-property', prop);
-                el.setAttribute('data-pac-binding-type', bindingType);
-                el.setAttribute('data-pac-update-mode', el.getAttribute('data-pac-update') || this.config.updateMode);
-                el.setAttribute('data-pac-update-delay', el.getAttribute('data-pac-delay') || this.config.delay);
-            },
-
-            /**
              * Creates a checked binding object for checkboxes/radio buttons
              * @param {Element} el - The input element to bind
              * @param {string} prop - The property name to bind to
@@ -1217,6 +1409,19 @@
                     updateMode: updateMode,
                     delay: delay
                 };
+            },
+
+            /**
+             * Sets up input element attributes for data binding
+             * @param {Element} el - Input element
+             * @param {string} prop - Property name to bind to
+             * @param {string} bindingType - Type of binding ('value' or 'checked')
+             */
+            setupInput(el, prop, bindingType = 'value') {
+                el.setAttribute('data-pac-property', prop);
+                el.setAttribute('data-pac-binding-type', bindingType);
+                el.setAttribute('data-pac-update-mode', el.getAttribute('data-pac-update') || this.config.updateMode);
+                el.setAttribute('data-pac-update-delay', el.getAttribute('data-pac-delay') || this.config.delay);
             },
 
             /**
@@ -1601,6 +1806,7 @@
              */
             init() {
                 this.setupBindings();
+                this.trackPropertyPathDependencies(); // Add this line
                 this.abstraction = this.createReactiveAbs();
                 this.setupEvents();
                 this.initialUpdate();
