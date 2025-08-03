@@ -372,7 +372,7 @@
                     <button class="btn-secondary" data-pac-bind="click:reset">🔄 Reset</button>
                     <button class="btn-warning" data-pac-bind="click:requestFocus">🎯 Request Focus</button>
                     <button class="btn-danger" data-pac-bind="click:sendAlert">🚨 Send Alert</button>
-                    <button class="btn-info" data-pac-bind="click:createGrandchild">👶 Add Grandchild</button>
+                    <button class="btn-info" data-pac-bind="click:createGrandchild">{{grandchildButtonText}}</button>
                 </div>
             </div>
 
@@ -645,27 +645,53 @@
                     this.isActive = true;
                     this.workStatus = 'low';
                     this.subTask = data.task || 'Default task';
+
+                    this.notifyParent('statusChange', {
+                        workerId: this.workerId,
+                        isActive: this.isActive,
+                        status: this.workStatus
+                    });
+
                     break;
+
                 case 'deactivate':
                     this.isActive = false;
                     this.workStatus = 'inactive';
                     this.progress = 0;
+
+                    this.notifyParent('statusChange', {
+                        workerId: this.workerId,
+                        isActive: this.isActive,
+                        status: this.workStatus
+                    });
+
                     break;
+
                 case 'setProgress':
                     this.progress = data.progress || 0;
                     this.updateWorkStatus();
                     break;
+
                 case 'emergencyStop':
                     this.isActive = false;
                     this.workStatus = 'high';
                     this.subTask = 'EMERGENCY STOP';
                     this.progress = 0;
+
+                    this.notifyParent('statusChange', {
+                        workerId: this.workerId,
+                        isActive: this.isActive,
+                        status: this.workStatus
+                    });
+
                     break;
+
                 case 'updateTheme':
                     const container = this.container;
                     container.className = container.className.replace(/theme-\w+/g, '');
                     container.classList.add(`theme-${data.theme}`);
                     break;
+
                 case 'updateData':
                     logMessage('grandchild', `Received requested data from parent via hierarchy`, data);
                     break;
@@ -730,6 +756,8 @@
         }
     });
 
+    // Replace the childPAC definition with this debug version:
+
     const childPAC = wakaPAC('#child-app', {
         name: 'Alice',
         taskName: 'Data Processing',
@@ -739,6 +767,7 @@
         isPaused: false,
         pauseReason: '',
         parentData: 'None received',
+        grandchildActive: false,
 
         computed: {
             taskSummary() {
@@ -746,6 +775,10 @@
             },
             pausedBadgeClass() {
                 return this.isPaused ? 'badge-warning' : 'badge-success';
+            },
+            grandchildButtonText() {
+                console.log('grandchildButtonText computed called! grandchildActive =', this.grandchildActive);
+                return this.grandchildActive ? '⏸️ Deactivate Worker' : '⚡ Activate Worker';
             }
         },
 
@@ -793,6 +826,18 @@
         onChildUpdate(eventType, data, childPAC) {
             const childId = childPAC.container.id;
             logMessage('child', `Received from ${childId}: ${eventType}`, data);
+
+            if (childId === 'grandchild-app' && eventType === 'statusChange') {
+                console.log('Setting grandchildActive from', this.grandchildActive, 'to', data.isActive);
+                this.grandchildActive = data.isActive;
+                console.log('grandchildActive is now', this.grandchildActive);
+
+                // FORCE computed property update
+                console.log('Manually triggering button text update...');
+                // Get current button text to force computed property evaluation
+                const buttonText = this.grandchildButtonText;
+                console.log('Current button text:', buttonText);
+            }
 
             switch(eventType) {
                 case 'progressUpdate':
@@ -876,11 +921,20 @@
         },
 
         createGrandchild() {
-            logMessage('child', 'Activating grandchild component');
-            this.sendToChild('#grandchild-app', 'activate', {
-                task: `Sub-task of ${this.taskName}`,
-                assignedBy: this.name
-            });
+            if (this.grandchildActive) {
+                logMessage('child', 'Deactivating grandchild worker');
+                this.sendToChild('#grandchild-app', 'deactivate', {
+                    reason: 'Deactivated by parent'
+                });
+                this.grandchildActive = false;
+            } else {
+                logMessage('child', 'Activating grandchild worker');
+                this.sendToChild('#grandchild-app', 'activate', {
+                    task: `Sub-task of ${this.taskName}`,
+                    assignedBy: this.name
+                });
+                this.grandchildActive = true;
+            }
         }
     });
 

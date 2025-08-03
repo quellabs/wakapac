@@ -26,6 +26,7 @@
         // Check if Proxy is supported in the current environment
         PROXY: typeof Proxy !== 'undefined',
 
+
         /**
          * Determines if a value should be made reactive
          * @param {*} v - Value to test
@@ -410,6 +411,241 @@
             },
 
             /**
+             * Enhanced expression parser that supports ternary operators
+             * Parses expressions like: property ? 'true' : 'false', object.property, etc.
+             * @param {string} expr - Expression to parse
+             * @returns {Object} - Parsed expression data
+             */
+            parseExpression(expr) {
+                // Remove leading and trailing whitespace from the expression
+                // This ensures consistent parsing regardless of input formatting
+                expr = expr.trim();
+
+                // Use regex to detect ternary operator pattern: condition ? trueValue : falseValue
+                // The regex captures three groups:
+                // 1. (.+?) - condition (non-greedy match up to the first '?')
+                // 2. (.+?) - true value (non-greedy match between '?' and ':')
+                // 3. (.+?) - false value (everything after ':')
+                // \s* allows for optional whitespace around operators
+                const ternaryMatch = expr.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+?)$/);
+
+                // If ternary pattern is found, parse it as a conditional expression
+                if (ternaryMatch) {
+                    // Destructure the regex match results
+                    // [0] is the full match, [1-3] are the captured groups
+                    const [, condition, trueValue, falseValue] = ternaryMatch;
+
+                    // Return structured ternary expression object
+                    return {
+                        type: 'ternary',                                    // Mark as ternary expression
+                        condition: condition.trim(),                        // Clean condition part
+                        trueValue: this.parseValue(trueValue.trim()),      // Parse and clean true branch
+                        falseValue: this.parseValue(falseValue.trim()),    // Parse and clean false branch
+                        dependencies: this.extractDependencies(condition.trim()) // Extract variable dependencies from condition
+                    };
+                }
+
+                // If no ternary operator found, treat as simple property access
+                // This handles cases like: 'user.name', 'isActive', 'config.settings.theme'
+                return {
+                    type: 'property',                           // Mark as property access
+                    path: expr,                                 // Store the full property path
+                    dependencies: this.extractDependencies(expr) // Extract all dependencies from the path
+                };
+            },
+
+            /**
+             * Parses a value which could be a string literal, number, or property reference
+             * @param {string} value - Value to parse
+             * @returns {Object} - Parsed value data
+             */
+            parseValue(value) {
+                // Remove leading and trailing whitespace from input
+                value = value.trim();
+
+                // Check if value is a string literal (enclosed in quotes)
+                // Handles both single quotes ('hello') and double quotes ("hello")
+                if ((value.startsWith("'") && value.endsWith("'")) ||
+                    (value.startsWith('"') && value.endsWith('"'))) {
+                    return {
+                        type: 'literal',
+                        // Remove the surrounding quotes by slicing off first and last character
+                        value: value.slice(1, -1)
+                    };
+                }
+
+                // Check if value is a numeric literal
+                // Regex matches: whole numbers (123) or decimals (123.45)
+                // ^ = start of string, \d+ = one or more digits, (\.\d+)? = optional decimal part, $ = end of string
+                if (/^\d+(\.\d+)?$/.test(value)) {
+                    return {
+                        type: 'literal',
+                        // Convert string to actual number (handles both integers and floats)
+                        value: parseFloat(value)
+                    };
+                }
+
+                // Check if value is a boolean literal
+                // Only accepts exact matches for 'true' or 'false'
+                if (value === 'true' || value === 'false') {
+                    return {
+                        type: 'literal',
+                        // Convert string to actual boolean value
+                        value: value === 'true'
+                    };
+                }
+
+                // If none of the above conditions match, treat as property reference
+                // This handles cases like: obj.prop, myVariable, nested.property.path
+                return {
+                    type: 'property',
+                    // Store the property path as-is for later resolution
+                    path: value
+                };
+            },
+
+            /**
+             * Extracts property dependencies from an expression
+             * @param {string} expr - Expression to analyze (e.g., "user.name && status === 'active'")
+             * @returns {Array} - Array of property names this expression depends on
+             */
+            extractDependencies(expr) {
+                const deps = [];
+
+                // Regular expression to match JavaScript identifiers and property access patterns
+                // Matches: variable names, object.property, nested.object.property, etc.
+                // Pattern breakdown: \b = word boundary, [a-zA-Z_$] = valid identifier start chars,
+                // [a-zA-Z0-9_$.]* = valid identifier continuation chars including dots for property access
+                const propertyRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$.]*)\b/g;
+
+                // Iterate through all matches in the expression
+                let match;
+
+                while ((match = propertyRegex.exec(expr))) {
+                    const prop = match[1];
+
+                    // Filter out JavaScript boolean literals and avoid duplicate entries
+                    // TODO: Consider filtering out other literals like 'null', 'undefined', numbers
+                    if (prop !== 'true' && prop !== 'false' && !deps.includes(prop)) {
+                        deps.push(prop);
+                    }
+                }
+
+                return deps;
+            },
+
+            /**
+             * Evaluates a parsed expression in the context of the reactive abstraction
+             * @param {Object} parsedExpr - Parsed expression object
+             * @returns {*} - Evaluated result
+             */
+            evaluateExpression(parsedExpr) {
+                // Handle ternary conditional expressions (condition ? trueValue : falseValue)
+                if (parsedExpr.type === 'ternary') {
+                    // Evaluate the condition part of the ternary expression
+                    // This determines which branch of the ternary to execute
+                    const conditionValue = this.evaluateCondition(parsedExpr.condition);
+
+                    // Execute the appropriate branch based on the condition result
+                    if (conditionValue) {
+                        // Condition is truthy - evaluate and return the "true" branch value
+                        return this.evaluateValue(parsedExpr.trueValue);
+                    } else {
+                        // Condition is falsy - evaluate and return the "false" branch value
+                        return this.evaluateValue(parsedExpr.falseValue);
+                    }
+                }
+
+                // Handle property access expressions (e.g., object.property, nested.path.value)
+                else if (parsedExpr.type === 'property') {
+                    // Resolve the property path to get the actual value from the reactive context
+                    return this.resolvePropertyPath(parsedExpr.path);
+                }
+
+                // Return undefined for any unrecognized expression types
+                // This serves as a fallback for unsupported or malformed expressions
+                return undefined;
+            },
+
+            /**
+             * Evaluates a condition expression (the part before ? in ternary)
+             * @param {string} condition - Condition to evaluate
+             * @returns {boolean} - Truthy/falsy result
+             */
+            evaluateCondition(condition) {
+                // Handle simple property access (e.g., "user.name", "isActive")
+                // Uses regex to match valid JavaScript property names and dot notation
+                if (/^[a-zA-Z_$][a-zA-Z0-9_$.]*$/.test(condition)) {
+                    const value = this.resolvePropertyPath(condition);
+                    return !!value; // Convert to boolean using double negation
+                }
+
+                // Handle comparison operators (===, !==, ==, !=, >=, <=, >, <)
+                // Regex captures: left operand, operator, right operand
+                const comparisonMatch = condition.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+?)$/);
+
+                if (comparisonMatch) {
+                    const [, left, operator, right] = comparisonMatch;
+
+                    // Resolve left side (usually a property path like "user.age")
+                    const leftValue = this.resolvePropertyPath(left.trim());
+
+                    // Parse and evaluate right side (could be literal value, property, etc.)
+                    const rightValue = this.parseAndEvaluateValue(right.trim());
+
+                    // Perform the comparison based on operator
+                    switch (operator) {
+                        case '===': return leftValue === rightValue; // Strict equality
+                        case '!==': return leftValue !== rightValue; // Strict inequality
+                        case '==': return leftValue == rightValue;   // Loose equality
+                        case '!=': return leftValue != rightValue;   // Loose inequality
+                        case '>=': return leftValue >= rightValue;   // Greater than or equal
+                        case '<=': return leftValue <= rightValue;   // Less than or equal
+                        case '>': return leftValue > rightValue;     // Greater than
+                        case '<': return leftValue < rightValue;     // Less than
+                        default: return false; // Unknown operator
+                    }
+                }
+
+                // Fallback: treat as simple property access and check truthiness
+                // This handles cases where regex didn't match but it's still a valid property
+                const value = this.resolvePropertyPath(condition);
+                return !!value; // Convert to boolean
+            },
+
+            /**
+             * Evaluates a value object (literal or property reference)
+             * @param {Object} valueObj - Value object from parseValue
+             * @returns {*} - Evaluated value
+             */
+            evaluateValue(valueObj) {
+                // Handle literal values (strings, numbers, booleans, etc.)
+                if (valueObj.type === 'literal') {
+                    return valueObj.value;
+                }
+                // Handle property references (e.g., "user.name", "config.timeout")
+                else if (valueObj.type === 'property') {
+                    // Resolve the property path to get the actual value
+                    return this.resolvePropertyPath(valueObj.path);
+                }
+                // Handle unknown or invalid value types
+                else {
+                    // Return undefined for unrecognized value types
+                    return undefined;
+                }
+            },
+
+            /**
+             * Parses and evaluates a value string (for use in conditions)
+             * @param {string} valueStr - Value string to parse and evaluate
+             * @returns {*} - Evaluated value
+             */
+            parseAndEvaluateValue(valueStr) {
+                const parsed = this.parseValue(valueStr);
+                return this.evaluateValue(parsed);
+            },
+
+            /**
              * Consolidated item rendering with better expression evaluation
              * Creates a DOM element from a template string with data binding applied
              * Processes both text interpolation and attribute bindings for the item
@@ -427,9 +663,11 @@
 
                 // Extract the first element or text node from the template
                 const el = div.firstElementChild || div.firstChild;
+
+                // Return empty text node if no content
                 if (!el) {
                     return document.createTextNode('');
-                } // Return empty text node if no content
+                }
 
                 // Clone the element to avoid modifying the original template
                 const clone = el.cloneNode(true);
@@ -437,6 +675,7 @@
                 // Process the cloned element to apply data binding
                 this.processTemplate(clone, item, idx, itemName, idxName);
 
+                // Return the clone
                 return clone;
             },
 
@@ -454,9 +693,10 @@
                 // Process text nodes for variable interpolation {{variable}}
                 const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
                 const nodes = [];
-                let node;
 
                 // Collect all text nodes first to avoid walker issues during modification
+                let node;
+
                 while (node = walker.nextNode()) {
                     nodes.push(node);
                 }
@@ -483,6 +723,7 @@
                 // Process elements with data-pac-bind attributes for directive binding
                 [el, ...el.querySelectorAll('[data-pac-bind]')].forEach(e => {
                     const bind = e.getAttribute('data-pac-bind');
+
                     if (!bind) {
                         return;
                     }
@@ -673,23 +914,31 @@
              * @param {*} val - New property value
              */
             updateText(binding, prop, val) {
-                // Only process if this binding is affected by the changed property
-                if (binding.property !== prop) {
+                // Check if this binding should be updated
+                if (binding.property !== prop &&
+                    (!binding.parsedExpression || !binding.parsedExpression.dependencies.includes(prop))) {
                     return;
                 }
 
-                // Resolve the full property path to get the actual display value
-                const resolvedValue = this.resolvePropertyPath(binding.propertyPath || binding.property);
+                let displayValue;
 
-                // Format the value appropriately for display
-                const display = this.formatDisplayValue(resolvedValue);
+                // Handle ternary expressions
+                if (binding.parsedExpression && binding.expressionContent) {
+                    displayValue = this.evaluateExpression(binding.parsedExpression);
+                } else {
+                    // Fallback to simple property path resolution
+                    displayValue = this.resolvePropertyPath(binding.propertyPath || binding.property);
+                }
 
-                // Create regex to match the specific property path in template
-                const regex = new RegExp(`\\{\\{\\s*${(binding.propertyPath || binding.property).replace(/\./g, '\\.')}\\s*\\}\\}`, 'g');
+                // Format the value for display
+                const formattedValue = this.formatDisplayValue(displayValue);
+
+                // Create regex to match the specific expression in template
+                const escapedMatch = binding.fullMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(escapedMatch, 'g');
 
                 // Update the text content by replacing template placeholders
-                (binding.textNode || binding.element).textContent =
-                    binding.origText.replace(regex, display);
+                (binding.textNode || binding.element).textContent = binding.origText.replace(regex, formattedValue);
             },
 
             /**
@@ -923,38 +1172,73 @@
             },
 
             /**
-             * Streamlined reactive abstraction creation
              * Creates the main reactive object that serves as the data model
              * Sets up computed properties, regular properties, and communication methods
              * @returns {Object} - The reactive abstraction object with getters/setters
              */
             createReactiveAbs() {
+                // Initialize empty reactive object that will become the data model
                 const reactive = {};
 
                 // Setup computed properties first (they may depend on regular properties)
+                // Computed properties are derived values that automatically update when dependencies change
                 this.setupComputedProperties(reactive);
 
                 // Setup regular properties from original configuration
+                // Iterate through all properties defined in the original configuration object
                 Object.keys(this.orig).forEach(key => {
+                    // Only process properties that exist on the object itself (not inherited)
+                    // Skip the 'computed' property as it's handled separately above
                     if (this.orig.hasOwnProperty(key) && key !== 'computed') {
                         const val = this.orig[key];
+
+                        // Handle function properties (methods)
                         if (typeof val === 'function') {
                             // Bind methods to reactive object so 'this' refers to reactive instance
+                            // This ensures methods have access to reactive properties and other methods
                             reactive[key] = val.bind(reactive);
                         } else {
-                            // Create reactive property with getter/setter for data properties
+                            // Handle data properties by creating reactive getters/setters
+                            // This enables automatic updates and change detection
                             this.createReactiveProp(reactive, key, val);
                         }
                     }
                 });
 
-                // Add communication methods for component hierarchy
+                // Add communication methods for component hierarchy management
+                // These methods enable parent-child communication in a component tree structure
                 Object.assign(reactive, {
+                    // Method to send notifications up the component hierarchy to parent
+                    // @param {string} type - The type/name of the notification
+                    // @param {*} data - The data payload to send with the notification
                     notifyParent: (type, data) => this.notifyParent(type, data),
+
+                    // Method to broadcast commands/data down to all child components
+                    // @param {string} cmd - The command identifier
+                    // @param {*} data - The data to send with the command
                     sendToChildren: (cmd, data) => this.sendToChildren(cmd, data),
+
+                    // Method to send commands/data to a specific child component by selector
+                    // @param {string} sel - CSS selector to identify the target child component
+                    // @param {string} cmd - The command identifier
+                    // @param {*} data - The data to send with the command
+                    sendToChild: (sel, cmd, data) => {
+                        // Find the first child component whose container matches the selector
+                        const child = Array.from(this.children).find(c => c.container.matches(sel));
+
+                        // If child exists and has a receiveFromParent method, send the command
+                        if (child && child.receiveFromParent) {
+                            child.receiveFromParent(cmd, data);
+                        }
+                    },
+
+                    // Utility method to find a child component using a custom predicate function
+                    // @param {Function} pred - Predicate function that returns true for the desired child
+                    // @returns {Object|undefined} - The first child that matches the predicate
                     findChild: pred => Array.from(this.children).find(pred)
                 });
 
+                // Return the fully configured reactive object
                 return reactive;
             },
 
@@ -965,54 +1249,81 @@
              * @param {Object} reactive - The reactive object to add computed properties to
              */
             setupComputedProperties(reactive) {
+                // Early exit if no computed properties are defined
                 if (!this.orig.computed) {
                     return;
                 }
 
+                // Iterate through each computed property definition
                 Object.keys(this.orig.computed).forEach(name => {
                     const fn = this.orig.computed[name];
 
+                    // Skip non-function entries (safety check)
                     if (typeof fn !== 'function') {
                         return;
                     }
 
                     try {
-                        // Analyze function to determine which properties it depends on
+                        // Analyze the function to determine which reactive properties it depends on
+                        // This creates a dependency graph for cache invalidation
                         const deps = this.analyzeComputed(fn);
                         this.computedDeps.set(name, deps);
 
                         // Build reverse dependency map for efficient updates
+                        // When a property changes, we can quickly find all computed properties that need invalidation
                         deps.forEach(dep => {
+                            // Initialize dependency list if it doesn't exist
                             if (!this.propDeps.has(dep)) {
                                 this.propDeps.set(dep, []);
                             }
+
+                            // Add this computed property to the dependency's dependents list
                             const depList = this.propDeps.get(dep);
                             if (!depList.includes(name)) {
                                 depList.push(name);
                             }
                         });
 
-                        // Define computed property with getter that implements caching
+                        // Define the computed property with a getter that implements caching logic
                         Object.defineProperty(reactive, name, {
                             get: () => {
-                                // Return cached value if available (performance optimization)
-                                if (this.computedCache.has(name)) {
-                                    return this.computedCache.get(name);
-                                }
-
                                 try {
-                                    // Compute value by calling function with reactive context
-                                    const val = fn.call(reactive);
-                                    this.computedCache.set(name, val);
-                                    return val;
+                                    // Special handling for computed properties that depend on dynamic children
+                                    // These properties need to always recompute since children can change
+                                    // without triggering our normal dependency tracking
+                                    const fnString = fn.toString();
+                                    const accessesChildren = /this\.children|this\.findChild|Array\.from\(this\.children\)/.test(fnString);
+
+                                    if (accessesChildren) {
+                                        // For child-dependent computed properties, always recompute
+                                        // This ensures we get fresh data when the children collection changes
+                                        const val = fn.call(reactive);
+
+                                        // Still cache the result for consistency, even though we always recompute
+                                        this.computedCache.set(name, val);
+                                        return val;
+                                    } else {
+                                        // Standard caching behavior for regular computed properties
+                                        // Return cached value if available (cache is invalidated when dependencies change)
+                                        if (this.computedCache.has(name)) {
+                                            return this.computedCache.get(name);
+                                        }
+
+                                        // Compute new value and cache it
+                                        const val = fn.call(reactive);
+                                        this.computedCache.set(name, val);
+                                        return val;
+                                    }
                                 } catch (error) {
+                                    // Handle errors gracefully during computation
                                     console.error(`Error computing property '${name}':`, error);
                                     return undefined;
                                 }
                             },
-                            enumerable: true // Make property visible in for...in loops
+                            enumerable: true
                         });
                     } catch (error) {
+                        // Handle errors during setup phase
                         console.error(`Error setting up computed property '${name}':`, error);
                     }
                 });
@@ -1088,40 +1399,63 @@
              * Supports property paths like {{user.name}} and {{items.length}}
              */
             findTextBindings() {
-                // Create tree walker to traverse all text nodes
+                // Create a TreeWalker to traverse only text nodes in the DOM
+                // This is more efficient than recursively walking all nodes manually
                 const walker = document.createTreeWalker(this.container, NodeFilter.SHOW_TEXT);
                 const bindings = [];
                 let node;
 
-                // Process each text node for template expressions
+                // Walk through each text node in the container
                 while (node = walker.nextNode()) {
                     const txt = node.textContent;
 
-                    // Enhanced regex to capture property paths with dot notation
-                    const matches = txt.match(/\{\{\s*([\w.]+)\s*\}\}/g);
+                    // Enhanced regex to capture any expression inside {{ }}
+                    // Matches patterns like {{name}}, {{user.email}}, {{items.length}}
+                    // \s* allows for optional whitespace around the expression
+                    const matches = txt.match(/\{\{\s*([^}]+)\s*\}\}/g);
 
                     if (matches) {
+                        // Process each template expression found in this text node
                         matches.forEach(match => {
-                            // Extract the full property path (e.g., "items.length", "user.name")
-                            const propertyPath = match.replace(/[{}\s]/g, '');
+                            // Extract the expression content by removing braces and whitespace
+                            // Example: "{{ user.name }}" becomes "user.name"
+                            const exprContent = match.replace(/[{}\s]/g, '').trim();
 
-                            // Get the root property name (first part before dot)
-                            const rootProperty = propertyPath.split('.')[0];
+                            // Parse the expression to handle complex cases (functions, operators, etc.)
+                            // This likely returns an object with the parsed expression and its dependencies
+                            const parsedExpr = this.parseExpression(exprContent);
 
-                            // Create binding with enhanced path support
-                            bindings.push([U.id(), {
-                                type: 'text',
-                                property: rootProperty,        // Root property for reactivity
-                                propertyPath: propertyPath,    // Full path for value resolution
-                                element: node.parentElement,  // Parent element for updates
-                                origText: txt,                 // Original text with placeholders
-                                textNode: node                 // Direct reference to text node
-                            }]);
+                            // Get all dependencies for reactivity tracking
+                            // If parsing didn't provide dependencies, fall back to the root property
+                            // Example: for "user.name.first", dependencies might include ["user", "user.name"]
+                            const dependencies = parsedExpr.dependencies || [exprContent.split('.')[0]];
+
+                            // Create a binding for each dependency to ensure proper reactivity
+                            // This allows the system to update when any part of the property path changes
+                            dependencies.forEach(dep => {
+                                // Get the root property name (first part before any dots)
+                                // Example: "user.profile.name" -> "user"
+                                const rootProperty = dep.split('.')[0];
+
+                                // Create a binding object with all necessary information for updates
+                                bindings.push([U.id(), {
+                                    type: 'text',                    // Binding type for text interpolation
+                                    property: rootProperty,          // Root property for change detection
+                                    propertyPath: dep,              // Full property path for value resolution
+                                    expressionContent: exprContent, // Original expression without braces
+                                    parsedExpression: parsedExpr,   // Parsed expression object
+                                    element: node.parentElement,    // Parent element containing the text
+                                    origText: txt,                  // Original text content of the node
+                                    textNode: node,                 // Reference to the actual text node
+                                    fullMatch: match                // Full matched pattern including braces
+                                }]);
+                            });
                         });
                     }
                 }
 
-                // Register all discovered text bindings
+                // Register all discovered text bindings in the bindings map
+                // Each binding gets a unique ID and can be looked up for updates
                 bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
             },
 
@@ -1487,6 +1821,9 @@
                 if (parent && this.parent !== parent) {
                     this.parent = parent;
                     parent.children.add(this);
+
+                    // Refresh parent's computed properties that might depend on children
+                    this.refreshChildDependentComputed(parent);
                 }
 
                 // Set up child relationships for all discovered children
@@ -1500,6 +1837,33 @@
                         // Establish new parent-child relationship
                         child.parent = this;
                         this.children.add(child);
+                    }
+                });
+
+                // Refresh computed properties that might depend on children
+                this.refreshChildDependentComputed(this);
+            },
+
+            /**
+             * Refreshes computed properties that might depend on children
+             * @param {Object} pacUnit - The PAC unit to refresh
+             */
+            refreshChildDependentComputed(pacUnit) {
+                if (!pacUnit.orig.computed) {
+                    return;
+                }
+
+                Object.keys(pacUnit.orig.computed).forEach(name => {
+                    const fn = pacUnit.orig.computed[name];
+                    if (typeof fn === 'function') {
+                        const fnString = fn.toString();
+                        // Check if this computed property accesses children
+                        if (/this\.children|this\.findChild|Array\.from\(this\.children\)/.test(fnString)) {
+                            // Clear cache to force recomputation
+                            pacUnit.computedCache.delete(name);
+                            // Trigger DOM update for this computed property
+                            pacUnit.updateDOM(name, pacUnit.abstraction[name]);
+                        }
                     }
                 });
             },
@@ -1539,6 +1903,9 @@
                     detail: {eventType: type, data, childPAC: child},
                     bubbles: true
                 }));
+
+                // REFRESH COMPUTED PROPERTIES that might depend on child state
+                this.refreshChildDependentComputed(this);
             },
 
             /**
