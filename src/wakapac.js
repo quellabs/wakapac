@@ -1249,68 +1249,85 @@
              * @param {Object} reactive - The reactive object to add computed properties to
              */
             setupComputedProperties(reactive) {
-                // Early exit if no computed properties are defined
+                // Early return if no computed properties are defined
                 if (!this.orig.computed) {
                     return;
                 }
 
-                // Iterate through each computed property definition
+                // Iterate through all defined computed properties
                 Object.keys(this.orig.computed).forEach(name => {
-                    const fn = this.orig.computed[name];
+                    const computedDef = this.orig.computed[name];
 
-                    // Skip non-function entries (safety check)
-                    if (typeof fn !== 'function') {
+                    // Handle both function and object definitions
+                    let getter, setter;
+
+                    if (typeof computedDef === 'function') {
+                        // Simple computed property - just a getter function
+                        // Example: computed: { fullName() { return this.firstName + ' ' + this.lastName; } }
+                        getter = computedDef;
+                        setter = null;
+                    } else if (computedDef && typeof computedDef === 'object') {
+                        // Two-way computed property with get and set methods
+                        // Example: computed: { fullName: { get() {...}, set(val) {...} } }
+                        getter = computedDef.get;
+                        setter = computedDef.set;
+
+                        // Validate that getter function exists
+                        if (typeof getter !== 'function') {
+                            console.error(`Computed property '${name}' must have a getter function`);
+                            return;
+                        }
+                    } else {
+                        // Invalid computed property definition
+                        console.error(`Invalid computed property definition for '${name}'`);
                         return;
                     }
 
                     try {
-                        // Analyze the function to determine which reactive properties it depends on
-                        // This creates a dependency graph for cache invalidation
-                        const deps = this.analyzeComputed(fn);
+                        // Analyze the getter function to determine what reactive properties it depends on
+                        // This creates a dependency graph for efficient cache invalidation
+                        const deps = this.analyzeComputed(getter);
                         this.computedDeps.set(name, deps);
 
-                        // Build reverse dependency map for efficient updates
-                        // When a property changes, we can quickly find all computed properties that need invalidation
+                        // Build reverse dependency map for efficient invalidation
+                        // When a reactive property changes, we need to know which computed properties to invalidate
                         deps.forEach(dep => {
                             // Initialize dependency list if it doesn't exist
                             if (!this.propDeps.has(dep)) {
                                 this.propDeps.set(dep, []);
                             }
 
-                            // Add this computed property to the dependency's dependents list
+                            // Add this computed property to the dependency list of the reactive property
                             const depList = this.propDeps.get(dep);
                             if (!depList.includes(name)) {
                                 depList.push(name);
                             }
                         });
 
-                        // Define the computed property with a getter that implements caching logic
-                        Object.defineProperty(reactive, name, {
+                        // Create the property descriptor for the computed property
+                        const descriptor = {
                             get: () => {
                                 try {
-                                    // Special handling for computed properties that depend on dynamic children
-                                    // These properties need to always recompute since children can change
-                                    // without triggering our normal dependency tracking
-                                    const fnString = fn.toString();
+                                    // Special handling for computed properties that access dynamic children
+                                    // These properties need to be recalculated every time since children can change
+                                    const fnString = getter.toString();
                                     const accessesChildren = /this\.children|this\.findChild|Array\.from\(this\.children\)/.test(fnString);
 
                                     if (accessesChildren) {
-                                        // For child-dependent computed properties, always recompute
-                                        // This ensures we get fresh data when the children collection changes
-                                        const val = fn.call(reactive);
-
-                                        // Still cache the result for consistency, even though we always recompute
+                                        // Always recalculate for dynamic children access
+                                        // Don't use cache since children relationships can change dynamically
+                                        const val = getter.call(reactive);
                                         this.computedCache.set(name, val);
                                         return val;
                                     } else {
-                                        // Standard caching behavior for regular computed properties
-                                        // Return cached value if available (cache is invalidated when dependencies change)
+                                        // Standard caching behavior for static dependencies
+                                        // Return cached value if available, otherwise compute and cache
                                         if (this.computedCache.has(name)) {
                                             return this.computedCache.get(name);
                                         }
 
-                                        // Compute new value and cache it
-                                        const val = fn.call(reactive);
+                                        // Compute new value and store in cache
+                                        const val = getter.call(reactive);
                                         this.computedCache.set(name, val);
                                         return val;
                                     }
@@ -1320,10 +1337,42 @@
                                     return undefined;
                                 }
                             },
-                            enumerable: true
-                        });
+                            enumerable: true // Make property visible in for...in loops and Object.keys()
+                        };
+
+                        // Add setter functionality if defined (for two-way computed properties)
+                        if (setter && typeof setter === 'function') {
+                            descriptor.set = (newVal) => {
+                                try {
+                                    // Clear the cache before calling setter to ensure fresh computation
+                                    this.computedCache.delete(name);
+
+                                    // Call the custom setter with the new value
+                                    // The setter should modify the underlying reactive properties
+                                    setter.call(reactive, newVal);
+
+                                    // The setter should have modified underlying properties,
+                                    // which will trigger reactivity and update the computed value
+                                    // Force recalculation by clearing cache again (safety measure)
+                                    this.computedCache.delete(name);
+
+                                    // Manually trigger DOM updates for this computed property
+                                    // This ensures the UI reflects the new computed value immediately
+                                    this.updateDOM(name, reactive[name]);
+
+                                } catch (error) {
+                                    // Handle setter errors gracefully
+                                    console.error(`Error setting computed property '${name}':`, error);
+                                }
+                            };
+                        }
+
+                        // Actually define the computed property on the reactive object
+                        // This makes the computed property accessible as a regular property
+                        Object.defineProperty(reactive, name, descriptor);
+
                     } catch (error) {
-                        // Handle errors during setup phase
+                        // Handle any errors during the setup process
                         console.error(`Error setting up computed property '${name}':`, error);
                     }
                 });
