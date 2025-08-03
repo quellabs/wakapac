@@ -61,8 +61,8 @@ Include WakaPAC in your HTML:
     <p>You clicked {{count}} times</p>
     <p>Double count: {{doubleCount}}</p>
 
-    <input data-pac-bind="firstName" placeholder="First name">
-    <input data-pac-bind="lastName" placeholder="Last name">
+    <input data-pac-bind="value:firstName" placeholder="First name">
+    <input data-pac-bind="value:lastName" placeholder="Last name">
 
     <button data-pac-bind="click:increment">Click me!</button>
 
@@ -145,13 +145,44 @@ Include WakaPAC in your HTML:
 
 ### Text Interpolation (Vue-style)
 
-Use double braces `{{}}` to bind data to text content:
+Use double braces `{{}}` to bind data to text content. **Note: Only simple property names are supported - no expressions, method calls, or property access:**
 
 ```html
+<!-- ✅ Correct: Simple properties -->
 <p>Hello, {{name}}!</p>
+<p>User name: {{userName}}</p>
+<p>Computed value: {{computedProperty}}</p>
+
+<!-- ❌ Incorrect: Property access not supported -->
 <p>Total items: {{items.length}}</p>
 <p>User info: {{user.name}} ({{user.age}})</p>
-<p>Computed value: {{computedProperty}}</p>
+
+<!-- ✅ Correct: Use computed properties instead -->
+<p>Total items: {{itemCount}}</p>
+<p>User info: {{userInfo}}</p>
+```
+
+```javascript
+wakaPAC('#app', {
+    name: 'John',
+    userName: 'john_doe',
+    items: [{id: 1}, {id: 2}, {id: 3}],
+    user: {
+        name: 'John Doe',
+        age: 30
+    },
+
+    computed: {
+        // ✅ Create computed properties for complex values
+        itemCount() {
+            return this.items.length;
+        },
+        
+        userInfo() {
+            return `${this.user.name} (${this.user.age})`;
+        }
+    }
+});
 ```
 
 ### Deep Reactivity Example (Vue-inspired with React-like state updates)
@@ -194,7 +225,7 @@ Use `data-pac-bind` to bind data to element attributes:
 
 ```html
 <!-- Basic property binding (like Vue v-model) -->
-<input type="text" data-pac-bind="name">
+<input type="text" data-pac-bind="value:name">
 
 <!-- Attribute binding (like Vue :class) -->
 <div data-pac-bind="class:statusClass,title:statusText"></div>
@@ -209,11 +240,11 @@ Use `data-pac-bind` to bind data to element attributes:
 Form elements automatically sync with your data:
 
 ```html
-<input type="text" data-pac-bind="username">
-<input type="number" data-pac-bind="age">
-<input type="email" data-pac-bind="email">
-<textarea data-pac-bind="description"></textarea>
-<select data-pac-bind="category">
+<input type="text" data-pac-bind="value:username">
+<input type="number" data-pac-bind="value:age">
+<input type="email" data-pac-bind="value:email">
+<textarea data-pac-bind="value:description"></textarea>
+<select data-pac-bind="value:category">
     <option value="A">Category A</option>
     <option value="B">Category B</option>
 </select>
@@ -280,6 +311,11 @@ const app = wakaPAC('#app', {
             return this.items.reduce((sum, item) => sum + item.price, 0);
         },
         
+        // Array length computed property
+        itemCount() {
+            return this.items.length;
+        },
+        
         // Computed property depending on other computed properties
         greeting() {
             return `Hello, ${this.fullName}! Your total is $${this.totalPrice}`;
@@ -299,9 +335,14 @@ computed: {
         return this.items.filter(item => item.price > 15);
     },
     
+    expensiveItemCount() {
+        // Depends on other computed property
+        return this.expensiveItems.length;
+    },
+    
     summary() {
         // Depends on multiple properties and other computed properties
-        return `${this.fullName} has ${this.expensiveItems.length} expensive items`;
+        return `${this.fullName} has ${this.expensiveItemCount} expensive items`;
     }
 }
 ```
@@ -315,9 +356,9 @@ WakaPAC supports different update modes for form inputs to optimize performance:
 Updates data model on every keystroke:
 
 ```html
-<input type="text" data-pac-bind="name">
+<input type="text" data-pac-bind="value:name">
 <!-- Or explicitly -->
-<input type="text" data-pac-bind="name" data-pac-update="immediate">
+<input type="text" data-pac-bind="value:name" data-pac-update="immediate">
 ```
 
 ### Change Mode
@@ -325,7 +366,7 @@ Updates data model on every keystroke:
 Updates only when the input loses focus:
 
 ```html
-<input type="text" data-pac-bind="name" data-pac-update="change">
+<input type="text" data-pac-bind="value:name" data-pac-update="change">
 ```
 
 ### Delayed Mode
@@ -333,7 +374,7 @@ Updates only when the input loses focus:
 Updates after a specified delay (debounced):
 
 ```html
-<input type="text" data-pac-bind="searchQuery" 
+<input type="text" data-pac-bind="value:searchQuery" 
        data-pac-update="delayed" data-pac-delay="500">
 ```
 
@@ -447,6 +488,17 @@ const app = wakaPAC('#app', {
         {id: 1, text: 'Learn WakaPAC', completed: false},
         {id: 2, text: 'Build an app', completed: true}
     ],
+    
+    // Computed property for todo count
+    computed: {
+        todoCount() {
+            return this.todos.length;
+        },
+        
+        completedCount() {
+            return this.todos.filter(todo => todo.completed).length;
+        }
+    },
     
     // Methods receive item, index, and event
     toggleTodo(todo, index, event) {
@@ -565,7 +617,7 @@ const component = wakaPAC(selector, abstraction, options);
 ### Template Syntax Reference
 
 ```html
-<!-- Text interpolation -->
+<!-- Text interpolation (property names only) -->
 <span>Welcome {{userName}}!</span>
 
 <!-- Conditional rendering -->
@@ -671,6 +723,11 @@ computed: {
         return this.items.filter(item => 
             item.name.toLowerCase().includes(this.searchQuery.toLowerCase())
         );
+    },
+    
+    // Always use computed properties for array lengths
+    filteredItemCount() {
+        return this.filteredItems.length;
     }
 }
 
@@ -682,6 +739,42 @@ computed: {
 <input data-pac-bind="email" data-pac-update="change">
 ```
 
+### 3. Template Interpolation Best Practices
+
+```javascript
+// ✅ Good: Use computed properties for any complex values
+wakaPAC('#app', {
+    items: [{name: 'Item 1'}, {name: 'Item 2'}],
+    user: {firstName: 'John', lastName: 'Doe'},
+    
+    computed: {
+        itemCount() {
+            return this.items.length;
+        },
+        
+        firstItemName() {
+            return this.items.length > 0 ? this.items[0].name : 'No items';
+        },
+        
+        fullName() {
+            return `${this.user.firstName} ${this.user.lastName}`;
+        }
+    }
+});
+```
+
+```html
+<!-- ✅ Good: Simple property references -->
+<p>Total: {{itemCount}}</p>
+<p>First: {{firstItemName}}</p>
+<p>User: {{fullName}}</p>
+
+<!-- ❌ Bad: Property access in templates -->
+<p>Total: {{items.length}}</p>
+<p>First: {{items[0].name}}</p>
+<p>User: {{user.firstName}} {{user.lastName}}</p>
+```
+
 ## 🔄 Migration Guide
 
 ### Key Concepts Translation
@@ -689,7 +782,7 @@ computed: {
 WakaPAC combines familiar patterns from popular frameworks:
 
 **Template Syntax:**
-- Use `{{property}}` for text interpolation
+- Use `{{property}}` for text interpolation (property names only)
 - Use `data-pac-bind="property"` for input binding
 - Use `data-pac-bind="visible:condition"` for conditional rendering
 - Use `data-pac-bind="click:method"` for event handling
@@ -698,6 +791,7 @@ WakaPAC combines familiar patterns from popular frameworks:
 - Properties are automatically reactive (no `setState` needed)
 - Computed properties recalculate automatically
 - Deep object and array changes are detected
+- Use computed properties for any derived values (like array lengths)
 
 **Component Communication:**
 - Use `notifyParent()` to send data up
@@ -718,12 +812,17 @@ WakaPAC combines familiar patterns from popular frameworks:
 - For nested objects, ensure deep reactivity is enabled
 - Check that computed property dependencies are correctly accessed
 
-**3. Performance issues**
+**3. Template interpolation not working**
+- Remember: only simple property names are supported in `{{}}`
+- Use computed properties for any property access, method calls, or expressions
+- Check that the property exists in your component
+
+**4. Performance issues**
 - Use appropriate update modes (delayed for search, change for validation)
 - Avoid complex operations in computed properties
 - Consider using requestAnimationFrame for heavy DOM updates
 
-**4. Hierarchy communication not working**
+**5. Hierarchy communication not working**
 - Verify parent-child relationships are established (check DOM structure)
 - Ensure onChildUpdate and receiveFromParent methods are defined
 - Check that event types and data match between sender and receiver
@@ -738,13 +837,13 @@ console.log('Children:', app.children);
 // Monitor property changes
 const app = wakaPAC('#app', {
     name: 'John',
-    
+
     // Override property setter for debugging
     set name(value) {
         console.log('Name changing from', this._name, 'to', value);
         this._name = value;
     },
-    
+
     get name() {
         return this._name;
     }

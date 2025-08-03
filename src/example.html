@@ -67,6 +67,12 @@
         .status-high { background: #dc3545; }
         .status-inactive { background: #6c757d; }
 
+        .completed {
+            background: #f0f8f0 !important;
+            text-decoration: line-through;
+            color: #666;
+        }
+
         button {
             margin: 5px;
             padding: 8px 16px;
@@ -192,7 +198,7 @@
     <div class="demo-grid">
         <!-- Basic Reactive Demo -->
         <div id="basic-app">
-            <h3>🔄 Basic Reactivity</h3>
+            <h3>🔄 Basic Reactivity & Input Update Modes</h3>
             <p>Hello, <strong>{{name}}</strong>!</p>
             <p>Count: <span class="status-{{status}}">{{count}}</span></p>
             <p>Status: <span class="status-{{status}}" data-pac-bind="click:toggleStatus" style="cursor: pointer; text-decoration: underline;">{{status}}</span> (click to change)</p>
@@ -203,27 +209,77 @@
                 <button class="btn-secondary" data-pac-bind="click:reset">🔄 Reset</button>
             </div>
 
-            <div style="margin-top: 15px;">
-                <label>Name (immediate update):</label><br>
-                <input type="text" data-pac-bind="name" placeholder="Updates immediately" />
-            </div>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                <h4>🎯 Input Update Mode Showcase</h4>
 
-            <div data-pac-bind="visible:showAdvanced" style="margin-top: 15px; padding: 10px; background: #f0f8ff; border-radius: 4px;">
-                <h4>🎯 Advanced Controls</h4>
-                <div>
-                    <label>Message (delayed 500ms):</label><br>
-                    <input type="text" data-pac-bind="message" data-pac-update="delayed" data-pac-delay="500" />
+                <div style="margin: 10px 0; padding: 10px; border: 2px solid #007bff; border-radius: 4px;">
+                    <label><strong>🚀 Immediate Mode (default):</strong></label><br>
+                    <input type="text" data-pac-bind="value:name" placeholder="Updates on every keystroke" style="width: 250px;" />
+                    <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                        Live value: <span style="font-weight: bold; color: #007bff;">{{name}}</span>
+                        <span style="color: #28a745;">← Updates instantly!</span>
+                    </div>
                 </div>
-                <div>
-                    <label>Status Text (change only):</label><br>
-                    <input type="text" data-pac-bind="statusText" data-pac-update="change" />
+
+                <div style="margin: 10px 0; padding: 10px; border: 2px solid #ffc107; border-radius: 4px;">
+                    <label><strong>⏱️ Delayed Mode (500ms):</strong></label><br>
+                    <input type="text" data-pac-bind="value:delayedText" data-pac-update="delayed" data-pac-delay="500"
+                           placeholder="Updates 500ms after you stop typing" style="width: 250px;" />
+                    <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                        Live value: <strong style="color: #ffc107;">{{delayedText}}</strong>
+                        <span style="color: #17a2b8;">← Updates after 500ms delay</span>
+                    </div>
                 </div>
-                <p><strong>Message:</strong> {{message}} | <strong>Status Text:</strong> {{statusText}}</p>
+
+                <div style="margin: 10px 0; padding: 10px; border: 2px solid #28a745; border-radius: 4px;">
+                    <label><strong>🎯 Change Mode (on blur):</strong></label><br>
+                    <input type="text" data-pac-bind="value:changeText" data-pac-update="change"
+                           placeholder="Updates only when you click away (blur)" style="width: 250px;" />
+                    <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                        Live value: <strong style="color: #28a745;">{{changeText}}</strong>
+                        <span style="color: #dc3545;">← Updates only on blur/change event</span>
+                    </div>                </div>
+
+                <div style="margin: 10px 0; padding: 10px; border: 2px solid #17a2b8; border-radius: 4px;">
+                    <label><strong>🔍 All Values Combined:</strong></label><br>
+                    <div style="background: white; padding: 10px; border-radius: 4px; margin-top: 5px;">
+                        <strong>Name:</strong> {{name}}<br>
+                        <strong>Delayed:</strong> {{delayedText}}<br>
+                        <strong>Change:</strong> {{changeText}}<br>
+                        <strong>Combined:</strong> {{allValuesDescription}}<br>
+                        <strong>Last Updated:</strong> {{lastUpdateTime}}
+                    </div>
+                </div>
             </div>
 
             <button class="btn-info" data-pac-bind="click:toggleAdvanced">
-                {{advancedButtonText}} Advanced Controls
+                {{advancedButtonText}} Advanced Demo
             </button>
+
+            <div data-pac-bind="visible:showAdvanced" style="margin-top: 15px; padding: 10px; background: #f0f8ff; border-radius: 4px;">
+                <h4>🎯 Advanced Features Demo</h4>
+                <div>
+                    <label>Search with 1000ms delay (simulates API calls):</label><br>
+                    <input type="text" data-pac-bind="value:searchQuery" data-pac-update="delayed" data-pac-delay="1000"
+                           placeholder="Search simulates API call..." style="width: 300px;" />
+                    <div style="margin-top: 5px;">
+                        <strong>Search Results for:</strong> "{{searchQuery}}"
+                        <span data-pac-bind="visible:searchQuery" style="color: #28a745;">✓ Found {{searchResultCount}} results</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 15px;">
+                    <label>Form validation (change mode):</label><br>
+                    <input type="email" data-pac-bind="value:email" data-pac-update="change"
+                           placeholder="Enter email (validates on blur)" style="width: 300px;" />
+                    <div style="margin-top: 5px;">
+                        <span data-pac-bind="visible:email">
+                            Email: {{email}} -
+                            <span style="color: {{emailValidationColor}};">{{emailValidationMessage}}</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Todo List Demo -->
@@ -232,7 +288,7 @@
             <p><strong>Total:</strong> {{todoCount}} | <strong>Active:</strong> {{activeCount}} | <strong>Completed:</strong> {{completedCount}}</p>
 
             <form data-pac-bind="submit:addTodo">
-                <input type="text" data-pac-bind="newTodo" placeholder="Add new todo..." style="width: 200px;" />
+                <input type="text" data-pac-bind="value:newTodo" placeholder="Add new todo..." style="width: 200px;" />
                 <button type="submit" class="btn-success">➕ Add</button>
             </form>
 
@@ -242,8 +298,12 @@
                 <button class="btn-secondary" data-pac-bind="click:showCompleted">Completed</button>
             </div>
 
-            <div id="todo-list" style="margin-top: 10px;">
-                <!-- Todo items will be rendered here by the component -->
+            <div data-pac-bind="foreach:filteredTodos" data-pac-item="todo" data-pac-index="index" style="margin-top: 10px;">
+                <div style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; margin: 5px 0; border-radius: 4px;" data-pac-bind="class:todo.completed">
+                    <input type="checkbox" data-pac-bind="checked:todo.completed,change:toggleTodoById" style="margin-right: 10px;">
+                    <span style="flex: 1;" data-pac-bind="class:todo.completed">{{todo.text}}</span>
+                    <button class="btn-danger" data-pac-bind="click:removeTodoById" style="padding: 4px 8px; font-size: 12px;">✕</button>
+                </div>
             </div>
 
             <div data-pac-bind="visible:todoCount" style="margin-top: 10px;">
@@ -285,7 +345,7 @@
 
             <div style="margin-top: 10px;">
                 <label>Master Value:</label>
-                <input type="number" data-pac-bind="masterValue" placeholder="Value to broadcast" />
+                <input type="number" data-pac-bind="value:masterValue" placeholder="Value to broadcast" />
                 <button class="btn-secondary" data-pac-bind="click:broadcastMasterValue">📡 Broadcast to All</button>
             </div>
         </div>
@@ -318,9 +378,9 @@
 
             <div>
                 <label>Task Name:</label>
-                <input type="text" data-pac-bind="taskName" placeholder="Enter task name" />
+                <input type="text" data-pac-bind="value:taskName" placeholder="Enter task name" />
                 <label>Worker Name:</label>
-                <input type="text" data-pac-bind="name" placeholder="Worker name" />
+                <input type="text" data-pac-bind="value:name" placeholder="Worker name" />
             </div>
 
             <!-- Grandchild PAC Unit -->
@@ -349,9 +409,9 @@
 
                 <div>
                     <label>Sub-Task:</label>
-                    <input type="text" data-pac-bind="subTask" placeholder="Enter sub-task" />
+                    <input type="text" data-pac-bind="value:subTask" placeholder="Enter sub-task" />
                     <label>Progress:</label>
-                    <input type="number" data-pac-bind="progress" min="0" max="100" />
+                    <input type="number" data-pac-bind="value:progress" min="0" max="100" />
                 </div>
             </div>
         </div>
@@ -380,9 +440,12 @@
         name: 'World',
         count: 0,
         status: 'low',
-        message: 'Type here...',
-        statusText: 'Status text here...',
+        delayedText: 'Type here with delay...',
+        changeText: 'Type here (change only)...',
+        searchQuery: '',
+        email: '',
         showAdvanced: false,
+        lastUpdate: Date.now(),
 
         computed: {
             fullDescription() {
@@ -391,6 +454,40 @@
 
             advancedButtonText() {
                 return this.showAdvanced ? 'Hide' : 'Show';
+            },
+
+            allValuesDescription() {
+                // Access all properties to ensure they trigger updates
+                const name = this.name;
+                const delayed = this.delayedText;
+                const change = this.changeText;
+                this.lastUpdate = Date.now(); // Update timestamp
+                return `Name: "${name}" | Delayed: "${delayed}" | Change: "${change}"`;
+            },
+
+            lastUpdateTime() {
+                // Force dependency on lastUpdate
+                const updateTime = this.lastUpdate;
+                return new Date(updateTime).toLocaleTimeString();
+            },
+
+            searchResultCount() {
+                const query = this.searchQuery;
+                return query ? query.length * 3 : 0;
+            },
+
+            emailValidationColor() {
+                const email = this.email;
+                if (!email) return '#666';
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(email) ? '#28a745' : '#dc3545';
+            },
+
+            emailValidationMessage() {
+                const email = this.email;
+                if (!email) return 'Enter an email address';
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(email) ? 'Valid email ✓' : 'Invalid email format ✗';
             }
         },
 
@@ -417,8 +514,10 @@
             this.count = 0;
             this.name = 'World';
             this.status = 'low';
-            this.message = 'Reset!';
-            this.statusText = 'Status reset';
+            this.delayedText = 'Reset delayed text!';
+            this.changeText = 'Reset change text!';
+            this.searchQuery = '';
+            this.email = '';
         },
 
         toggleAdvanced() {
@@ -450,12 +549,16 @@
             },
 
             filteredTodos() {
-                if (this.filter === 'active') {
-                    return this.todos.filter(todo => !todo.completed);
-                } else if (this.filter === 'completed') {
-                    return this.todos.filter(todo => todo.completed);
+                // Make sure we access the filter property to establish dependency
+                const currentFilter = this.filter;
+                const allTodos = this.todos;
+
+                if (currentFilter === 'active') {
+                    return allTodos.filter(todo => !todo.completed);
+                } else if (currentFilter === 'completed') {
+                    return allTodos.filter(todo => todo.completed);
                 }
-                return this.todos;
+                return allTodos;
             },
 
             allCompleted() {
@@ -470,52 +573,50 @@
         addTodo(event) {
             event.preventDefault();
             if (this.newTodo.trim()) {
+                console.log('Adding todo:', this.newTodo);
+                console.log('Current todos before:', this.todos.length);
+
                 // Demonstrate deep reactivity - this push will trigger updates
                 this.todos.push({
                     id: Date.now(),
                     text: this.newTodo.trim(),
                     completed: false
                 });
+
+                console.log('Current todos after:', this.todos.length);
+                console.log('Filtered todos:', this.filteredTodos);
+
                 this.newTodo = '';
-                this.renderTodos();
             }
         },
 
-        toggleTodo(todoId) {
+        toggleTodoById(todo, index, event) {
             // Demonstrate deep reactivity - nested property changes
-            const todo = this.todos.find(t => t.id === todoId);
-            if (todo) {
-                todo.completed = !todo.completed;
-                this.renderTodos();
-            }
+            todo.completed = !todo.completed;
         },
 
-        removeTodo(todoId) {
-            const index = this.todos.findIndex(t => t.id === todoId);
-            if (index !== -1) {
-                this.todos.splice(index, 1);
-                this.renderTodos();
+        removeTodoById(todo, index, event) {
+            // Remove from the todos array
+            const todoIndex = this.todos.findIndex(t => t.id === todo.id);
+            if (todoIndex !== -1) {
+                this.todos.splice(todoIndex, 1);
             }
         },
 
         showAll() {
             this.filter = 'all';
-            this.renderTodos();
         },
 
         showActive() {
             this.filter = 'active';
-            this.renderTodos();
         },
 
         showCompleted() {
             this.filter = 'completed';
-            this.renderTodos();
         },
 
         clearCompleted() {
             this.todos = this.todos.filter(todo => !todo.completed);
-            this.renderTodos();
         },
 
         toggleAllTodos() {
@@ -523,24 +624,8 @@
             this.todos.forEach(todo => {
                 todo.completed = !allCompleted;
             });
-            this.renderTodos();
-        },
-
-        renderTodos() {
-            const container = document.getElementById('todo-list');
-            container.innerHTML = this.filteredTodos.map(todo => `
-            <div style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; margin: 5px 0; border-radius: 4px; ${todo.completed ? 'background: #f0f8f0;' : ''}">
-                <input type="checkbox" ${todo.completed ? 'checked' : ''} 
-                       onchange="todoApp.toggleTodo(${todo.id})" style="margin-right: 10px;">
-                <span style="flex: 1; ${todo.completed ? 'text-decoration: line-through; color: #666;' : ''}">${todo.text}</span>
-                <button onclick="todoApp.removeTodo(${todo.id})" class="btn-danger" style="padding: 4px 8px; font-size: 12px;">✕</button>
-            </div>
-        `).join('');
         }
     });
-
-    // Initial render of todos
-    todoApp.renderTodos();
 
     // Hierarchical Communication Components
     const grandchildPAC = wakaPAC('#grandchild-app', {

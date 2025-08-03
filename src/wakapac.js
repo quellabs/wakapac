@@ -632,7 +632,6 @@
                 this.pending.forEach(prop => {
                     const val = this.pendingVals[prop];
 
-                    // Update all bindings for this property
                     this.bindings.forEach(binding => {
                         if (binding.property !== prop && binding.type !== 'foreach') {
                             return;
@@ -651,7 +650,12 @@
                                 if (binding.element.value !== val) {
                                     binding.element.value = val;
                                 }
+                                break;
 
+                            case 'checked': // NEW: Handle checked binding updates
+                                if (binding.element.checked !== !!val) {
+                                    binding.element.checked = !!val;
+                                }
                                 break;
 
                             case 'visible':
@@ -665,7 +669,6 @@
                     });
                 });
 
-                // Clear pending updates
                 this.pending = null;
                 this.pendingVals = null;
             },
@@ -1028,30 +1031,24 @@
              * Excludes nested foreach elements to avoid duplicate processing
              */
             findAttrBindings: function() {
-                // Find all elements with data-pac-bind attribute, excluding those inside foreach loops
-                // The :not() selector prevents processing nested bindings that will be handled by foreach
                 const elements = this.container.querySelectorAll('[data-pac-bind]:not([data-pac-bind*="foreach"] [data-pac-bind])');
                 const bindings = [];
 
-                // Process each element with binding attributes
                 Array.from(elements).forEach(function(el) {
                     const bindStr = el.getAttribute('data-pac-bind');
 
                     // Handle multiple bindings on a single element (comma-separated)
                     for (let i = 0; i < bindStr.split(',').length; i++) {
-                        // Fetch all binds
                         const bind = bindStr.split(',')[i];
-
-                        // Split binding string into type and target (e.g., "click:handleClick" -> ["click", "handleClick"])
                         const parts = bind.trim().split(':');
-                        const type = parts[0] ? parts[0].trim() : '';  // Binding type (click, value, visible, etc.)
-                        const target = parts[1] ? parts[1].trim() : ''; // Target property or method
-                        const key = bind + '_' + U.id(); // Unique key for this binding
+                        const type = parts[0] ? parts[0].trim() : '';
+                        const target = parts[1] ? parts[1].trim() : '';
+                        const key = bind + '_' + U.id();
 
-                        // Handle foreach binding - creates repeating elements based on array data
+                        // Handle foreach binding
                         if (type === 'foreach') {
                             bindings.push([key, this.createForeachBinding(el, target)]);
-                            el.innerHTML = ''; // Clear template content after storing it
+                            el.innerHTML = '';
                             continue;
                         }
 
@@ -1061,25 +1058,40 @@
                             continue;
                         }
 
-                        // Handle visibility binding - shows/hides element based on property value
+                        // Handle visibility binding
                         if (type === 'visible') {
                             bindings.push([key, this.createVisibilityBinding(el, target)]);
                             continue;
                         }
 
+                        // Handle input value binding (NEW: explicit value:property syntax)
+                        if (type === 'value') {
+                            this.setupInput(el, target);
+                            bindings.push([key, this.createInputBinding(el, target)]);
+                            continue;
+                        }
+
+                        // Handle checkbox checked binding (NEW: checked:property syntax)
+                        if (type === 'checked') {
+                            this.setupInput(el, target, 'checked');
+                            bindings.push([key, this.createCheckedBinding(el, target)]);
+                            continue;
+                        }
+
                         // Handle attribute bindings (class, style, disabled, etc.)
-                        if (bind.indexOf(':') !== -1) {
+                        if (bind.indexOf(':') !== -1 && target) {
                             bindings.push([key, this.createAttributeBinding(el, type, target)]);
                             continue;
                         }
 
-                        // Default case: Input binding for two-way data binding with form elements
-                        this.setupInput(el, bind.trim());
-                        bindings.push([key, this.createInputBinding(el, bind.trim())]);
+                        // Invalid binding syntax - all bindings must use type:target format
+                        if (bind.indexOf(':') === -1) {
+                            console.error(`Invalid binding syntax: "${bind}". All bindings must use "type:target" format (e.g., "value:propertyName", "click:methodName").`);
+                            continue;
+                        }
                     }
                 }.bind(this));
 
-                // Store all created bindings in the bindings map for later reference
                 bindings.forEach(function(binding) {
                     this.bindings.set(binding[0], binding[1]);
                 }.bind(this));
@@ -1179,11 +1191,32 @@
              * Sets up input element attributes for data binding
              * @param {Element} el - Input element
              * @param {string} prop - Property name to bind to
+             * @param {string} bindingType - Type of binding ('value' or 'checked')
              */
-            setupInput(el, prop) {
+            setupInput(el, prop, bindingType = 'value') {
                 el.setAttribute('data-pac-property', prop);
+                el.setAttribute('data-pac-binding-type', bindingType);
                 el.setAttribute('data-pac-update-mode', el.getAttribute('data-pac-update') || this.config.updateMode);
                 el.setAttribute('data-pac-update-delay', el.getAttribute('data-pac-delay') || this.config.delay);
+            },
+
+            /**
+             * Creates a checked binding object for checkboxes/radio buttons
+             * @param {Element} el - The input element to bind
+             * @param {string} prop - The property name to bind to
+             * @returns {Object} Checked binding configuration object
+             */
+            createCheckedBinding: function(el, prop) {
+                const delay = parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay || 0;
+                const updateMode = el.getAttribute('data-pac-update-mode') || this.config.updateMode || 'immediate';
+
+                return {
+                    type: 'checked',
+                    property: prop,
+                    element: el,
+                    updateMode: updateMode,
+                    delay: delay
+                };
             },
 
             /**
@@ -1246,28 +1279,52 @@
              * @param {string} prop - The bound property name
              */
             _handleInputEvent(ev, target, prop) {
-                // Get update mode from element attribute or fall back to config default
+                // Determine the update mode for this input element
+                // Priority: element's data attribute > global config default
                 const mode = target.getAttribute('data-pac-update-mode') || this.config.updateMode;
-                const value = target.value;
 
+                // Determine what property of the element to bind to (value vs checked)
+                // Most inputs use 'value', but checkboxes/radios use 'checked'
+                const bindingType = target.getAttribute('data-pac-binding-type') || 'value';
+
+                // Extract the appropriate value based on the binding type
+                let value;
+                if (bindingType === 'checked') {
+                    // For checkboxes and radio buttons, use the checked state
+                    value = target.checked;
+                } else {
+                    // For text inputs, selects, etc., use the value property
+                    value = target.value;
+                }
+
+                // Handle the update based on the configured mode
                 switch (mode) {
                     case 'change':
-                        // Store value temporarily, wait for change event to commit
+                        // CHANGE MODE: Wait for explicit change event (e.g., blur or Enter)
+                        // Store the current value as pending but don't update the model yet
+                        // This prevents updates on every keystroke for better performance
                         target.setAttribute('data-pac-pending-value', value);
                         break;
 
                     case 'immediate':
-                        // Update data model immediately on every keystroke
+                        // IMMEDIATE MODE: Update the data model on every input event
+                        // Provides real-time synchronization but may impact performance
+                        // with frequent updates during typing
                         this.abstraction[prop] = value;
                         break;
 
                     case 'delayed':
-                        // Update after a delay (debounced input)
+                        // DELAYED MODE: Use debounced updates to balance responsiveness and performance
+                        // Updates occur after a brief pause in typing, reducing excessive calls
                         this.updateFromDOM(target, prop, value);
                         break;
 
                     default:
+                        // Fallback for invalid or unknown update modes
+                        // Log a warning to help with debugging configuration issues
                         console.warn(`Unknown update mode: ${mode}. Using immediate.`);
+
+                        // Default to immediate mode as a safe fallback
                         this.abstraction[prop] = value;
                 }
             },
@@ -1281,18 +1338,39 @@
              */
             _handleChangeEvent(ev, target, prop) {
                 // Generate unique key for this element's delayed update
+                // This key combines the property name with the element's specific identifier
+                // to ensure each bound element has its own delayed update tracking
                 const delayKey = `${prop}_${target.getAttribute('data-pac-property')}`;
 
+                // Determine how to extract the value from this element
+                // Default to 'value' but could be 'checked' for checkboxes/radios
+                const bindingType = target.getAttribute('data-pac-binding-type') || 'value';
+
                 // Cancel any pending delayed update for this element
+                // This prevents multiple rapid changes from creating multiple timeouts
                 if (this.delays.has(delayKey)) {
                     clearTimeout(this.delays.get(delayKey));
                     this.delays.delete(delayKey);
                 }
 
-                // Commit the current value to the data model
-                this.abstraction[prop] = target.value;
+                // Extract the appropriate value based on the binding type
+                let value;
 
-                // Clean up pending value marker
+                if (bindingType === 'checked') {
+                    // For checkboxes and radio buttons, use the checked state
+                    value = target.checked;
+                } else {
+                    // For text inputs, selects, etc., use the value property
+                    value = target.value;
+                }
+
+                // Immediately commit the current value to the data model
+                // This ensures the model stays in sync with user changes
+                this.abstraction[prop] = value;
+
+                // Remove the pending value marker attribute
+                // This indicates the value has been successfully committed
+                // and is no longer in a temporary/pending state
                 target.removeAttribute('data-pac-pending-value');
             },
 
