@@ -1,8 +1,8 @@
-# WakaPAC Framework Manual
+# WakaPAC
 
 ## 🌟 Introduction
 
-**WakaPAC** is a lightweight, powerful reactive JavaScript framework that implements the **PAC (Presentation-Abstraction-Control)** architectural pattern. **Knockout.js was the main inspiration** for WakaPAC, enhanced with the best ideas from Vue and React to create a modern development experience.
+**WakaPAC** is a lightweight, powerful reactive JavaScript library that implements the **PAC (Presentation-Abstraction-Control)** architectural pattern. **Knockout.js was the main inspiration** for WakaPAC, enhanced with the best ideas from Vue and React to create a modern development experience.
 
 ### Why WakaPAC?
 
@@ -345,7 +345,7 @@ const app = wakaPAC('#app', {
 
 ### Automatic Dependency Tracking (Knockout-style)
 
-The framework automatically analyzes computed functions to determine dependencies:
+The library automatically analyzes computed functions to determine dependencies:
 
 ```javascript
 computed: {
@@ -799,7 +799,7 @@ wakaPAC('#app', {
 
 ### Key Concepts Translation
 
-WakaPAC combines familiar patterns from popular frameworks:
+WakaPAC combines familiar patterns from popular libraries:
 
 **Template Syntax:**
 - Use `{{property}}` or `{{object.property}}` for text interpolation
@@ -876,7 +876,7 @@ WakaPAC supports:
 - **Modern browsers**: Chrome, Firefox, Safari, Edge (ES6 Proxy support)
 - **Legacy browsers**: IE11+ (with fallback reactivity using Object.defineProperty)
 
-The framework automatically detects Proxy support and falls back gracefully.
+The library automatically detects Proxy support and falls back gracefully.
 
 ## 🎯 Why Choose WakaPAC?
 
@@ -887,7 +887,7 @@ The framework automatically detects Proxy support and falls back gracefully.
 - **Performance by default** - Direct DOM manipulation with intelligent batching outperforms virtual DOM overhead
 - **Progressive enhancement** - Drop into existing projects without rewriting everything
 - **Component hierarchy** - Build complex applications with parent-child communication
-- **True simplicity** - Focus on your application logic, not framework complexity
+- **True simplicity** - Focus on your application logic, not library complexity
 
 **WakaPAC excels at:**
 - **Complex single-page applications** with clean architecture
@@ -905,7 +905,7 @@ The framework automatically detects Proxy support and falls back gracefully.
 
 ---
 
-WakaPAC brings together the best ideas from modern frameworks in a lightweight, approachable package that works everywhere JavaScript runs. No build tools, no complexity - just reactive, component-based development the way it should be.
+WakaPAC brings together the best ideas from modern libraris in a lightweight, approachable package that works everywhere JavaScript runs. No build tools, no complexity - just reactive, component-based development the way it should be.
 
 ## 📄 License
 
