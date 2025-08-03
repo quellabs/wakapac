@@ -110,10 +110,12 @@
          */
         unregister(sel) {
             const unit = this.units.get(sel);
+
             if (unit) {
                 this.units.delete(sel);
                 this.cache = new WeakMap(); // Clear cache when units change
             }
+
             return unit;
         },
 
@@ -139,6 +141,7 @@
                         parent = unit;
                     }
                 });
+
                 el = el.parentElement;
             }
 
@@ -175,6 +178,7 @@
         if (U.PROXY) {
             return createProxy(target, onChange, path);
         }
+
         return createFallback(target, onChange, path);
     }
 
@@ -189,7 +193,11 @@
         // Make nested objects reactive recursively
         for (const k in target) {
             if (target.hasOwnProperty(k) && U.isReactive(target[k])) {
-                target[k] = createReactive(target[k], onChange, path ? `${path}.${k}` : k);
+                if (path) {
+                    target[k] = createReactive(target[k], onChange, `${path}.${k}`);
+                } else {
+                    target[k] = createReactive(target[k], onChange, k);
+                }
             }
         }
 
@@ -227,6 +235,7 @@
                         return result;
                     };
                 }
+
                 return obj[prop];
             },
 
@@ -274,9 +283,11 @@
         if (Array.isArray(target)) {
             ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'].forEach(m => {
                 const orig = target[m];
+
                 Object.defineProperty(target, m, {
                     value: function (...args) {
                         const result = orig.apply(this, args);
+
                         // Make new items reactive for mutation methods
                         if (/^(push|unshift|splice)$/.test(m)) {
                             for (let i = 0; i < this.length; i++) {
@@ -285,6 +296,7 @@
                                 }
                             }
                         }
+
                         onChange(path || 'root', this, 'array-mutation', {method: m, args});
                         return result;
                     },
@@ -315,6 +327,7 @@
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
         const container = document.querySelector(selector);
+
         if (!container) {
             throw new Error(`Container not found: ${selector}`);
         }
@@ -358,6 +371,7 @@
                 }
 
                 let arr = val;
+
                 if (!Array.isArray(arr)) {
                     console.warn('Foreach expects array, got:', typeof arr);
                     binding.element.innerHTML = '';
@@ -372,6 +386,7 @@
                 if (curr === prev) {
                     return;
                 }
+
                 if (this.arrEq(prev, curr)) {
                     binding.prev = [...curr];
                     return;
@@ -400,6 +415,7 @@
             renderItem(tmpl, item, idx, itemName, idxName) {
                 const div = document.createElement('div');
                 div.innerHTML = tmpl;
+
                 const el = div.firstElementChild || div.firstChild;
                 if (!el) {
                     return document.createTextNode('');
@@ -421,11 +437,13 @@
                 if (a.length !== b.length) {
                     return false;
                 }
+
                 for (let i = 0; i < a.length; i++) {
                     if (!U.deepEq(a[i], b[i])) {
                         return false;
                     }
                 }
+
                 return true;
             },
 
@@ -440,22 +458,33 @@
             processText(el, item, idx, itemName, idxName) {
                 const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
                 const nodes = [];
-                let node;
+
                 // Collect all text nodes first to avoid walker issues
+                let node;
                 while (node = walker.nextNode()) {
                     nodes.push(node);
                 }
 
-                nodes.forEach(n => {
+                nodes.forEach(function(n) {
+                    // Original content
                     let txt = n.textContent;
+
                     // Replace item property references: {{item.property}}
-                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\.(\\w+)\\s*\\}\\}`, 'g'), (m, p) =>
-                        item && item.hasOwnProperty(p) ? item[p] : '');
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\.(\\w+)\\s*\\}\\}`, 'g'), function(m, p) {
+                        return item && item.hasOwnProperty(p) ? item[p] : '';
+                    });
+
                     // Replace item references: {{item}}
-                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\s*\\}\\}`, 'g'), () =>
-                        typeof item === 'object' ? JSON.stringify(item) : item || '');
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\s*\\}\\}`, 'g'), function() {
+                        return typeof item === 'object' ? JSON.stringify(item) : item || '';
+                    });
+
                     // Replace index references: {{index}}
-                    txt = txt.replace(new RegExp(`\\{\\{\\s*${idxName}\\s*\\}\\}`, 'g'), () => idx);
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${idxName}\\s*\\}\\}`, 'g'), function() {
+                        return idx;
+                    });
+
+                    // Update content
                     n.textContent = txt;
                 });
             },
@@ -473,6 +502,7 @@
 
                 bindable.forEach(e => {
                     const bind = e.getAttribute('data-pac-bind');
+
                     if (!bind) {
                         return;
                     }
@@ -481,27 +511,38 @@
                     bind.split(',').forEach(b => {
                         const [type, target] = b.trim().split(':').map(s => s.trim());
 
-                        if (U.isEvent(type)) {
-                            // Event binding: click:methodName
-                            e.addEventListener(type, ev => {
-                                if (typeof this.abstraction[target] === 'function') {
-                                    this.abstraction[target].call(this.abstraction, item, idx, ev);
+                        switch (type) {
+                            case 'class':
+                                // Class binding: class:condition
+                                if (this.evalExpr(target, item, idx, itemName, idxName)) {
+                                    e.classList.add(target.includes('.') ? target.split('.').pop() : target);
                                 }
-                            });
-                        } else if (type === 'class') {
-                            // Class binding: class:condition
-                            if (this.evalExpr(target, item, idx, itemName, idxName)) {
-                                e.classList.add(target.includes('.') ? target.split('.').pop() : target);
-                            }
-                        } else if (type === 'checked') {
-                            // Checkbox binding: checked:condition
-                            e.checked = !!this.evalExpr(target, item, idx, itemName, idxName);
-                        } else {
-                            // Attribute binding: attr:value
-                            const val = this.evalExpr(target, item, idx, itemName, idxName);
-                            if (val != null) {
-                                e.setAttribute(type, val);
-                            }
+
+                                break;
+
+                            case 'checked':
+                                // Checkbox binding: checked:condition
+                                e.checked = !!this.evalExpr(target, item, idx, itemName, idxName);
+                                break;
+
+                            default:
+                                if (U.isEvent(type)) {
+                                    // Event binding: click:methodName
+                                    e.addEventListener(type, ev => {
+                                        if (typeof this.abstraction[target] === 'function') {
+                                            this.abstraction[target].call(this.abstraction, item, idx, ev);
+                                        }
+                                    });
+                                } else {
+                                    // Attribute binding: attr:value
+                                    const val = this.evalExpr(target, item, idx, itemName, idxName);
+
+                                    if (val != null) {
+                                        e.setAttribute(type, val);
+                                    }
+                                }
+
+                                break;
                         }
                     });
                 });
@@ -520,9 +561,11 @@
                 if (expr === idxName) {
                     return idx;
                 }
+
                 if (expr === itemName) {
                     return item;
                 }
+
                 if (expr.startsWith(`${itemName}.`)) {
                     // Navigate object path: item.property.subproperty
                     const path = expr.substring(itemName.length + 1).split('.');
@@ -536,6 +579,7 @@
                     }
                     return val;
                 }
+
                 return expr;
             },
 
@@ -598,17 +642,22 @@
                             case 'text':
                                 this.updateText(binding, prop, val);
                                 break;
+
                             case 'attribute':
                                 binding.element.setAttribute(binding.attribute, val);
                                 break;
+
                             case 'input':
                                 if (binding.element.value !== val) {
                                     binding.element.value = val;
                                 }
+
                                 break;
+
                             case 'visible':
                                 this.updateVisible(binding, val);
                                 break;
+
                             case 'foreach':
                                 this.updateForeach(binding, prop, val);
                                 break;
@@ -630,23 +679,27 @@
                 const el = binding.element;
                 const show = binding.condition.startsWith('!') ? !val : !!val;
 
+                // Show the element
                 if (show) {
-                    // Show element
                     if (el.hasAttribute('data-pac-hidden')) {
                         el.style.display = el.getAttribute('data-pac-orig-display') || '';
                         el.removeAttribute('data-pac-hidden');
                         el.removeAttribute('data-pac-orig-display');
                     }
-                } else {
-                    // Hide element
-                    if (!el.hasAttribute('data-pac-hidden')) {
-                        const orig = getComputedStyle(el).display;
-                        if (orig !== 'none') {
-                            el.setAttribute('data-pac-orig-display', orig);
-                        }
-                        el.style.display = 'none';
-                        el.setAttribute('data-pac-hidden', 'true');
+
+                    return;
+                }
+
+                // Hide the element
+                if (!el.hasAttribute('data-pac-hidden')) {
+                    const orig = getComputedStyle(el).display;
+
+                    if (orig !== 'none') {
+                        el.setAttribute('data-pac-orig-display', orig);
                     }
+
+                    el.style.display = 'none';
+                    el.setAttribute('data-pac-hidden', 'true');
                 }
             },
 
@@ -667,8 +720,7 @@
                     display = '';
                 }
 
-                const txt = binding.origText.replace(regex, display);
-                (binding.textNode || binding.element).textContent = txt;
+                (binding.textNode || binding.element).textContent = binding.origText.replace(regex, display);
             },
 
             /**
@@ -685,10 +737,12 @@
                 // Find all 'this.property' references in the function
                 while ((match = regex.exec(src))) {
                     const prop = match[1];
+
                     if (this.orig.hasOwnProperty(prop) && !deps.includes(prop)) {
                         deps.push(prop);
                     }
                 }
+
                 return deps;
             },
 
@@ -697,27 +751,48 @@
              * @param {string} changed - Name of the property that changed
              */
             updateComputed(changed) {
+                // Get all computed properties that depend on the changed property
                 const deps = this.propDeps.get(changed) || [];
 
+                // Process each dependent computed property
                 deps.forEach(computed => {
+                    // Store the previous value for comparison and change notifications
                     const old = this.computedCache.get(computed);
+
+                    // Get the computed property function from the original configuration
                     const fn = this.orig.computed[computed];
+
+                    // Execute the computed function in the context of the abstraction object
                     const val = fn.call(this.abstraction);
 
-                    // Check if we need foreach updates or value actually changed
-                    const hasArray = Array.from(this.bindings.values()).some(b =>
-                        b.type === 'foreach' && b.collection === computed);
+                    // Check if any bindings use this computed property as a foreach collection
+                    // This is important because foreach bindings need updates even if the array
+                    // reference hasn't changed (e.g., when array contents are modified)
+                    const hasArray = Array.from(this.bindings.values()).some(function(b) {
+                        return b.type === 'foreach' && b.collection === computed;
+                    });
 
+                    // Update only if:
+                    // 1. There's a foreach binding using this computed property, OR
+                    // 2. The computed value has actually changed (deep equality check)
                     if (hasArray || !U.deepEq(old, val)) {
+                        // Cache the new computed value
                         this.computedCache.set(computed, val);
+
+                        // Update any DOM elements bound to this computed property
                         this.updateDOM(computed, val);
+
+                        // Notify parent component of the property change
                         this.notifyParent('propertyChange', {
                             property: computed,
                             oldValue: old,
                             newValue: val,
                             computed: true
                         });
-                        this.updateComputed(computed); // Handle cascading computed updates
+
+                        // Recursively update any computed properties that depend on this one
+                        // This handles cascading updates where computed properties depend on other computed properties
+                        this.updateComputed(computed);
                     }
                 });
             },
@@ -727,59 +802,83 @@
              * @returns {Object} - Reactive abstraction object
              */
             createReactiveAbs() {
+                const self = this;
                 const reactive = {};
 
                 // Set up computed properties
                 if (this.orig.computed) {
+                    // Iterate through all computed property definitions
                     for (const name in this.orig.computed) {
                         const fn = this.orig.computed[name];
+
+                        // Only process function-based computed properties
                         if (typeof fn === 'function') {
+                            // Analyze the computed function to find its dependencies
                             const deps = this.analyzeComputed(fn);
+                            // Store the dependencies for this computed property
                             this.computedDeps.set(name, deps);
 
-                            // Build reverse dependency map
-                            deps.forEach(dep => {
-                                if (!this.propDeps.has(dep)) {
-                                    this.propDeps.set(dep, []);
+                            // Build reverse dependency map - track which computed properties
+                            // depend on each regular property for efficient invalidation
+                            deps.forEach(function(dep) {
+                                // Initialize the dependency array if it doesn't exist
+                                if (!self.propDeps.has(dep)) {
+                                    self.propDeps.set(dep, []);
                                 }
-                                this.propDeps.get(dep).push(name);
+
+                                // Add this computed property to the dependency list
+                                // of the property it depends on
+                                self.propDeps.get(dep).push(name);
                             });
 
-                            // Define computed property with getter
+                            // Define computed property with getter that implements caching
                             Object.defineProperty(reactive, name, {
                                 get: () => {
+                                    // Return cached value if available (performance optimization)
                                     if (this.computedCache.has(name)) {
                                         return this.computedCache.get(name);
                                     }
+
+                                    // Compute the value by calling the function with reactive context
                                     const val = fn.call(reactive);
+                                    // Cache the computed value for future access
                                     this.computedCache.set(name, val);
                                     return val;
                                 },
-                                enumerable: true
+                                enumerable: true // Make property visible in for...in loops
                             });
                         }
                     }
                 }
 
-                // Set up regular properties
+                // Set up regular properties (non-computed)
                 for (const key in this.orig) {
+                    // Only process own properties, skip computed (already handled above)
                     if (this.orig.hasOwnProperty(key) && key !== 'computed') {
                         const val = this.orig[key];
+
                         if (typeof val === 'function') {
-                            // Bind methods to reactive object
+                            // Bind methods to reactive object so 'this' refers to reactive instance
+                            // This ensures methods can access reactive properties correctly
                             reactive[key] = val.bind(reactive);
                         } else {
-                            // Create reactive property
+                            // Create reactive property with getter/setter for data properties
+                            // This enables change detection and computed property invalidation
                             this.createReactiveProp(reactive, key, val);
                         }
                     }
                 }
 
-                // Add communication methods
+                // Method to send notifications up the component hierarchy
                 reactive.notifyParent = (type, data) => this.notifyParent(type, data);
+
+                // Method to broadcast commands down to child components
                 reactive.sendToChildren = (cmd, data) => this.sendToChildren(cmd, data);
+
+                // Utility method to find a specific child component using a predicate function
                 reactive.findChild = pred => Array.from(this.children).find(pred);
 
+                // Return the reactive object
                 return reactive;
             },
 
@@ -790,33 +889,64 @@
              * @param {*} init - Initial value
              */
             createReactiveProp(obj, key, init) {
+                const self = this;
                 let val = init;
 
-                // Make initial value reactive if needed
+                // Make initial value reactive if needed for deep reactivity.
+                // This enables nested object/array change detection
                 if (this.config.deepReactivity && U.isReactive(val)) {
-                    val = createReactive(val, (path, newVal, type, meta) =>
-                        this.handleDeepChange(path, newVal, type, meta), key);
+                    val = createReactive(val, function(path, newVal, type, meta) {
+                        // Delegate deep change handling to the parent's handler
+                        return self.handleDeepChange(path, newVal, type, meta);
+                    }, key);
                 }
 
+                // Define the reactive property using Object.defineProperty
                 Object.defineProperty(obj, key, {
+                    // Getter: simply returns the current value
                     get: () => val,
-                    set: newVal => {
-                        const isObj = U.isReactive(val) || U.isReactive(newVal);
-                        if (isObj || !U.deepEq(val, newVal)) {
-                            const old = val;
 
-                            // Make new value reactive if needed
+                    // Setter: handles value changes and triggers reactivity
+                    set: newVal => {
+                        // Check if either old or new value is a reactive object/array
+                        // This helps determine if we need to perform deep equality checking
+                        const isObj = U.isReactive(val) || U.isReactive(newVal);
+
+                        // Only proceed with updates if:
+                        // 1. At least one value is reactive (objects/arrays always trigger updates)
+                        // 2. OR the values are not deeply equal (primitive value change)
+                        if (isObj || !U.deepEq(val, newVal)) {
+                            const old = val; // Store old value for change notifications
+
+                            // Make new value reactive if deep reactivity is enabled
+                            // and the new value is an object/array
                             if (this.config.deepReactivity && U.isReactive(newVal)) {
-                                newVal = createReactive(newVal, (path, changedVal, type, meta) =>
-                                    this.handleDeepChange(path, changedVal, type, meta), key);
+                                newVal = createReactive(newVal, function(path, changedVal, type, meta) {
+                                    // Set up change handler for nested changes in the new value
+                                    return self.handleDeepChange(path, changedVal, type, meta);
+                                }, key);
                             }
 
+                            // Update the internal value
                             val = newVal;
+
+                            // Trigger DOM updates for this property
                             this.updateDOM(key, newVal);
+
+                            // Recalculate any computed properties that depend on this property
                             this.updateComputed(key);
-                            this.notifyParent('propertyChange', {property: key, oldValue: old, newValue: newVal});
+
+                            // Notify parent component/system about the property change
+                            // Includes old and new values for comparison/logging
+                            this.notifyParent('propertyChange', {
+                                property: key,
+                                oldValue: old,
+                                newValue: newVal
+                            });
                         }
                     },
+
+                    // Make property enumerable so it shows up in Object.keys(), for...in loops, etc.
                     enumerable: true
                 });
             },
@@ -846,87 +976,203 @@
              * Finds and sets up text interpolation bindings {{property}}
              */
             findTextBindings() {
+                // Create a TreeWalker to traverse only text nodes in the DOM
+                // This is more efficient than recursively walking all nodes
                 const walker = document.createTreeWalker(this.container, NodeFilter.SHOW_TEXT);
+
+                // Array to temporarily store binding data before adding to the bindings map
                 const bindings = [];
+
+                // Iterate through each text node in the container
                 let node;
 
                 while (node = walker.nextNode()) {
                     const txt = node.textContent;
+
+                    // Look for interpolation patterns like {{property}} or {{ property }}
+                    // \{\{ matches opening braces, \s* allows optional whitespace
+                    // (\w+) captures the property name (word characters only)
+                    // \s* allows optional whitespace, \}\} matches closing braces
+                    // g flag finds all matches in the text
                     const matches = txt.match(/\{\{\s*(\w+)\s*\}\}/g);
 
+                    // If interpolation patterns were found in this text node
                     if (matches) {
+                        // Process each match found in this text node
                         matches.forEach(match => {
+                            // Extract the property name by removing braces and whitespace
+                            // Example: "{{ name }}" becomes "name"
                             const prop = match.replace(/[{}\s]/g, '');
+
+                            // Create a binding object with all necessary information
+                            // U.id() generates a unique identifier for this binding
                             bindings.push([U.id(), {
-                                type: 'text',
-                                property: prop,
-                                element: node.parentElement,
-                                origText: txt,
-                                textNode: node
+                                type: 'text',              // Indicates this is a text interpolation binding
+                                property: prop,            // The property name to bind to
+                                element: node.parentElement, // The containing element
+                                origText: txt,             // Original text content (for restoration/re-evaluation)
+                                textNode: node             // Direct reference to the text node for efficient updates
                             }]);
                         });
                     }
                 }
 
+                // Add all discovered bindings to the component's bindings map
+                // Using forEach with destructuring to separate the key from the binding object
                 bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
             },
 
             /**
              * Finds and sets up attribute bindings data-pac-bind="..."
+             * Scans the container for elements with data-pac-bind attributes and creates appropriate binding objects
+             * Excludes nested foreach elements to avoid duplicate processing
              */
-            findAttrBindings() {
-                // Exclude bindings inside foreach templates
+            findAttrBindings: function() {
+                // Find all elements with data-pac-bind attribute, excluding those inside foreach loops
+                // The :not() selector prevents processing nested bindings that will be handled by foreach
                 const elements = this.container.querySelectorAll('[data-pac-bind]:not([data-pac-bind*="foreach"] [data-pac-bind])');
                 const bindings = [];
 
-                Array.from(elements).forEach(el => {
+                // Process each element with binding attributes
+                Array.from(elements).forEach(function(el) {
                     const bindStr = el.getAttribute('data-pac-bind');
 
-                    bindStr.split(',').forEach(bind => {
-                        const [type, target] = bind.trim().split(':').map(s => s.trim());
-                        const key = `${bind}_${U.id()}`;
+                    // Handle multiple bindings on a single element (comma-separated)
+                    for (let i = 0; i < bindStr.split(',').length; i++) {
+                        // Fetch all binds
+                        const bind = bindStr.split(',')[i];
 
+                        // Split binding string into type and target (e.g., "click:handleClick" -> ["click", "handleClick"])
+                        const parts = bind.trim().split(':');
+                        const type = parts[0] ? parts[0].trim() : '';  // Binding type (click, value, visible, etc.)
+                        const target = parts[1] ? parts[1].trim() : ''; // Target property or method
+                        const key = bind + '_' + U.id(); // Unique key for this binding
+
+                        // Handle foreach binding - creates repeating elements based on array data
                         if (type === 'foreach') {
-                            // Foreach binding: foreach:arrayProperty
-                            bindings.push([key, {
-                                type: 'foreach',
-                                property: target,
-                                collection: target,
-                                itemName: el.getAttribute('data-pac-item') || 'item',
-                                indexName: el.getAttribute('data-pac-index') || 'index',
-                                template: el.innerHTML,
-                                element: el
-                            }]);
-                            el.innerHTML = ''; // Clear template content
-                        } else if (U.isEvent(type)) {
-                            // Event binding: click:methodName
-                            bindings.push([key, {type: 'event', event: type, method: target, element: el}]);
-                        } else if (type === 'visible') {
-                            // Visibility binding: visible:property or visible:!property
-                            bindings.push([key, {
-                                type: 'visible',
-                                property: target.replace(/^!/, ''),
-                                element: el,
-                                condition: target
-                            }]);
-                        } else if (bind.indexOf(':') !== -1) {
-                            // Attribute binding: attribute:property
-                            bindings.push([key, {type: 'attribute', property: target, element: el, attribute: type}]);
-                        } else {
-                            // Input binding: propertyName
-                            this.setupInput(el, bind.trim());
-                            bindings.push([key, {
-                                type: 'input',
-                                property: bind.trim(),
-                                element: el,
-                                updateMode: el.getAttribute('data-pac-update-mode') || this.config.updateMode,
-                                delay: parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay
-                            }]);
+                            bindings.push([key, this.createForeachBinding(el, target)]);
+                            el.innerHTML = ''; // Clear template content after storing it
+                            continue;
                         }
-                    });
-                });
 
-                bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
+                        // Handle event bindings (click, change, submit, etc.)
+                        if (U.isEvent(type)) {
+                            bindings.push([key, this.createEventBinding(el, type, target)]);
+                            continue;
+                        }
+
+                        // Handle visibility binding - shows/hides element based on property value
+                        if (type === 'visible') {
+                            bindings.push([key, this.createVisibilityBinding(el, target)]);
+                            continue;
+                        }
+
+                        // Handle attribute bindings (class, style, disabled, etc.)
+                        if (bind.indexOf(':') !== -1) {
+                            bindings.push([key, this.createAttributeBinding(el, type, target)]);
+                            continue;
+                        }
+
+                        // Default case: Input binding for two-way data binding with form elements
+                        this.setupInput(el, bind.trim());
+                        bindings.push([key, this.createInputBinding(el, bind.trim())]);
+                    }
+                }.bind(this));
+
+                // Store all created bindings in the bindings map for later reference
+                bindings.forEach(function(binding) {
+                    this.bindings.set(binding[0], binding[1]);
+                }.bind(this));
+            },
+
+            /**
+             * Creates a foreach binding object for rendering collections/arrays
+             * @param {Element} el - The template element that will be repeated
+             * @param {string} target - The property name containing the array data
+             * @returns {Object} Foreach binding configuration object
+             */
+            createForeachBinding: function(el, target) {
+                const itemName = el.getAttribute('data-pac-item') || 'item';
+                const indexName = el.getAttribute('data-pac-index') || 'index';
+
+                return {
+                    type: 'foreach',
+                    property: target,         // Property name in the data model
+                    collection: target,       // Same as property (legacy support)
+                    itemName: itemName,       // Item variable name in template (defaults to 'item')
+                    indexName: indexName,     // Index variable name in template (defaults to 'index')
+                    template: el.innerHTML,   // HTML template to repeat for each item
+                    element: el               // Reference to the container element
+                };
+            },
+
+            /**
+             * Creates an event binding object for handling DOM events
+             * @param {Element} el - The element that will trigger the event
+             * @param {string} type - The event type (click, change, etc.)
+             * @param {string} target - The method name to call when event fires
+             * @returns {Object} Event binding configuration object
+             */
+            createEventBinding: function(el, type, target) {
+                return {
+                    type: 'event',
+                    event: type,        // Event name (click, change, submit, etc.)
+                    method: target,     // Method to invoke when event occurs
+                    element: el         // Element that triggers the event
+                };
+            },
+
+            /**
+             * Creates a visibility binding object for showing/hiding elements
+             * @param {Element} el - The element whose visibility will be controlled
+             * @param {string} target - The property name or condition (can start with ! for negation)
+             * @returns {Object} Visibility binding configuration object
+             */
+            createVisibilityBinding: function(el, target) {
+                // Remove negation operator to get actual property name
+                const propertyName = target.replace(/^!/, '');
+
+                return {
+                    type: 'visible',
+                    property: propertyName,
+                    element: el,
+                    condition: target   // Full condition including negation if present
+                };
+            },
+
+            /**
+             * Creates an attribute binding object for dynamic attribute values
+             * @param {Element} el - The element whose attribute will be bound
+             * @param {string} type - The attribute name (class, style, disabled, etc.)
+             * @param {string} target - The property name containing the attribute value
+             * @returns {Object} Attribute binding configuration object
+             */
+            createAttributeBinding: function(el, type, target) {
+                return {
+                    type: 'attribute',
+                    property: target,   // Property name in data model
+                    element: el,        // Target element
+                    attribute: type     // Attribute name to update (class, style, etc.)
+                };
+            },
+
+            /**
+             * Creates an input binding object for two-way data binding with form elements
+             * @param {Element} el - The input element to bind
+             * @param {string} bind - The property name to bind to
+             * @returns {Object} Input binding configuration object
+             */
+            createInputBinding: function(el, bind) {
+                const delay = parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay || 0;
+                const updateMode = el.getAttribute('data-pac-update-mode') || this.config.updateMode || 'immediate';
+
+                return {
+                    type: 'input',
+                    property: bind,         // Property name in data model
+                    element: el,            // Input element reference
+                    updateMode: updateMode, // How often to update: 'immediate', 'change', or 'manual'
+                    delay: delay            // Delay in milliseconds (for debouncing)
+                };
             },
 
             /**
@@ -955,48 +1201,155 @@
 
             /**
              * Handles all DOM events for the container
-             * @param {Event} ev - DOM event
+             * Routes events to appropriate handlers based on event type and element attributes
+             * @param {Event} ev - DOM event object
              */
             handleEvent(ev) {
                 const {type, target} = ev;
                 const prop = target.getAttribute('data-pac-property');
 
-                if (type === 'input' && prop && this.abstraction.hasOwnProperty(prop)) {
-                    // Handle input events based on update mode
-                    const mode = target.getAttribute('data-pac-update-mode') || this.config.updateMode;
-
-                    if (mode === 'change') {
-                        // Wait for change event
-                        target.setAttribute('data-pac-pending-value', target.value);
-                    } else if (mode === 'immediate') {
-                        // Update immediately
-                        this.abstraction[prop] = target.value;
-                    } else if (mode === 'delayed') {
-                        // Update after delay
-                        this.updateFromDOM(target, prop, target.value);
-                    }
-                } else if (type === 'change' && prop && this.abstraction.hasOwnProperty(prop)) {
-                    // Handle change events
-                    const key = `${prop}_${target.getAttribute('data-pac-property')}`;
-                    if (this.delays.has(key)) {
-                        clearTimeout(this.delays.get(key));
-                        this.delays.delete(key);
-                    }
-                    this.abstraction[prop] = target.value;
-                    target.removeAttribute('data-pac-pending-value');
+                // Route to the appropriate handler based on the event type
+                if (this._isInputEvent(type, prop)) {
+                    this._handleInputEvent(ev, target, prop);
+                } else if (this._isChangeEvent(type, prop)) {
+                    this._handleChangeEvent(ev, target, prop);
                 } else {
-                    // Handle event bindings (click, submit, etc.)
-                    this.bindings.forEach(binding => {
-                        if (binding.type === 'event' && binding.event === type && binding.element === target) {
-                            const method = this.abstraction[binding.method];
-                            if (typeof method === 'function') {
-                                if (type === 'submit') {
-                                    ev.preventDefault();
-                                }
-                                method.call(this.abstraction, ev);
-                            }
-                        }
-                    });
+                    this._handleEventBinding(ev, type, target);
+                }
+            },
+
+            /**
+             * Checks if this is an input event on a bound property
+             * @param {string} type - Event type
+             * @param {string} prop - Property name from data-pac-property
+             * @returns {boolean} True if this is a bound input event
+             */
+            _isInputEvent(type, prop) {
+                return type === 'input' && prop && this.abstraction.hasOwnProperty(prop);
+            },
+
+            /**
+             * Checks if this is a change event on a bound property
+             * @param {string} type - Event type
+             * @param {string} prop - Property name from data-pac-property
+             * @returns {boolean} True if this is a bound change event
+             */
+            _isChangeEvent(type, prop) {
+                return type === 'change' && prop && this.abstraction.hasOwnProperty(prop);
+            },
+
+            /**
+             * Handles input events based on the element's update mode
+             * Supports three modes: change, immediate, and delayed
+             * @param {Event} ev - The input event
+             * @param {Element} target - The input element
+             * @param {string} prop - The bound property name
+             */
+            _handleInputEvent(ev, target, prop) {
+                // Get update mode from element attribute or fall back to config default
+                const mode = target.getAttribute('data-pac-update-mode') || this.config.updateMode;
+                const value = target.value;
+
+                switch (mode) {
+                    case 'change':
+                        // Store value temporarily, wait for change event to commit
+                        target.setAttribute('data-pac-pending-value', value);
+                        break;
+
+                    case 'immediate':
+                        // Update data model immediately on every keystroke
+                        this.abstraction[prop] = value;
+                        break;
+
+                    case 'delayed':
+                        // Update after a delay (debounced input)
+                        this.updateFromDOM(target, prop, value);
+                        break;
+
+                    default:
+                        console.warn(`Unknown update mode: ${mode}. Using immediate.`);
+                        this.abstraction[prop] = value;
+                }
+            },
+
+            /**
+             * Handles change events for bound properties
+             * Cleans up any pending delayed updates and commits the value
+             * @param {Event} ev - The change event
+             * @param {Element} target - The input element that changed
+             * @param {string} prop - The bound property name
+             */
+            _handleChangeEvent(ev, target, prop) {
+                // Generate unique key for this element's delayed update
+                const delayKey = `${prop}_${target.getAttribute('data-pac-property')}`;
+
+                // Cancel any pending delayed update for this element
+                if (this.delays.has(delayKey)) {
+                    clearTimeout(this.delays.get(delayKey));
+                    this.delays.delete(delayKey);
+                }
+
+                // Commit the current value to the data model
+                this.abstraction[prop] = target.value;
+
+                // Clean up pending value marker
+                target.removeAttribute('data-pac-pending-value');
+            },
+
+            /**
+             * Handles custom event bindings (click, submit, etc.)
+             * Searches through registered bindings and executes matching event handlers
+             * @param {Event} ev - The DOM event
+             * @param {string} type - Event type (click, submit, etc.)
+             * @param {Element} target - Element that triggered the event
+             */
+            _handleEventBinding(ev, type, target) {
+                // Search through all registered event bindings
+                this.bindings.forEach(binding => {
+                    // Check if this binding matches the current event
+                    if (this._isMatchingEventBinding(binding, type, target)) {
+                        this._executeEventBinding(binding, ev);
+                    }
+                });
+            },
+
+            /**
+             * Checks if a binding matches the current event and target
+             * @param {Object} binding - The binding configuration object
+             * @param {string} type - Event type
+             * @param {Element} target - Target element
+             * @returns {boolean} True if the binding matches
+             */
+            _isMatchingEventBinding(binding, type, target) {
+                return binding.type === 'event' &&
+                    binding.event === type &&
+                    binding.element === target;
+            },
+
+            /**
+             * Executes an event binding by calling the bound method
+             * @param {Object} binding - The binding configuration
+             * @param {Event} ev - The original DOM event
+             */
+            _executeEventBinding(binding, ev) {
+                const method = this.abstraction[binding.method];
+
+                // Ensure the method exists and is callable
+                if (typeof method !== 'function') {
+                    console.warn(`Event handler method '${binding.method}' is not a function`);
+                    return;
+                }
+
+                // Prevent default form submission behavior
+                if (binding.event === 'submit') {
+                    ev.preventDefault();
+                }
+
+                // Execute the method with proper context and pass the event
+                try {
+                    method.call(this.abstraction, ev);
+                } catch (error) {
+                    console.error(`Error executing event handler '${binding.method}':`, error);
                 }
             },
 
@@ -1051,6 +1404,7 @@
                         if (child.parent) {
                             child.parent.children.delete(child);
                         }
+
                         child.parent = this;
                         this.children.add(child);
                     }
@@ -1152,6 +1506,7 @@
                 if (this.parent) {
                     this.parent.children.delete(this);
                 }
+
                 this.children.forEach(child => child.parent = null);
 
                 // Clear caches and references
@@ -1261,6 +1616,7 @@
             sendToChildren: (cmd, data) => control.sendToChildren(cmd, data),
             sendToChild: (sel, cmd, data) => {
                 const child = control.findChild(c => c.container.matches(sel));
+
                 if (child && child.receiveFromParent) {
                     child.receiveFromParent(cmd, data);
                 }
