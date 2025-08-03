@@ -97,10 +97,12 @@
          */
         unregister(sel) {
             const unit = this.units.get(sel);
+
             if (unit) {
                 this.units.delete(sel);
                 this.cache = new WeakMap(); // Clear cache when units change
             }
+
             return unit;
         },
 
@@ -157,7 +159,11 @@
             return target;
         }
 
-        return U.PROXY ? createProxy(target, onChange, path) : createFallback(target, onChange, path);
+        if (U.PROXY) {
+            return createProxy(target, onChange, path);
+        } else {
+            return createFallback(target, onChange, path);
+        }
     }
 
     /**
@@ -168,68 +174,127 @@
      * @returns {Object} - Proxied reactive object
      */
     function createProxy(target, onChange, path) {
-        // Make nested objects reactive recursively
+        // Initialize nested objects as reactive proxies recursively
+        // This ensures that any existing nested objects/arrays are also reactive
         Object.keys(target).forEach(k => {
+            // Check if the property exists directly on the object (not inherited)
+            // and if it's a type that should be made reactive (object/array)
             if (target.hasOwnProperty(k) && U.isReactive(target[k])) {
+                // Create reactive proxy for nested object with proper path tracking
                 target[k] = createReactive(target[k], onChange, path ? `${path}.${k}` : k);
             }
         });
 
-        const isArr = Array.isArray(target);
+        // Check if target is an array to handle array-specific operations
         const methods = {};
+        const isArr = Array.isArray(target);
 
-        // Store original array methods for mutation tracking
+        // Store references to original array mutation methods
+        // This allows us to intercept calls and trigger change notifications
         if (isArr) {
             ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'].forEach(m => {
+                // Store original method implementation
                 methods[m] = target[m];
             });
         }
 
+        // Create and return the proxy with custom behavior
         return new Proxy(target, {
             /**
-             * Proxy get trap - handles property access and array method calls
+             * Proxy get trap - intercepts property access and method calls
+             * @param {Object} obj - The target object
+             * @param {string|symbol} prop - The property being accessed
+             * @returns {*} - The property value or wrapped method
              */
             get(obj, prop) {
+                // Handle array mutation methods specially
                 if (isArr && methods[prop]) {
+                    // Return a wrapped version of the array method
                     return function (...args) {
+                        // Call the original method with the provided arguments
                         const result = methods[prop].apply(obj, args);
-                        // Make new items reactive for mutation methods
+
+                        // For methods that add new elements, ensure they become reactive
                         if (/^(push|unshift|splice)$/.test(prop)) {
+                            // Iterate through all array items
                             obj.forEach((item, i) => {
+                                // If item should be reactive but isn't already proxied
                                 if (U.isReactive(item) && !item._reactive) {
+                                    // Make the item reactive with proper path
                                     obj[i] = createReactive(item, onChange, `${path}.${i}`);
                                 }
                             });
                         }
+
+                        // Notify observers about the array mutation
                         onChange(path || 'root', obj, 'array-mutation', {method: prop, args});
                         return result;
                     };
                 }
+
+                // Default behavior: return the property value
                 return obj[prop];
             },
 
             /**
-             * Proxy set trap - handles property assignment
+             * Proxy set trap - intercepts property assignment
+             * @param {Object} obj - The target object
+             * @param {string|symbol} prop - The property being set
+             * @param {*} val - The new value
+             * @returns {boolean} - Success indicator
              */
             set(obj, prop, val) {
+                // Store the old value for comparison and change notification
                 const old = obj[prop];
+
+                // If the new value should be reactive, wrap it in a proxy
                 if (U.isReactive(val)) {
                     val = createReactive(val, onChange, path ? `${path}.${prop}` : prop);
                 }
+
+                // Perform the actual assignment
                 obj[prop] = val;
+
+                // Only trigger change notification if the value actually changed
                 if (!U.deepEq(old, val)) {
+                    // Notify about the direct property change
                     onChange(path ? `${path}.${prop}` : prop, val, 'set', {old});
+
+                    // If this is a nested property, also notify about root-level changes
+                    // This allows parent objects/arrays to react to nested changes
+                    if (path && path.includes('.')) {
+                        // Extract the root path (first segment before the dot)
+                        const rootPath = path.split('.')[0];
+                        // Notify about nested property change at root level
+                        onChange(rootPath, null, 'nested-property-change', {
+                            nestedPath: path ? `${path}.${prop}` : prop,
+                            oldValue: old,
+                            newValue: val
+                        });
+                    }
                 }
+
+                // Return true to indicate successful assignment
                 return true;
             },
 
             /**
-             * Proxy deleteProperty trap - handles property deletion
+             * Proxy deleteProperty trap - intercepts property deletion
+             * @param {Object} obj - The target object
+             * @param {string|symbol} prop - The property being deleted
+             * @returns {boolean} - Success indicator
              */
             deleteProperty(obj, prop) {
+                // Store the old value before deletion
                 const old = obj[prop];
+
+                // Perform the actual deletion
                 delete obj[prop];
+
+                // Notify observers about the property deletion
                 onChange(path ? `${path}.${prop}` : prop, undefined, 'delete', {old});
+
+                // Return true to indicate successful deletion
                 return true;
             }
         });
@@ -839,24 +904,56 @@
              * @param {Object} meta - Additional metadata about the change
              */
             handleDeepChange(path, val, type, meta) {
-                // Extract root property name for reactivity system
+                // Extract the root property name from the path for reactivity system
+                // e.g., "user.profile.name" -> "user"
                 const root = path.split('.')[0];
 
-                // Update any computed properties that depend on this root property
+                // Handle nested property changes and cache invalidation
+                // For nested property changes, clear the cache for both direct and computed property bindings
+                if (type === 'nested-property-change' || (type === 'set' && path.includes('.'))) {
+                    let foundForeach = false;
+
+                    // Get all computed properties that depend on this root property
+                    // This ensures we update computed values that might be affected by the change
+                    const dependentComputed = this.propDeps.get(root) || [];
+
+                    // Iterate through all bindings to find affected foreach loops
+                    this.bindings.forEach((binding, key) => {
+                        // Check if this is a foreach binding that needs cache invalidation
+                        if (binding.type === 'foreach') {
+                            // Clear cache if binding is directly on the root property
+                            // OR on a computed property that depends on root
+                            if (binding.collection === root || dependentComputed.includes(binding.collection)) {
+                                // Clear the previous value cache to force re-render
+                                // This ensures the foreach loop will detect changes and update the DOM
+                                binding.prev = null;
+                                foundForeach = true;
+                            }
+                        }
+                    });
+                }
+
+                // Update computed properties that depend on the changed root property
+                // This ensures derived values are recalculated when their dependencies change
                 this.updateComputed(root);
 
-                // Trigger DOM updates if this is a root property change or array mutation
-                if (type === 'array-mutation' || this.abstraction.hasOwnProperty(root)) {
+                // Trigger DOM updates for various change types
+                // Check if this change requires a DOM update based on change type or property existence
+                if (type === 'array-mutation' ||          // Array was modified (push, pop, splice, etc.)
+                    type === 'nested-property-change' ||  // Nested object property was changed
+                    type === 'set' ||                     // Property was directly set
+                    this.abstraction.hasOwnProperty(root)) { // Root property exists in the data model
+
+                    // Update the DOM to reflect the new value
                     this.updateDOM(root, this.abstraction[root]);
                 }
 
                 // Notify parent component of the property change for hierarchical communication
+                // This enables parent-child component communication in nested component structures
                 this.notifyParent('propertyChange', {
-                    property: root,
-                    path,
-                    newValue: val,
-                    changeType: type,
-                    meta
+                    property: root,    // The root property that changed
+                    path,             // The full path of the change
+                    newValue: val     // The new value (note: original code had 'newValue' without defining it)
                 });
             },
 
@@ -1029,6 +1126,7 @@
                         `[${value.length} items]` :
                         JSON.stringify(value, null, 2);
                 }
+
                 // Return empty string for null/undefined, otherwise convert to string
                 return value == null ? '' : value;
             },
