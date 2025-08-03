@@ -26,6 +26,7 @@
         // Check if Proxy is supported in the current environment
         PROXY: typeof Proxy !== 'undefined',
 
+
         /**
          * Determines if a value should be made reactive
          * @param {*} v - Value to test
@@ -1171,38 +1172,73 @@
             },
 
             /**
-             * Streamlined reactive abstraction creation
              * Creates the main reactive object that serves as the data model
              * Sets up computed properties, regular properties, and communication methods
              * @returns {Object} - The reactive abstraction object with getters/setters
              */
             createReactiveAbs() {
+                // Initialize empty reactive object that will become the data model
                 const reactive = {};
 
                 // Setup computed properties first (they may depend on regular properties)
+                // Computed properties are derived values that automatically update when dependencies change
                 this.setupComputedProperties(reactive);
 
                 // Setup regular properties from original configuration
+                // Iterate through all properties defined in the original configuration object
                 Object.keys(this.orig).forEach(key => {
+                    // Only process properties that exist on the object itself (not inherited)
+                    // Skip the 'computed' property as it's handled separately above
                     if (this.orig.hasOwnProperty(key) && key !== 'computed') {
                         const val = this.orig[key];
+
+                        // Handle function properties (methods)
                         if (typeof val === 'function') {
                             // Bind methods to reactive object so 'this' refers to reactive instance
+                            // This ensures methods have access to reactive properties and other methods
                             reactive[key] = val.bind(reactive);
                         } else {
-                            // Create reactive property with getter/setter for data properties
+                            // Handle data properties by creating reactive getters/setters
+                            // This enables automatic updates and change detection
                             this.createReactiveProp(reactive, key, val);
                         }
                     }
                 });
 
-                // Add communication methods for component hierarchy
+                // Add communication methods for component hierarchy management
+                // These methods enable parent-child communication in a component tree structure
                 Object.assign(reactive, {
+                    // Method to send notifications up the component hierarchy to parent
+                    // @param {string} type - The type/name of the notification
+                    // @param {*} data - The data payload to send with the notification
                     notifyParent: (type, data) => this.notifyParent(type, data),
+
+                    // Method to broadcast commands/data down to all child components
+                    // @param {string} cmd - The command identifier
+                    // @param {*} data - The data to send with the command
                     sendToChildren: (cmd, data) => this.sendToChildren(cmd, data),
+
+                    // Method to send commands/data to a specific child component by selector
+                    // @param {string} sel - CSS selector to identify the target child component
+                    // @param {string} cmd - The command identifier
+                    // @param {*} data - The data to send with the command
+                    sendToChild: (sel, cmd, data) => {
+                        // Find the first child component whose container matches the selector
+                        const child = Array.from(this.children).find(c => c.container.matches(sel));
+
+                        // If child exists and has a receiveFromParent method, send the command
+                        if (child && child.receiveFromParent) {
+                            child.receiveFromParent(cmd, data);
+                        }
+                    },
+
+                    // Utility method to find a child component using a custom predicate function
+                    // @param {Function} pred - Predicate function that returns true for the desired child
+                    // @returns {Object|undefined} - The first child that matches the predicate
                     findChild: pred => Array.from(this.children).find(pred)
                 });
 
+                // Return the fully configured reactive object
                 return reactive;
             },
 
@@ -1213,54 +1249,81 @@
              * @param {Object} reactive - The reactive object to add computed properties to
              */
             setupComputedProperties(reactive) {
+                // Early exit if no computed properties are defined
                 if (!this.orig.computed) {
                     return;
                 }
 
+                // Iterate through each computed property definition
                 Object.keys(this.orig.computed).forEach(name => {
                     const fn = this.orig.computed[name];
 
+                    // Skip non-function entries (safety check)
                     if (typeof fn !== 'function') {
                         return;
                     }
 
                     try {
-                        // Analyze function to determine which properties it depends on
+                        // Analyze the function to determine which reactive properties it depends on
+                        // This creates a dependency graph for cache invalidation
                         const deps = this.analyzeComputed(fn);
                         this.computedDeps.set(name, deps);
 
                         // Build reverse dependency map for efficient updates
+                        // When a property changes, we can quickly find all computed properties that need invalidation
                         deps.forEach(dep => {
+                            // Initialize dependency list if it doesn't exist
                             if (!this.propDeps.has(dep)) {
                                 this.propDeps.set(dep, []);
                             }
+
+                            // Add this computed property to the dependency's dependents list
                             const depList = this.propDeps.get(dep);
                             if (!depList.includes(name)) {
                                 depList.push(name);
                             }
                         });
 
-                        // Define computed property with getter that implements caching
+                        // Define the computed property with a getter that implements caching logic
                         Object.defineProperty(reactive, name, {
                             get: () => {
-                                // Return cached value if available (performance optimization)
-                                if (this.computedCache.has(name)) {
-                                    return this.computedCache.get(name);
-                                }
-
                                 try {
-                                    // Compute value by calling function with reactive context
-                                    const val = fn.call(reactive);
-                                    this.computedCache.set(name, val);
-                                    return val;
+                                    // Special handling for computed properties that depend on dynamic children
+                                    // These properties need to always recompute since children can change
+                                    // without triggering our normal dependency tracking
+                                    const fnString = fn.toString();
+                                    const accessesChildren = /this\.children|this\.findChild|Array\.from\(this\.children\)/.test(fnString);
+
+                                    if (accessesChildren) {
+                                        // For child-dependent computed properties, always recompute
+                                        // This ensures we get fresh data when the children collection changes
+                                        const val = fn.call(reactive);
+
+                                        // Still cache the result for consistency, even though we always recompute
+                                        this.computedCache.set(name, val);
+                                        return val;
+                                    } else {
+                                        // Standard caching behavior for regular computed properties
+                                        // Return cached value if available (cache is invalidated when dependencies change)
+                                        if (this.computedCache.has(name)) {
+                                            return this.computedCache.get(name);
+                                        }
+
+                                        // Compute new value and cache it
+                                        const val = fn.call(reactive);
+                                        this.computedCache.set(name, val);
+                                        return val;
+                                    }
                                 } catch (error) {
+                                    // Handle errors gracefully during computation
                                     console.error(`Error computing property '${name}':`, error);
                                     return undefined;
                                 }
                             },
-                            enumerable: true // Make property visible in for...in loops
+                            enumerable: true
                         });
                     } catch (error) {
+                        // Handle errors during setup phase
                         console.error(`Error setting up computed property '${name}':`, error);
                     }
                 });
@@ -1758,6 +1821,9 @@
                 if (parent && this.parent !== parent) {
                     this.parent = parent;
                     parent.children.add(this);
+
+                    // Refresh parent's computed properties that might depend on children
+                    this.refreshChildDependentComputed(parent);
                 }
 
                 // Set up child relationships for all discovered children
@@ -1771,6 +1837,33 @@
                         // Establish new parent-child relationship
                         child.parent = this;
                         this.children.add(child);
+                    }
+                });
+
+                // Refresh computed properties that might depend on children
+                this.refreshChildDependentComputed(this);
+            },
+
+            /**
+             * Refreshes computed properties that might depend on children
+             * @param {Object} pacUnit - The PAC unit to refresh
+             */
+            refreshChildDependentComputed(pacUnit) {
+                if (!pacUnit.orig.computed) {
+                    return;
+                }
+
+                Object.keys(pacUnit.orig.computed).forEach(name => {
+                    const fn = pacUnit.orig.computed[name];
+                    if (typeof fn === 'function') {
+                        const fnString = fn.toString();
+                        // Check if this computed property accesses children
+                        if (/this\.children|this\.findChild|Array\.from\(this\.children\)/.test(fnString)) {
+                            // Clear cache to force recomputation
+                            pacUnit.computedCache.delete(name);
+                            // Trigger DOM update for this computed property
+                            pacUnit.updateDOM(name, pacUnit.abstraction[name]);
+                        }
                     }
                 });
             },
@@ -1810,6 +1903,9 @@
                     detail: {eventType: type, data, childPAC: child},
                     bubbles: true
                 }));
+
+                // REFRESH COMPUTED PROPERTIES that might depend on child state
+                this.refreshChildDependentComputed(this);
             },
 
             /**
