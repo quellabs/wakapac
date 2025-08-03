@@ -803,7 +803,7 @@ WakaPAC combines familiar patterns from popular frameworks:
 
 **Template Syntax:**
 - Use `{{property}}` or `{{object.property}}` for text interpolation
-- Use `data-pac-bind="property"` for input binding
+- Use `data-pac-bind="value:property"` for input binding
 - Use `data-pac-bind="visible:condition"` for conditional rendering
 - Use `data-pac-bind="click:method"` for event handling
 
