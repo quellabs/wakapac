@@ -145,7 +145,7 @@ Include WakaPAC in your HTML:
 
 ### Text Interpolation (Vue-style)
 
-Use double braces `{{}}` to bind data to text content. **Property access and expressions are now fully supported:**
+Use double braces `{{}}` to bind data to text content. Property access and expressions are fully supported:
 
 ```html
 <!-- ✅ Simple properties -->
