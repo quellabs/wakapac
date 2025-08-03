@@ -372,7 +372,7 @@
                     <button class="btn-secondary" data-pac-bind="click:reset">🔄 Reset</button>
                     <button class="btn-warning" data-pac-bind="click:requestFocus">🎯 Request Focus</button>
                     <button class="btn-danger" data-pac-bind="click:sendAlert">🚨 Send Alert</button>
-                    <button class="btn-info" data-pac-bind="click:createGrandchild">👶 Add Grandchild</button>
+                    <button class="btn-info" data-pac-bind="click:createGrandchild">{{grandchildButtonText}}</button>
                 </div>
             </div>
 
@@ -746,6 +746,18 @@
             },
             pausedBadgeClass() {
                 return this.isPaused ? 'badge-warning' : 'badge-success';
+            },
+            grandchildButtonText() {
+                // Check if grandchild is active by finding it in children
+                const grandchild = Array.from(this.children).find(child =>
+                    child.container.id === 'grandchild-app'
+                );
+
+                if (grandchild && grandchild.isActive) {
+                    return '⏸️ Deactivate Worker';
+                } else {
+                    return '⚡ Activate Worker';
+                }
             }
         },
 
