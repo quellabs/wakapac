@@ -1811,6 +1811,9 @@
                             ev.preventDefault();
                         }
 
+                        // Stop event propagation to prevent parent PAC units from handling it
+                        ev.stopPropagation();
+
                         // Execute the method with proper context and error handling
                         try {
                             method.call(this.abstraction, ev);
