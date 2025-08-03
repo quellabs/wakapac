@@ -45,28 +45,14 @@
                 return true;
             }
 
-            if (!a || !b || typeof a !== typeof b) {
-                return false;
-            }
-
-            if (typeof a !== 'object') {
+            if (!a || !b || typeof a !== typeof b || typeof a !== 'object') {
                 return false;
             }
 
             const ka = Object.keys(a), kb = Object.keys(b);
 
-            if (ka.length !== kb.length) {
-                return false;
-            }
-
-            for (let i = 0; i < ka.length; i++) {
-                const k = ka[i];
-
-                if (!kb.includes(k) || !U.deepEq(a[k], b[k])) {
-                    return false;
-                }
-            }
-            return true;
+            return ka.length === kb.length &&
+                ka.every(k => kb.includes(k) && U.deepEq(a[k], b[k]));
         },
 
         /**
@@ -110,12 +96,10 @@
          */
         unregister(sel) {
             const unit = this.units.get(sel);
-
             if (unit) {
                 this.units.delete(sel);
                 this.cache = new WeakMap(); // Clear cache when units change
             }
-
             return unit;
         },
 
@@ -130,22 +114,20 @@
                 return this.cache.get(container);
             }
 
-            let parent = null;
+            let parent = null, el = container.parentElement;
             const children = [];
-            let el = container.parentElement;
 
-            // Walk up the DOM tree to find parent PAC unit
+            // Find parent PAC unit by walking up DOM tree
             while (el && !parent) {
                 this.units.forEach(unit => {
                     if (unit.container === el) {
                         parent = unit;
                     }
                 });
-
                 el = el.parentElement;
             }
 
-            // Find all child PAC units within this container
+            // Find children PAC units within this container
             this.units.forEach(unit => {
                 if (container.contains(unit.container) && unit.container !== container) {
                     children.push(unit);
@@ -162,7 +144,7 @@
     window.PACRegistry = window.PACRegistry || new Registry();
 
     /**
-     * Creates a reactive proxy or fallback for an object
+     * Creates reactive proxy or fallback for objects with deep reactivity
      * Handles deep reactivity and change notifications
      * @param {Object} target - Object to make reactive
      * @param {Function} onChange - Callback for changes
@@ -174,12 +156,7 @@
             return target;
         }
 
-        // Use Proxy if available, otherwise fall back to Object.defineProperty
-        if (U.PROXY) {
-            return createProxy(target, onChange, path);
-        }
-
-        return createFallback(target, onChange, path);
+        return U.PROXY ? createProxy(target, onChange, path) : createFallback(target, onChange, path);
     }
 
     /**
@@ -187,19 +164,15 @@
      * @param {Object} target - Object to make reactive
      * @param {Function} onChange - Change callback
      * @param {string} path - Property path
-     * @returns {Proxy} - Proxied reactive object
+     * @returns {Object} - Proxied reactive object
      */
     function createProxy(target, onChange, path) {
         // Make nested objects reactive recursively
-        for (const k in target) {
+        Object.keys(target).forEach(k => {
             if (target.hasOwnProperty(k) && U.isReactive(target[k])) {
-                if (path) {
-                    target[k] = createReactive(target[k], onChange, `${path}.${k}`);
-                } else {
-                    target[k] = createReactive(target[k], onChange, k);
-                }
+                target[k] = createReactive(target[k], onChange, path ? `${path}.${k}` : k);
             }
-        }
+        });
 
         const isArr = Array.isArray(target);
         const methods = {};
@@ -216,26 +189,21 @@
              * Proxy get trap - handles property access and array method calls
              */
             get(obj, prop) {
-                // Handle array mutation methods
                 if (isArr && methods[prop]) {
                     return function (...args) {
                         const result = methods[prop].apply(obj, args);
-
                         // Make new items reactive for mutation methods
                         if (/^(push|unshift|splice)$/.test(prop)) {
-                            for (let i = 0; i < obj.length; i++) {
-                                if (U.isReactive(obj[i]) && !obj[i]._reactive) {
-                                    obj[i] = createReactive(obj[i], onChange, `${path}.${i}`);
+                            obj.forEach((item, i) => {
+                                if (U.isReactive(item) && !item._reactive) {
+                                    obj[i] = createReactive(item, onChange, `${path}.${i}`);
                                 }
-                            }
+                            });
                         }
-
-                        // Notify of array mutation
                         onChange(path || 'root', obj, 'array-mutation', {method: prop, args});
                         return result;
                     };
                 }
-
                 return obj[prop];
             },
 
@@ -244,15 +212,10 @@
              */
             set(obj, prop, val) {
                 const old = obj[prop];
-
-                // Make new value reactive if needed
                 if (U.isReactive(val)) {
                     val = createReactive(val, onChange, path ? `${path}.${prop}` : prop);
                 }
-
                 obj[prop] = val;
-
-                // Only notify if value actually changed
                 if (!U.deepEq(old, val)) {
                     onChange(path ? `${path}.${prop}` : prop, val, 'set', {old});
                 }
@@ -279,24 +242,13 @@
      * @returns {Object} - Reactive object
      */
     function createFallback(target, onChange, path) {
-        // Handle array mutation methods
+        // Simplified fallback implementation for older browsers
         if (Array.isArray(target)) {
             ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'].forEach(m => {
                 const orig = target[m];
-
                 Object.defineProperty(target, m, {
                     value: function (...args) {
                         const result = orig.apply(this, args);
-
-                        // Make new items reactive for mutation methods
-                        if (/^(push|unshift|splice)$/.test(m)) {
-                            for (let i = 0; i < this.length; i++) {
-                                if (U.isReactive(this[i]) && !this[i]._reactive) {
-                                    this[i] = createReactive(this[i], onChange, `${path}.${i}`);
-                                }
-                            }
-                        }
-
                         onChange(path || 'root', this, 'array-mutation', {method: m, args});
                         return result;
                     },
@@ -307,13 +259,12 @@
         }
 
         // Make nested objects reactive
-        for (const k in target) {
+        Object.keys(target).forEach(k => {
             if (target.hasOwnProperty(k) && U.isReactive(target[k])) {
                 target[k] = createReactive(target[k], onChange, path ? `${path}.${k}` : k);
             }
-        }
+        });
 
-        // Mark as reactive to avoid double-processing
         Object.defineProperty(target, '_reactive', {value: true, enumerable: false});
         return target;
     }
@@ -341,11 +292,9 @@
 
         /**
          * Control object - Internal management of the PAC unit
-         * Handles bindings, reactivity, DOM updates, and communication
          */
         const control = {
             bindings: new Map(), // Map of binding ID -> binding config
-            container, // DOM container element
             abstraction: null, // Reactive abstraction object
             delays: new Map(), // Map of delayed update timeouts
             parent: null, // Parent PAC unit
@@ -354,276 +303,348 @@
             pending: null, // Set of properties pending DOM update
             pendingVals: null, // Values for pending updates
             orig: abstraction, // Original abstraction object
-            config, // Configuration options
             computedCache: new Map(), // Cache for computed property values
             computedDeps: new Map(), // Map of computed property -> dependencies
             propDeps: new Map(), // Map of property -> dependent computed properties
+            container,
+            config,
 
             /**
-             * Updates a foreach binding with new array data
-             * @param {Object} binding - The foreach binding configuration
-             * @param {string} prop - Property name that changed
-             * @param {Array} val - New array value
+             * Generic method to create any binding type - DRY principle
+             * Creates a standardized binding object with common properties for all binding types
+             * @param {string} type - The binding type (text, attribute, input, etc.)
+             * @param {Element} element - The DOM element this binding applies to
+             * @param {Object} config - Configuration object with binding-specific properties
+             * @returns {Object} - Standardized binding configuration object
+             */
+            createBinding(type, element, config) {
+                const baseBinding = {
+                    type,
+                    element,
+                    ...config
+                };
+
+                // Add common properties based on type
+                // Extract root property and full path for reactivity tracking
+                if (config.target) {
+                    baseBinding.property = config.target.split('.')[0];        // Root property for change detection
+                    baseBinding.propertyPath = config.target;   // Full path for value resolution
+                }
+
+                return baseBinding;
+            },
+
+            /**
+             * Generic DOM updater - handles all binding types uniformly
+             * Uses strategy pattern to delegate to specific update methods based on binding type
+             * Determines whether a binding needs updating based on the changed property
+             * @param {Object} binding - The binding configuration object
+             * @param {string} prop - The property name that changed
+             * @param {*} val - The new value of the property
+             */
+            updateBinding(binding, prop, val) {
+                // Determine if this binding should be updated based on the changed property
+                // Update if the binding's property matches OR if it uses a property path that starts with the changed property
+                const shouldUpdate = binding.property === prop ||
+                    (binding.propertyPath && binding.propertyPath.startsWith(prop + '.'));
+
+                // Skip bindings that don't need updates (except foreach which has special handling)
+                if (!shouldUpdate && binding.type !== 'foreach') {
+                    return;
+                }
+
+                // Strategy pattern - map binding types to their update methods
+                const updaters = {
+                    text: () => this.updateText(binding, prop, val),
+                    attribute: () => this.updateAttribute(binding, prop, val),
+                    input: () => this.updateInput(binding, prop, val),
+                    checked: () => this.updateChecked(binding, prop, val),
+                    visible: () => this.updateVisible(binding, val),
+                    foreach: () => this.updateForeach(binding, prop, val)
+                };
+
+                // Execute the appropriate updater if it exists and the binding should be updated
+                const updater = updaters[binding.type];
+                if (updater && (shouldUpdate || binding.type === 'foreach')) {
+                    updater.call(this);
+                }
+            },
+
+            /**
+             * Enhanced foreach update with better item handling
+             * Updates a foreach binding when the associated array property changes
+             * Performs efficient array comparison to avoid unnecessary DOM rebuilds
+             * @param {Object} binding - The foreach binding configuration object
+             * @param {string} prop - The property name that changed
+             * @param {*} val - The new array value to render
              */
             updateForeach(binding, prop, val) {
+                // Only process if this foreach binding matches the changed property
                 if (binding.collection !== prop) {
                     return;
                 }
 
-                let arr = val;
-
-                if (!Array.isArray(arr)) {
-                    console.warn('Foreach expects array, got:', typeof arr);
-                    binding.element.innerHTML = '';
-                    binding.prev = [];
-                    return;
-                }
-
+                // Ensure we have a valid array to work with, default to empty array
+                const arr = Array.isArray(val) ? val : [];
                 const prev = binding.prev || [];
-                const curr = Array.from(arr);
 
-                // Skip update if arrays are identical
-                if (curr === prev) {
+                // Performance optimization: skip update if arrays are deeply equal
+                // This prevents unnecessary DOM rebuilds when array contents haven't changed
+                if (this.arrEq(prev, arr)) {
+                    binding.prev = [...arr];  // Update reference for future comparisons
                     return;
                 }
 
-                if (this.arrEq(prev, curr)) {
-                    binding.prev = [...curr];
-                    return;
-                }
+                // Store current array state for next comparison
+                binding.prev = [...arr];
 
-                binding.prev = [...curr];
-                const el = binding.element;
-                el.innerHTML = ''; // Clear existing content
+                // Clear existing content before rendering new items
+                binding.element.innerHTML = '';
 
-                // Render each item in the array
-                curr.forEach((item, i) => {
-                    const itemEl = this.renderItem(binding.template, item, i, binding.itemName, binding.indexName);
-                    el.appendChild(itemEl);
+                // Render each item in the array using the stored template
+                arr.forEach((item, i) => {
+                    const itemEl = this.renderItem(binding.template, item, i,
+                        binding.itemName, binding.indexName);
+                    binding.element.appendChild(itemEl);
                 });
             },
 
             /**
-             * Renders a single item template with data binding
-             * @param {string} tmpl - HTML template string
-             * @param {*} item - Data item to bind
-             * @param {number} idx - Index of the item
-             * @param {string} itemName - Variable name for the item
-             * @param {string} idxName - Variable name for the index
-             * @returns {Element} - Rendered DOM element
+             * Consolidated item rendering with better expression evaluation
+             * Creates a DOM element from a template string with data binding applied
+             * Processes both text interpolation and attribute bindings for the item
+             * @param {string} tmpl - HTML template string to render
+             * @param {*} item - Data item to bind to the template
+             * @param {number} idx - Index of the item in the collection
+             * @param {string} itemName - Variable name for the item in template expressions
+             * @param {string} idxName - Variable name for the index in template expressions
+             * @returns {Element} - Rendered DOM element with data binding applied
              */
             renderItem(tmpl, item, idx, itemName, idxName) {
+                // Create temporary container to parse HTML template
                 const div = document.createElement('div');
                 div.innerHTML = tmpl;
 
+                // Extract the first element or text node from the template
                 const el = div.firstElementChild || div.firstChild;
                 if (!el) {
                     return document.createTextNode('');
-                }
+                } // Return empty text node if no content
 
+                // Clone the element to avoid modifying the original template
                 const clone = el.cloneNode(true);
-                this.processText(clone, item, idx, itemName, idxName);
-                this.processAttrs(clone, item, idx, itemName, idxName);
+
+                // Process the cloned element to apply data binding
+                this.processTemplate(clone, item, idx, itemName, idxName);
+
                 return clone;
             },
 
             /**
-             * Shallow array equality check for optimization
-             * @param {Array} a - First array
-             * @param {Array} b - Second array
-             * @returns {boolean} - True if arrays are equal
+             * Unified template processing - combines text and attribute processing
+             * Processes both text content and element attributes for data binding
+             * Handles variable interpolation and binding directives in a single pass
+             * @param {Element} el - The element to process for data binding
+             * @param {*} item - Data item for binding context
+             * @param {number} idx - Item index for binding context
+             * @param {string} itemName - Item variable name for template expressions
+             * @param {string} idxName - Index variable name for template expressions
              */
-            arrEq(a, b) {
-                if (a.length !== b.length) {
-                    return false;
-                }
-
-                for (let i = 0; i < a.length; i++) {
-                    if (!U.deepEq(a[i], b[i])) {
-                        return false;
-                    }
-                }
-
-                return true;
-            },
-
-            /**
-             * Processes text nodes in a template, replacing variable placeholders
-             * @param {Element} el - Element to process
-             * @param {*} item - Data item
-             * @param {number} idx - Item index
-             * @param {string} itemName - Item variable name
-             * @param {string} idxName - Index variable name
-             */
-            processText(el, item, idx, itemName, idxName) {
+            processTemplate(el, item, idx, itemName, idxName) {
+                // Process text nodes for variable interpolation {{variable}}
                 const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
                 const nodes = [];
-
-                // Collect all text nodes first to avoid walker issues
                 let node;
+
+                // Collect all text nodes first to avoid walker issues during modification
                 while (node = walker.nextNode()) {
                     nodes.push(node);
                 }
 
-                nodes.forEach(function(n) {
-                    // Original content
+                // Process each text node for variable interpolation
+                nodes.forEach(n => {
                     let txt = n.textContent;
 
                     // Replace item property references: {{item.property}}
-                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\.(\\w+)\\s*\\}\\}`, 'g'), function(m, p) {
-                        return item && item.hasOwnProperty(p) ? item[p] : '';
-                    });
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\.(\\w+)\\s*\\}\\}`, 'g'),
+                        (m, p) => item && item.hasOwnProperty(p) ? item[p] : '');
 
                     // Replace item references: {{item}}
-                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\s*\\}\\}`, 'g'), function() {
-                        return typeof item === 'object' ? JSON.stringify(item) : item || '';
-                    });
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${itemName}\\s*\\}\\}`, 'g'),
+                        () => typeof item === 'object' ? JSON.stringify(item) : item || '');
 
                     // Replace index references: {{index}}
-                    txt = txt.replace(new RegExp(`\\{\\{\\s*${idxName}\\s*\\}\\}`, 'g'), function() {
-                        return idx;
-                    });
+                    txt = txt.replace(new RegExp(`\\{\\{\\s*${idxName}\\s*\\}\\}`, 'g'), () => idx);
 
-                    // Update content
+                    // Update the text content with interpolated values
                     n.textContent = txt;
                 });
-            },
 
-            /**
-             * Processes attributes and bindings in a template
-             * @param {Element} el - Element to process
-             * @param {*} item - Data item
-             * @param {number} idx - Item index
-             * @param {string} itemName - Item variable name
-             * @param {string} idxName - Index variable name
-             */
-            processAttrs(el, item, idx, itemName, idxName) {
-                const bindable = [el, ...el.querySelectorAll('[data-pac-bind]')];
-
-                bindable.forEach(e => {
+                // Process elements with data-pac-bind attributes for directive binding
+                [el, ...el.querySelectorAll('[data-pac-bind]')].forEach(e => {
                     const bind = e.getAttribute('data-pac-bind');
-
                     if (!bind) {
                         return;
                     }
 
-                    // Process each binding (comma-separated)
+                    // Handle multiple bindings on a single element (comma-separated)
                     bind.split(',').forEach(b => {
                         const [type, target] = b.trim().split(':').map(s => s.trim());
-
-                        switch (type) {
-                            case 'class':
-                                // Class binding: class:condition
-                                if (this.evalExpr(target, item, idx, itemName, idxName)) {
-                                    e.classList.add(target.includes('.') ? target.split('.').pop() : target);
-                                }
-
-                                break;
-
-                            case 'checked':
-                                // Checkbox binding: checked:condition
-                                e.checked = !!this.evalExpr(target, item, idx, itemName, idxName);
-                                break;
-
-                            default:
-                                if (U.isEvent(type)) {
-                                    // Event binding: click:methodName
-                                    e.addEventListener(type, ev => {
-                                        if (typeof this.abstraction[target] === 'function') {
-                                            this.abstraction[target].call(this.abstraction, item, idx, ev);
-                                        }
-                                    });
-                                } else {
-                                    // Attribute binding: attr:value
-                                    const val = this.evalExpr(target, item, idx, itemName, idxName);
-
-                                    if (val != null) {
-                                        e.setAttribute(type, val);
-                                    }
-                                }
-
-                                break;
-                        }
+                        this.processBinding(e, type, target, item, idx, itemName, idxName);
                     });
                 });
             },
 
             /**
-             * Evaluates an expression in the context of item data
-             * @param {string} expr - Expression to evaluate
-             * @param {*} item - Data item
-             * @param {number} idx - Item index
-             * @param {string} itemName - Item variable name
-             * @param {string} idxName - Index variable name
-             * @returns {*} - Evaluated result
+             * Unified binding processor for template items
+             * Handles different types of data bindings within foreach templates
+             * Supports class toggling, checked states, events, and attribute binding
+             * @param {Element} element - The element to apply binding to
+             * @param {string} type - The binding type (class, checked, event name, attribute name)
+             * @param {string} target - The binding target (property name, method name, etc.)
+             * @param {*} item - Data item for binding context
+             * @param {number} idx - Item index for binding context
+             * @param {string} itemName - Item variable name for template expressions
+             * @param {string} idxName - Index variable name for template expressions
+             */
+            processBinding(element, type, target, item, idx, itemName, idxName) {
+                // Map of specific binding types to their handlers
+                const bindingMap = {
+                    // Class binding: conditionally add CSS class based on expression value
+                    class: () => {
+                        if (this.evalExpr(target, item, idx, itemName, idxName)) {
+                            const className = target.includes('.') ? target.split('.').pop() : target;
+                            element.classList.add(className);
+                        }
+                    },
+
+                    // Checked binding: set checkbox/radio checked state based on expression
+                    checked: () => {
+                        element.checked = !!this.evalExpr(target, item, idx, itemName, idxName);
+                    }
+                };
+
+                // Execute specific binding handler if available
+                if (bindingMap[type]) {
+                    bindingMap[type]();
+                } else if (U.isEvent(type)) {
+                    // Event binding: attach event listener that calls abstraction method
+                    element.addEventListener(type, ev => {
+                        if (typeof this.abstraction[target] === 'function') {
+                            // Call method with item, index, and event as parameters
+                            this.abstraction[target].call(this.abstraction, item, idx, ev);
+                        }
+                    });
+                } else {
+                    // Generic attribute binding: set attribute value from expression
+                    const val = this.evalExpr(target, item, idx, itemName, idxName);
+                    if (val != null) {
+                        element.setAttribute(type, val);
+                    }
+                }
+            },
+
+            /**
+             * Simple expression evaluator for template binding contexts
+             * Evaluates property access expressions in the context of foreach items
+             * Supports simple property access and nested object property paths
+             * @param {string} expr - The expression to evaluate (e.g., "item.name", "index")
+             * @param {*} item - The current item data
+             * @param {number} idx - The current item index
+             * @param {string} itemName - Variable name for item in expressions
+             * @param {string} idxName - Variable name for index in expressions
+             * @returns {*} - The evaluated expression result
              */
             evalExpr(expr, item, idx, itemName, idxName) {
+                // Direct index reference
                 if (expr === idxName) {
                     return idx;
                 }
 
+                // Direct item reference
                 if (expr === itemName) {
                     return item;
                 }
 
+                // Property path on item (e.g., "item.property.subproperty")
                 if (expr.startsWith(`${itemName}.`)) {
-                    // Navigate object path: item.property.subproperty
-                    const path = expr.substring(itemName.length + 1).split('.');
-                    let val = item;
-                    for (const p of path) {
-                        if (val && val.hasOwnProperty(p)) {
-                            val = val[p];
-                        } else {
-                            return undefined;
-                        }
-                    }
-                    return val;
+                    // Navigate the property path starting from the item
+                    return expr.substring(itemName.length + 1)
+                        .split('.')
+                        .reduce((val, p) => val && val.hasOwnProperty(p) ? val[p] : undefined, item);
                 }
 
+                // Return literal value if not a recognized expression pattern
                 return expr;
             },
 
             /**
-             * Handles deep property changes in reactive objects
-             * @param {string} path - Property path that changed
-             * @param {*} val - New value
+             * Simplified array equality check for performance optimization
+             * Performs shallow comparison of array elements using deep equality for objects
+             * Used to determine if foreach bindings need DOM updates
+             * @param {Array} a - First array to compare
+             * @param {Array} b - Second array to compare
+             * @returns {boolean} - True if arrays are equal
+             */
+            arrEq: (a, b) => a.length === b.length && a.every((item, i) => U.deepEq(item, b[i])),
+
+            /**
+             * Handles deep property changes with unified logic
+             * Manages reactive updates when nested object/array properties change
+             * Triggers computed property updates and DOM synchronization
+             * @param {string} path - The full property path that changed (e.g., "user.profile.name")
+             * @param {*} val - The new value at the changed path
              * @param {string} type - Type of change (set, delete, array-mutation)
-             * @param {Object} meta - Additional change metadata
+             * @param {Object} meta - Additional metadata about the change
              */
             handleDeepChange(path, val, type, meta) {
+                // Extract root property name for reactivity system
                 const root = path.split('.')[0];
-                this.updateComputed(root); // Update any computed properties
 
-                // Update DOM if this is a root property or array mutation
+                // Update any computed properties that depend on this root property
+                this.updateComputed(root);
+
+                // Trigger DOM updates if this is a root property change or array mutation
                 if (type === 'array-mutation' || this.abstraction.hasOwnProperty(root)) {
                     this.updateDOM(root, this.abstraction[root]);
                 }
 
-                // Notify parent of the change
-                this.notifyParent('propertyChange', {property: root, path, newValue: val, changeType: type, meta});
+                // Notify parent component of the property change for hierarchical communication
+                this.notifyParent('propertyChange', {
+                    property: root,
+                    path,
+                    newValue: val,
+                    changeType: type,
+                    meta
+                });
             },
 
             /**
-             * Queues a DOM update for a property (batched for performance)
-             * @param {string} prop - Property name
-             * @param {*} val - New value
+             * Batched DOM updates with requestAnimationFrame for optimal performance
+             * Queues property updates to be processed in the next animation frame
+             * Prevents excessive DOM manipulation during rapid property changes
+             * @param {string} prop - Property name that changed
+             * @param {*} val - New property value
              */
             updateDOM(prop, val) {
+                // Initialize batching system if not already active
                 if (!this.pending) {
-                    this.pending = new Set();
-                    this.pendingVals = {};
+                    this.pending = new Set();        // Set of properties pending update
+                    this.pendingVals = {};           // Map of property -> new value
 
-                    // Batch updates using requestAnimationFrame
+                    // Schedule flush for next animation frame (or fallback to setTimeout)
                     (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => this.flushDOM());
                 }
 
+                // Add this property to the pending updates queue
                 this.pending.add(prop);
                 this.pendingVals[prop] = val;
             },
 
             /**
-             * Flushes all pending DOM updates by processing queued property changes
-             * and applying them to their corresponding DOM bindings
+             * Flushes all pending DOM updates efficiently in a single batch
+             * Processes all queued property changes and applies them to bindings
+             * Clears the pending queue after processing to prepare for next batch
              */
             flushDOM() {
                 // Exit early if no updates are pending
@@ -633,57 +654,10 @@
 
                 // Process each property that has pending changes
                 this.pending.forEach(prop => {
-                    // Get the new value for this property
                     const val = this.pendingVals[prop];
 
                     // Apply the property change to all relevant bindings
-                    this.bindings.forEach(binding => {
-                        // Determine if this binding should be updated based on the changed property
-                        // Update if:
-                        // 1. The binding's property exactly matches the changed property
-                        // 2. The binding uses a property path that starts with the changed property
-                        //    (e.g., if 'user' changed, update bindings for 'user.name')
-                        const shouldUpdate = binding.property === prop ||
-                            (binding.propertyPath && binding.propertyPath.startsWith(prop + '.'));
-
-                        // Skip bindings that don't need updates (except foreach which has special handling)
-                        if (!shouldUpdate && binding.type !== 'foreach') {
-                            return;
-                        }
-
-                        // Delegate to specific update functions based on binding type
-                        switch (binding.type) {
-                            case 'text':
-                                if (shouldUpdate) {
-                                    this.updateText(binding, prop, val);
-                                }
-                                break;
-
-                            case 'attribute':
-                                if (shouldUpdate) {
-                                    this.updateAttribute(binding, prop, val);
-                                }
-                                break;
-
-                            case 'input':
-                                this.updateInput(binding, prop, val);
-                                break;
-
-                            case 'checked':
-                                this.updateChecked(binding, prop, val);
-                                break;
-
-                            case 'visible':
-                                if (shouldUpdate) {
-                                    this.updateVisible(binding, val);
-                                }
-                                break;
-
-                            case 'foreach':
-                                this.updateForeach(binding, prop, val);
-                                break;
-                        }
-                    });
+                    this.bindings.forEach(binding => this.updateBinding(binding, prop, val));
                 });
 
                 // Clear the pending updates queue after processing
@@ -692,24 +666,47 @@
             },
 
             /**
-             * Updates attribute bindings on DOM elements
-             * @param {Object} binding - The binding configuration
-             * @param {string} prop - The property that changed
-             * @param {*} val - The new value
+             * Updates text content with interpolated property values
+             * Handles property path resolution and display formatting
+             * @param {Object} binding - Text binding configuration object
+             * @param {string} prop - Property name that changed
+             * @param {*} val - New property value
              */
-            updateAttribute(binding, prop, val) {
-                // Resolve the actual value using the property path
-                // This handles nested property access (e.g., user.name)
-                let actualValue;
-                if (binding.propertyPath && binding.propertyPath !== binding.property) {
-                    // Use property path resolution for nested properties
-                    actualValue = this.resolvePropertyPath(binding.propertyPath);
-                } else {
-                    // Use the direct value for simple properties
-                    actualValue = val;
+            updateText(binding, prop, val) {
+                // Only process if this binding is affected by the changed property
+                if (binding.property !== prop) {
+                    return;
                 }
 
-                // Set or remove the attribute based on the value
+                // Resolve the full property path to get the actual display value
+                const resolvedValue = this.resolvePropertyPath(binding.propertyPath || binding.property);
+
+                // Format the value appropriately for display
+                const display = this.formatDisplayValue(resolvedValue);
+
+                // Create regex to match the specific property path in template
+                const regex = new RegExp(`\\{\\{\\s*${(binding.propertyPath || binding.property).replace(/\./g, '\\.')}\\s*\\}\\}`, 'g');
+
+                // Update the text content by replacing template placeholders
+                (binding.textNode || binding.element).textContent =
+                    binding.origText.replace(regex, display);
+            },
+
+            /**
+             * Updates attribute bindings on DOM elements
+             * Handles both simple properties and complex property paths
+             * Sets or removes attributes based on resolved values
+             * @param {Object} binding - Attribute binding configuration object
+             * @param {string} prop - Property name that changed
+             * @param {*} val - New property value
+             */
+            updateAttribute(binding, prop, val) {
+                // Resolve the actual value using property path if available
+                // This handles nested property access (e.g., user.profile.name)
+                const actualValue = binding.propertyPath && binding.propertyPath !== binding.property ?
+                    this.resolvePropertyPath(binding.propertyPath) : val;
+
+                // Set or remove the attribute based on the resolved value
                 if (actualValue != null) {
                     binding.element.setAttribute(binding.attribute, actualValue);
                 } else {
@@ -719,10 +716,12 @@
             },
 
             /**
-             * Updates input element values (for form controls)
-             * @param {Object} binding - The binding configuration
-             * @param {string} prop - The property that changed
-             * @param {*} val - The new value
+             * Updates input element values for two-way data binding
+             * Only updates if the value has actually changed to prevent cursor issues
+             * Handles form controls like text inputs, textareas, and selects
+             * @param {Object} binding - Input binding configuration object
+             * @param {string} prop - Property name that changed
+             * @param {*} val - New property value
              */
             updateInput(binding, prop, val) {
                 // Only update if the property matches and the value has actually changed
@@ -734,9 +733,11 @@
 
             /**
              * Updates checkbox/radio button checked state
-             * @param {Object} binding - The binding configuration
-             * @param {string} prop - The property that changed
-             * @param {*} val - The new value
+             * Converts values to boolean and only updates if state changed
+             * Prevents unnecessary DOM manipulation for unchanged states
+             * @param {Object} binding - Checked binding configuration object
+             * @param {string} prop - Property name that changed
+             * @param {*} val - New property value
              */
             updateChecked(binding, prop, val) {
                 // Convert value to boolean and only update if state has changed
@@ -746,178 +747,127 @@
             },
 
             /**
-             * Updates element visibility based on a condition
-             * @param {Object} binding - Visibility binding configuration
-             * @param {*} val - Value to test for visibility
+             * Updates element visibility based on binding conditions
+             * Handles both direct values and complex property paths
+             * Supports negation for hide-when-true scenarios
+             * @param {Object} binding - Visibility binding configuration object
+             * @param {*} val - Value to test for visibility (may be unused if property path differs)
              */
             updateVisible(binding, val) {
-                const el = binding.element;
+                // Resolve the actual value using property path if available
+                // This enables complex visibility conditions like "todos.length"
+                const actualValue = binding.propertyPath && binding.propertyPath !== binding.property ?
+                    this.resolvePropertyPath(binding.propertyPath) : val;
 
-                // Resolve the actual value using the property path
-                let actualValue;
-                if (binding.propertyPath && binding.propertyPath !== binding.property) {
-                    // Use property path resolution for complex paths like "todos.length"
-                    actualValue = this.resolvePropertyPath(binding.propertyPath);
-                } else {
-                    // Use the passed value for simple properties
-                    actualValue = val;
-                }
-
-                // Apply negation if present
+                // Apply negation logic if present (for hide-when-true scenarios)
                 const show = binding.isNegated ? !actualValue : !!actualValue;
 
-                // Show the element
+                // Delegate to helper method for actual DOM manipulation
+                this.toggleElementVisibility(binding.element, show);
+            },
+
+            /**
+             * Helper methods extracted for reusability
+             * Formats different value types for appropriate display in text content
+             * Handles objects, arrays, primitives, and null/undefined values
+             * @param {*} value - The value to format for display
+             * @returns {string} - Formatted display string
+             */
+            formatDisplayValue(value) {
+                if (typeof value === 'object' && value !== null) {
+                    // Format arrays as item count, objects as formatted JSON
+                    return Array.isArray(value) ?
+                        `[${value.length} items]` :
+                        JSON.stringify(value, null, 2);
+                }
+                // Return empty string for null/undefined, otherwise convert to string
+                return value == null ? '' : value;
+            },
+
+            /**
+             * Toggles element visibility while preserving original display style
+             * Stores and restores the original CSS display value when showing/hiding
+             * Uses custom attributes to track visibility state and original styles
+             * @param {Element} el - The element to show or hide
+             * @param {boolean} show - Whether to show (true) or hide (false) the element
+             */
+            toggleElementVisibility(el, show) {
                 if (show) {
+                    // Show the element by restoring original display style
                     if (el.hasAttribute('data-pac-hidden')) {
                         el.style.display = el.getAttribute('data-pac-orig-display') || '';
                         el.removeAttribute('data-pac-hidden');
                         el.removeAttribute('data-pac-orig-display');
                     }
-                    return;
-                }
+                } else {
+                    // Hide the element by setting display: none
+                    if (!el.hasAttribute('data-pac-hidden')) {
+                        const orig = getComputedStyle(el).display;
 
-                // Hide the element
-                if (!el.hasAttribute('data-pac-hidden')) {
-                    const orig = getComputedStyle(el).display;
+                        // Store original display value if it's not already 'none'
+                        if (orig !== 'none') {
+                            el.setAttribute('data-pac-orig-display', orig);
+                        }
 
-                    if (orig !== 'none') {
-                        el.setAttribute('data-pac-orig-display', orig);
+                        el.style.display = 'none';
+                        el.setAttribute('data-pac-hidden', 'true');
                     }
-
-                    el.style.display = 'none';
-                    el.setAttribute('data-pac-hidden', 'true');
                 }
             },
 
             /**
-             * Updates text content with interpolated values
-             * @param {Object} binding - Text binding configuration
-             * @param {string} prop - Property name
-             * @param {*} val - New value
-             */
-            updateText(binding, prop, val) {
-                // Only update if this binding is affected by the changed property
-                if (binding.property !== prop) {
-                    return;
-                }
-
-                const propertyPath = binding.propertyPath || binding.property;
-
-                // Resolve the full property path value
-                const resolvedValue = this.resolvePropertyPath(propertyPath);
-
-                // Create regex for the specific property path
-                const regex = new RegExp(`\\{\\{\\s*${propertyPath.replace(/\./g, '\\.')}\\s*\\}\\}`, 'g');
-
-                let display = resolvedValue;
-
-                // Format different value types for display
-                if (typeof resolvedValue === 'object' && resolvedValue !== null) {
-                    display = Array.isArray(resolvedValue) ?
-                        `[${resolvedValue.length} items]` :
-                        JSON.stringify(resolvedValue, null, 2);
-                } else if (resolvedValue == null) {
-                    display = '';
-                }
-
-                // Update the text content
-                const currentText = (binding.textNode || binding.element).textContent;
-
-                (binding.textNode || binding.element).textContent = binding.origText.replace(regex, display);
-            },
-
-            /**
-             * Resolves a property path like "items.length" or "user.profile.name"
-             * @param {string} path - The property path to resolve
-             * @returns {*} - The resolved value
+             * Resolves property paths like "items.length" or "user.profile.name"
+             * Safely navigates nested object properties without throwing errors
+             * Returns undefined for invalid or non-existent property paths
+             * @param {string} path - The property path to resolve (dot-separated)
+             * @returns {*} - The resolved value or undefined if path is invalid
              */
             resolvePropertyPath(path) {
-                const parts = path.split('.');
-                let current = this.abstraction;
-
-                for (const part of parts) {
-                    if (current == null) {
-                        return undefined;
-                    }
-
-                    current = current[part];
-                }
-
-                return current;
+                return path.split('.').reduce((current, part) =>
+                    current == null ? undefined : current[part], this.abstraction);
             },
 
             /**
-             * Enhanced method to track deep property dependencies
-             * Call this during binding setup to ensure proper reactivity
-             */
-            trackPropertyPathDependencies() {
-                this.bindings.forEach(binding => {
-                    if (binding.type === 'text' && binding.propertyPath) {
-                        const parts = binding.propertyPath.split('.');
-
-                        // Track all intermediate properties in the path for reactivity
-                        // For "items.length", we need to update when "items" changes
-                        for (let i = 0; i < parts.length; i++) {
-                            const partialPath = parts.slice(0, i + 1).join('.');
-                            const rootProp = parts[0];
-
-                            // Ensure the root property triggers updates for this binding
-                            if (!this.propDeps) {
-                                this.propDeps = new Map();
-                            }
-
-                            if (!this.propDeps.has(rootProp)) {
-                                this.propDeps.set(rootProp, []);
-                            }
-
-                            // Add this binding to be updated when root property changes
-                            if (!this.propDeps.get(rootProp).includes(binding)) {
-                                this.propDeps.get(rootProp).push(binding);
-                            }
-                        }
-                    }
-                });
-            },
-
-            /**
-             * Analyzes a computed function to find its dependencies
-             * @param {Function} fn - Computed function to analyze
-             * @returns {Array} - Array of property names the function depends on
+             * Enhanced computed property handling with better dependency tracking
+             * Analyzes computed function source code to automatically detect dependencies
+             * Uses regex parsing to find 'this.property' references in function body
+             * @param {Function} fn - The computed property function to analyze
+             * @returns {Array} - Array of property names this function depends on
              */
             analyzeComputed(fn) {
                 if (!fn || typeof fn !== 'function') {
-                    console.warn('analyzeComputed called with invalid function');
                     return [];
                 }
 
-                const deps = [];
-
                 try {
-                    const src = fn.toString();
+                    const deps = [];
+                    // Regular expression to find 'this.property' references in function source
                     const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
                     let match;
 
-                    // Find all 'this.property' references in the function
-                    while ((match = regex.exec(src))) {
+                    // Extract function source and find all property references
+                    while ((match = regex.exec(fn.toString()))) {
                         const prop = match[1];
 
-                        // Only include properties that exist in the original data
-                        // and exclude computed properties to prevent circular dependencies
+                        // Only include properties that exist in original data
+                        // Exclude computed properties to prevent circular dependencies
                         if (this.orig.hasOwnProperty(prop) &&
                             (!this.orig.computed || !this.orig.computed.hasOwnProperty(prop)) &&
                             !deps.includes(prop)) {
                             deps.push(prop);
                         }
                     }
+                    return deps;
                 } catch (error) {
                     console.error('Error analyzing computed function:', error);
+                    return [];
                 }
-
-                return deps;
             },
 
             /**
              * Updates computed properties that depend on a changed property
+             * Handles cascading updates when computed properties depend on other computed properties
+             * Includes performance optimization to avoid unnecessary recalculations
              * @param {string} changed - Name of the property that changed
              */
             updateComputed(changed) {
@@ -926,45 +876,36 @@
 
                 // Process each dependent computed property
                 deps.forEach(computed => {
-                    // Store the previous value for comparison and change notifications
+                    // Store previous value for change detection and notifications
                     const old = this.computedCache.get(computed);
-
-                    // Ensure we have computed properties defined
                     if (!this.orig.computed) {
                         return;
                     }
 
-                    // Get the computed property function from the original configuration
+                    // Get the computed property function from configuration
                     const fn = this.orig.computed[computed];
-
-                    // Check if the computed function exists and is actually a function
                     if (!fn || typeof fn !== 'function') {
-                        console.warn(`Computed property '${computed}' is not defined or not a function`);
                         return;
                     }
 
                     try {
-                        // Execute the computed function in the context of the abstraction object
+                        // Execute the computed function in the context of reactive abstraction
                         const val = fn.call(this.abstraction);
 
-                        // Check if any bindings use this computed property as a foreach collection
-                        // This is important because foreach bindings need updates even if the array
-                        // reference hasn't changed (e.g., when array contents are modified)
-                        const hasArray = Array.from(this.bindings.values()).some(function(b) {
-                            return b.type === 'foreach' && b.collection === computed;
-                        });
+                        // Check if any foreach bindings use this computed property
+                        // This is important because foreach needs updates even if array reference is same
+                        const hasArray = Array.from(this.bindings.values())
+                            .some(b => b.type === 'foreach' && b.collection === computed);
 
-                        // Update only if:
-                        // 1. There's a foreach binding using this computed property, OR
-                        // 2. The computed value has actually changed (deep equality check)
+                        // Update only if value changed or if foreach binding needs update
                         if (hasArray || !U.deepEq(old, val)) {
-                            // Cache the new computed value
+                            // Cache the new computed value for future access
                             this.computedCache.set(computed, val);
 
-                            // Update any DOM elements bound to this computed property
+                            // Trigger DOM updates for elements bound to this computed property
                             this.updateDOM(computed, val);
 
-                            // Notify parent component of the property change
+                            // Notify parent component of computed property change
                             this.notifyParent('propertyChange', {
                                 property: computed,
                                 oldValue: old,
@@ -972,8 +913,7 @@
                                 computed: true
                             });
 
-                            // Recursively update any computed properties that depend on this one
-                            // This handles cascading updates where computed properties depend on other computed properties
+                            // Recursively update computed properties that depend on this one
                             this.updateComputed(computed);
                         }
                     } catch (error) {
@@ -983,170 +923,144 @@
             },
 
             /**
-             * Enhanced createReactiveAbs method with better computed property handling
-             * This replaces the computed property setup section in the existing method
-             */
-            setupComputedProperties(reactive) {
-                const self = this;
-
-                // Set up computed properties
-                if (this.orig.computed) {
-                    // Iterate through all computed property definitions
-                    for (const name in this.orig.computed) {
-                        const fn = this.orig.computed[name];
-
-                        // Only process function-based computed properties
-                        if (typeof fn === 'function') {
-                            try {
-                                // Analyze the computed function to find its dependencies
-                                const deps = this.analyzeComputed(fn);
-                                // Store the dependencies for this computed property
-                                this.computedDeps.set(name, deps);
-
-                                // Build reverse dependency map - track which computed properties
-                                // depend on each regular property for efficient invalidation
-                                deps.forEach(function(dep) {
-                                    // Initialize the dependency array if it doesn't exist
-                                    if (!self.propDeps.has(dep)) {
-                                        self.propDeps.set(dep, []);
-                                    }
-
-                                    // Add this computed property to the dependency list
-                                    // of the property it depends on
-                                    const depList = self.propDeps.get(dep);
-                                    if (!depList.includes(name)) {
-                                        depList.push(name);
-                                    }
-                                });
-
-                                // Define computed property with getter that implements caching
-                                Object.defineProperty(reactive, name, {
-                                    get: () => {
-                                        // Return cached value if available (performance optimization)
-                                        if (this.computedCache.has(name)) {
-                                            return this.computedCache.get(name);
-                                        }
-
-                                        try {
-                                            // Compute the value by calling the function with reactive context
-                                            const val = fn.call(reactive);
-                                            // Cache the computed value for future access
-                                            this.computedCache.set(name, val);
-                                            return val;
-                                        } catch (error) {
-                                            console.error(`Error computing property '${name}':`, error);
-                                            return undefined;
-                                        }
-                                    },
-                                    enumerable: true // Make property visible in for...in loops
-                                });
-                            } catch (error) {
-                                console.error(`Error setting up computed property '${name}':`, error);
-                            }
-                        } else {
-                            console.warn(`Computed property '${name}' is not a function`);
-                        }
-                    }
-                }
-            },
-
-            /**
-             * Creates the reactive abstraction object with getters/setters
-             * @returns {Object} - Reactive abstraction object
+             * Streamlined reactive abstraction creation
+             * Creates the main reactive object that serves as the data model
+             * Sets up computed properties, regular properties, and communication methods
+             * @returns {Object} - The reactive abstraction object with getters/setters
              */
             createReactiveAbs() {
                 const reactive = {};
 
-                // Set up computed properties first (with error handling)
+                // Setup computed properties first (they may depend on regular properties)
                 this.setupComputedProperties(reactive);
 
-                // Set up regular properties (non-computed)
-                for (const key in this.orig) {
-                    // Only process own properties, skip computed (already handled above)
+                // Setup regular properties from original configuration
+                Object.keys(this.orig).forEach(key => {
                     if (this.orig.hasOwnProperty(key) && key !== 'computed') {
                         const val = this.orig[key];
-
                         if (typeof val === 'function') {
                             // Bind methods to reactive object so 'this' refers to reactive instance
-                            // This ensures methods can access reactive properties correctly
                             reactive[key] = val.bind(reactive);
                         } else {
                             // Create reactive property with getter/setter for data properties
-                            // This enables change detection and computed property invalidation
                             this.createReactiveProp(reactive, key, val);
                         }
                     }
-                }
+                });
 
-                // Method to send notifications up the component hierarchy
-                reactive.notifyParent = (type, data) => this.notifyParent(type, data);
+                // Add communication methods for component hierarchy
+                Object.assign(reactive, {
+                    notifyParent: (type, data) => this.notifyParent(type, data),
+                    sendToChildren: (cmd, data) => this.sendToChildren(cmd, data),
+                    findChild: pred => Array.from(this.children).find(pred)
+                });
 
-                // Method to broadcast commands down to child components
-                reactive.sendToChildren = (cmd, data) => this.sendToChildren(cmd, data);
-
-                // Utility method to find a specific child component using a predicate function
-                reactive.findChild = pred => Array.from(this.children).find(pred);
-
-                // Return the reactive object
                 return reactive;
             },
 
             /**
-             * Creates a reactive property with getter/setter
-             * @param {Object} obj - Object to add property to
-             * @param {string} key - Property name
-             * @param {*} init - Initial value
+             * Sets up computed properties with dependency tracking and caching
+             * Creates getter-only properties that automatically recalculate when dependencies change
+             * Builds reverse dependency maps for efficient invalidation
+             * @param {Object} reactive - The reactive object to add computed properties to
              */
-            createReactiveProp(obj, key, init) {
-                const self = this;
-                let val = init;
-
-                // Make initial value reactive if needed for deep reactivity.
-                // This enables nested object/array change detection
-                if (this.config.deepReactivity && U.isReactive(val)) {
-                    val = createReactive(val, function(path, newVal, type, meta) {
-                        // Delegate deep change handling to the parent's handler
-                        return self.handleDeepChange(path, newVal, type, meta);
-                    }, key);
+            setupComputedProperties(reactive) {
+                if (!this.orig.computed) {
+                    return;
                 }
 
-                // Define the reactive property using Object.defineProperty
+                Object.keys(this.orig.computed).forEach(name => {
+                    const fn = this.orig.computed[name];
+
+                    if (typeof fn !== 'function') {
+                        return;
+                    }
+
+                    try {
+                        // Analyze function to determine which properties it depends on
+                        const deps = this.analyzeComputed(fn);
+                        this.computedDeps.set(name, deps);
+
+                        // Build reverse dependency map for efficient updates
+                        deps.forEach(dep => {
+                            if (!this.propDeps.has(dep)) {
+                                this.propDeps.set(dep, []);
+                            }
+                            const depList = this.propDeps.get(dep);
+                            if (!depList.includes(name)) {
+                                depList.push(name);
+                            }
+                        });
+
+                        // Define computed property with getter that implements caching
+                        Object.defineProperty(reactive, name, {
+                            get: () => {
+                                // Return cached value if available (performance optimization)
+                                if (this.computedCache.has(name)) {
+                                    return this.computedCache.get(name);
+                                }
+
+                                try {
+                                    // Compute value by calling function with reactive context
+                                    const val = fn.call(reactive);
+                                    this.computedCache.set(name, val);
+                                    return val;
+                                } catch (error) {
+                                    console.error(`Error computing property '${name}':`, error);
+                                    return undefined;
+                                }
+                            },
+                            enumerable: true // Make property visible in for...in loops
+                        });
+                    } catch (error) {
+                        console.error(`Error setting up computed property '${name}':`, error);
+                    }
+                });
+            },
+
+            /**
+             * Creates a reactive property with getter/setter that triggers updates
+             * Handles deep reactivity for nested objects and arrays
+             * Integrates with computed property system and DOM update batching
+             * @param {Object} obj - Object to add the reactive property to
+             * @param {string} key - Property name
+             * @param {*} init - Initial property value
+             */
+            createReactiveProp(obj, key, init) {
+                let val = init;
+
+                // Make initial value reactive if deep reactivity is enabled
+                if (this.config.deepReactivity && U.isReactive(val)) {
+                    val = createReactive(val, (path, newVal, type, meta) =>
+                        this.handleDeepChange(path, newVal, type, meta), key);
+                }
+
+                // Define reactive property using Object.defineProperty
                 Object.defineProperty(obj, key, {
-                    // Getter: simply returns the current value
+                    // Getter: simply returns current value
                     get: () => val,
 
-                    // Setter: handles value changes and triggers reactivity
+                    // Setter: handles change detection and triggers reactivity system
                     set: newVal => {
-                        // Check if either old or new value is a reactive object/array
-                        // This helps determine if we need to perform deep equality checking
+                        // Check if change detection is needed (objects always trigger, primitives only if different)
                         const isObj = U.isReactive(val) || U.isReactive(newVal);
-
-                        // Only proceed with updates if:
-                        // 1. At least one value is reactive (objects/arrays always trigger updates)
-                        // 2. OR the values are not deeply equal (primitive value change)
                         if (isObj || !U.deepEq(val, newVal)) {
                             const old = val; // Store old value for change notifications
 
-                            // Make new value reactive if deep reactivity is enabled
-                            // and the new value is an object/array
+                            // Make new value reactive if it's an object/array
                             if (this.config.deepReactivity && U.isReactive(newVal)) {
-                                newVal = createReactive(newVal, function(path, changedVal, type, meta) {
-                                    // Set up change handler for nested changes in the new value
-                                    return self.handleDeepChange(path, changedVal, type, meta);
-                                }, key);
+                                newVal = createReactive(newVal, (path, changedVal, type, meta) =>
+                                    this.handleDeepChange(path, changedVal, type, meta), key);
                             }
 
-                            // Update the internal value
+                            // Update internal value
                             val = newVal;
 
-                            // Trigger DOM updates for this property
+                            // Trigger DOM updates and computed property recalculation
                             this.updateDOM(key, newVal);
-
-                            // Recalculate any computed properties that depend on this property
                             this.updateComputed(key);
 
-                            // Notify parent component/system about the property change
-                            // Includes old and new values for comparison/logging
+                            // Notify parent component of the change
                             this.notifyParent('propertyChange', {
                                 property: key,
                                 oldValue: old,
@@ -1154,46 +1068,36 @@
                             });
                         }
                     },
-
-                    // Make property enumerable so it shows up in Object.keys(), for...in loops, etc.
-                    enumerable: true
+                    enumerable: true // Make property enumerable for Object.keys(), etc.
                 });
             },
 
             /**
-             * Sends a command to all child PAC units
-             * @param {string} cmd - Command name
-             * @param {*} data - Command data
-             */
-            sendToChildren(cmd, data) {
-                this.children.forEach(child => {
-                    if (typeof child.receiveFromParent === 'function') {
-                        child.receiveFromParent(cmd, data);
-                    }
-                });
-            },
-
-            /**
-             * Sets up data bindings by scanning the DOM
+             * Unified binding setup with factory pattern
+             * Scans the DOM container for binding directives and creates appropriate binding objects
+             * Delegates to specialized methods for text interpolation and attribute bindings
              */
             setupBindings() {
-                this.findTextBindings();
-                this.findAttrBindings();
+                this.findTextBindings();    // Setup {{property}} text interpolation bindings
+                this.findAttrBindings();    // Setup data-pac-bind attribute bindings
             },
 
             /**
              * Finds and sets up text interpolation bindings {{property}}
+             * Scans all text nodes in the container for template expressions
+             * Supports property paths like {{user.name}} and {{items.length}}
              */
             findTextBindings() {
+                // Create tree walker to traverse all text nodes
                 const walker = document.createTreeWalker(this.container, NodeFilter.SHOW_TEXT);
                 const bindings = [];
                 let node;
 
+                // Process each text node for template expressions
                 while (node = walker.nextNode()) {
                     const txt = node.textContent;
 
                     // Enhanced regex to capture property paths with dot notation
-                    // Supports: {{property}}, {{object.property}}, {{array.length}}, etc.
                     const matches = txt.match(/\{\{\s*([\w.]+)\s*\}\}/g);
 
                     if (matches) {
@@ -1201,7 +1105,7 @@
                             // Extract the full property path (e.g., "items.length", "user.name")
                             const propertyPath = match.replace(/[{}\s]/g, '');
 
-                            // Get the root property name (first part before the dot)
+                            // Get the root property name (first part before dot)
                             const rootProperty = propertyPath.split('.')[0];
 
                             // Create binding with enhanced path support
@@ -1209,211 +1113,179 @@
                                 type: 'text',
                                 property: rootProperty,        // Root property for reactivity
                                 propertyPath: propertyPath,    // Full path for value resolution
-                                element: node.parentElement,
-                                origText: txt,
-                                textNode: node
+                                element: node.parentElement,  // Parent element for updates
+                                origText: txt,                 // Original text with placeholders
+                                textNode: node                 // Direct reference to text node
                             }]);
                         });
                     }
                 }
 
+                // Register all discovered text bindings
                 bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
             },
 
             /**
              * Finds and sets up attribute bindings data-pac-bind="..."
-             * Scans the container for elements with data-pac-bind attributes and creates appropriate binding objects
-             * Excludes nested foreach elements to avoid duplicate processing
+             * Processes various binding types: foreach, events, visibility, form inputs, attributes
+             * Uses factory pattern to create appropriate binding objects based on type
              */
-            findAttrBindings: function() {
+            findAttrBindings() {
+                // Find elements with binding directives, excluding nested foreach children
                 const elements = this.container.querySelectorAll('[data-pac-bind]:not([data-pac-bind*="foreach"] [data-pac-bind])');
                 const bindings = [];
 
-                Array.from(elements).forEach(function(el) {
+                Array.from(elements).forEach(el => {
                     const bindStr = el.getAttribute('data-pac-bind');
 
-                    // Handle multiple bindings on a single element (comma-separated)
-                    for (let i = 0; i < bindStr.split(',').length; i++) {
-                        const bind = bindStr.split(',')[i];
-                        const parts = bind.trim().split(':');
-                        const type = parts[0] ? parts[0].trim() : '';
-                        const target = parts[1] ? parts[1].trim() : '';
+                    // Handle multiple bindings on single element (comma-separated)
+                    bindStr.split(',').forEach(bind => {
+                        const [type, target] = bind.trim().split(':').map(s => s.trim());
                         const key = bind + '_' + U.id();
 
-                        // Handle foreach binding
-                        if (type === 'foreach') {
-                            bindings.push([key, this.createForeachBinding(el, target)]);
-                            el.innerHTML = '';
-                            continue;
-                        }
+                        // Factory pattern for creating different binding types
+                        const bindingCreators = {
+                            // Collection rendering binding
+                            foreach: () => this.createForeachBinding(el, target),
 
-                        // Handle event bindings (click, change, submit, etc.)
-                        if (U.isEvent(type)) {
+                            // Conditional visibility binding
+                            visible: () => this.createVisibilityBinding(el, target),
+
+                            // Two-way form input binding
+                            value: () => {
+                                this.setupInput(el, target);
+                                return this.createInputBinding(el, target);
+                            },
+
+                            // Checkbox/radio checked state binding
+                            checked: () => {
+                                this.setupInput(el, target, 'checked');
+                                return this.createCheckedBinding(el, target);
+                            }
+                        };
+
+                        // Create appropriate binding based on type
+                        if (bindingCreators[type]) {
+                            bindings.push([key, bindingCreators[type]()]);
+                            // Clear foreach template content after storing it
+                            if (type === 'foreach') {
+                                el.innerHTML = '';
+                            }
+                        } else if (U.isEvent(type)) {
+                            // Event handler binding (click, submit, etc.)
                             bindings.push([key, this.createEventBinding(el, type, target)]);
-                            continue;
-                        }
-
-                        // Handle visibility binding
-                        if (type === 'visible') {
-                            bindings.push([key, this.createVisibilityBinding(el, target)]);
-                            continue;
-                        }
-
-                        // Handle input value binding (NEW: explicit value:property syntax)
-                        if (type === 'value') {
-                            this.setupInput(el, target);
-                            bindings.push([key, this.createInputBinding(el, target)]);
-                            continue;
-                        }
-
-                        // Handle checkbox checked binding (NEW: checked:property syntax)
-                        if (type === 'checked') {
-                            this.setupInput(el, target, 'checked');
-                            bindings.push([key, this.createCheckedBinding(el, target)]);
-                            continue;
-                        }
-
-                        // Handle attribute bindings (class, style, disabled, etc.)
-                        if (bind.indexOf(':') !== -1 && target) {
+                        } else if (bind.includes(':') && target) {
+                            // Generic attribute binding (class, style, disabled, etc.)
                             bindings.push([key, this.createAttributeBinding(el, type, target)]);
-                            continue;
+                        } else if (!bind.includes(':')) {
+                            // Invalid binding syntax error
+                            console.error(`Invalid binding syntax: "${bind}". Use "type:target" format.`);
                         }
+                    });
+                });
 
-                        // Invalid binding syntax - all bindings must use type:target format
-                        if (bind.indexOf(':') === -1) {
-                            console.error(`Invalid binding syntax: "${bind}". All bindings must use "type:target" format (e.g., "value:propertyName", "click:methodName").`);
-                            continue;
-                        }
-                    }
-                }.bind(this));
-
-                bindings.forEach(function(binding) {
-                    this.bindings.set(binding[0], binding[1]);
-                }.bind(this));
+                // Register all discovered attribute bindings
+                bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
             },
 
             /**
-             * Creates a foreach binding object for rendering collections/arrays
-             * @param {Element} el - The template element that will be repeated
-             * @param {string} target - The property name containing the array data
-             * @returns {Object} Foreach binding configuration object
+             * Simplified binding creators using the generic createBinding method
+             * Each creator handles the specific configuration for its binding type
+             * Reduces code duplication through consistent patterns
              */
-            createForeachBinding: function(el, target) {
-                const itemName = el.getAttribute('data-pac-item') || 'item';
-                const indexName = el.getAttribute('data-pac-index') || 'index';
 
-                return {
-                    type: 'foreach',
-                    property: target,         // Property name in the data model
-                    collection: target,       // Same as property (legacy support)
-                    itemName: itemName,       // Item variable name in template (defaults to 'item')
-                    indexName: indexName,     // Index variable name in template (defaults to 'index')
-                    template: el.innerHTML,   // HTML template to repeat for each item
-                    element: el               // Reference to the container element
-                };
+            /**
+             * Creates a foreach binding for rendering collections/arrays
+             * @param {Element} el - Template element that will be repeated
+             * @param {string} target - Property name containing array data
+             * @returns {Object} - Foreach binding configuration
+             */
+            createForeachBinding(el, target) {
+                return this.createBinding('foreach', el, {
+                    target,
+                    collection: target,
+                    itemName: el.getAttribute('data-pac-item') || 'item',
+                    indexName: el.getAttribute('data-pac-index') || 'index',
+                    template: el.innerHTML
+                });
             },
 
             /**
-             * Creates an event binding object for handling DOM events
-             * @param {Element} el - The element that will trigger the event
-             * @param {string} type - The event type (click, change, etc.)
-             * @param {string} target - The method name to call when event fires
-             * @returns {Object} Event binding configuration object
+             * Creates an event binding for DOM event handling
+             * @param {Element} el - Element that will trigger the event
+             * @param {string} type - Event type (click, submit, etc.)
+             * @param {string} target - Method name to call when event fires
+             * @returns {Object} - Event binding configuration
              */
-            createEventBinding: function(el, type, target) {
-                return {
-                    type: 'event',
-                    event: type,        // Event name (click, change, submit, etc.)
-                    method: target,     // Method to invoke when event occurs
-                    element: el         // Element that triggers the event
-                };
+            createEventBinding(el, type, target) {
+                return this.createBinding('event', el, {
+                    event: type,
+                    method: target
+                });
             },
 
             /**
-             * Creates a visibility binding object for showing/hiding elements
-             * @param {Element} el - The element whose visibility will be controlled
-             * @param {string} target - The property name or condition (can start with ! for negation)
-             * @returns {Object} Visibility binding configuration object
+             * Creates a visibility binding for show/hide functionality
+             * @param {Element} el - Element whose visibility will be controlled
+             * @param {string} target - Property/condition (supports ! negation)
+             * @returns {Object} - Visibility binding configuration
              */
-            createVisibilityBinding: function(el, target) {
-                // Handle negation operator (!)
+            createVisibilityBinding(el, target) {
                 const isNegated = target.startsWith('!');
                 const cleanTarget = target.replace(/^!/, '');
-
-                // Extract root property for reactivity tracking
-                const rootProperty = cleanTarget.split('.')[0];
-
-                return {
-                    type: 'visible',
-                    property: rootProperty,        // Root property for change detection
-                    propertyPath: cleanTarget,     // Full path for value resolution
-                    element: el,
-                    condition: target,             // Full condition including negation
-                    isNegated: isNegated          // Store negation state
-                };
+                return this.createBinding('visible', el, {
+                    target: cleanTarget,
+                    condition: target,
+                    isNegated
+                });
             },
 
             /**
-             * Creates an attribute binding object for dynamic attribute values
-             * @param {Element} el - The element whose attribute will be bound
-             * @param {string} type - The attribute name (class, style, disabled, etc.)
-             * @param {string} target - The property name containing the attribute value
-             * @returns {Object} Attribute binding configuration object
+             * Creates an attribute binding for dynamic attribute values
+             * @param {Element} el - Element whose attribute will be bound
+             * @param {string} type - Attribute name (class, style, etc.)
+             * @param {string} target - Property name containing attribute value
+             * @returns {Object} - Attribute binding configuration
              */
-            createAttributeBinding: function(el, type, target) {
-                // Extract root property for reactivity tracking
-                const rootProperty = target.split('.')[0];
-
-                return {
-                    type: 'attribute',
-                    property: rootProperty,        // Root property for change detection
-                    propertyPath: target,          // Full path for value resolution
-                    element: el,                   // Target element
-                    attribute: type                // Attribute name to update (class, style, etc.)
-                };
+            createAttributeBinding(el, type, target) {
+                return this.createBinding('attribute', el, {
+                    target,
+                    attribute: type
+                });
             },
 
             /**
-             * Creates an input binding object for two-way data binding with form elements
-             * @param {Element} el - The input element to bind
-             * @param {string} bind - The property name to bind to
-             * @returns {Object} Input binding configuration object
+             * Creates an input binding for two-way data binding
+             * @param {Element} el - Input element to bind
+             * @param {string} bind - Property name to bind to
+             * @returns {Object} - Input binding configuration
              */
-            createInputBinding: function(el, bind) {
-                const delay = parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay || 0;
-                const updateMode = el.getAttribute('data-pac-update-mode') || this.config.updateMode || 'immediate';
-
-                return {
-                    type: 'input',
-                    property: bind,         // Property name in data model
-                    element: el,            // Input element reference
-                    updateMode: updateMode, // How often to update: 'immediate', 'change', or 'manual'
-                    delay: delay            // Delay in milliseconds (for debouncing)
-                };
+            createInputBinding(el, bind) {
+                return this.createBinding('input', el, {
+                    target: bind,
+                    updateMode: el.getAttribute('data-pac-update-mode') || this.config.updateMode,
+                    delay: parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay
+                });
             },
 
             /**
-             * Creates a checked binding object for checkboxes/radio buttons
-             * @param {Element} el - The input element to bind
-             * @param {string} prop - The property name to bind to
-             * @returns {Object} Checked binding configuration object
+             * Creates a checked binding for checkboxes/radio buttons
+             * @param {Element} el - Input element to bind
+             * @param {string} prop - Property name to bind to
+             * @returns {Object} - Checked binding configuration
              */
-            createCheckedBinding: function(el, prop) {
-                const delay = parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay || 0;
-                const updateMode = el.getAttribute('data-pac-update-mode') || this.config.updateMode || 'immediate';
-
-                return {
-                    type: 'checked',
-                    property: prop,
-                    element: el,
-                    updateMode: updateMode,
-                    delay: delay
-                };
+            createCheckedBinding(el, prop) {
+                return this.createBinding('checked', el, {
+                    target: prop,
+                    updateMode: el.getAttribute('data-pac-update-mode') || this.config.updateMode,
+                    delay: parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay
+                });
             },
 
             /**
              * Sets up input element attributes for data binding
-             * @param {Element} el - Input element
+             * Configures elements with necessary data attributes for the binding system
+             * @param {Element} el - Input element to configure
              * @param {string} prop - Property name to bind to
              * @param {string} bindingType - Type of binding ('value' or 'checked')
              */
@@ -1425,241 +1297,175 @@
             },
 
             /**
-             * Sets up event listeners for the container
+             * Unified event handling with routing pattern
+             * Sets up event listeners for the container and delegates to appropriate handlers
+             * Uses event delegation to handle all events from a single container listener
              */
             setupEvents() {
+                // Standard DOM events that the framework handles
                 const events = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
 
                 events.forEach(type => {
                     const handler = ev => this.handleEvent(ev);
                     this.container.addEventListener(type, handler);
-                    this.listeners.set(type, handler);
+                    this.listeners.set(type, handler); // Store for cleanup during destroy
                 });
             },
 
             /**
-             * Handles all DOM events for the container
-             * Routes events to appropriate handlers based on event type and element attributes
-             * @param {Event} ev - DOM event object
+             * Main event router that delegates to specific handlers based on event type
+             * Uses strategy pattern to route events to appropriate processing methods
+             * Handles both data binding events and custom event bindings
+             * @param {Event} ev - The DOM event object
              */
             handleEvent(ev) {
                 const {type, target} = ev;
                 const prop = target.getAttribute('data-pac-property');
 
-                // Route to the appropriate handler based on the event type
-                if (this._isInputEvent(type, prop)) {
-                    this._handleInputEvent(ev, target, prop);
-                } else if (this._isChangeEvent(type, prop)) {
-                    this._handleChangeEvent(ev, target, prop);
-                } else {
-                    this._handleEventBinding(ev, type, target);
-                }
+                // Route events using strategy pattern for cleaner code organization
+                const eventHandlers = {
+                    // Handle input events for real-time data binding
+                    input: () => prop && this.abstraction.hasOwnProperty(prop) && this._handleInputEvent(ev, target, prop),
+
+                    // Handle change events for delayed data binding
+                    change: () => prop && this.abstraction.hasOwnProperty(prop) && this._handleChangeEvent(ev, target, prop),
+
+                    // Default handler for custom event bindings (click, submit, etc.)
+                    default: () => this._handleEventBinding(ev, type, target)
+                };
+
+                // Execute appropriate handler
+                const handler = eventHandlers[type] || eventHandlers.default;
+                handler();
             },
 
             /**
-             * Checks if this is an input event on a bound property
-             * @param {string} type - Event type
-             * @param {string} prop - Property name from data-pac-property
-             * @returns {boolean} True if this is a bound input event
-             */
-            _isInputEvent(type, prop) {
-                return type === 'input' && prop && this.abstraction.hasOwnProperty(prop);
-            },
-
-            /**
-             * Checks if this is a change event on a bound property
-             * @param {string} type - Event type
-             * @param {string} prop - Property name from data-pac-property
-             * @returns {boolean} True if this is a bound change event
-             */
-            _isChangeEvent(type, prop) {
-                return type === 'change' && prop && this.abstraction.hasOwnProperty(prop);
-            },
-
-            /**
-             * Handles input events based on the element's update mode
-             * Supports three modes: change, immediate, and delayed
+             * Handles input events based on the element's configured update mode
+             * Supports three update modes: change (wait for blur), immediate, and delayed
+             * Manages two-way data binding for form controls
              * @param {Event} ev - The input event
-             * @param {Element} target - The input element
+             * @param {Element} target - The input element that triggered the event
              * @param {string} prop - The bound property name
              */
             _handleInputEvent(ev, target, prop) {
-                // Determine the update mode for this input element
-                // Priority: element's data attribute > global config default
+                // Determine update strategy from element configuration
                 const mode = target.getAttribute('data-pac-update-mode') || this.config.updateMode;
-
-                // Determine what property of the element to bind to (value vs checked)
-                // Most inputs use 'value', but checkboxes/radios use 'checked'
                 const bindingType = target.getAttribute('data-pac-binding-type') || 'value';
 
-                // Extract the appropriate value based on the binding type
-                let value;
-                if (bindingType === 'checked') {
-                    // For checkboxes and radio buttons, use the checked state
-                    value = target.checked;
-                } else {
-                    // For text inputs, selects, etc., use the value property
-                    value = target.value;
-                }
+                // Extract appropriate value based on element type
+                const value = bindingType === 'checked' ? target.checked : target.value;
 
-                // Handle the update based on the configured mode
-                switch (mode) {
-                    case 'change':
-                        // CHANGE MODE: Wait for explicit change event (e.g., blur or Enter)
-                        // Store the current value as pending but don't update the model yet
-                        // This prevents updates on every keystroke for better performance
-                        target.setAttribute('data-pac-pending-value', value);
-                        break;
+                // Strategy pattern for different update modes
+                const modeHandlers = {
+                    // CHANGE MODE: Store value but don't update model until change event
+                    change: () => target.setAttribute('data-pac-pending-value', value),
 
-                    case 'immediate':
-                        // IMMEDIATE MODE: Update the data model on every input event
-                        // Provides real-time synchronization but may impact performance
-                        // with frequent updates during typing
-                        this.abstraction[prop] = value;
-                        break;
+                    // IMMEDIATE MODE: Update model immediately on every keystroke
+                    immediate: () => this.abstraction[prop] = value,
 
-                    case 'delayed':
-                        // DELAYED MODE: Use debounced updates to balance responsiveness and performance
-                        // Updates occur after a brief pause in typing, reducing excessive calls
-                        this.updateFromDOM(target, prop, value);
-                        break;
+                    // DELAYED MODE: Use debounced updates for better performance
+                    delayed: () => this.updateFromDOM(target, prop, value),
 
-                    default:
-                        // Fallback for invalid or unknown update modes
-                        // Log a warning to help with debugging configuration issues
+                    // Fallback for unknown modes
+                    default: () => {
                         console.warn(`Unknown update mode: ${mode}. Using immediate.`);
-
-                        // Default to immediate mode as a safe fallback
                         this.abstraction[prop] = value;
-                }
+                    }
+                };
+
+                (modeHandlers[mode] || modeHandlers.default)();
             },
 
             /**
-             * Handles change events for bound properties
-             * Cleans up any pending delayed updates and commits the value
+             * Handles change events for bound form elements
+             * Commits pending values and cleans up delayed update timeouts
+             * Ensures data model stays synchronized with user changes
              * @param {Event} ev - The change event
              * @param {Element} target - The input element that changed
              * @param {string} prop - The bound property name
              */
             _handleChangeEvent(ev, target, prop) {
-                // Generate unique key for this element's delayed update
-                // This key combines the property name with the element's specific identifier
-                // to ensure each bound element has its own delayed update tracking
+                // Generate unique key for tracking delayed updates per element
                 const delayKey = `${prop}_${target.getAttribute('data-pac-property')}`;
-
-                // Determine how to extract the value from this element
-                // Default to 'value' but could be 'checked' for checkboxes/radios
                 const bindingType = target.getAttribute('data-pac-binding-type') || 'value';
 
                 // Cancel any pending delayed update for this element
-                // This prevents multiple rapid changes from creating multiple timeouts
                 if (this.delays.has(delayKey)) {
                     clearTimeout(this.delays.get(delayKey));
                     this.delays.delete(delayKey);
                 }
 
-                // Extract the appropriate value based on the binding type
-                let value;
+                // Extract current value and commit to data model
+                this.abstraction[prop] = bindingType === 'checked' ? target.checked : target.value;
 
-                if (bindingType === 'checked') {
-                    // For checkboxes and radio buttons, use the checked state
-                    value = target.checked;
-                } else {
-                    // For text inputs, selects, etc., use the value property
-                    value = target.value;
-                }
-
-                // Immediately commit the current value to the data model
-                // This ensures the model stays in sync with user changes
-                this.abstraction[prop] = value;
-
-                // Remove the pending value marker attribute
-                // This indicates the value has been successfully committed
-                // and is no longer in a temporary/pending state
+                // Clean up pending value marker
                 target.removeAttribute('data-pac-pending-value');
             },
 
             /**
-             * Handles custom event bindings (click, submit, etc.)
-             * Searches through registered bindings and executes matching event handlers
+             * Handles custom event bindings defined in data-pac-bind attributes
+             * Searches for matching event bindings and executes corresponding methods
+             * Provides error handling and automatic form submission prevention
              * @param {Event} ev - The DOM event
              * @param {string} type - Event type (click, submit, etc.)
              * @param {Element} target - Element that triggered the event
              */
             _handleEventBinding(ev, type, target) {
-                // Search through all registered event bindings
+                // Search through all registered event bindings for matches
                 this.bindings.forEach(binding => {
-                    // Check if this binding matches the current event
-                    if (this._isMatchingEventBinding(binding, type, target)) {
-                        this._executeEventBinding(binding, ev);
+                    // Check if this binding matches the current event and element
+                    if (binding.type === 'event' && binding.event === type && binding.element === target) {
+                        const method = this.abstraction[binding.method];
+
+                        // Validate that the bound method exists and is callable
+                        if (typeof method !== 'function') {
+                            console.warn(`Event handler method '${binding.method}' is not a function`);
+                            return;
+                        }
+
+                        // Prevent default form submission behavior for submit events
+                        if (binding.event === 'submit') {
+                            ev.preventDefault();
+                        }
+
+                        // Execute the method with proper context and error handling
+                        try {
+                            method.call(this.abstraction, ev);
+                        } catch (error) {
+                            console.error(`Error executing event handler '${binding.method}':`, error);
+                        }
                     }
                 });
             },
 
             /**
-             * Checks if a binding matches the current event and target
-             * @param {Object} binding - The binding configuration object
-             * @param {string} type - Event type
-             * @param {Element} target - Target element
-             * @returns {boolean} True if the binding matches
-             */
-            _isMatchingEventBinding(binding, type, target) {
-                return binding.type === 'event' &&
-                    binding.event === type &&
-                    binding.element === target;
-            },
-
-            /**
-             * Executes an event binding by calling the bound method
-             * @param {Object} binding - The binding configuration
-             * @param {Event} ev - The original DOM event
-             */
-            _executeEventBinding(binding, ev) {
-                const method = this.abstraction[binding.method];
-
-                // Ensure the method exists and is callable
-                if (typeof method !== 'function') {
-                    console.warn(`Event handler method '${binding.method}' is not a function`);
-                    return;
-                }
-
-                // Prevent default form submission behavior
-                if (binding.event === 'submit') {
-                    ev.preventDefault();
-                }
-
-                // Execute the method with proper context and pass the event
-                try {
-                    method.call(this.abstraction, ev);
-                } catch (error) {
-                    console.error(`Error executing event handler '${binding.method}':`, error);
-                }
-            },
-
-            /**
-             * Updates property from DOM input with configurable timing
-             * @param {Element} el - Input element
-             * @param {string} prop - Property name
-             * @param {*} val - New value
+             * Updates property from DOM input with configurable timing strategies
+             * Handles immediate updates or delayed updates with debouncing
+             * Used primarily for delayed update mode to improve performance
+             * @param {Element} el - The input element
+             * @param {string} prop - Property name to update
+             * @param {*} val - New value to set
              */
             updateFromDOM(el, prop, val) {
                 const mode = el.getAttribute('data-pac-update-mode') || this.config.updateMode;
                 const delay = parseInt(el.getAttribute('data-pac-update-delay')) || this.config.delay;
 
+                // Immediate mode: update right away
                 if (mode === 'immediate') {
                     this.abstraction[prop] = val;
                     return;
                 }
 
+                // Delayed mode: use debouncing to batch rapid changes
                 if (mode === 'delayed') {
                     const key = `${prop}_${el.id || el.getAttribute('data-pac-property')}`;
 
-                    // Clear existing timeout
+                    // Clear any existing timeout for this element
                     if (this.delays.has(key)) {
                         clearTimeout(this.delays.get(key));
                     }
 
-                    // Set new timeout
+                    // Set new timeout for delayed update
                     const id = setTimeout(() => {
                         this.abstraction[prop] = val;
                         this.delays.delete(key);
@@ -1670,24 +1476,28 @@
             },
 
             /**
-             * Establishes parent-child relationships with other PAC units
+             * Simplified hierarchy management
+             * Establishes parent-child relationships between PAC components
+             * Updates relationships when new components are added to the DOM
              */
             establishHierarchy() {
                 const {parent, children} = window.PACRegistry.getHierarchy(this.container);
 
-                // Set up parent relationship
+                // Set up parent relationship if found and not already established
                 if (parent && this.parent !== parent) {
                     this.parent = parent;
                     parent.children.add(this);
                 }
 
-                // Set up child relationships
+                // Set up child relationships for all discovered children
                 children.forEach(child => {
                     if (child.parent !== this) {
+                        // Remove child from previous parent if it had one
                         if (child.parent) {
                             child.parent.children.delete(child);
                         }
 
+                        // Establish new parent-child relationship
                         child.parent = this;
                         this.children.add(child);
                     }
@@ -1695,9 +1505,15 @@
             },
 
             /**
-             * Notifies parent PAC unit of events
-             * @param {string} type - Event type
-             * @param {*} data - Event data
+             * Communication methods with consistent patterns
+             * These methods enable hierarchical component communication
+             */
+
+            /**
+             * Notifies parent PAC unit of events and state changes
+             * Part of the hierarchical communication system
+             * @param {string} type - Type of notification (e.g., 'propertyChange')
+             * @param {*} data - Notification data payload
              */
             notifyParent(type, data) {
                 if (this.parent && typeof this.parent.receiveUpdate === 'function') {
@@ -1707,6 +1523,7 @@
 
             /**
              * Receives updates from child PAC units
+             * Calls user-defined handlers and dispatches DOM events for additional handling
              * @param {string} type - Update type
              * @param {*} data - Update data
              * @param {Object} child - Child PAC unit that sent the update
@@ -1717,7 +1534,7 @@
                     this.abstraction.onChildUpdate(type, data, child);
                 }
 
-                // Dispatch DOM event for additional handling
+                // Dispatch DOM event for additional handling opportunities
                 this.container.dispatchEvent(new CustomEvent('pac:childupdate', {
                     detail: {eventType: type, data, childPAC: child},
                     bubbles: true
@@ -1726,8 +1543,9 @@
 
             /**
              * Receives commands from parent PAC unit
+             * Enables top-down communication in the component hierarchy
              * @param {string} cmd - Command name
-             * @param {*} data - Command data
+             * @param {*} data - Command data payload
              */
             receiveFromParent(cmd, data) {
                 // Call user-defined handler if it exists
@@ -1735,7 +1553,7 @@
                     this.abstraction.receiveFromParent(cmd, data);
                 }
 
-                // Dispatch DOM event for additional handling
+                // Dispatch DOM event for declarative handling
                 this.container.dispatchEvent(new CustomEvent('pac:parentcommand', {
                     detail: {command: cmd, data},
                     bubbles: true
@@ -1743,29 +1561,50 @@
             },
 
             /**
-             * Performs initial DOM update with all property values
+             * Sends commands to all child PAC units
+             * Broadcasts messages down the component hierarchy
+             * @param {string} cmd - Command name
+             * @param {*} data - Command data payload
+             */
+            sendToChildren(cmd, data) {
+                this.children.forEach(child => {
+                    if (typeof child.receiveFromParent === 'function') {
+                        child.receiveFromParent(cmd, data);
+                    }
+                });
+            },
+
+            /**
+             * Initialization and cleanup methods
+             * Handle component lifecycle and resource management
+             */
+
+            /**
+             * Performs initial DOM update with all current property values
+             * Synchronizes the DOM state with the initial data model
+             * Initializes foreach bindings and computed properties
              */
             initialUpdate() {
-                // Update regular properties
-                for (const key in this.abstraction) {
+                // Update all regular properties to sync DOM with initial state
+                Object.keys(this.abstraction).forEach(key => {
                     if (this.abstraction.hasOwnProperty(key) && typeof this.abstraction[key] !== 'function') {
                         this.updateDOM(key, this.abstraction[key]);
                     }
-                }
+                });
 
-                // Update computed properties
+                // Update all computed properties
                 if (this.orig.computed) {
-                    for (const name in this.orig.computed) {
-                        const val = this.abstraction[name];
-                        this.updateDOM(name, val);
-                    }
+                    Object.keys(this.orig.computed).forEach(name => {
+                        this.updateDOM(name, this.abstraction[name]);
+                    });
                 }
 
-                // Initialize foreach bindings
+                // Initialize foreach bindings with empty state
                 this.bindings.forEach(binding => {
                     if (binding.type === 'foreach') {
-                        binding.prev = [];
+                        binding.prev = []; // Initialize comparison array
                         const val = this.abstraction[binding.collection];
+
                         if (val !== undefined) {
                             this.updateForeach(binding, binding.collection, val);
                         }
@@ -1774,43 +1613,74 @@
             },
 
             /**
-             * Cleans up the PAC unit and removes all listeners
+             * Cleans up the PAC unit and removes all listeners and references
+             * Prevents memory leaks by properly disposing of resources
+             * Should be called when removing components from the DOM
              */
             destroy() {
-                // Remove event listeners
+                // Remove all DOM event listeners
                 this.listeners.forEach((handler, type) => {
                     this.container.removeEventListener(type, handler);
                 });
 
-                // Clear all timeouts
+                // Clear all pending timeouts to prevent delayed execution
                 this.delays.forEach(id => clearTimeout(id));
 
-                // Remove from hierarchy
+                // Clean up hierarchy relationships
                 if (this.parent) {
                     this.parent.children.delete(this);
                 }
 
                 this.children.forEach(child => child.parent = null);
 
-                // Clear caches and references
-                this.computedCache.clear();
-                this.computedDeps.clear();
-                this.propDeps.clear();
-                this.bindings.clear();
+                // Clear all internal caches and maps to free memory
+                [this.computedCache, this.computedDeps, this.propDeps, this.bindings].forEach(map => map.clear());
+
+                // Remove reference to reactive abstraction
                 this.abstraction = null;
             },
 
             /**
-             * Initializes the PAC unit
-             * @returns {Object} - The control object for chaining
+             * Initializes the PAC unit by setting up all systems
+             * Entry point that coordinates the setup of bindings, reactivity, and events
+             * @returns {Object} - The control object for method chaining
              */
             init() {
-                this.setupBindings();
-                this.trackPropertyPathDependencies(); // Add this line
-                this.abstraction = this.createReactiveAbs();
-                this.setupEvents();
-                this.initialUpdate();
+                this.setupBindings();                    // Scan DOM for binding directives
+                this.trackPropertyPathDependencies();    // Set up dependency tracking for complex paths
+                this.abstraction = this.createReactiveAbs(); // Create reactive data model
+                this.setupEvents();                      // Attach event listeners
+                this.initialUpdate();                    // Sync initial DOM state
                 return this;
+            },
+
+            /**
+             * Tracks dependencies for property paths in text bindings
+             * Ensures that complex property paths like "items.length" trigger updates correctly
+             * Builds dependency maps for efficient change propagation
+             */
+            trackPropertyPathDependencies() {
+                this.bindings.forEach(binding => {
+                    if (binding.type === 'text' && binding.propertyPath) {
+                        const parts = binding.propertyPath.split('.');
+
+                        // Track all parts of the property path for reactivity
+                        for (let i = 0; i < parts.length; i++) {
+                            const rootProp = parts[0];
+
+                            // Initialize dependency tracking for root property
+                            if (!this.propDeps.has(rootProp)) {
+                                this.propDeps.set(rootProp, []);
+                            }
+
+                            // Add this binding to dependency list if not already present
+                            const deps = this.propDeps.get(rootProp);
+                            if (!deps.includes(binding)) {
+                                deps.push(binding);
+                            }
+                        }
+                    }
+                });
             }
         };
 
@@ -1818,114 +1688,147 @@
         const unit = control.init();
 
         /**
-         * Public API object - External interface for the PAC unit
-         * Provides access to abstraction properties and communication methods
+         * Creates the public API with a cleaner separation of concerns
+         * Provides external interface while keeping internal control methods private
+         * Includes communication methods and child management functionality
+         * @param {Object} unit - The initialized control unit
+         * @param {Object} control - The internal control object
+         * @returns {Object} - Public API object with abstraction properties and methods
          */
-        const api = {};
+        function createPublicAPI(unit, control) {
+            const api = {};
 
-        // Copy abstraction properties to API
-        for (const key in unit.abstraction) {
-            if (unit.abstraction.hasOwnProperty(key)) {
-                api[key] = unit.abstraction[key];
-            }
+            // Copy all abstraction properties and methods to the public API
+            Object.keys(unit.abstraction).forEach(key => {
+                if (unit.abstraction.hasOwnProperty(key)) {
+                    api[key] = unit.abstraction[key];
+                }
+            });
+
+            // Add public methods for component management and communication
+            Object.assign(api, {
+                /**
+                 * Child management methods for programmatic hierarchy control
+                 */
+
+                /**
+                 * Manually adds a child PAC unit to this component
+                 * @param {Object} child - Child PAC unit to add
+                 */
+                addChild: child => {
+                    control.children.add(child);
+                    child.parent = control;
+                },
+
+                /**
+                 * Removes a child PAC unit from this component
+                 * @param {Object} child - Child PAC unit to remove
+                 */
+                removeChild: child => {
+                    control.children.delete(child);
+                    child.parent = null;
+                },
+
+                /**
+                 * Communication methods for hierarchical component interaction
+                 */
+                notifyParent: (type, data) => control.notifyParent(type, data),
+                receiveUpdate: (type, data, child) => control.receiveUpdate(type, data, child),
+                receiveFromParent: (cmd, data) => control.receiveFromParent(cmd, data),
+                sendToChildren: (cmd, data) => control.sendToChildren(cmd, data),
+
+                /**
+                 * Targeted child communication with enhanced API
+                 * Sends command to specific child component matching CSS selector
+                 * @param {string} sel - CSS selector to match child component
+                 * @param {string} cmd - Command name
+                 * @param {*} data - Command data
+                 */
+                sendToChild: (sel, cmd, data) => {
+                    const child = Array.from(control.children).find(c => c.container.matches(sel));
+
+                    if (child && child.receiveFromParent) {
+                        child.receiveFromParent(cmd, data);
+                    }
+                },
+
+                /**
+                 * Child finding and querying methods
+                 */
+                findChild: pred => Array.from(control.children).find(pred),
+                findChildren: pred => Array.from(control.children).filter(pred),
+                findChildBySelector: sel => Array.from(control.children).find(c => c.container.matches(sel)),
+                findChildByProperty: (prop, val) => Array.from(control.children).find(c =>
+                    c.abstraction && c.abstraction[prop] === val),
+
+                /**
+                 * Server communication with automatic property updates
+                 * Provides built-in fetch wrapper with PAC-specific features
+                 * @param {string} url - Server endpoint URL
+                 * @param {Object} opts - Request options with PAC extensions
+                 * @returns {Promise} - Promise resolving to server response
+                 */
+                control: (url, opts = {}) => {
+                    return fetch(url, {
+                        method: opts.method || 'GET',
+                        headers: Object.assign({
+                            'Content-Type': 'application/json',
+                            'X-PAC-Request': 'true'  // Identify PAC framework requests
+                        }, opts.headers || {}),
+                        body: opts.data ? JSON.stringify(opts.data) : undefined
+                    })
+                        .then(r => r.json())
+                        .then(data => {
+                            // Automatically update component properties if requested
+                            if (opts.updateProperties) {
+                                Object.keys(data).forEach(k => {
+                                    if (control.abstraction.hasOwnProperty(k)) {
+                                        control.abstraction[k] = data[k];
+                                    }
+                                });
+                            }
+
+                            // Call success callback if provided
+                            if (opts.onSuccess) {
+                                opts.onSuccess.call(control.abstraction, data);
+                            }
+
+                            return data;
+                        })
+                        .catch(err => {
+                            // Call error callback if provided
+                            if (opts.onError) {
+                                opts.onError.call(control.abstraction, err);
+                            }
+
+                            throw err;
+                        });
+                },
+
+                /**
+                 * Component lifecycle method
+                 */
+                destroy: () => control.destroy()
+            });
+
+            // Define read-only properties for component introspection
+            Object.defineProperties(api, {
+                parent: {get: () => control.parent, enumerable: true},
+                children: {get: () => Array.from(control.children), enumerable: true},
+                container: {get: () => control.container, enumerable: true}
+            });
+
+            return api;
         }
 
-        // Add public methods to API
-        Object.assign(api, {
-            /**
-             * Manually adds a child PAC unit
-             * @param {Object} child - Child PAC unit to add
-             */
-            addChild: child => {
-                control.children.add(child);
-                child.parent = control;
-            },
+        // Initialize and create public API
+        const api = createPublicAPI(unit, control);
 
-            /**
-             * Removes a child PAC unit
-             * @param {Object} child - Child PAC unit to remove
-             */
-            removeChild: child => {
-                control.children.delete(child);
-                child.parent = null;
-            },
-
-            // Communication methods
-            notifyParent: (type, data) => control.notifyParent(type, data),
-            receiveUpdate: (type, data, child) => control.receiveUpdate(type, data, child),
-            receiveFromParent: (cmd, data) => control.receiveFromParent(cmd, data),
-            destroy: () => control.destroy(),
-
-            /**
-             * Performs server communication with automatic property updates
-             * @param {string} url - Server endpoint URL
-             * @param {Object} opts - Request options
-             * @returns {Promise} - Promise that resolves with server response
-             */
-            control: (url, opts = {}) => {
-                return fetch(url, {
-                    method: opts.method || 'GET',
-                    headers: Object.assign({
-                        'Content-Type': 'application/json',
-                        'X-PAC-Request': 'true'
-                    }, opts.headers || {}),
-                    body: opts.data ? JSON.stringify(opts.data) : undefined
-                })
-                    .then(r => r.json())
-                    .then(data => {
-                        // Automatically update properties if requested
-                        if (opts.updateProperties) {
-                            for (const k in data) {
-                                if (control.abstraction.hasOwnProperty(k)) {
-                                    control.abstraction[k] = data[k];
-                                }
-                            }
-                        }
-                        // Call success callback if provided
-                        if (opts.onSuccess) {
-                            opts.onSuccess.call(control.abstraction, data);
-                        }
-                        return data;
-                    })
-                    .catch(err => {
-                        // Call error callback if provided
-                        if (opts.onError) {
-                            opts.onError.call(control.abstraction, err);
-                        }
-                        throw err;
-                    });
-            },
-
-            // Child communication methods
-            sendToChildren: (cmd, data) => control.sendToChildren(cmd, data),
-            sendToChild: (sel, cmd, data) => {
-                const child = control.findChild(c => c.container.matches(sel));
-
-                if (child && child.receiveFromParent) {
-                    child.receiveFromParent(cmd, data);
-                }
-            },
-
-            // Child finding methods
-            findChild: pred => Array.from(control.children).find(pred),
-            findChildren: pred => Array.from(control.children).filter(pred),
-            findChildBySelector: sel => Array.from(control.children).find(c => c.container.matches(sel)),
-            findChildByProperty: (prop, val) => Array.from(control.children).find(c =>
-                c.abstraction && c.abstraction[prop] === val)
-        });
-
-        // Define read-only properties
-        Object.defineProperties(api, {
-            parent: {get: () => control.parent, enumerable: true},
-            children: {get: () => Array.from(control.children), enumerable: true},
-            container: {get: () => control.container, enumerable: true}
-        });
-
-        // Register in global registry and establish hierarchy
+        // Register component in global registry
         window.PACRegistry.register(selector, control);
         control.establishHierarchy();
 
-        // Re-establish hierarchy for existing units that might be affected
+        // Re-establish hierarchy for existing components that might be affected
         window.PACRegistry.units.forEach(pac => {
             if (pac !== control && !pac.parent) {
                 pac.establishHierarchy();

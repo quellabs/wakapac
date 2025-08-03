@@ -145,7 +145,7 @@ Include WakaPAC in your HTML:
 
 ### Text Interpolation (Vue-style)
 
-Use double braces `{{}}` to bind data to text content. **Property access and expressions are now fully supported:**
+Use double braces `{{}}` to bind data to text content. Property access and expressions are fully supported:
 
 ```html
 <!-- ✅ Simple properties -->
@@ -406,8 +406,7 @@ const app = wakaPAC('#app', {
     name: 'John'
 }, {
     updateMode: 'delayed',
-    delay: 300,
-    deepReactivity: true
+    delay: 300
 });
 ```
 
@@ -683,8 +682,7 @@ const component = wakaPAC(selector, abstraction, options);
 ```javascript
 {
     updateMode: 'immediate',    // 'immediate', 'delayed', 'change'
-    delay: 300,                 // Delay for 'delayed' mode (ms)
-    deepReactivity: true        // Enable deep object reactivity
+    delay: 300                  // Delay for 'delayed' mode (ms)
 }
 ```
 
