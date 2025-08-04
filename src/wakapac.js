@@ -42,16 +42,26 @@
          * @returns {boolean} - True if values are deeply equal
          */
         deepEq: (a, b) => {
+            // First check: if both values are strictly equal (same reference or primitive value)
             if (a === b) {
                 return true;
             }
 
+            // Early exit conditions:
+            // - If either value is falsy (null, undefined, 0, "", false)
+            // - If types don't match
+            // - If neither value is an object (covers primitives, functions, etc.)
             if (!a || !b || typeof a !== typeof b || typeof a !== 'object') {
                 return false;
             }
 
+            // Get all enumerable property keys from both objects
             const ka = Object.keys(a), kb = Object.keys(b);
 
+            // Objects are equal if:
+            // 1. They have the same number of properties
+            // 2. Every key in 'a' exists in 'b'
+            // 3. The value for each key is deeply equal (recursive call)
             return ka.length === kb.length &&
                 ka.every(k => kb.includes(k) && U.deepEq(a[k], b[k]));
         },
@@ -431,6 +441,7 @@
 
                 // Execute the appropriate updater if it exists and the binding should be updated
                 const updater = updaters[binding.type];
+
                 if (updater && (shouldUpdate || binding.type === 'foreach')) {
                     updater.call(this);
                 }
@@ -494,7 +505,7 @@
                 // \s* allows for optional whitespace around operators
                 const ternaryMatch = expr.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+?)$/);
 
-                // If ternary pattern is found, parse it as a conditional expression
+                // If a ternary pattern is found, parse it as a conditional expression
                 if (ternaryMatch) {
                     // Destructure the regex match results
                     // [0] is the full match, [1-3] are the captured groups
@@ -502,10 +513,10 @@
 
                     // Return structured ternary expression object
                     return {
-                        type: 'ternary',                                    // Mark as ternary expression
-                        condition: condition.trim(),                        // Clean condition part
-                        trueValue: this.parseValue(trueValue.trim()),      // Parse and clean true branch
-                        falseValue: this.parseValue(falseValue.trim()),    // Parse and clean false branch
+                        type: 'ternary',                                         // Mark as ternary expression
+                        condition: condition.trim(),                             // Clean condition part
+                        trueValue: this.parseValue(trueValue.trim()),            // Parse and clean true branch
+                        falseValue: this.parseValue(falseValue.trim()),          // Parse and clean false branch
                         dependencies: this.extractDependencies(condition.trim()) // Extract variable dependencies from condition
                     };
                 }
@@ -688,16 +699,15 @@
                 if (valueObj.type === 'literal') {
                     return valueObj.value;
                 }
+
                 // Handle property references (e.g., "user.name", "config.timeout")
-                else if (valueObj.type === 'property') {
+                if (valueObj.type === 'property') {
                     // Resolve the property path to get the actual value
                     return this.resolvePropertyPath(valueObj.path);
                 }
-                // Handle unknown or invalid value types
-                else {
-                    // Return undefined for unrecognized value types
-                    return undefined;
-                }
+
+                // Return undefined for unrecognized value types
+                return undefined;
             },
 
             /**
@@ -1208,10 +1218,12 @@
                 try {
                     const deps = [];
                     // Regular expression to find 'this.property' references in function source
+
                     const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
-                    let match;
 
                     // Extract function source and find all property references
+                    let match;
+
                     while ((match = regex.exec(fn.toString()))) {
                         const prop = match[1];
 
@@ -1244,12 +1256,14 @@
                 deps.forEach(computed => {
                     // Store previous value for change detection and notifications
                     const old = this.computedCache.get(computed);
+
                     if (!this.orig.computed) {
                         return;
                     }
 
                     // Get the computed property function from configuration
                     const fn = this.orig.computed[computed];
+
                     if (!fn || typeof fn !== 'function') {
                         return;
                     }
