@@ -42,16 +42,26 @@
          * @returns {boolean} - True if values are deeply equal
          */
         deepEq: (a, b) => {
+            // First check: if both values are strictly equal (same reference or primitive value)
             if (a === b) {
                 return true;
             }
 
+            // Early exit conditions:
+            // - If either value is falsy (null, undefined, 0, "", false)
+            // - If types don't match
+            // - If neither value is an object (covers primitives, functions, etc.)
             if (!a || !b || typeof a !== typeof b || typeof a !== 'object') {
                 return false;
             }
 
+            // Get all enumerable property keys from both objects
             const ka = Object.keys(a), kb = Object.keys(b);
 
+            // Objects are equal if:
+            // 1. They have the same number of properties
+            // 2. Every key in 'a' exists in 'b'
+            // 3. The value for each key is deeply equal (recursive call)
             return ka.length === kb.length &&
                 ka.every(k => kb.includes(k) && U.deepEq(a[k], b[k]));
         },
@@ -431,6 +441,7 @@
 
                 // Execute the appropriate updater if it exists and the binding should be updated
                 const updater = updaters[binding.type];
+
                 if (updater && (shouldUpdate || binding.type === 'foreach')) {
                     updater.call(this);
                 }
@@ -494,7 +505,7 @@
                 // \s* allows for optional whitespace around operators
                 const ternaryMatch = expr.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+?)$/);
 
-                // If ternary pattern is found, parse it as a conditional expression
+                // If a ternary pattern is found, parse it as a conditional expression
                 if (ternaryMatch) {
                     // Destructure the regex match results
                     // [0] is the full match, [1-3] are the captured groups
@@ -502,10 +513,10 @@
 
                     // Return structured ternary expression object
                     return {
-                        type: 'ternary',                                    // Mark as ternary expression
-                        condition: condition.trim(),                        // Clean condition part
-                        trueValue: this.parseValue(trueValue.trim()),      // Parse and clean true branch
-                        falseValue: this.parseValue(falseValue.trim()),    // Parse and clean false branch
+                        type: 'ternary',                                         // Mark as ternary expression
+                        condition: condition.trim(),                             // Clean condition part
+                        trueValue: this.parseValue(trueValue.trim()),            // Parse and clean true branch
+                        falseValue: this.parseValue(falseValue.trim()),          // Parse and clean false branch
                         dependencies: this.extractDependencies(condition.trim()) // Extract variable dependencies from condition
                     };
                 }
@@ -688,16 +699,15 @@
                 if (valueObj.type === 'literal') {
                     return valueObj.value;
                 }
+
                 // Handle property references (e.g., "user.name", "config.timeout")
-                else if (valueObj.type === 'property') {
+                if (valueObj.type === 'property') {
                     // Resolve the property path to get the actual value
                     return this.resolvePropertyPath(valueObj.path);
                 }
-                // Handle unknown or invalid value types
-                else {
-                    // Return undefined for unrecognized value types
-                    return undefined;
-                }
+
+                // Return undefined for unrecognized value types
+                return undefined;
             },
 
             /**
@@ -972,7 +982,6 @@
 
                     // Schedule flush for next animation frame (or fallback to setTimeout)
                     const self = this;
-
                     (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => {
                         self.flushDOM();
                     });
@@ -996,10 +1005,8 @@
 
                 // Process each property that has pending changes
                 this.pending.forEach(prop => {
-                    const val = this.pendingVals[prop];
-
                     // Apply the property change to all relevant bindings
-                    this.bindings.forEach(binding => this.updateBinding(binding, prop, val));
+                    this.bindings.forEach(binding => this.updateBinding(binding, prop, this.pendingVals[prop]));
                 });
 
                 // Clear the pending updates queue after processing
@@ -1015,31 +1022,49 @@
              * @param {*} val - New property value
              */
             updateText(binding, prop, val) {
-                // Check if this binding should be updated
+                // Early exit if this binding shouldn't be updated for the given property
                 if (binding.property !== prop &&
                     (!binding.parsedExpression || !binding.parsedExpression.dependencies.includes(prop))) {
                     return;
                 }
 
-                let displayValue;
+                // Get the text node that needs updating
+                const textNode = binding.textNode || binding.element;
 
-                // Handle ternary expressions
-                if (binding.parsedExpression && binding.expressionContent) {
-                    displayValue = this.evaluateExpression(binding.parsedExpression);
-                } else {
-                    // Fallback to simple property path resolution
-                    displayValue = this.resolvePropertyPath(binding.propertyPath || binding.property);
-                }
+                // Start with the original text content
+                let updatedText = binding.origText;
+                const affectedBindings = [];
 
-                // Format the value for display
-                const formattedValue = this.formatDisplayValue(displayValue);
+                // Find all bindings that affect this same text node
+                this.bindings.forEach(b => {
+                    if (b.type === 'text' && (b.textNode === textNode || b.element === textNode)) {
+                        affectedBindings.push(b);
+                    }
+                });
 
-                // Create regex to match the specific expression in template
-                const escapedMatch = binding.fullMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const regex = new RegExp(escapedMatch, 'g');
+                // Process each binding that affects this text node
+                affectedBindings.forEach(b => {
+                    // Evaluate the binding's value based on its type
+                    let displayValue;
 
-                // Update the text content by replacing template placeholders
-                (binding.textNode || binding.element).textContent = binding.origText.replace(regex, formattedValue);
+                    if (b.parsedExpression && b.expressionContent) {
+                        displayValue = this.evaluateExpression(b.parsedExpression);
+                    } else {
+                        displayValue = this.resolvePropertyPath(b.propertyPath || b.property);
+                    }
+
+                    // Format the value for display
+                    const formattedValue = this.formatDisplayValue(displayValue);
+
+                    // Create regex to safely match the binding pattern in the text
+                    const escapedMatch = b.fullMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                    // Replace this binding's pattern with the new value
+                    updatedText = updatedText.replace(new RegExp(escapedMatch, 'g'), formattedValue);
+                });
+
+                // Update the DOM with the final processed text
+                textNode.textContent = updatedText;
             },
 
             /**
@@ -1193,10 +1218,12 @@
                 try {
                     const deps = [];
                     // Regular expression to find 'this.property' references in function source
+
                     const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
-                    let match;
 
                     // Extract function source and find all property references
+                    let match;
+
                     while ((match = regex.exec(fn.toString()))) {
                         const prop = match[1];
 
@@ -1229,12 +1256,14 @@
                 deps.forEach(computed => {
                     // Store previous value for change detection and notifications
                     const old = this.computedCache.get(computed);
+
                     if (!this.orig.computed) {
                         return;
                     }
 
                     // Get the computed property function from configuration
                     const fn = this.orig.computed[computed];
+
                     if (!fn || typeof fn !== 'function') {
                         return;
                     }
@@ -2046,6 +2075,7 @@
                         if (/this\.children|this\.findChild|Array\.from\(this\.children\)/.test(fnString)) {
                             // Clear cache to force recomputation
                             pacUnit.computedCache.delete(name);
+
                             // Trigger DOM update for this computed property
                             pacUnit.updateDOM(name, pacUnit.abstraction[name]);
                         }
@@ -2348,28 +2378,19 @@
             });
 
             // Copy all abstraction properties and methods
-            Object.keys(unit.abstraction).forEach(key => {
-                if (typeof unit.abstraction[key] === 'function') {
+            Object.entries(Object.getOwnPropertyDescriptors(unit.abstraction)).forEach(([key, descriptor]) => {
+                if (typeof descriptor.value === 'function') {
                     if (!api.hasOwnProperty(key)) {
-                        api[key] = unit.abstraction[key].bind(api);
+                        api[key] = descriptor.value.bind(api);
                     }
+                } else if (descriptor.get || descriptor.set) {
+                    Object.defineProperty(api, key, {
+                        ...descriptor,
+                        get: descriptor.get,
+                        set: descriptor.set
+                    });
                 } else {
-                    // DON'T copy values - create property descriptors that delegate to the reactive object
-                    const descriptor = Object.getOwnPropertyDescriptor(unit.abstraction, key);
-                    if (descriptor) {
-                        // If it's a reactive property (has get/set), copy the descriptor
-                        if (descriptor.get || descriptor.set) {
-                            Object.defineProperty(api, key, {
-                                get: descriptor.get,
-                                set: descriptor.set,
-                                enumerable: descriptor.enumerable,
-                                configurable: descriptor.configurable
-                            });
-                        } else {
-                            // If it's a plain property, just copy the value (for non-reactive properties)
-                            api[key] = unit.abstraction[key];
-                        }
-                    }
+                    api[key] = descriptor.value;
                 }
             });
 
