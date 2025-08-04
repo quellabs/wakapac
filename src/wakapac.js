@@ -1001,7 +1001,16 @@
              * Eliminates duplication of attribute set/remove logic
              */
             setElementAttribute(element, name, value) {
-                if (value != null) {
+                // Boolean attributes that should be present/absent, not true/false
+                const booleanAttrs = ['disabled', 'readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
+
+                if (booleanAttrs.includes(name)) {
+                    if (value) {
+                        element.setAttribute(name, name);  // <input disabled="disabled">
+                    } else {
+                        element.removeAttribute(name);     // <input> (no disabled)
+                    }
+                } else if (value != null) {
                     element.setAttribute(name, value);
                 } else {
                     element.removeAttribute(name);
