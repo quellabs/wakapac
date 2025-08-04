@@ -972,7 +972,6 @@
 
                     // Schedule flush for next animation frame (or fallback to setTimeout)
                     const self = this;
-
                     (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => {
                         self.flushDOM();
                     });
@@ -996,10 +995,8 @@
 
                 // Process each property that has pending changes
                 this.pending.forEach(prop => {
-                    const val = this.pendingVals[prop];
-
                     // Apply the property change to all relevant bindings
-                    this.bindings.forEach(binding => this.updateBinding(binding, prop, val));
+                    this.bindings.forEach(binding => this.updateBinding(binding, prop, this.pendingVals[prop]));
                 });
 
                 // Clear the pending updates queue after processing
@@ -2348,28 +2345,19 @@
             });
 
             // Copy all abstraction properties and methods
-            Object.keys(unit.abstraction).forEach(key => {
-                if (typeof unit.abstraction[key] === 'function') {
+            Object.entries(Object.getOwnPropertyDescriptors(unit.abstraction)).forEach(([key, descriptor]) => {
+                if (typeof descriptor.value === 'function') {
                     if (!api.hasOwnProperty(key)) {
-                        api[key] = unit.abstraction[key].bind(api);
+                        api[key] = descriptor.value.bind(api);
                     }
+                } else if (descriptor.get || descriptor.set) {
+                    Object.defineProperty(api, key, {
+                        ...descriptor,
+                        get: descriptor.get,
+                        set: descriptor.set
+                    });
                 } else {
-                    // DON'T copy values - create property descriptors that delegate to the reactive object
-                    const descriptor = Object.getOwnPropertyDescriptor(unit.abstraction, key);
-                    if (descriptor) {
-                        // If it's a reactive property (has get/set), copy the descriptor
-                        if (descriptor.get || descriptor.set) {
-                            Object.defineProperty(api, key, {
-                                get: descriptor.get,
-                                set: descriptor.set,
-                                enumerable: descriptor.enumerable,
-                                configurable: descriptor.configurable
-                            });
-                        } else {
-                            // If it's a plain property, just copy the value (for non-reactive properties)
-                            api[key] = unit.abstraction[key];
-                        }
-                    }
+                    api[key] = descriptor.value;
                 }
             });
 
