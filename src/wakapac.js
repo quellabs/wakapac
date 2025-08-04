@@ -971,7 +971,11 @@
                     this.pendingVals = {};           // Map of property -> new value
 
                     // Schedule flush for next animation frame (or fallback to setTimeout)
-                    (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => this.flushDOM());
+                    const self = this;
+
+                    (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => {
+                        self.flushDOM();
+                    });
                 }
 
                 // Add this property to the pending updates queue
@@ -2320,15 +2324,6 @@
                     })
                         .then(r => r.json())
                         .then(data => {
-                            // Automatically update component properties if requested
-                            if (opts.updateProperties) {
-                                Object.keys(data).forEach(k => {
-                                    if (control.abstraction.hasOwnProperty(k)) {
-                                        control.abstraction[k] = data[k];
-                                    }
-                                });
-                            }
-
                             // Call success callback if provided
                             if (opts.onSuccess) {
                                 opts.onSuccess.call(control.abstraction, data);
@@ -2355,12 +2350,26 @@
             // Copy all abstraction properties and methods
             Object.keys(unit.abstraction).forEach(key => {
                 if (typeof unit.abstraction[key] === 'function') {
-                    // Skip if method already exists on api (added by Object.assign)
                     if (!api.hasOwnProperty(key)) {
                         api[key] = unit.abstraction[key].bind(api);
                     }
                 } else {
-                    api[key] = unit.abstraction[key];
+                    // DON'T copy values - create property descriptors that delegate to the reactive object
+                    const descriptor = Object.getOwnPropertyDescriptor(unit.abstraction, key);
+                    if (descriptor) {
+                        // If it's a reactive property (has get/set), copy the descriptor
+                        if (descriptor.get || descriptor.set) {
+                            Object.defineProperty(api, key, {
+                                get: descriptor.get,
+                                set: descriptor.set,
+                                enumerable: descriptor.enumerable,
+                                configurable: descriptor.configurable
+                            });
+                        } else {
+                            // If it's a plain property, just copy the value (for non-reactive properties)
+                            api[key] = unit.abstraction[key];
+                        }
+                    }
                 }
             });
 
