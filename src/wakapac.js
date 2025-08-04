@@ -411,6 +411,16 @@
             },
 
             /**
+             * Helper method: Determines if a binding should be updated for a given property change
+             * Eliminates duplication of shouldUpdate logic across binding methods
+             */
+            shouldUpdateBinding(binding, prop) {
+                return binding.property === prop ||
+                    (binding.propertyPath && binding.propertyPath.startsWith(prop + '.')) ||
+                    (binding.parsedExpression && binding.parsedExpression.dependencies?.includes(prop));
+            },
+
+            /**
              * Generic DOM updater - handles all binding types uniformly
              * Uses strategy pattern to delegate to specific update methods based on binding type
              * Determines whether a binding needs updating based on the changed property
@@ -421,8 +431,7 @@
             updateBinding(binding, prop, val) {
                 // Determine if this binding should be updated based on the changed property
                 // Update if the binding's property matches OR if it uses a property path that starts with the changed property
-                const shouldUpdate = binding.property === prop ||
-                    (binding.propertyPath && binding.propertyPath.startsWith(prop + '.'));
+                const shouldUpdate = this.shouldUpdateBinding(binding, prop);
 
                 // Skip bindings that don't need updates (except foreach which has special handling)
                 if (!shouldUpdate && binding.type !== 'foreach') {
@@ -445,45 +454,6 @@
                 if (updater && (shouldUpdate || binding.type === 'foreach')) {
                     updater.call(this);
                 }
-            },
-
-            /**
-             * Enhanced foreach update with better item handling
-             * Updates a foreach binding when the associated array property changes
-             * Performs efficient array comparison to avoid unnecessary DOM rebuilds
-             * @param {Object} binding - The foreach binding configuration object
-             * @param {string} prop - The property name that changed
-             * @param {*} val - The new array value to render
-             */
-            updateForeach(binding, prop, val) {
-                // Only process if this foreach binding matches the changed property
-                if (binding.collection !== prop) {
-                    return;
-                }
-
-                // Ensure we have a valid array to work with, default to empty array
-                const arr = Array.isArray(val) ? val : [];
-                const prev = binding.prev || [];
-
-                // Performance optimization: skip update if arrays are deeply equal
-                // This prevents unnecessary DOM rebuilds when array contents haven't changed
-                if (this.arrEq(prev, arr)) {
-                    binding.prev = [...arr];  // Update reference for future comparisons
-                    return;
-                }
-
-                // Store current array state for next comparison
-                binding.prev = [...arr];
-
-                // Clear existing content before rendering new items
-                binding.element.innerHTML = '';
-
-                // Render each item in the array using the stored template
-                arr.forEach((item, i) => {
-                    const itemEl = this.renderItem(binding.template, item, i,
-                        binding.itemName, binding.indexName);
-                    binding.element.appendChild(itemEl);
-                });
             },
 
             /**
@@ -1015,6 +985,49 @@
             },
 
             /**
+             * Helper method: Resolves binding value using property path or fallback
+             * Eliminates duplication of property path resolution logic
+             */
+            resolveBindingValue(binding, fallbackValue) {
+                if (binding.propertyPath && binding.propertyPath !== binding.property) {
+                    return this.resolvePropertyPath(binding.propertyPath);
+                } else {
+                    return fallbackValue;
+                }
+            },
+
+            /**
+             * Helper method: Sets or removes element attribute based on value
+             * Eliminates duplication of attribute set/remove logic
+             */
+            setElementAttribute(element, name, value) {
+                // Boolean attributes that should be present/absent, not true/false
+                const booleanAttrs = ['disabled', 'readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
+
+                if (booleanAttrs.includes(name)) {
+                    if (value) {
+                        element.setAttribute(name, name);  // <input disabled="disabled">
+                    } else {
+                        element.removeAttribute(name);     // <input> (no disabled)
+                    }
+                } else if (value != null) {
+                    element.setAttribute(name, value);
+                } else {
+                    element.removeAttribute(name);
+                }
+            },
+
+            /**
+             * Helper method: Updates element property only if value changed
+             * Eliminates duplication of change-detection logic for element properties
+             */
+            updateElementProperty(element, property, newValue) {
+                if (element[property] !== newValue) {
+                    element[property] = newValue;
+                }
+            },
+
+            /**
              * Updates text content with interpolated property values
              * Handles property path resolution and display formatting
              * @param {Object} binding - Text binding configuration object
@@ -1023,8 +1036,7 @@
              */
             updateText(binding, prop, val) {
                 // Early exit if this binding shouldn't be updated for the given property
-                if (binding.property !== prop &&
-                    (!binding.parsedExpression || !binding.parsedExpression.dependencies.includes(prop))) {
+                if (!this.shouldUpdateBinding(binding, prop)) {
                     return;
                 }
 
@@ -1078,15 +1090,19 @@
             updateAttribute(binding, prop, val) {
                 // Resolve the actual value using property path if available
                 // This handles nested property access (e.g., user.profile.name)
-                const actualValue = binding.propertyPath && binding.propertyPath !== binding.property ?
-                    this.resolvePropertyPath(binding.propertyPath) : val;
+                const actualValue = this.resolveBindingValue(binding, val);
 
                 // Set or remove the attribute based on the resolved value
-                if (actualValue != null) {
-                    binding.element.setAttribute(binding.attribute, actualValue);
+                if (binding.attribute === 'class' && actualValue) {
+                    binding.element.className = actualValue;
+                } else if (binding.attribute === 'style') {
+                    if (typeof actualValue === 'object' && actualValue) {
+                        Object.assign(binding.element.style, actualValue);
+                    } else {
+                        binding.element.style.cssText = actualValue || '';
+                    }
                 } else {
-                    // Remove attribute when value is null/undefined
-                    binding.element.removeAttribute(binding.attribute);
+                    this.setElementAttribute(binding.element, binding.attribute, actualValue);
                 }
             },
 
@@ -1101,8 +1117,10 @@
             updateInput(binding, prop, val) {
                 // Only update if the property matches and the value has actually changed
                 // This prevents unnecessary updates and cursor position issues
-                if (binding.property === prop && binding.element.value !== val) {
-                    binding.element.value = val;
+                if (this.shouldUpdateBinding(binding, prop)) {
+                    // Resolve value using property path if needed
+                    const actualValue = this.resolveBindingValue(binding, val);
+                    this.updateElementProperty(binding.element, 'value', actualValue);
                 }
             },
 
@@ -1116,8 +1134,10 @@
              */
             updateChecked(binding, prop, val) {
                 // Convert value to boolean and only update if state has changed
-                if (binding.property === prop && binding.element.checked !== !!val) {
-                    binding.element.checked = !!val;
+                if (this.shouldUpdateBinding(binding, prop)) {
+                    // Resolve value using property path if needed
+                    const actualValue = this.resolveBindingValue(binding, val);
+                    this.updateElementProperty(binding.element, 'checked', !!actualValue);
                 }
             },
 
@@ -1131,14 +1151,57 @@
             updateVisible(binding, val) {
                 // Resolve the actual value using property path if available
                 // This enables complex visibility conditions like "todos.length"
-                const actualValue = binding.propertyPath && binding.propertyPath !== binding.property ?
-                    this.resolvePropertyPath(binding.propertyPath) : val;
+                const actualValue = this.resolveBindingValue(binding, val);
 
                 // Apply negation logic if present (for hide-when-true scenarios)
                 const show = binding.isNegated ? !actualValue : !!actualValue;
 
                 // Delegate to helper method for actual DOM manipulation
                 this.toggleElementVisibility(binding.element, show);
+            },
+
+            /**
+             * Enhanced foreach update with better item handling
+             * Updates a foreach binding when the associated array property changes
+             * Performs efficient array comparison to avoid unnecessary DOM rebuilds
+             * @param {Object} binding - The foreach binding configuration object
+             * @param {string} prop - The property name that changed
+             * @param {*} val - The new array value to render
+             */
+            updateForeach(binding, prop, val) {
+                // Only process if this foreach binding matches the changed property
+                if (binding.collection !== prop) {
+                    return;
+                }
+
+                // Ensure we have a valid array to work with, default to empty array
+                const arr = Array.isArray(val) ? val : [];
+                const prev = binding.prev || [];
+
+                // Performance optimization: skip update if arrays are deeply equal
+                // This prevents unnecessary DOM rebuilds when array contents haven't changed
+                if (this.arrEq(prev, arr)) {
+                    binding.prev = [...arr];  // Update reference for future comparisons
+                    return;
+                }
+
+                // Store current array state for next comparison
+                binding.prev = [...arr];
+
+                // Clear existing content before rendering new items
+                binding.element.innerHTML = '';
+
+                // Render each item in the array using the stored template
+                arr.forEach((item, i) => {
+                    const itemEl = this.renderItem(
+                        binding.template,
+                        item,
+                        i,
+                        binding.itemName, binding.indexName
+                    );
+
+                    binding.element.appendChild(itemEl);
+                });
             },
 
             /**
