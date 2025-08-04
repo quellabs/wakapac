@@ -1084,7 +1084,17 @@
                 const actualValue = this.resolveBindingValue(binding, val);
 
                 // Set or remove the attribute based on the resolved value
-                this.setElementAttribute(binding.element, binding.attribute, actualValue);
+                if (binding.attribute === 'class' && actualValue) {
+                    binding.element.className = actualValue;
+                } else if (binding.attribute === 'style') {
+                    if (typeof actualValue === 'object' && actualValue) {
+                        Object.assign(binding.element.style, actualValue);
+                    } else {
+                        binding.element.style.cssText = actualValue || '';
+                    }
+                } else {
+                    this.setElementAttribute(binding.element, binding.attribute, actualValue);
+                }
             },
 
             /**
