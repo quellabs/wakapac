@@ -1012,31 +1012,49 @@
              * @param {*} val - New property value
              */
             updateText(binding, prop, val) {
-                // Check if this binding should be updated
+                // Early exit if this binding shouldn't be updated for the given property
                 if (binding.property !== prop &&
                     (!binding.parsedExpression || !binding.parsedExpression.dependencies.includes(prop))) {
                     return;
                 }
 
-                let displayValue;
+                // Get the text node that needs updating
+                const textNode = binding.textNode || binding.element;
 
-                // Handle ternary expressions
-                if (binding.parsedExpression && binding.expressionContent) {
-                    displayValue = this.evaluateExpression(binding.parsedExpression);
-                } else {
-                    // Fallback to simple property path resolution
-                    displayValue = this.resolvePropertyPath(binding.propertyPath || binding.property);
-                }
+                // Start with the original text content
+                let updatedText = binding.origText;
+                const affectedBindings = [];
 
-                // Format the value for display
-                const formattedValue = this.formatDisplayValue(displayValue);
+                // Find all bindings that affect this same text node
+                this.bindings.forEach(b => {
+                    if (b.type === 'text' && (b.textNode === textNode || b.element === textNode)) {
+                        affectedBindings.push(b);
+                    }
+                });
 
-                // Create regex to match the specific expression in template
-                const escapedMatch = binding.fullMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const regex = new RegExp(escapedMatch, 'g');
+                // Process each binding that affects this text node
+                affectedBindings.forEach(b => {
+                    // Evaluate the binding's value based on its type
+                    let displayValue;
 
-                // Update the text content by replacing template placeholders
-                (binding.textNode || binding.element).textContent = binding.origText.replace(regex, formattedValue);
+                    if (b.parsedExpression && b.expressionContent) {
+                        displayValue = this.evaluateExpression(b.parsedExpression);
+                    } else {
+                        displayValue = this.resolvePropertyPath(b.propertyPath || b.property);
+                    }
+
+                    // Format the value for display
+                    const formattedValue = this.formatDisplayValue(displayValue);
+
+                    // Create regex to safely match the binding pattern in the text
+                    const escapedMatch = b.fullMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                    // Replace this binding's pattern with the new value
+                    updatedText = updatedText.replace(new RegExp(escapedMatch, 'g'), formattedValue);
+                });
+
+                // Update the DOM with the final processed text
+                textNode.textContent = updatedText;
             },
 
             /**
@@ -2043,6 +2061,7 @@
                         if (/this\.children|this\.findChild|Array\.from\(this\.children\)/.test(fnString)) {
                             // Clear cache to force recomputation
                             pacUnit.computedCache.delete(name);
+
                             // Trigger DOM update for this computed property
                             pacUnit.updateDOM(name, pacUnit.abstraction[name]);
                         }
