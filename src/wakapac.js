@@ -1015,6 +1015,18 @@
             },
 
             /**
+             * Helper method: Resolves binding value using property path or fallback
+             * Eliminates duplication of property path resolution logic
+             */
+            resolveBindingValue(binding, fallbackValue) {
+                if (binding.propertyPath && binding.propertyPath !== binding.property) {
+                    return this.resolvePropertyPath(binding.propertyPath);
+                } else {
+                    return fallbackValue;
+                }
+            },
+
+            /**
              * Updates text content with interpolated property values
              * Handles property path resolution and display formatting
              * @param {Object} binding - Text binding configuration object
@@ -1078,8 +1090,7 @@
             updateAttribute(binding, prop, val) {
                 // Resolve the actual value using property path if available
                 // This handles nested property access (e.g., user.profile.name)
-                const actualValue = binding.propertyPath && binding.propertyPath !== binding.property ?
-                    this.resolvePropertyPath(binding.propertyPath) : val;
+                const actualValue = this.resolveBindingValue(binding, val);
 
                 // Set or remove the attribute based on the resolved value
                 if (actualValue != null) {
@@ -1131,8 +1142,7 @@
             updateVisible(binding, val) {
                 // Resolve the actual value using property path if available
                 // This enables complex visibility conditions like "todos.length"
-                const actualValue = binding.propertyPath && binding.propertyPath !== binding.property ?
-                    this.resolvePropertyPath(binding.propertyPath) : val;
+                const actualValue = this.resolveBindingValue(binding, val);
 
                 // Apply negation logic if present (for hide-when-true scenarios)
                 const show = binding.isNegated ? !actualValue : !!actualValue;
