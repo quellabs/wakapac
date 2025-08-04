@@ -1294,7 +1294,7 @@
                         if (typeof val === 'function') {
                             // Bind methods to reactive object so 'this' refers to reactive instance
                             // This ensures methods have access to reactive properties and other methods
-                            reactive[key] = val.bind(reactive);
+                            reactive[key] = val;
                         } else {
                             // Handle data properties by creating reactive getters/setters
                             // This enables automatic updates and change detection
@@ -2246,13 +2246,6 @@
         function createPublicAPI(unit, control) {
             const api = {};
 
-            // Copy all abstraction properties and methods to the public API
-            Object.keys(unit.abstraction).forEach(key => {
-                if (unit.abstraction.hasOwnProperty(key)) {
-                    api[key] = unit.abstraction[key];
-                }
-            });
-
             // Add public methods for component management and communication
             Object.assign(api, {
                 /**
@@ -2358,6 +2351,41 @@
                  */
                 destroy: () => control.destroy()
             });
+
+            // Add this debug line:
+            console.log('api.control exists?', typeof api.control); // Should log 'function'
+
+            // Copy all abstraction properties and methods
+            Object.keys(unit.abstraction).forEach(key => {
+                if (typeof unit.abstraction[key] === 'function') {
+                    // Skip if method already exists on api (added by Object.assign)
+                    if (!api.hasOwnProperty(key)) {
+                        console.log(`Binding method: ${key}`);
+                        api[key] = unit.abstraction[key].bind(api);
+                    } else {
+                        console.log(`Skipping method: ${key} (already exists on api)`);
+                    }
+                } else {
+                    api[key] = unit.abstraction[key];
+                }
+            });
+
+            // After the forEach loop, you already have this:
+            console.log('Final verification:');
+            console.log('api.control type:', typeof api.control);
+            console.log('api.load type:', typeof api.load);
+
+            console.log('Testing api.load call with proper context:');
+            try {
+                const testLoad = function() {
+                    console.log('Inside test function, this.control type:', typeof this.control);
+                    return this.control;
+                };
+                const boundTestLoad = testLoad.bind(api);
+                console.log('Test result:', typeof boundTestLoad());
+            } catch (e) {
+                console.log('Test error:', e);
+            }
 
             // Define read-only properties for component introspection
             Object.defineProperties(api, {
