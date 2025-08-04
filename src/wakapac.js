@@ -411,6 +411,16 @@
             },
 
             /**
+             * Helper method: Determines if a binding should be updated for a given property change
+             * Eliminates duplication of shouldUpdate logic across binding methods
+             */
+            shouldUpdateBinding(binding, prop) {
+                return binding.property === prop ||
+                    (binding.propertyPath && binding.propertyPath.startsWith(prop + '.')) ||
+                    (binding.parsedExpression && binding.parsedExpression.dependencies?.includes(prop));
+            },
+
+            /**
              * Generic DOM updater - handles all binding types uniformly
              * Uses strategy pattern to delegate to specific update methods based on binding type
              * Determines whether a binding needs updating based on the changed property
@@ -421,8 +431,7 @@
             updateBinding(binding, prop, val) {
                 // Determine if this binding should be updated based on the changed property
                 // Update if the binding's property matches OR if it uses a property path that starts with the changed property
-                const shouldUpdate = binding.property === prop ||
-                    (binding.propertyPath && binding.propertyPath.startsWith(prop + '.'));
+                const shouldUpdate = this.shouldUpdateBinding(binding, prop);
 
                 // Skip bindings that don't need updates (except foreach which has special handling)
                 if (!shouldUpdate && binding.type !== 'foreach') {
@@ -1018,8 +1027,7 @@
              */
             updateText(binding, prop, val) {
                 // Early exit if this binding shouldn't be updated for the given property
-                if (binding.property !== prop &&
-                    (!binding.parsedExpression || !binding.parsedExpression.dependencies.includes(prop))) {
+                if (!this.shouldUpdateBinding(binding, prop)) {
                     return;
                 }
 
