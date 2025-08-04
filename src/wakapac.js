@@ -974,7 +974,6 @@
                     const self = this;
 
                     (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => {
-                        console.log('Animation frame callback executing, calling flushDOM...');
                         self.flushDOM();
                     });
                 }
