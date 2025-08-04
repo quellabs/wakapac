@@ -1098,8 +1098,10 @@
             updateInput(binding, prop, val) {
                 // Only update if the property matches and the value has actually changed
                 // This prevents unnecessary updates and cursor position issues
-                if (binding.property === prop) {
-                    this.updateElementProperty(binding.element, 'value', val);
+                if (this.shouldUpdateBinding(binding, prop)) {
+                    // Resolve value using property path if needed
+                    const actualValue = this.resolveBindingValue(binding, val);
+                    this.updateElementProperty(binding.element, 'value', actualValue);
                 }
             },
 
@@ -1113,8 +1115,10 @@
              */
             updateChecked(binding, prop, val) {
                 // Convert value to boolean and only update if state has changed
-                if (binding.property === prop) {
-                    this.updateElementProperty(binding.element, 'checked', !!val);
+                if (this.shouldUpdateBinding(binding, prop)) {
+                    // Resolve value using property path if needed
+                    const actualValue = this.resolveBindingValue(binding, val);
+                    this.updateElementProperty(binding.element, 'checked', !!actualValue);
                 }
             },
 
