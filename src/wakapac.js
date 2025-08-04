@@ -1333,7 +1333,38 @@
                     // Utility method to find a child component using a custom predicate function
                     // @param {Function} pred - Predicate function that returns true for the desired child
                     // @returns {Object|undefined} - The first child that matches the predicate
-                    findChild: pred => Array.from(this.children).find(pred)
+                    findChild: pred => Array.from(this.children).find(pred),
+
+                    /**
+                     * Serializes all non-computed member variables to a JSON-ready object
+                     * Excludes undefined values, functions, and computed properties
+                     * @returns {Object} - Plain object containing all defined property values
+                     */
+                    toJSON: () => {
+                        const result = {};
+
+                        // Get computed property names to exclude them
+                        const computedProps = control.orig.computed ? Object.keys(control.orig.computed) : [];
+
+                        // Iterate through all abstraction properties
+                        Object.keys(control.abstraction).forEach(key => {
+                            const value = control.abstraction[key];
+
+                            // Include property if:
+                            // - It has a defined value (not undefined)
+                            // - It's not a function
+                            // - It's not a computed property
+                            // - It's not one of the built-in communication methods
+                            if (value !== undefined &&
+                                typeof value !== 'function' &&
+                                !computedProps.includes(key) &&
+                                !['notifyParent', 'sendToChildren', 'sendToChild', 'findChild', 'toJSON'].includes(key)) {
+                                result[key] = value;
+                            }
+                        });
+
+                        return result;
+                    },
                 });
 
                 // Return the fully configured reactive object
