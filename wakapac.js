@@ -557,23 +557,20 @@
              */
             extractDependencies(expr) {
                 const deps = [];
+                const jsLiterals = ['true', 'false', 'null', 'undefined', 'NaN', 'Infinity'];
 
-                // Regular expression to match JavaScript identifiers and property access patterns
-                // Matches: variable names, object.property, nested.object.property, etc.
-                // Pattern breakdown: \b = word boundary, [a-zA-Z_$] = valid identifier start chars,
-                // [a-zA-Z0-9_$.]* = valid identifier continuation chars including dots for property access
-                const propertyRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$.]*)\b/g;
+                // Find all property access patterns (with or without bracket notation)
+                const propertyRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*|\[[^\]]+])*/g;
 
-                // Iterate through all matches in the expression
                 let match;
-
                 while ((match = propertyRegex.exec(expr))) {
-                    const prop = match[1];
+                    const fullPath = match[0];    // e.g., "items[0].name"
+                    const rootProperty = match[1]; // e.g., "items"
 
-                    // Filter out JavaScript boolean literals and avoid duplicate entries
-                    // TODO: Consider filtering out other literals like 'null', 'undefined', numbers
-                    if (prop !== 'true' && prop !== 'false' && !deps.includes(prop)) {
-                        deps.push(prop);
+                    // Only track the root property for reactivity
+                    // When "items" changes, we need to update "items[0].name"
+                    if (!jsLiterals.includes(rootProperty) && !deps.includes(rootProperty)) {
+                        deps.push(rootProperty);
                     }
                 }
 
@@ -1262,8 +1259,142 @@
              * @returns {*} - The resolved value or undefined if path is invalid
              */
             resolvePropertyPath(path) {
-                return path.split('.').reduce((current, part) =>
-                    current == null ? undefined : current[part], this.abstraction);
+                // Early return if path is falsy (null, undefined, empty string)
+                if (!path) {
+                    return undefined;
+                }
+
+                // Split the path into segments, handling both dots and brackets
+                const segments = this.parsePropertyPath(path);
+
+                // Navigate through each segment starting from the abstraction object
+                // Uses reduce to traverse the object tree step by step
+                return segments.reduce((current, segment) => {
+                    // Safety check: if current value is null or undefined, stop traversal
+                    // This prevents "Cannot read property of null/undefined" errors
+                    if (current == null) {
+                        return undefined;
+                    }
+
+                    // Handle regular property access (e.g., obj.property)
+                    if (segment.type === 'property') {
+                        // Access the property directly using bracket notation
+                        return current[segment.name];
+                    }
+
+                    // Handle array index access (e.g., arr[0], arr[5])
+                    if (segment.type === 'index') {
+                        // Convert string index to number for proper array access
+                        const index = parseInt(segment.value, 10);
+                        // Verify current is an array before attempting index access
+                        // Returns undefined if not an array or index is out of bounds
+                        return Array.isArray(current) ? current[index] : undefined;
+                    }
+
+                    // Handle quoted key access (e.g., obj['key-with-dashes'], obj['special chars'])
+                    if (segment.type === 'key') {
+                        // Use the raw key value for property access
+                        // Useful for properties with special characters or spaces
+                        return current[segment.value];
+                    }
+
+                    // Fallback for unknown segment types - should not occur with proper parsing
+                    return undefined;
+                }, this.abstraction); // Start the reduction from the root abstraction object
+            },
+
+            /**
+             * Parses a property path into segments that can include dots, brackets, and quotes
+             *
+             * Examples:
+             *   "user.name" → [{type: 'property', name: 'user'}, {type: 'property', name: 'name'}]
+             *   "items[0]" → [{type: 'property', name: 'items'}, {type: 'index', value: '0'}]
+             *   "items[0].name" → [{type: 'property', name: 'items'}, {type: 'index', value: '0'}, {type: 'property', name: 'name'}]
+             *   "user['first-name']" → [{type: 'property', name: 'user'}, {type: 'key', value: 'first-name'}]
+             */
+            parsePropertyPath(path) {
+                // Array to store parsed path segments
+                const segments = [];
+
+                // Current property name being built character by character
+                let current = '';
+
+                // Index for iterating through the path string
+                let i = 0;
+
+                // Main parsing loop - process each character in the path
+                while (i < path.length) {
+                    const char = path[i];
+
+                    if (char === '.') {
+                        // Property separator - add current segment and start new one
+                        if (current) {
+                            // Only add if we have accumulated characters (avoid empty segments)
+                            segments.push({type: 'property', name: current});
+                            current = ''; // Reset for next property name
+                        }
+
+                        i++;
+                    } else if (char === '[') {
+                        // Start of bracket notation - add current property if exists
+                        if (current) {
+                            // Push any accumulated property name before processing bracket
+                            segments.push({type: 'property', name: current});
+                            current = ''; // Reset current buffer
+                        }
+
+                        // Find the closing bracket and extract content
+                        ++i; // Skip opening bracket '['
+                        let bracketContent = ''; // Content between brackets
+                        let inQuotes = false; // Track if we're inside quoted string
+                        let quoteChar = ''; // Remember which quote character started the string
+
+                        // Parse bracket content until we find unquoted closing bracket
+                        while (i < path.length && (path[i] !== ']' || inQuotes)) {
+                            const bracketChar = path[i];
+
+                            if ((bracketChar === '"' || bracketChar === "'") && !inQuotes) {
+                                // Start of quoted string - don't include quote in content
+                                inQuotes = true;
+                                quoteChar = bracketChar; // Remember which quote type we're using
+                            } else if (bracketChar === quoteChar && inQuotes) {
+                                // End of quoted string - don't include quote in content
+                                inQuotes = false;
+                                quoteChar = ''; // Clear quote character
+                            } else {
+                                // Regular character inside brackets - add to content
+                                bracketContent += bracketChar;
+                            }
+
+                            i++;
+                        }
+
+                        // Add the bracket content as appropriate segment type
+                        if (bracketContent) {
+                            if (/^\d+$/.test(bracketContent)) {
+                                // Numeric index like [0] or [42] - used for array access
+                                segments.push({type: 'index', value: bracketContent});
+                            } else {
+                                // String key like ['first-name'] or ["user-id"] - used for object property access
+                                segments.push({type: 'key', value: bracketContent});
+                            }
+                        }
+
+                        i++; // Skip closing bracket ']'
+                    } else {
+                        // Regular character - add to the current segment being built
+                        current += char;
+                        i++;
+                    }
+                }
+
+                // Add the final segment if we have accumulated characters
+                if (current) {
+                    segments.push({type: 'property', name: current});
+                }
+
+                // Return array of parsed segments
+                return segments;
             },
 
             /**
