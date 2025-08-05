@@ -382,6 +382,7 @@
             computedCache: new Map(), // Cache for computed property values
             computedDeps: new Map(), // Map of computed property -> dependencies
             propDeps: new Map(), // Map of property -> dependent computed properties
+            expressionCache: new Map(), // Cache for parsed expressions to avoid re-parsing
             container,
             config,
 
@@ -1956,7 +1957,14 @@
 
                             // Parse the expression to handle complex cases (functions, operators, etc.)
                             // This likely returns an object with the parsed expression and its dependencies
-                            const parsedExpr = this.parseExpression(exprContent);
+                            let parsedExpr;
+
+                            if (this.expressionCache.has(exprContent)) {
+                                parsedExpr = this.expressionCache.get(exprContent);
+                            } else {
+                                parsedExpr = this.parseExpression(exprContent);
+                                this.expressionCache.set(exprContent, parsedExpr);
+                            }
 
                             // Get all dependencies for reactivity tracking
                             // If parsing didn't provide dependencies, fall back to the root property
@@ -2100,8 +2108,23 @@
              * @returns {Object} - Attribute binding configuration
              */
             createAttributeBinding(el, type, target) {
+                // Check cache first
+                if (this.expressionCache.has(target)) {
+                    const parsedExpression = this.expressionCache.get(target);
+
+                    return this.createBinding('attribute', el, {
+                        target,
+                        attribute: type,
+                        parsedExpression,
+                        dependencies: parsedExpression.dependencies || [target.split('.')[0]]
+                    });
+                }
+
                 // Parse the target expression to check if it contains conditional logic
                 const parsedExpression = this.parseExpression(target);
+
+                // Add to cache
+                this.expressionCache.set(target, parsedExpression);
 
                 return this.createBinding('attribute', el, {
                     target,
@@ -2528,7 +2551,7 @@
                 this.children.forEach(child => child.parent = null);
 
                 // Clear all internal caches and maps to free memory
-                [this.computedCache, this.computedDeps, this.propDeps, this.bindings].forEach(map => map.clear());
+                [this.computedCache, this.computedDeps, this.propDeps, this.bindings, this.expressionCache].forEach(map => map.clear());
 
                 // Remove reference to reactive abstraction
                 this.abstraction = null;
