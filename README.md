@@ -6,7 +6,7 @@
 
 ### Why WakaPAC?
 
-If you loved **Knockout's declarative data binding** but wanted modern component hierarchy from React and clean template syntax from Vue, WakaPAC is for you. It evolves Knockout's proven foundation with contemporary features and performance optimizations.
+If you love **Knockout's declarative data binding** but want modern component hierarchy from React and clean template syntax from Vue, WakaPAC is for you. It evolves Knockout's proven foundation with contemporary features and performance optimizations.
 
 **🪶 Lightweight Alternative**
 - **No build tools required** - works directly in the browser with vanilla HTML/JS
@@ -153,20 +153,20 @@ Use double braces `{{}}` to bind data to text content. Property access and expre
 <p>User name: {{userName}}</p>
 <p>Computed value: {{computedProperty}}</p>
 
-<!-- ✅ Property access now supported -->
-<p>Total items: {{items.length}}</p>
+<!-- ✅ Nested property access (dot notation only) -->
+<p>Total items: {{itemCount}}</p>
 <p>User info: {{user.name}} ({{user.age}})</p>
-<p>First item: {{items[0].name}}</p>
-
-<!-- ✅ Nested property access -->
 <p>Theme: {{user.preferences.theme}}</p>
-<p>Notification status: {{user.settings.notifications.email}}</p>
+<p>Email notifications: {{user.settings.notifications.email}}</p>
 
-<!-- ✅ Array and object methods -->
-<p>Completed todos: {{todos.filter(t => t.completed).length}}</p>
-<p>User initials: {{user.name.split(' ').map(n => n[0]).join('.')}}</p>
+<!-- ✅ Ternary expressions -->
+<p>Status: {{user.age >= 18 ? 'Adult' : 'Minor'}}</p>
+<p>Theme mode: {{user.preferences.theme === 'dark' ? 'Dark Mode' : 'Light Mode'}}</p>
 
-<!-- ✅ Computed properties still recommended for complex logic -->
+<!-- ✅ Computed properties for complex logic -->
+<p>Completed todos: {{completedTodosCount}}</p>
+<p>User initials: {{userInitials}}</p>
+<p>First item: {{firstItemName}}</p>
 <p>Summary: {{userSummary}}</p>
 ```
 
@@ -195,7 +195,23 @@ wakaPAC('#app', {
     ],
 
     computed: {
-        // Computed properties still useful for reusable complex logic
+        // Simple computed properties for values that need calculation
+        itemCount() {
+            return this.items.length;
+        },
+
+        completedTodosCount() {
+            return this.todos.filter(t => t.completed).length;
+        },
+
+        userInitials() {
+            return this.user.name.split(' ').map(n => n[0]).join('.');
+        },
+
+        firstItemName() {
+            return this.items.length > 0 ? this.items[0].name : 'No items';
+        },
+
         userSummary() {
             const completedTodos = this.todos.filter(t => t.completed).length;
             return `${this.user.name} has completed ${completedTodos} todos`;
@@ -377,7 +393,7 @@ Updates data model on every keystroke:
 ```html
 <input type="text" data-pac-bind="value:name">
 <!-- Or explicitly -->
-<input type="text" data-pac-bind="value:name" data-pac-update="immediate">
+<input type="text" data-pac-bind="value:name" data-pac-update-mode="immediate">
 ```
 
 ### Change Mode
@@ -385,7 +401,7 @@ Updates data model on every keystroke:
 Updates only when the input loses focus:
 
 ```html
-<input type="text" data-pac-bind="value:name" data-pac-update="change">
+<input type="text" data-pac-bind="value:name" data-pac-update-mode="change">
 ```
 
 ### Delayed Mode
@@ -393,8 +409,8 @@ Updates only when the input loses focus:
 Updates after a specified delay (debounced):
 
 ```html
-<input type="text" data-pac-bind="value:searchQuery" 
-       data-pac-update="delayed" data-pac-delay="500">
+<input type="text" data-pac-bind="value:searchQuery"
+       data-pac-update-mode="delayed" data-pac-update-delay="500">
 ```
 
 ### Global Configuration
@@ -409,6 +425,76 @@ const app = wakaPAC('#app', {
     delay: 300
 });
 ```
+
+## 🎯 Event Handler Signatures
+
+**WakaPAC event handlers receive different parameters depending on where they're used:**
+
+### Outside Foreach Loops → Just the Event
+When you bind events to regular elements, your handler gets only the `event` parameter:
+
+```html
+<!-- Regular button outside any foreach -->
+<button data-pac-bind="click:saveData">Save</button>
+<form data-pac-bind="submit:handleLogin">Login</form>
+```
+
+```javascript
+wakaPAC('#app', {
+    saveData(event) {
+        // ✅ Only receives: event
+        console.log('Save clicked');
+    },
+    
+    handleLogin(event) {
+        // ✅ Only receives: event
+        event.preventDefault();
+        console.log('Login submitted');
+    }
+});
+```
+
+### Inside Foreach Loops → Item, Index, and Event
+When you bind events inside a `foreach` template, your handler gets three parameters:
+
+```html
+<!-- Buttons inside foreach get extra context -->
+<div data-pac-bind="foreach:todos" data-pac-item="todo" data-pac-index="i">
+    <span>{{todo.text}}</span>
+    <button data-pac-bind="click:toggleTodo">Toggle</button>
+    <button data-pac-bind="click:removeTodo">Delete</button>
+</div>
+```
+
+```javascript
+wakaPAC('#app', {
+    todos: [
+        {id: 1, text: 'Learn WakaPAC', completed: false},
+        {id: 2, text: 'Build an app', completed: true}
+    ],
+    
+    toggleTodo(todo, index, event) {
+        // ✅ Receives: current todo item, its array index, and the click event
+        console.log('Toggling todo:', todo.text, 'at position', index);
+        todo.completed = !todo.completed;
+    },
+    
+    removeTodo(todo, index, event) {
+        // ✅ Receives: current todo item, its array index, and the click event
+        console.log('Removing todo:', todo.text);
+        this.todos.splice(index, 1);
+    }
+});
+```
+
+### Quick Reference
+
+| **Context**     | **Handler Signature**         | **Example**                                            |
+|-----------------|-------------------------------|--------------------------------------------------------|
+| Regular element | `handler(event)`              | `<button data-pac-bind="click:save">`                  |
+| Inside foreach  | `handler(item, index, event)` | `<button data-pac-bind="click:toggle">` inside foreach |
+
+**💡 Tip:** The foreach context gives you direct access to the current item and its position, making it easy to modify or remove specific items without searching through the array.
 
 ## 🔗 Hierarchical Communication
 
@@ -447,7 +533,7 @@ const child = wakaPAC('#child-app', {
 
 // In parent component
 const parent = wakaPAC('#parent-app', {
-    onChildUpdate(eventType, data, childPAC) {
+    receiveUpdate(eventType, data, childPAC) {
         if (eventType === 'alert') {
             console.log('Received alert:', data.message);
         }
@@ -476,6 +562,7 @@ const child = wakaPAC('#child-app', {
             case 'update':
                 this.applyTheme(data.theme);
                 break;
+                
             case 'focus':
                 this.handleFocus(data.reason);
                 break;
@@ -525,6 +612,7 @@ const app = wakaPAC('#app', {
     
     removeTodo(todo, index, event) {
         const todoIndex = this.todos.findIndex(t => t.id === todo.id);
+        
         if (todoIndex !== -1) {
             this.todos.splice(todoIndex, 1);
         }
@@ -541,13 +629,12 @@ const app = wakaPAC('#app', {
     user: null,
     loading: false,
     
-    async loadUser() {
+    loadUser() {
         this.loading = true;
         
         try {
-            const userData = await this.control('/api/user', {
+            const userData = this.control('/api/user', {
                 method: 'GET',
-                updateProperties: true, // Automatically update matching properties
                 onSuccess(data) {
                     console.log('User loaded:', data);
                 },
@@ -563,8 +650,8 @@ const app = wakaPAC('#app', {
         }
     },
     
-    async saveUser() {
-        await this.control('/api/user', {
+    saveUser() {
+        this.control('/api/user', {
             method: 'POST',
             data: {
                 name: this.user.name,
@@ -605,7 +692,7 @@ wakaPAC('#dashboard', {
         this.sendToChildren('updateTheme', { theme: newTheme });
     },
 
-    onChildUpdate(eventType, data, childPAC) {
+    receiveUpdate(eventType, data, childPAC) {
         if (eventType === 'error') {
             // Handle widget errors
             console.error(`Widget error in ${childPAC.container.id}:`, data);
@@ -638,7 +725,6 @@ const component = wakaPAC(selector, abstraction, options);
 <!-- Text interpolation (expressions now supported) -->
 <span>Welcome {{userName}}!</span>
 <span>Items: {{items.length}}</span>
-<span>First item: {{items[0].name}}</span>
 
 <!-- Conditional rendering -->
 <div data-pac-bind="visible:isLoggedIn">User dashboard</div>
@@ -649,8 +735,8 @@ const component = wakaPAC(selector, abstraction, options);
 <form data-pac-bind="submit:handleSubmit">...</form>
 
 <!-- Input binding -->
-<input data-pac-bind="email" type="email">
-<textarea data-pac-bind="message"></textarea>
+<input data-pac-bind="value:email" type="email">
+<textarea data-pac-bind="value:message"></textarea>
 
 <!-- Attribute binding -->
 <div data-pac-bind="class:statusClass,title:tooltipText">Status</div>
@@ -752,10 +838,10 @@ computed: {
 
 // Good: Use appropriate update modes
 // For search inputs (delayed)
-<input data-pac-bind="searchQuery" data-pac-update="delayed" data-pac-delay="300">
+<input data-pac-bind="searchQuery" data-pac-update-mode="delayed" data-pac-update-delay="300">
 
 // For form validation (change)
-<input data-pac-bind="email" data-pac-update="change">
+<input data-pac-bind="email" data-pac-update-mode="change">
 ```
 
 ### 3. Template Interpolation Best Practices
@@ -842,7 +928,7 @@ WakaPAC combines familiar patterns from popular libraries:
 
 **5. Hierarchy communication not working**
 - Verify parent-child relationships are established (check DOM structure)
-- Ensure onChildUpdate and receiveFromParent methods are defined
+- Ensure receiveUpdate and receiveFromParent methods are defined
 - Check that event types and data match between sender and receiver
 
 ### Debug Tips
