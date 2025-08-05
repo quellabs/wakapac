@@ -55,15 +55,39 @@
                 return false;
             }
 
-            // Get all enumerable property keys from both objects
-            const ka = Object.keys(a), kb = Object.keys(b);
+            // Array optimization
+            if (Array.isArray(a)) {
+                if (!Array.isArray(b) || a.length !== b.length) {
+                    return false;
+                }
 
-            // Objects are equal if:
-            // 1. They have the same number of properties
-            // 2. Every key in 'a' exists in 'b'
-            // 3. The value for each key is deeply equal (recursive call)
-            return ka.length === kb.length &&
-                ka.every(k => kb.includes(k) && U.deepEq(a[k], b[k]));
+                for (let i = 0; i < a.length; i++) {
+                    if (!U.deepEq(a[i], b[i])) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            // Object optimization - get keys once
+            const aKeys = Object.keys(a);
+            const bKeys = Object.keys(b);
+
+            if (aKeys.length !== bKeys.length) {
+                return false;
+            }
+
+            // Use for loop instead of every() for better performance
+            for (let i = 0; i < aKeys.length; i++) {
+                const key = aKeys[i];
+
+                if (!b.hasOwnProperty(key) || !U.deepEq(a[key], b[key])) {
+                    return false;
+                }
+            }
+
+            return true;
         },
 
         /**
@@ -399,7 +423,12 @@
              */
             splitPath(path) {
                 if (!this.pathSplitCache.has(path)) {
-                    this.pathSplitCache.set(path, path.split('.'));
+                    // Use a simple split for basic paths, detailed parsing only when needed
+                    if (path.indexOf('[') === -1 && path.indexOf("'") === -1 && path.indexOf('"') === -1) {
+                        this.pathSplitCache.set(path, path.split('.'));
+                    } else {
+                        this.pathSplitCache.set(path, this.parsePropertyPath(path));
+                    }
                 }
 
                 return this.pathSplitCache.get(path);
@@ -1425,20 +1454,24 @@
                 // Store current array state for next comparison
                 binding.prev = [...arr];
 
-                // Clear existing content before rendering new items
-                binding.element.innerHTML = '';
+                // Build new contents
+                const fragment = document.createDocumentFragment();
 
-                // Render each item in the array using the stored template
                 arr.forEach((item, i) => {
                     const itemEl = this.renderItem(
                         binding.template,
                         item,
                         i,
-                        binding.itemName, binding.indexName
+                        binding.itemName,
+                        binding.indexName
                     );
 
-                    binding.element.appendChild(itemEl);
+                    fragment.appendChild(itemEl);
                 });
+
+                // Single DOM operation instead of multiple appendChild calls
+                binding.element.innerHTML = '';
+                binding.element.appendChild(fragment);
             },
 
             /**
@@ -2048,9 +2081,9 @@
                 // This is more efficient than recursively walking all nodes manually
                 const walker = document.createTreeWalker(this.container, NodeFilter.SHOW_TEXT);
                 const bindings = [];
-                let node;
 
                 // Walk through each text node in the container
+                let node;
                 while (node = walker.nextNode()) {
                     const txt = node.textContent;
 
@@ -2293,21 +2326,25 @@
              * Uses event delegation to handle all events from a single container listener
              */
             setupEvents() {
-                // Standard DOM events that the framework handles
+                // Use a single delegated listener instead of multiple listeners
+                const delegatedHandler = (ev) => {
+                    const {type, target} = ev;
+
+                    // Quick bailout for non-PAC elements
+                    if (!target.hasAttribute('data-pac-bind') &&
+                        !target.hasAttribute('data-pac-property')) {
+                        return;
+                    }
+
+                    this.handleEvent(ev);
+                };
+
+                // Single listener for all events
                 const events = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
 
                 events.forEach(type => {
-                    // Check if any elements need passive listeners for this event type
-                    const passiveElements = this.container.querySelectorAll(`[data-pac-bind*="${type}:"][data-pac-modifiers*="passive"]`);
-                    const usePassive = passiveElements.length > 0;
-
-                    const handler = ev => this.handleEvent(ev);
-
-                    // Add event listener with passive option if needed
-                    const options = usePassive ? { passive: true } : false;
-                    this.container.addEventListener(type, handler, options);
-
-                    this.listeners.set(type, { handler, options }); // Store for cleanup
+                    this.container.addEventListener(type, delegatedHandler, true); // Use capture phase
+                    this.listeners.set(type, {handler: delegatedHandler, options: true});
                 });
             },
 
