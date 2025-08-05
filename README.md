@@ -122,11 +122,18 @@ Include WakaPAC in your HTML:
 ### Template Syntax (Vue-inspired)
 - Simple `{{propertyName}}` syntax for dynamic content in HTML
 - Support for computed properties with automatic dependency tracking
+- **Conditional expressions** in text interpolation with ternary operators
 - Conditional rendering with `data-pac-bind="visible:property"` and negation support `visible:!property`
+
+### Enhanced Attribute Binding
+- **Conditional attribute binding** with expressions
+- **Multiple binding support** on single elements
+- **Performance-optimized** expression parsing and caching
 
 ### Event Handling (React-inspired)
 - Declarative event binding via data attributes
 - Method binding with `data-pac-bind="click:methodName"`
+- **Event modifiers** for common patterns like prevent default and key filtering
 - Automatic event delegation for performance
 
 ### Hierarchical Components (React-inspired)
@@ -138,6 +145,7 @@ Include WakaPAC in your HTML:
 ### Performance Optimized
 - Batched DOM updates using `requestAnimationFrame`
 - Intelligent caching of computed properties
+- **Expression caching** to avoid re-parsing
 - Event delegation to minimize memory usage
 - **Proxy-based reactivity** for modern browsers with fallback for older browsers
 
@@ -254,7 +262,7 @@ wakaPAC('#app', {
 });
 ```
 
-### Attribute Binding
+### Basic Attribute Binding
 
 Use `data-pac-bind` to bind data to element attributes:
 
@@ -262,12 +270,55 @@ Use `data-pac-bind` to bind data to element attributes:
 <!-- Basic property binding (like Vue v-model) -->
 <input type="text" data-pac-bind="value:name">
 
-<!-- Attribute binding (like Vue :class) -->
+<!-- Simple attribute binding -->
 <div data-pac-bind="class:statusClass,title:statusText"></div>
 
 <!-- Visibility binding (like Vue v-if) -->
 <div data-pac-bind="visible:showDetails">Details here</div>
 <div data-pac-bind="visible:!hideContent">Always visible unless hideContent is true</div>
+```
+
+### Conditional Attribute Binding
+
+WakaPAC now supports powerful conditional expressions directly in attribute bindings:
+
+```html
+<!-- ✅ Simple conditional classes -->
+<div data-pac-bind="class:isActive ? 'btn-primary' : 'btn-secondary'">Button</div>
+
+<!-- ✅ Multiple conditions -->
+<button data-pac-bind="disabled:loading || !isValid">Submit</button>
+
+<!-- ✅ Complex expressions -->
+<div data-pac-bind="class:user.role === 'admin' && user.isActive ? 'admin-panel' : 'user-panel'">Panel</div>
+
+<!-- ✅ Dynamic styles -->
+<div data-pac-bind="style:theme === 'dark' ? 'background: #333; color: white' : 'background: white; color: black'">Content</div>
+
+<!-- ✅ Multiple bindings with mixed expressions -->
+<button data-pac-bind="class:status === 'loading' ? 'spinner' : '', disabled:loading">Save</button>
+```
+
+#### Supported Expression Types:
+
+**Ternary Operators:**
+```html
+<!-- condition ? trueValue : falseValue -->
+<div data-pac-bind="class:isActive ? 'active highlight' : 'inactive'">
+```
+
+**Comparison Operators:**
+```html
+<!-- ===, !==, ==, !=, >=, <=, >, < -->
+<div data-pac-bind="visible:user.age >= 18">Adult content</div>
+<div data-pac-bind="class:status === 'complete' ? 'done' : 'pending'">
+```
+
+**Logical Operators:**
+```html
+<!-- && (AND), || (OR) -->
+<button data-pac-bind="disabled:loading || !isValid">Submit</button>
+<div data-pac-bind="visible:user.isLoggedIn && user.hasPermission">Admin panel</div>
 ```
 
 ### Two-Way Data Binding (Knockout-style simplicity)
@@ -294,7 +345,7 @@ Bind DOM events to methods using the `data-pac-bind` attribute:
 ```html
 <button data-pac-bind="click:handleClick">Click me</button>
 <form data-pac-bind="submit:handleSubmit">
-    <input type="text" data-pac-bind="searchQuery">
+    <input type="text" data-pac-bind="value:searchQuery">
     <button type="submit">Search</button>
 </form>
 <input data-pac-bind="input:handleInput,focus:handleFocus,blur:handleBlur">
@@ -317,6 +368,88 @@ const app = wakaPAC('#app', {
         console.log('Input changed:', event.target.value);
     }
 });
+```
+
+### Event Modifiers
+
+WakaPAC provides powerful event modifiers to reduce boilerplate in your event handlers:
+
+```html
+<!-- ✅ Prevent form submission redirect -->
+<form data-pac-bind="submit:handleSubmit" data-pac-modifiers="prevent">
+
+<!-- ✅ Search on Enter key -->
+<input data-pac-bind="keyup:search" data-pac-modifiers="enter">
+
+<!-- ✅ Close modal on Escape -->
+<div data-pac-bind="keyup:closeModal" data-pac-modifiers="escape">
+
+<!-- ✅ Stop event propagation -->
+<button data-pac-bind="click:handleClick" data-pac-modifiers="stop">
+
+<!-- ✅ One-time event (auto-removes after first trigger) -->
+<button data-pac-bind="click:initialize" data-pac-modifiers="once">
+
+<!-- ✅ Multiple modifiers -->
+<form data-pac-bind="submit:handleForm" data-pac-modifiers="prevent stop">
+<input data-pac-bind="keydown:handleShortcut" data-pac-modifiers="ctrl enter prevent">
+</html>
+```
+
+#### Supported Event Modifiers:
+
+**Behavior Modifiers:**
+- `prevent` - Calls `event.preventDefault()`
+- `stop` - Calls `event.stopPropagation()`
+- `once` - Removes the event listener after first execution
+- `passive` - Adds passive event listener for better performance
+
+**Key Modifiers:**
+- `enter`, `escape`/`esc`, `space`, `tab`
+- `delete`/`del`, `up`, `down`, `left`, `right`
+- `ctrl`, `alt`, `shift`, `meta`
+
+**Benefits of Event Modifiers:**
+
+```javascript
+// ❌ Without modifiers (lots of boilerplate)
+const app = wakaPAC('#app', {
+    handleSubmit(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        // Your actual logic here
+        this.submitForm();
+    },
+
+    handleKeyPress(event) {
+        if (event.key !== 'Enter') return;
+        if (!event.ctrlKey) return;
+        event.preventDefault();
+        // Your actual logic here
+        this.search();
+    }
+});
+```
+
+```javascript
+// ✅ With modifiers (clean, focused methods)
+const app = wakaPAC('#app', {
+    handleSubmit() {
+        // Just your logic - no event handling boilerplate!
+        this.submitForm();
+    },
+    
+    search() {
+        // Direct to the point
+        this.performSearch();
+    }
+});
+```
+
+```html
+<!-- Clean declarative templates -->
+<form data-pac-bind="submit:handleSubmit" data-pac-modifiers="prevent stop">
+<input data-pac-bind="keyup:search" data-pac-modifiers="ctrl enter prevent">
 ```
 
 ### Supported Events
@@ -436,7 +569,7 @@ When you bind events to regular elements, your handler gets only the `event` par
 ```html
 <!-- Regular button outside any foreach -->
 <button data-pac-bind="click:saveData">Save</button>
-<form data-pac-bind="submit:handleLogin">Login</form>
+<form data-pac-bind="submit:handleLogin" data-pac-modifiers="prevent">Login</form>
 ```
 
 ```javascript
@@ -447,8 +580,7 @@ wakaPAC('#app', {
     },
     
     handleLogin(event) {
-        // ✅ Only receives: event
-        event.preventDefault();
+        // ✅ Only receives: event (no need for event.preventDefault() with modifiers!)
         console.log('Login submitted');
     }
 });
@@ -662,51 +794,6 @@ const app = wakaPAC('#app', {
 });
 ```
 
-### Coordinated Dashboard Example
-
-```javascript
-// Dashboard parent coordinates multiple widgets
-wakaPAC('#dashboard', {
-    theme: 'light',
-    refreshInterval: 5000,
-    isMaintenanceMode: false,
-
-    // Coordinate all widgets
-    refreshAllData() {
-        this.sendToChildren('refresh', {
-            timestamp: Date.now(),
-            force: true
-        });
-    },
-
-    enterMaintenanceMode() {
-        this.isMaintenanceMode = true;
-        this.sendToChildren('pause', {
-            reason: 'Maintenance mode activated',
-            showMessage: true
-        });
-    },
-
-    changeTheme(newTheme) {
-        this.theme = newTheme;
-        this.sendToChildren('updateTheme', { theme: newTheme });
-    },
-
-    receiveUpdate(eventType, data, childPAC) {
-        if (eventType === 'error') {
-            // Handle widget errors
-            console.error(`Widget error in ${childPAC.container.id}:`, data);
-            
-            // Pause the problematic widget
-            childPAC.receiveFromParent('pause', {
-                reason: 'Error occurred',
-                showError: true
-            });
-        }
-    }
-});
-```
-
 ## 📋 API Reference
 
 ### Creating a PAC Component
@@ -722,23 +809,29 @@ const component = wakaPAC(selector, abstraction, options);
 ### Template Syntax Reference
 
 ```html
-<!-- Text interpolation (expressions now supported) -->
+<!-- Text interpolation with expression support -->
 <span>Welcome {{userName}}!</span>
 <span>Items: {{items.length}}</span>
+<span>Status: {{status === 'active' ? 'Online' : 'Offline'}}</span>
 
 <!-- Conditional rendering -->
 <div data-pac-bind="visible:isLoggedIn">User dashboard</div>
 <div data-pac-bind="visible:!isLoggedIn">Please log in</div>
 
-<!-- Event binding -->
-<button data-pac-bind="click:handleLogin">Login</button>
-<form data-pac-bind="submit:handleSubmit">...</form>
+<!-- Event binding with modifiers -->
+<button data-pac-bind="click:handleLogin" data-pac-modifiers="once">Login</button>
+<form data-pac-bind="submit:handleSubmit" data-pac-modifiers="prevent">...</form>
+<input data-pac-bind="keyup:search" data-pac-modifiers="enter">
 
 <!-- Input binding -->
 <input data-pac-bind="value:email" type="email">
 <textarea data-pac-bind="value:message"></textarea>
 
-<!-- Attribute binding -->
+<!-- Conditional attribute binding -->
+<div data-pac-bind="class:isActive ? 'btn-primary' : 'btn-secondary'">Button</div>
+<button data-pac-bind="disabled:loading || !isValid">Submit</button>
+
+<!-- Multiple attribute bindings -->
 <div data-pac-bind="class:statusClass,title:tooltipText">Status</div>
 
 <!-- List rendering -->
@@ -772,113 +865,6 @@ const component = wakaPAC(selector, abstraction, options);
 }
 ```
 
-## 💡 Best Practices
-
-### 1. Component Organization
-
-```javascript
-// Good: Organized component structure
-const userProfile = wakaPAC('#user-profile', {
-    // Data properties
-    user: {
-        name: '',
-        email: '',
-        avatar: null
-    },
-    editing: false,
-    
-    // Computed properties
-    computed: {
-        displayName() {
-            return this.user.name || 'Anonymous';
-        },
-        
-        isValid() {
-            return this.user.name && this.user.email;
-        }
-    },
-    
-    // Event handlers
-    startEdit() {
-        this.editing = true;
-    },
-    
-    saveProfile() {
-        if (this.isValid) {
-            this.control('/api/profile', {
-                method: 'PUT',
-                data: this.user
-            });
-        }
-    },
-    
-    // Communication handlers
-    receiveFromParent(command, data) {
-        // Handle parent commands
-    }
-});
-```
-
-### 2. Efficient DOM Updates
-
-```javascript
-// Good: Use computed properties for expensive operations
-computed: {
-    filteredItems() {
-        return this.items.filter(item => 
-            item.name.toLowerCase().includes(this.searchQuery.toLowerCase())
-        );
-    },
-    
-    // Computed properties still useful for frequently used values
-    filteredItemCount() {
-        return this.filteredItems.length;
-    }
-}
-
-// Good: Use appropriate update modes
-// For search inputs (delayed)
-<input data-pac-bind="searchQuery" data-pac-update-mode="delayed" data-pac-update-delay="300">
-
-// For form validation (change)
-<input data-pac-bind="email" data-pac-update-mode="change">
-```
-
-### 3. Template Interpolation Best Practices
-
-```javascript
-wakaPAC('#app', {
-    items: [{name: 'Item 1'}, {name: 'Item 2'}],
-    user: {firstName: 'John', lastName: 'Doe'},
-    
-    computed: {
-        // Computed properties still recommended for complex or reusable logic
-        expensiveCalculation() {
-            return this.items
-                .filter(item => item.price > 100)
-                .reduce((sum, item) => sum + item.price, 0);
-        },
-        
-        // For simple one-time expressions, direct interpolation is fine
-        // But computed properties provide better performance for repeated use
-        userSummary() {
-            return `${this.user.firstName} ${this.user.lastName}`;
-        }
-    }
-});
-```
-
-```html
-<!-- ✅ Both approaches now work -->
-<!-- Direct property access -->
-<p>Total: {{items.length}}</p>
-<p>User: {{user.firstName}} {{user.lastName}}</p>
-
-<!-- Computed properties (still recommended for complex/reusable logic) -->
-<p>Expensive total: {{expensiveCalculation}}</p>
-<p>User summary: {{userSummary}}</p>
-```
-
 ## 🔄 Migration Guide
 
 ### Key Concepts Translation
@@ -887,9 +873,16 @@ WakaPAC combines familiar patterns from popular libraries:
 
 **Template Syntax:**
 - Use `{{property}}` or `{{object.property}}` for text interpolation
+- Use `{{condition ? 'true' : 'false'}}` for conditional text
 - Use `data-pac-bind="value:property"` for input binding
 - Use `data-pac-bind="visible:condition"` for conditional rendering
 - Use `data-pac-bind="click:method"` for event handling
+- Use `data-pac-modifiers="prevent enter"` for event modifiers
+
+**Conditional Attributes:**
+- Use `data-pac-bind="class:condition ? 'class1' : 'class2'"` instead of computed properties
+- Use `data-pac-bind="disabled:loading || !valid"` for dynamic attributes
+- Combine with regular bindings: `data-pac-bind="class:statusClass, disabled:loading"`
 
 **Reactivity:**
 - Properties are automatically reactive (no `setState` needed)
@@ -901,35 +894,6 @@ WakaPAC combines familiar patterns from popular libraries:
 - Use `notifyParent()` to send data up
 - Use `sendToChildren()` to send commands down
 - Use `receiveFromParent()` to handle parent commands
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**1. Bindings not working**
-- Ensure the container element exists when creating the PAC unit
-- Check that data-pac-bind syntax is correct
-- Verify property names match between HTML and abstraction object
-
-**2. Updates not triggering**
-- Make sure you're modifying the reactive properties, not copies
-- For nested objects, ensure deep reactivity is enabled
-- Check that computed property dependencies are correctly accessed
-
-**3. Template interpolation not working**
-- Verify the property path exists in your component
-- Check for JavaScript errors in complex expressions
-- Use computed properties for complex expressions that might fail
-
-**4. Performance issues**
-- Use appropriate update modes (delayed for search, change for validation)
-- Consider using computed properties for frequently accessed expressions
-- Consider using requestAnimationFrame for heavy DOM updates
-
-**5. Hierarchy communication not working**
-- Verify parent-child relationships are established (check DOM structure)
-- Ensure receiveUpdate and receiveFromParent methods are defined
-- Check that event types and data match between sender and receiver
 
 ### Debug Tips
 
@@ -952,6 +916,9 @@ const app = wakaPAC('#app', {
         return this._name;
     }
 });
+
+// Debug expression parsing
+// Check browser console for expression parsing warnings
 ```
 
 ### Browser Support
@@ -967,6 +934,7 @@ The library automatically detects Proxy support and falls back gracefully.
 **Choose WakaPAC when you want:**
 - **Zero build complexity** - Start building immediately without webpack, vite, or any toolchain
 - **Modern reactivity** - Get Vue/React-level reactivity with simpler mental models
+- **Expressive templates** - Write conditions directly in templates without bloating your component logic
 - **Architectural clarity** - PAC pattern provides better separation of concerns than MVC
 - **Performance by default** - Direct DOM manipulation with intelligent batching outperforms virtual DOM overhead
 - **Progressive enhancement** - Drop into existing projects without rewriting everything
@@ -987,9 +955,7 @@ The library automatically detects Proxy support and falls back gracefully.
 - **Mobile app development** (use React Native/Flutter alongside WakaPAC for web)
 - **Massive teams** requiring extensive TypeScript tooling (though WakaPAC works great with TypeScript)
 
----
-
-WakaPAC brings together the best ideas from modern libraris in a lightweight, approachable package that works everywhere JavaScript runs. No build tools, no complexity - just reactive, component-based development the way it should be.
+WakaPAC brings together the best ideas from modern libraries in a lightweight, approachable package that works everywhere JavaScript runs. No build tools, no complexity - just reactive, component-based development the way it should be.
 
 ## 📄 License
 

@@ -2186,9 +2186,17 @@
                 const events = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
 
                 events.forEach(type => {
+                    // Check if any elements need passive listeners for this event type
+                    const passiveElements = this.container.querySelectorAll(`[data-pac-bind*="${type}:"][data-pac-modifiers*="passive"]`);
+                    const usePassive = passiveElements.length > 0;
+
                     const handler = ev => this.handleEvent(ev);
-                    this.container.addEventListener(type, handler);
-                    this.listeners.set(type, handler); // Store for cleanup during destroy
+
+                    // Add event listener with passive option if needed
+                    const options = usePassive ? { passive: true } : false;
+                    this.container.addEventListener(type, handler, options);
+
+                    this.listeners.set(type, { handler, options }); // Store for cleanup
                 });
             },
 
@@ -2291,6 +2299,14 @@
              * @param {Element} target - Element that triggered the event
              */
             _handleEventBinding(ev, type, target) {
+                // Parse modifiers from data-pac-modifiers attribute
+                const modifiers = this.parseEventModifiers(target);
+
+                // Apply modifiers before executing handler
+                if (!this.applyEventModifiers(ev, modifiers, target)) {
+                    return; // Modifier prevented execution (e.g., wrong key pressed)
+                }
+
                 // Search through all registered event bindings for matches
                 this.bindings.forEach(binding => {
                     // Check if this binding matches the current event and element
@@ -2303,13 +2319,13 @@
                             return;
                         }
 
-                        // Prevent default form submission behavior for submit events
-                        if (binding.event === 'submit') {
-                            ev.preventDefault();
+                        // Handle 'once' modifier by removing the binding after execution
+                        if (modifiers.includes('once')) {
+                            // Remove the binding to prevent future executions
+                            this.bindings.delete(binding);
+                            // Also remove the attribute to indicate it's been used
+                            target.removeAttribute('data-pac-modifiers');
                         }
-
-                        // Stop event propagation to prevent parent PAC units from handling it
-                        ev.stopPropagation();
 
                         // Execute the method with proper context and error handling
                         try {
@@ -2319,6 +2335,105 @@
                         }
                     }
                 });
+            },
+
+            parseEventModifiers(element) {
+                const modifiersAttr = element.getAttribute('data-pac-modifiers');
+                if (!modifiersAttr) {
+                    return [];
+                }
+
+                // Split by whitespace and filter out empty strings
+                return modifiersAttr.trim().split(/\s+/).filter(mod => mod.length > 0);
+            },
+
+            applyEventModifiers(event, modifiers, element) {
+                // Process each modifier
+                for (const modifier of modifiers) {
+                    switch (modifier.toLowerCase()) {
+                        case 'prevent':
+                            event.preventDefault();
+                            break;
+
+                        case 'stop':
+                            event.stopPropagation();
+                            break;
+
+                        case 'passive':
+                            // This is handled during event listener setup, not here
+                            break;
+
+                        case 'once':
+                            // This is handled after method execution, not here
+                            break;
+
+                        // Key modifiers
+                        case 'enter':
+                            if (event.key !== 'Enter') return false;
+                            break;
+
+                        case 'escape':
+                        case 'esc':
+                            if (event.key !== 'Escape') return false;
+                            break;
+
+                        case 'space':
+                            if (event.key !== ' ') return false;
+                            break;
+
+                        case 'tab':
+                            if (event.key !== 'Tab') return false;
+                            break;
+
+                        case 'delete':
+                        case 'del':
+                            if (event.key !== 'Delete' && event.key !== 'Backspace') return false;
+                            break;
+
+                        // Arrow keys
+                        case 'up':
+                            if (event.key !== 'ArrowUp') return false;
+                            break;
+
+                        case 'down':
+                            if (event.key !== 'ArrowDown') return false;
+                            break;
+
+                        case 'left':
+                            if (event.key !== 'ArrowLeft') return false;
+                            break;
+
+                        case 'right':
+                            if (event.key !== 'ArrowRight') return false;
+                            break;
+
+                        // Meta keys
+                        case 'ctrl':
+                            if (!event.ctrlKey) return false;
+                            break;
+
+                        case 'alt':
+                            if (!event.altKey) return false;
+                            break;
+
+                        case 'shift':
+                            if (!event.shiftKey) return false;
+                            break;
+
+                        case 'meta':
+                            if (!event.metaKey) return false;
+                            break;
+
+                        default:
+                            // For custom key names, try exact match
+                            if (event.key.toLowerCase() !== modifier.toLowerCase()) {
+                                console.warn(`Unknown event modifier: ${modifier}`);
+                            }
+                            break;
+                    }
+                }
+
+                return true; // All modifiers passed, execute handler
             },
 
             /**
@@ -2536,8 +2651,13 @@
              */
             destroy() {
                 // Remove all DOM event listeners
-                this.listeners.forEach((handler, type) => {
-                    this.container.removeEventListener(type, handler);
+                // Remove all DOM event listeners with proper options
+                this.listeners.forEach((listenerData, type) => {
+                    if (typeof listenerData === 'function') {
+                        this.container.removeEventListener(type, listenerData);
+                    } else {
+                        this.container.removeEventListener(type, listenerData.handler, listenerData.options);
+                    }
                 });
 
                 // Clear all pending timeouts to prevent delayed execution
