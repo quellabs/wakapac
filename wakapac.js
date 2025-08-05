@@ -274,7 +274,8 @@
                     // This allows parent objects/arrays to react to nested changes
                     if (path && path.includes('.')) {
                         // Extract the root path (first segment before the dot)
-                        const rootPath = path.split('.')[0];
+                        const rootPath = this.splitPath(path)[0];
+
                         // Notify about nested property change at root level
                         onChange(rootPath, null, 'nested-property-change', {
                             nestedPath: path ? `${path}.${prop}` : prop,
@@ -378,13 +379,31 @@
             listeners: new Map(), // Map of event type -> handler function
             pending: null, // Set of properties pending DOM update
             pendingVals: null, // Values for pending updates
+            pendingPaths: null, // Values for pending updates
             orig: abstraction, // Original abstraction object
             computedCache: new Map(), // Cache for computed property values
             computedDeps: new Map(), // Map of computed property -> dependencies
             propDeps: new Map(), // Map of property -> dependent computed properties
             expressionCache: new Map(), // Cache for parsed expressions to avoid re-parsing
+            pathSplitCache: new Map(), // Cache for splits
+            lastValues: new Map(), // Cache last values to avoid unnecessary updates
             container,
             config,
+
+            /**
+             * Splits a property path into its component parts with caching for performance.
+             * Uses a cache to avoid repeatedly splitting the same paths, which can be
+             * expensive when called frequently during property change detection.
+             * @param {string} path - The property path to split (e.g., "user.profile.name")
+             * @returns {string[]} Array of path segments (e.g., ["user", "profile", "name"])
+             */
+            splitPath(path) {
+                if (!this.pathSplitCache.has(path)) {
+                    this.pathSplitCache.set(path, path.split('.'));
+                }
+
+                return this.pathSplitCache.get(path);
+            },
 
             /**
              * Generic method to create any binding type - DRY principle
@@ -404,7 +423,7 @@
                 // Add common properties based on type
                 // Extract root property and full path for reactivity tracking
                 if (config.target) {
-                    baseBinding.property = config.target.split('.')[0];        // Root property for change detection
+                    baseBinding.property = this.splitPath(config.target)[0];        // Root property for change detection
                     baseBinding.propertyPath = config.target;   // Full path for value resolution
                 }
 
@@ -416,22 +435,45 @@
              * Eliminates duplication of shouldUpdate logic across binding methods
              */
             shouldUpdateBinding(binding, prop) {
-                // Check direct property match
-                if (binding.property === prop) {
-                    return true;
+                // Handle both root properties ("x") and full paths ("x.y")
+                const isFullPath = prop.includes('.');
+
+                if (isFullPath) {
+                    // For full paths like "x.y", only update if binding uses that exact path or deeper
+                    if (binding.propertyPath === prop) {
+                        return true;
+                    }
+
+                    if (binding.propertyPath && binding.propertyPath.startsWith(prop + '.')) {
+                        return true;
+                    }
+
+                    // Check if binding's root property matches the path's root
+                    const pathRoot = this.splitPath(prop)[0];
+
+                    if (binding.property === pathRoot) {
+                        // Only update if the binding actually uses this path
+                        return binding.propertyPath &&
+                            (binding.propertyPath === prop || binding.propertyPath.startsWith(prop + '.'));
+                    }
+
+                    return false;
+                } else {
+                    // Existing logic for root property updates
+                    if (binding.property === prop) {
+                        return true;
+                    }
+
+                    if (binding.propertyPath && binding.propertyPath.startsWith(prop + '.')) {
+                        return true;
+                    }
                 }
 
-                // Check property path match
-                if (binding.propertyPath && binding.propertyPath.startsWith(prop + '.')) {
-                    return true;
-                }
-
-                // Check expression dependencies
+                // Expression dependencies (existing)
                 if (binding.dependencies && binding.dependencies.includes(prop)) {
                     return true;
                 }
 
-                // Legacy check for parsed expression dependencies
                 return !!(binding.parsedExpression && binding.parsedExpression.dependencies?.includes(prop));
             },
 
@@ -883,7 +925,7 @@
                     // Class binding: conditionally add CSS class based on expression value
                     class: () => {
                         if (this.evalExpr(target, item, idx, itemName, idxName)) {
-                            const className = target.includes('.') ? target.split('.').pop() : target;
+                            const className = target.includes('.') ? this.splitPath(target).pop() : target;
                             element.classList.add(className);
                         }
                     },
@@ -970,7 +1012,7 @@
             handleDeepChange(path, val, type, meta) {
                 // Extract the root property name from the path for reactivity system
                 // e.g., "user.profile.name" -> "user"
-                const root = path.split('.')[0];
+                const root = this.splitPath(path)[0];
 
                 // Handle nested property changes and cache invalidation
                 // For nested property changes, clear the cache for both direct and computed property bindings
@@ -990,8 +1032,13 @@
                             if (binding.collection === root || dependentComputed.includes(binding.collection)) {
                                 // Clear the previous value cache to force re-render
                                 // This ensures the foreach loop will detect changes and update the DOM
-                                binding.prev = null;
-                                foundForeach = true;
+                                // Only clear if this change actually affects the array structure
+                                if (type === 'array-mutation' ||
+                                    binding.collection === root ||
+                                    this.pathAffectsCollection(path, binding.collection)) {
+                                    binding.prev = null;
+                                    foundForeach = true;
+                                }
                             }
                         }
                     });
@@ -1003,13 +1050,18 @@
 
                 // Trigger DOM updates for various change types
                 // Check if this change requires a DOM update based on change type or property existence
-                if (type === 'array-mutation' ||          // Array was modified (push, pop, splice, etc.)
-                    type === 'nested-property-change' ||  // Nested object property was changed
-                    type === 'set' ||                     // Property was directly set
+                if (type === 'array-mutation' ||             // Array was modified (push, pop, splice, etc.)
+                    type === 'nested-property-change' ||     // Nested object property was changed
+                    type === 'set' ||                        // Property was directly set
                     this.abstraction.hasOwnProperty(root)) { // Root property exists in the data model
 
                     // Update the DOM to reflect the new value
                     this.updateDOM(root, this.abstraction[root]);
+
+                    // Also update the specific path if it's different from root
+                    if (path !== root && type === 'set') {
+                        this.updateDOM(path, val);
+                    }
                 }
 
                 // Notify parent component of the property change for hierarchical communication
@@ -1022,6 +1074,24 @@
             },
 
             /**
+             * Determines if a property change should trigger a re-render of a collection.
+             * Compares the root property names to see if a changed path falls within
+             * the scope of a collection property.
+             * @param {string} changedPath - The property path that changed (e.g., "items.0.name", "items.length")
+             * @param {string} collectionProperty - The collection property path (e.g., "items")
+             * @returns {boolean} True if the changed path affects the collection
+             */
+            pathAffectsCollection(changedPath, collectionProperty) {
+                // If someone changes "items.length" or "items.0.name",
+                // it might affect how we render the collection
+                const pathParts = this.splitPath(changedPath);
+                const collectionParts = this.splitPath(collectionProperty);
+
+                // Check if the changed path is within this collection's scope
+                return pathParts[0] === collectionParts[0];
+            },
+
+            /**
              * Batched DOM updates with requestAnimationFrame for optimal performance
              * Queues property updates to be processed in the next animation frame
              * Prevents excessive DOM manipulation during rapid property changes
@@ -1029,21 +1099,35 @@
              * @param {*} val - New property value
              */
             updateDOM(prop, val) {
-                // Initialize batching system if not already active
                 if (!this.pending) {
-                    this.pending = new Set();        // Set of properties pending update
-                    this.pendingVals = {};           // Map of property -> new value
+                    this.pending = new Set();
+                    this.pendingVals = {};
+                    this.pendingPaths = new Set();
 
-                    // Schedule flush for next animation frame (or fallback to setTimeout)
                     const self = this;
                     (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => {
                         self.flushDOM();
                     });
                 }
 
-                // Add this property to the pending updates queue
-                this.pending.add(prop);
-                this.pendingVals[prop] = val;
+                // Handle both root properties and full paths
+                if (prop.includes('.')) {
+                    // For specific paths like "x.y"
+                    this.pendingPaths.add(prop);
+                    this.pendingVals[prop] = val;
+
+                    // Also ensure root is updated for bindings that need it
+                    const root = this.splitPath(prop)[0];
+                    this.pending.add(root);
+
+                    if (!this.pendingVals.hasOwnProperty(root)) {
+                        this.pendingVals[root] = this.abstraction[root];
+                    }
+                } else {
+                    // For root properties like "x"
+                    this.pending.add(prop);
+                    this.pendingVals[prop] = val;
+                }
             },
 
             /**
@@ -1057,6 +1141,15 @@
                     return;
                 }
 
+                // Process specific paths first (more precise)
+                if (this.pendingPaths) {
+                    this.pendingPaths.forEach(path => {
+                        this.bindings.forEach(binding =>
+                            this.updateBinding(binding, path, this.pendingVals[path])
+                        );
+                    });
+                }
+
                 // Process each property that has pending changes
                 this.pending.forEach(prop => {
                     // Apply the property change to all relevant bindings
@@ -1066,6 +1159,7 @@
                 // Clear the pending updates queue after processing
                 this.pending = null;
                 this.pendingVals = null;
+                this.pendingPaths = null;
             },
 
             /**
@@ -1113,7 +1207,7 @@
 
             /**
              * Updates text content with interpolated property values
-             * Handles property path resolution and display formatting
+             * Handles property path resolution and display formatting with caching optimization
              * @param {Object} binding - Text binding configuration object
              * @param {string} prop - Property name that changed
              * @param {*} val - New property value
@@ -1127,39 +1221,56 @@
                 // Get the text node that needs updating
                 const textNode = binding.textNode || binding.element;
 
-                // Start with the original text content
+                // Start with the original text content as our base
                 let updatedText = binding.origText;
                 const affectedBindings = [];
 
                 // Find all bindings that affect this same text node
+                // A single text node might have multiple {{}} expressions
                 this.bindings.forEach(b => {
                     if (b.type === 'text' && (b.textNode === textNode || b.element === textNode)) {
                         affectedBindings.push(b);
                     }
                 });
 
-                // Process each binding that affects this text node
-                affectedBindings.forEach(b => {
-                    // Evaluate the binding's value based on its type
-                    let displayValue;
+                // NEW: Create a cache key based on ALL bindings that affect this text node
+                // This ensures we cache the final result, not individual binding results
+                const cacheKey = `text_node_${textNode.parentElement?.tagName || 'root'}_${affectedBindings.map(b => b.property).join('_')}`;
 
+                // Process each binding that affects this text node and build the final text
+                affectedBindings.forEach(b => {
+                    // Evaluate this binding's value
+                    let bDisplayValue;
                     if (b.parsedExpression && b.expressionContent) {
-                        displayValue = this.evaluateExpression(b.parsedExpression);
+                        // Complex expression evaluation
+                        bDisplayValue = this.evaluateExpression(b.parsedExpression);
                     } else {
-                        displayValue = this.resolvePropertyPath(b.propertyPath || b.property);
+                        // Simple property path resolution
+                        bDisplayValue = this.resolvePropertyPath(b.propertyPath || b.property);
                     }
 
                     // Format the value for display
-                    const formattedValue = this.formatDisplayValue(displayValue);
+                    const bFormattedValue = this.formatDisplayValue(bDisplayValue);
 
                     // Create regex to safely match the binding pattern in the text
+                    // This escapes special regex characters to prevent regex injection
                     const escapedMatch = b.fullMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
                     // Replace this binding's pattern with the new value
-                    updatedText = updatedText.replace(new RegExp(escapedMatch, 'g'), formattedValue);
+                    // Uses global flag to replace all occurrences of the same binding
+                    updatedText = updatedText.replace(new RegExp(escapedMatch, 'g'), bFormattedValue);
                 });
 
-                // Update the DOM with the final processed text
+                // NEW: Check cache AFTER processing all bindings to get the final text result
+                if (this.lastValues.get(cacheKey) === updatedText) {
+                    return; // Final text unchanged, skip DOM update
+                }
+
+                // Cache the final processed text
+                this.lastValues.set(cacheKey, updatedText);
+
+                // Finally, update the DOM with the processed text
+                // This is the expensive operation we want to minimize
                 textNode.textContent = updatedText;
             },
 
@@ -1976,7 +2087,7 @@
                             dependencies.forEach(dep => {
                                 // Get the root property name (first part before any dots)
                                 // Example: "user.profile.name" -> "user"
-                                const rootProperty = dep.split('.')[0];
+                                const rootProperty = this.splitPath(dep)[0];
 
                                 // Create a binding object with all necessary information for updates
                                 bindings.push([U.id(), {
@@ -2671,7 +2782,12 @@
                 this.children.forEach(child => child.parent = null);
 
                 // Clear all internal caches and maps to free memory
-                [this.computedCache, this.computedDeps, this.propDeps, this.bindings, this.expressionCache].forEach(map => map.clear());
+                const clearList = [
+                    this.computedCache, this.computedDeps, this.propDeps, this.bindings,
+                    this.expressionCache, this.pathSplitCache, this.lastValues
+                ];
+
+                clearList.forEach(map => map.clear());
 
                 // Remove reference to reactive abstraction
                 this.abstraction = null;
@@ -2699,7 +2815,7 @@
             trackPropertyPathDependencies() {
                 this.bindings.forEach(binding => {
                     if (binding.type === 'text' && binding.propertyPath) {
-                        const parts = binding.propertyPath.split('.');
+                        const parts = this.splitPath(binding.propertyPath);
 
                         // Track all parts of the property path for reactivity
                         for (let i = 0; i < parts.length; i++) {
