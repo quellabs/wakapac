@@ -6,7 +6,7 @@
 
 ### Why WakaPAC?
 
-If you loved **Knockout's declarative data binding** but wanted modern component hierarchy from React and clean template syntax from Vue, WakaPAC is for you. It evolves Knockout's proven foundation with contemporary features and performance optimizations.
+If you love **Knockout's declarative data binding** but want modern component hierarchy from React and clean template syntax from Vue, WakaPAC is for you. It evolves Knockout's proven foundation with contemporary features and performance optimizations.
 
 **🪶 Lightweight Alternative**
 - **No build tools required** - works directly in the browser with vanilla HTML/JS
