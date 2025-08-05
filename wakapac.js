@@ -382,6 +382,7 @@
             computedCache: new Map(), // Cache for computed property values
             computedDeps: new Map(), // Map of computed property -> dependencies
             propDeps: new Map(), // Map of property -> dependent computed properties
+            expressionCache: new Map(), // Cache for parsed expressions to avoid re-parsing
             container,
             config,
 
@@ -415,9 +416,23 @@
              * Eliminates duplication of shouldUpdate logic across binding methods
              */
             shouldUpdateBinding(binding, prop) {
-                return binding.property === prop ||
-                    (binding.propertyPath && binding.propertyPath.startsWith(prop + '.')) ||
-                    (binding.parsedExpression && binding.parsedExpression.dependencies?.includes(prop));
+                // Check direct property match
+                if (binding.property === prop) {
+                    return true;
+                }
+
+                // Check property path match
+                if (binding.propertyPath && binding.propertyPath.startsWith(prop + '.')) {
+                    return true;
+                }
+
+                // Check expression dependencies
+                if (binding.dependencies && binding.dependencies.includes(prop)) {
+                    return true;
+                }
+
+                // Legacy check for parsed expression dependencies
+                return !!(binding.parsedExpression && binding.parsedExpression.dependencies?.includes(prop));
             },
 
             /**
@@ -457,7 +472,7 @@
             },
 
             /**
-             * Enhanced expression parser that supports ternary operators
+             * Expression parser that supports ternary operators
              * Parses expressions like: property ? 'true' : 'false', object.property, etc.
              * @param {string} expr - Expression to parse
              * @returns {Object} - Parsed expression data
@@ -467,36 +482,78 @@
                 // This ensures consistent parsing regardless of input formatting
                 expr = expr.trim();
 
-                // Use regex to detect ternary operator pattern: condition ? trueValue : falseValue
-                // The regex captures three groups:
-                // 1. (.+?) - condition (non-greedy match up to the first '?')
-                // 2. (.+?) - true value (non-greedy match between '?' and ':')
-                // 3. (.+?) - false value (everything after ':')
-                // \s* allows for optional whitespace around operators
+                // Check for ternary operator: condition ? trueValue : falseValue
+                // Uses non-greedy matching (.+?) to properly handle nested operators
+                // Example: "user.age >= 18 ? 'adult' : 'minor'"
                 const ternaryMatch = expr.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+?)$/);
 
-                // If a ternary pattern is found, parse it as a conditional expression
                 if (ternaryMatch) {
-                    // Destructure the regex match results
-                    // [0] is the full match, [1-3] are the captured groups
+                    // Destructure the regex capture groups: full match, condition, true value, false value
                     const [, condition, trueValue, falseValue] = ternaryMatch;
 
-                    // Return structured ternary expression object
                     return {
-                        type: 'ternary',                                         // Mark as ternary expression
-                        condition: condition.trim(),                             // Clean condition part
-                        trueValue: this.parseValue(trueValue.trim()),            // Parse and clean true branch
-                        falseValue: this.parseValue(falseValue.trim()),          // Parse and clean false branch
-                        dependencies: this.extractDependencies(condition.trim()) // Extract variable dependencies from condition
+                        type: 'ternary',
+                        condition: condition.trim(),
+                        // Recursively parse the true and false values in case they contain expressions
+                        trueValue: this.parseValue(trueValue.trim()),
+                        falseValue: this.parseValue(falseValue.trim()),
+                        // Extract variable dependencies only from the condition part
+                        dependencies: this.extractDependencies(condition.trim())
                     };
                 }
 
-                // If no ternary operator found, treat as simple property access
-                // This handles cases like: 'user.name', 'isActive', 'config.settings.theme'
+                // Check for comparison operators (===, !==, ==, !=, >=, <=, >, <)
+                // Order matters: longer operators (===, !==, >=, <=) must be checked before shorter ones
+                // Example: "user.score >= 100" or "status === 'active'"
+                const comparisonMatch = expr.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+?)$/);
+
+                if (comparisonMatch) {
+                    // Extract left operand, comparison operator, and right operand
+                    const [, left, operator, right] = comparisonMatch;
+
+                    return {
+                        type: 'comparison',
+                        left: left.trim(),
+                        operator: operator.trim(),
+                        // Parse the right side value (could be literal, variable, or nested expression)
+                        right: this.parseValue(right.trim()),
+                        // Dependencies come from the left side (typically a property path)
+                        dependencies: this.extractDependencies(left.trim())
+                    };
+                }
+
+                // Check for logical operators (&&, ||)
+                // Handles logical AND/OR operations between two expressions
+                // Example: "user.isActive && user.hasPermission"
+                const logicalMatch = expr.match(/^(.+?)\s*(&&|\|\|)\s*(.+?)$/);
+
+                if (logicalMatch) {
+                    // Extract left expression, logical operator, and right expression
+                    const [, left, operator, right] = logicalMatch;
+
+                    return {
+                        type: 'logical',
+                        left: left.trim(),
+                        operator: operator.trim(),
+                        right: right.trim(),
+
+                        // Combine dependencies from both left and right expressions
+                        // Uses spread operator to merge arrays and eliminate duplicates
+                        dependencies: [
+                            ...this.extractDependencies(left.trim()),
+                            ...this.extractDependencies(right.trim())
+                        ]
+                    };
+                }
+
+                // Fallback case: treat as simple property access
+                // This handles basic variable references like "user.name" or "isEnabled"
+                // When no operators are found, assume it's a direct property path
                 return {
-                    type: 'property',                           // Mark as property access
-                    path: expr,                                 // Store the full property path
-                    dependencies: this.extractDependencies(expr) // Extract all dependencies from the path
+                    type: 'property',
+                    path: expr,
+                    // Extract any variable dependencies from the property path
+                    dependencies: this.extractDependencies(expr)
                 };
             },
 
@@ -578,82 +635,122 @@
             },
 
             /**
-             * Evaluates a parsed expression in the context of the reactive abstraction
-             * @param {Object} parsedExpr - Parsed expression object
-             * @returns {*} - Evaluated result
+             * Unified method to evaluate any type of expression or condition
+             * @param {Object} expr - Expression/condition object to evaluate
+             * @param {boolean} forceBoolean - Whether to convert result to boolean (for condition contexts)
+             * @returns {*} - Evaluated result (any type if forceBoolean=false, boolean if forceBoolean=true)
              */
-            evaluateExpression(parsedExpr) {
-                // Handle ternary conditional expressions (condition ? trueValue : falseValue)
-                if (parsedExpr.type === 'ternary') {
-                    // Evaluate the condition part of the ternary expression
-                    // This determines which branch of the ternary to execute
-                    const conditionValue = this.evaluateCondition(parsedExpr.condition);
+            evaluateExpression(expr, forceBoolean = false) {
+                let result;
 
-                    // Execute the appropriate branch based on the condition result
-                    if (conditionValue) {
-                        // Condition is truthy - evaluate and return the "true" branch value
-                        return this.evaluateValue(parsedExpr.trueValue);
-                    } else {
-                        // Condition is falsy - evaluate and return the "false" branch value
-                        return this.evaluateValue(parsedExpr.falseValue);
-                    }
+                // Switch on the expression type to handle different kinds of expressions
+                switch (expr.type) {
+                    case 'ternary':
+                        // Handle ternary conditional expressions (condition ? trueValue : falseValue)
+                        const conditionValue = this.evaluateExpression(expr.condition, true); // Force boolean for condition
+
+                        // Return the appropriate value based on the condition result
+                        if (conditionValue) {
+                            result = this.evaluateValue(expr.trueValue);
+                        } else {
+                            result = this.evaluateValue(expr.falseValue);
+                        }
+
+                        break;
+
+                    case 'comparison':
+                        // Handle comparison expressions (left operator right)
+                        // Resolve the left side of the comparison (typically a property path)
+                        const leftValue = this.resolvePropertyPath(expr.left);
+
+                        // Evaluate the right side of the comparison (could be literal or expression)
+                        const rightValue = this.evaluateValue(expr.right);
+
+                        // Perform the actual comparison using the specified operator
+                        result = this.evaluateComparison(leftValue, expr.operator, rightValue);
+                        break;
+
+                    case 'logical':
+                        // Handle logical expressions (AND/OR operations)
+                        // Recursively evaluate both sides, forcing boolean context
+                        const leftLogical = this.evaluateExpression(expr.left, true);
+                        const rightLogical = this.evaluateExpression(expr.right, true);
+
+                        // Handle logical AND operator
+                        if (expr.operator === '&&') {
+                            result = leftLogical && rightLogical;
+                        } else if (expr.operator === '||') {
+                            result = leftLogical || rightLogical;
+                        } else {
+                            result = false;
+                        }
+
+                        break;
+
+                    case 'property':
+                        // Handle simple property access expressions
+                        // Resolve and return the value at the specified property path
+                        result = this.resolvePropertyPath(expr.path);
+                        break;
+
+                    default:
+                        // Handle unknown or unsupported expression types
+                        // Return undefined for safety when expression type is not recognized
+                        result = undefined;
+                        break;
                 }
 
-                // Handle property access expressions (e.g., object.property, nested.path.value)
-                else if (parsedExpr.type === 'property') {
-                    // Resolve the property path to get the actual value from the reactive context
-                    return this.resolvePropertyPath(parsedExpr.path);
-                }
-
-                // Return undefined for any unrecognized expression types
-                // This serves as a fallback for unsupported or malformed expressions
-                return undefined;
+                // Convert to boolean if this expression is being used in a conditional context
+                return forceBoolean ? Boolean(result) : result;
             },
 
             /**
-             * Evaluates a condition expression (the part before ? in ternary)
-             * @param {string} condition - Condition to evaluate
-             * @returns {boolean} - Truthy/falsy result
+             * Performs comparison operations between two values
+             * @param {*} left - Left operand value
+             * @param {string} operator - Comparison operator (===, !==, ==, !=, >=, <=, >, <)
+             * @param {*} right - Right operand value
+             * @returns {boolean} - Result of the comparison operation
              */
-            evaluateCondition(condition) {
-                // Handle simple property access (e.g., "user.name", "isActive")
-                // Uses regex to match valid JavaScript property names and dot notation
-                if (/^[a-zA-Z_$][a-zA-Z0-9_$.]*$/.test(condition)) {
-                    const value = this.resolvePropertyPath(condition);
-                    return !!value; // Convert to boolean using double negation
+            evaluateComparison(left, operator, right) {
+                // Switch on the operator type to perform the appropriate comparison
+                switch (operator) {
+                    case '===':
+                        // Strict equality - checks both value and type
+                        return left === right;
+
+                    case '!==':
+                        // Strict inequality - checks both value and type
+                        return left !== right;
+
+                    case '==':
+                        // Loose equality - performs type coercion if needed
+                        return left == right;
+
+                    case '!=':
+                        // Loose inequality - performs type coercion if needed
+                        return left != right;
+
+                    case '>=':
+                        // Greater than or equal to comparison
+                        return left >= right;
+
+                    case '<=':
+                        // Less than or equal to comparison
+                        return left <= right;
+
+                    case '>':
+                        // Greater than comparison
+                        return left > right;
+
+                    case '<':
+                        // Less than comparison
+                        return left < right;
+
+                    default:
+                        // Return false for any unsupported or unrecognized operator
+                        // This provides safe fallback behavior
+                        return false;
                 }
-
-                // Handle comparison operators (===, !==, ==, !=, >=, <=, >, <)
-                // Regex captures: left operand, operator, right operand
-                const comparisonMatch = condition.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+?)$/);
-
-                if (comparisonMatch) {
-                    const [, left, operator, right] = comparisonMatch;
-
-                    // Resolve left side (usually a property path like "user.age")
-                    const leftValue = this.resolvePropertyPath(left.trim());
-
-                    // Parse and evaluate right side (could be literal value, property, etc.)
-                    const rightValue = this.parseAndEvaluateValue(right.trim());
-
-                    // Perform the comparison based on operator
-                    switch (operator) {
-                        case '===': return leftValue === rightValue; // Strict equality
-                        case '!==': return leftValue !== rightValue; // Strict inequality
-                        case '==': return leftValue == rightValue;   // Loose equality
-                        case '!=': return leftValue != rightValue;   // Loose inequality
-                        case '>=': return leftValue >= rightValue;   // Greater than or equal
-                        case '<=': return leftValue <= rightValue;   // Less than or equal
-                        case '>': return leftValue > rightValue;     // Greater than
-                        case '<': return leftValue < rightValue;     // Less than
-                        default: return false; // Unknown operator
-                    }
-                }
-
-                // Fallback: treat as simple property access and check truthiness
-                // This handles cases where regex didn't match but it's still a valid property
-                const value = this.resolvePropertyPath(condition);
-                return !!value; // Convert to boolean
             },
 
             /**
@@ -675,16 +772,6 @@
 
                 // Return undefined for unrecognized value types
                 return undefined;
-            },
-
-            /**
-             * Parses and evaluates a value string (for use in conditions)
-             * @param {string} valueStr - Value string to parse and evaluate
-             * @returns {*} - Evaluated value
-             */
-            parseAndEvaluateValue(valueStr) {
-                const parsed = this.parseValue(valueStr);
-                return this.evaluateValue(parsed);
             },
 
             /**
@@ -1085,21 +1172,63 @@
              * @param {*} val - New property value
              */
             updateAttribute(binding, prop, val) {
-                // Resolve the actual value using property path if available
-                // This handles nested property access (e.g., user.profile.name)
-                const actualValue = this.resolveBindingValue(binding, val);
+                let actualValue;
 
-                // Set or remove the attribute based on the resolved value
-                if (binding.attribute === 'class' && actualValue) {
-                    binding.element.className = actualValue;
-                } else if (binding.attribute === 'style') {
-                    if (typeof actualValue === 'object' && actualValue) {
-                        Object.assign(binding.element.style, actualValue);
-                    } else {
-                        binding.element.style.cssText = actualValue || '';
-                    }
+                // Check if this binding uses a conditional expression
+                if (binding.parsedExpression && binding.parsedExpression.type === 'ternary') {
+                    // Evaluate the ternary expression
+                    actualValue = this.evaluateExpression(binding.parsedExpression);
+                } else if (binding.parsedExpression && binding.parsedExpression.type === 'property') {
+                    // Simple property path
+                    actualValue = this.resolvePropertyPath(binding.parsedExpression.path);
                 } else {
-                    this.setElementAttribute(binding.element, binding.attribute, actualValue);
+                    // Fallback to simple property resolution
+                    actualValue = this.resolveBindingValue(binding, val);
+                }
+
+                // Apply the resolved value to the attribute
+                this.applyAttributeValue(binding.element, binding.attribute, actualValue);
+            },
+
+            /**
+             * Applies an attribute value to a DOM element with special handling for certain attribute types
+             * @param {HTMLElement} element - The DOM element to apply the attribute to
+             * @param {string} attributeName - The name of the attribute to set
+             * @param {*} value - The value to set for the attribute
+             */
+            applyAttributeValue(element, attributeName, value) {
+                // Special handling for different attribute types that require custom logic
+                switch (attributeName) {
+                    case 'class':
+                        // Handle CSS class names - use className property for better performance
+                        if (value) {
+                            // Set the class name if value is truthy
+                            element.className = value;
+                        } else {
+                            // Clear all classes if value is falsy
+                            element.className = '';
+                        }
+                        break;
+
+                    case 'style':
+                        // Handle CSS styles - support both object and string formats
+                        if (typeof value === 'object' && value) {
+                            // Object-style CSS: {color: 'red', fontSize: '14px'}
+                            // Use Object.assign to merge style properties efficiently
+                            Object.assign(element.style, value);
+                        } else if (typeof value === 'string') {
+                            // String-style CSS: "color: red; font-size: 14px"
+                            // Use cssText to set all styles at once, fallback to empty string if falsy
+                            element.style.cssText = value || '';
+                        }
+                        // Note: If value is neither object nor string, styles remain unchanged
+                        break;
+
+                    default:
+                        // Standard attribute handling for all other attributes
+                        // Delegate to separate method for consistent attribute setting logic
+                        this.setElementAttribute(element, attributeName, value);
+                        break;
                 }
             },
 
@@ -1828,7 +1957,14 @@
 
                             // Parse the expression to handle complex cases (functions, operators, etc.)
                             // This likely returns an object with the parsed expression and its dependencies
-                            const parsedExpr = this.parseExpression(exprContent);
+                            let parsedExpr;
+
+                            if (this.expressionCache.has(exprContent)) {
+                                parsedExpr = this.expressionCache.get(exprContent);
+                            } else {
+                                parsedExpr = this.parseExpression(exprContent);
+                                this.expressionCache.set(exprContent, parsedExpr);
+                            }
 
                             // Get all dependencies for reactivity tracking
                             // If parsing didn't provide dependencies, fall back to the root property
@@ -1870,60 +2006,45 @@
              * Uses factory pattern to create appropriate binding objects based on type
              */
             findAttrBindings() {
-                // Find elements with binding directives, excluding nested foreach children
                 const elements = this.container.querySelectorAll('[data-pac-bind]:not([data-pac-bind*="foreach"] [data-pac-bind])');
                 const bindings = [];
 
                 Array.from(elements).forEach(el => {
                     const bindStr = el.getAttribute('data-pac-bind');
 
-                    // Handle multiple bindings on single element (comma-separated)
                     bindStr.split(',').forEach(bind => {
                         const [type, target] = bind.trim().split(':').map(s => s.trim());
                         const key = bind + '_' + U.id();
 
-                        // Factory pattern for creating different binding types
                         const bindingCreators = {
-                            // Collection rendering binding
                             foreach: () => this.createForeachBinding(el, target),
-
-                            // Conditional visibility binding
                             visible: () => this.createVisibilityBinding(el, target),
-
-                            // Two-way form input binding
                             value: () => {
                                 this.setupInput(el, target);
                                 return this.createInputBinding(el, target);
                             },
-
-                            // Checkbox/radio checked state binding
                             checked: () => {
                                 this.setupInput(el, target, 'checked');
                                 return this.createCheckedBinding(el, target);
                             }
                         };
 
-                        // Create appropriate binding based on type
                         if (bindingCreators[type]) {
                             bindings.push([key, bindingCreators[type]()]);
-                            // Clear foreach template content after storing it
                             if (type === 'foreach') {
                                 el.innerHTML = '';
                             }
                         } else if (U.isEvent(type)) {
-                            // Event handler binding (click, submit, etc.)
                             bindings.push([key, this.createEventBinding(el, type, target)]);
                         } else if (bind.includes(':') && target) {
-                            // Generic attribute binding (class, style, disabled, etc.)
-                            bindings.push([key, this.createAttributeBinding(el, type, target)]);
+                            // THIS IS WHERE THE MAGIC HAPPENS - Enhanced attribute binding
+                            bindings.push([key, this.createAttributeBinding.call(this, el, type, target)]);
                         } else if (!bind.includes(':')) {
-                            // Invalid binding syntax error
                             console.error(`Invalid binding syntax: "${bind}". Use "type:target" format.`);
                         }
                     });
                 });
 
-                // Register all discovered attribute bindings
                 bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
             },
 
@@ -1987,9 +2108,29 @@
              * @returns {Object} - Attribute binding configuration
              */
             createAttributeBinding(el, type, target) {
+                // Check cache first
+                if (this.expressionCache.has(target)) {
+                    const parsedExpression = this.expressionCache.get(target);
+
+                    return this.createBinding('attribute', el, {
+                        target,
+                        attribute: type,
+                        parsedExpression,
+                        dependencies: parsedExpression.dependencies || [target.split('.')[0]]
+                    });
+                }
+
+                // Parse the target expression to check if it contains conditional logic
+                const parsedExpression = this.parseExpression(target);
+
+                // Add to cache
+                this.expressionCache.set(target, parsedExpression);
+
                 return this.createBinding('attribute', el, {
                     target,
-                    attribute: type
+                    attribute: type,
+                    parsedExpression, // Store parsed expression for evaluation
+                    dependencies: parsedExpression.dependencies || [target.split('.')[0]]
                 });
             },
 
@@ -2410,7 +2551,7 @@
                 this.children.forEach(child => child.parent = null);
 
                 // Clear all internal caches and maps to free memory
-                [this.computedCache, this.computedDeps, this.propDeps, this.bindings].forEach(map => map.clear());
+                [this.computedCache, this.computedDeps, this.propDeps, this.bindings, this.expressionCache].forEach(map => map.clear());
 
                 // Remove reference to reactive abstraction
                 this.abstraction = null;
