@@ -1247,60 +1247,74 @@
                     return;
                 }
 
-                // Get the text node that needs updating
                 const textNode = binding.textNode || binding.element;
+                const affectedBindings = this.updateTextGetAffectedBindings(textNode);
+                const updatedText = this.updateTextProcessBindings(binding.origText, affectedBindings);
 
-                // Start with the original text content as our base
-                let updatedText = binding.origText;
+                this.updateTextNodeIfChanged(textNode, affectedBindings, updatedText);
+            },
+
+            /**
+             * Finds all bindings that affect the same text node
+             * @param {Node} textNode - The text node to check
+             * @returns {Array} Array of affected bindings
+             */
+            updateTextGetAffectedBindings(textNode) {
                 const affectedBindings = [];
 
-                // Find all bindings that affect this same text node
-                // A single text node might have multiple {{}} expressions
                 this.bindings.forEach(b => {
                     if (b.type === 'text' && (b.textNode === textNode || b.element === textNode)) {
                         affectedBindings.push(b);
                     }
                 });
 
-                // NEW: Create a cache key based on ALL bindings that affect this text node
-                // This ensures we cache the final result, not individual binding results
-                const cacheKey = `text_node_${textNode.parentElement?.tagName || 'root'}_${affectedBindings.map(b => b.property).join('_')}`;
+                return affectedBindings;
+            },
 
-                // Process each binding that affects this text node and build the final text
-                affectedBindings.forEach(b => {
-                    // Evaluate this binding's value
-                    let bDisplayValue;
-                    if (b.parsedExpression && b.expressionContent) {
-                        // Complex expression evaluation
-                        bDisplayValue = this.evaluateExpression(b.parsedExpression);
+            /**
+             * Processes all text bindings and returns the final interpolated text
+             * @param {string} originalText - The original text template
+             * @param {Array} affectedBindings - All bindings affecting the text node
+             * @returns {string} The final processed text
+             */
+            updateTextProcessBindings(originalText, affectedBindings) {
+                let updatedText = originalText;
+
+                affectedBindings.forEach(binding => {
+                    // Evaluate binding value
+                    let displayValue;
+                    if (binding.parsedExpression && binding.expressionContent) {
+                        displayValue = this.evaluateExpression(binding.parsedExpression);
                     } else {
-                        // Simple property path resolution
-                        bDisplayValue = this.resolvePropertyPath(b.propertyPath || b.property);
+                        displayValue = this.resolvePropertyPath(binding.propertyPath || binding.property);
                     }
 
-                    // Format the value for display
-                    const bFormattedValue = this.formatDisplayValue(bDisplayValue);
-
-                    // Create regex to safely match the binding pattern in the text
-                    // This escapes special regex characters to prevent regex injection
-                    const escapedMatch = b.fullMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-                    // Replace this binding's pattern with the new value
-                    // Uses global flag to replace all occurrences of the same binding
-                    updatedText = updatedText.replace(new RegExp(escapedMatch, 'g'), bFormattedValue);
+                    // Format and replace in text
+                    const formattedValue = this.formatDisplayValue(displayValue);
+                    const escapedMatch = binding.fullMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    updatedText = updatedText.replace(new RegExp(escapedMatch, 'g'), formattedValue);
                 });
 
-                // NEW: Check cache AFTER processing all bindings to get the final text result
-                if (this.lastValues.get(cacheKey) === updatedText) {
-                    return; // Final text unchanged, skip DOM update
+                return updatedText;
+            },
+
+            /**
+             * Updates the text node if the content has changed, with caching optimization
+             * @param {Node} textNode - The text node to update
+             * @param {Array} affectedBindings - All bindings affecting this text node
+             * @param {string} newText - The new text content
+             */
+            updateTextNodeIfChanged(textNode, affectedBindings, newText) {
+                // Create cache key based on all bindings that affect this text node
+                const nodeIdentifier = textNode.parentElement?.tagName || 'root';
+                const bindingProperties = affectedBindings.map(b => b.property).join('_');
+                const cacheKey = `text_node_${nodeIdentifier}_${bindingProperties}`;
+
+                // Check cache and update DOM if content changed
+                if (this.lastValues.get(cacheKey) !== newText) {
+                    this.lastValues.set(cacheKey, newText);
+                    textNode.textContent = newText;
                 }
-
-                // Cache the final processed text
-                this.lastValues.set(cacheKey, updatedText);
-
-                // Finally, update the DOM with the processed text
-                // This is the expensive operation we want to minimize
-                textNode.textContent = updatedText;
             },
 
             /**
@@ -1533,7 +1547,8 @@
              */
             resolvePropertyPath(path) {
                 // Early return if path is falsy (null, undefined, empty string)
-                if (!path) {
+                if (!path || typeof path !== 'string') {
+                    console.warn('resolvePropertyPath: Invalid path provided:', path);
                     return undefined;
                 }
 
@@ -2798,36 +2813,54 @@
              * Should be called when removing components from the DOM
              */
             destroy() {
-                // Remove all DOM event listeners
-                // Remove all DOM event listeners with proper options
+                // Clear timeouts first
+                this.delays.forEach(id => clearTimeout(id));
+                this.delays.clear();
+
+                // Remove event listeners with error handling
                 this.listeners.forEach((listenerData, type) => {
-                    if (typeof listenerData === 'function') {
-                        this.container.removeEventListener(type, listenerData);
-                    } else {
-                        this.container.removeEventListener(type, listenerData.handler, listenerData.options);
+                    try {
+                        if (typeof listenerData === 'function') {
+                            this.container.removeEventListener(type, listenerData);
+                        } else {
+                            this.container.removeEventListener(type, listenerData.handler, listenerData.options);
+                        }
+                    } catch (error) {
+                        console.warn(`Failed to remove event listener for ${type}:`, error);
                     }
                 });
 
-                // Clear all pending timeouts to prevent delayed execution
-                this.delays.forEach(id => clearTimeout(id));
+                // Clear hierarchy with proper notifications
+                this.cleanupHierarchy();
 
-                // Clean up hierarchy relationships
+                // Null out references to prevent memory leaks
+                this.abstraction = null;
+                this.container = null;
+                this.parent = null;
+            },
+
+            /**
+             * Cleans up the hierarchical relationships for this node by removing
+             * all parent-child connections and clearing the children collection.
+             * This method ensures proper cleanup to prevent memory leaks and
+             * dangling references in tree/hierarchy data structures.
+             */
+            cleanupHierarchy() {
+                // Remove this node from its parent's children collection
+                // and clear the parent reference to break the upward link
                 if (this.parent) {
-                    this.parent.children.delete(this);
+                    this.parent.children.delete(this);  // Remove from parent's children set/collection
+                    this.parent = null;                 // Clear the parent reference
                 }
 
-                this.children.forEach(child => child.parent = null);
+                // Break the downward links by clearing parent references
+                // for all child nodes (but don't recursively cleanup children)
+                this.children.forEach(child => {
+                    child.parent = null;  // Orphan each child by removing parent reference
+                });
 
-                // Clear all internal caches and maps to free memory
-                const clearList = [
-                    this.computedCache, this.computedDeps, this.propDeps, this.bindings,
-                    this.expressionCache, this.pathSplitCache, this.lastValues
-                ];
-
-                clearList.forEach(map => map.clear());
-
-                // Remove reference to reactive abstraction
-                this.abstraction = null;
+                // Clear the entire children collection to complete the cleanup
+                this.children.clear();
             },
 
             /**

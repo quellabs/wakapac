@@ -417,6 +417,7 @@ const app = wakaPAC('#app', {
     handleSubmit(event) {
         event.preventDefault();
         event.stopPropagation();
+        
         // Your actual logic here
         this.submitForm();
     },
@@ -425,6 +426,7 @@ const app = wakaPAC('#app', {
         if (event.key !== 'Enter') return;
         if (!event.ctrlKey) return;
         event.preventDefault();
+        
         // Your actual logic here
         this.search();
     }
@@ -754,7 +756,7 @@ const app = wakaPAC('#app', {
 
 ### Server Communication (Built-in fetch wrapper)
 
-Built-in AJAX support with automatic property updates:
+Built-in AJAX support:
 
 ```javascript
 const app = wakaPAC('#app', {
