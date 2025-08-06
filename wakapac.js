@@ -20,6 +20,27 @@
     'use strict';
 
     /**
+     * Constants
+     */
+    const ARRAY_MUTATION_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+    const BOOLEAN_ATTRS = ['disabled', 'readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
+
+    const EVENT_KEY_MAP = {
+        'enter': 'Enter',
+        'escape': 'Escape',
+        'esc': 'Escape',
+        'space': ' ',
+        'tab': 'Tab',
+        'delete': ['Delete', 'Backspace'],
+        'del': ['Delete', 'Backspace'],
+        'up': 'ArrowUp',
+        'down': 'ArrowDown',
+        'left': 'ArrowLeft',
+        'right': 'ArrowRight'
+    };
+
+
+    /**
      * Utility functions - Consolidated helper methods for the framework
      */
     const U = {
@@ -226,7 +247,7 @@
         // Store references to original array mutation methods
         // This allows us to intercept calls and trigger change notifications
         if (isArr) {
-            ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'].forEach(m => {
+            ARRAY_MUTATION_METHODS.forEach(m => {
                 // Store original method implementation
                 methods[m] = target[m];
             });
@@ -345,7 +366,7 @@
     function createFallback(target, onChange, path) {
         // Simplified fallback implementation for older browsers
         if (Array.isArray(target)) {
-            ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'].forEach(m => {
+            ARRAY_MUTATION_METHODS.forEach(m => {
                 const orig = target[m];
                 Object.defineProperty(target, m, {
                     value: function (...args) {
@@ -396,6 +417,7 @@
          */
         const control = {
             bindings: new Map(), // Map of binding ID -> binding config
+            bindingsByProperty: new Map(), // Initialize here
             abstraction: null, // Reactive abstraction object
             delays: new Map(), // Map of delayed update timeouts
             parent: null, // Parent PAC unit
@@ -422,8 +444,12 @@
              * @returns {string[]} Array of path segments (e.g., ["user", "profile", "name"])
              */
             splitPath(path) {
+                if (typeof path !== 'string' || path.length === 0) {
+                    console.warn('splitPath: Invalid path provided:', path);
+                    return [];
+                }
+
                 if (!this.pathSplitCache.has(path)) {
-                    // Use a simple split for basic paths, detailed parsing only when needed
                     if (path.indexOf('[') === -1 && path.indexOf("'") === -1 && path.indexOf('"') === -1) {
                         this.pathSplitCache.set(path, path.split('.'));
                     } else {
@@ -1165,30 +1191,80 @@
              * Clears the pending queue after processing to prepare for next batch
              */
             flushDOM() {
-                // Exit early if no updates are pending
                 if (!this.pending) {
                     return;
                 }
 
-                // Process specific paths first (more precise)
-                if (this.pendingPaths) {
-                    this.pendingPaths.forEach(path => {
-                        this.bindings.forEach(binding =>
-                            this.updateBinding(binding, path, this.pendingVals[path])
-                        );
-                    });
-                }
+                const relevantBindings = new Map(); // binding -> {prop, value}
+                const processed = new Set();
 
-                // Process each property that has pending changes
-                this.pending.forEach(prop => {
-                    // Apply the property change to all relevant bindings
-                    this.bindings.forEach(binding => this.updateBinding(binding, prop, this.pendingVals[prop]));
+                // Collect only relevant bindings (instead of checking all bindings)
+                this._collectRelevantBindings(relevantBindings, processed);
+
+                // Update only relevant bindings
+                relevantBindings.forEach(({prop, value}, binding) => {
+                    this._safeUpdateBinding(binding, prop, value);
                 });
 
-                // Clear the pending updates queue after processing
+                // Clear state
                 this.pending = null;
                 this.pendingVals = null;
                 this.pendingPaths = null;
+            },
+
+            _collectRelevantBindings(relevantBindings, processed) {
+                // Safety check - initialize index if not exists
+                if (!this.bindingsByProperty) {
+                    this._buildBindingIndex();
+                }
+
+                // Process specific paths first (higher priority)
+                if (this.pendingPaths) {
+                    this.pendingPaths.forEach(path => {
+                        const rootProp = this.splitPath(path)[0];
+                        const bindings = this.bindingsByProperty.get(rootProp) || new Set();
+
+                        bindings.forEach(binding => {
+                            if (!processed.has(binding) && this.shouldUpdateBinding(binding, path)) {
+                                relevantBindings.set(binding, {prop: path, value: this.pendingVals[path]});
+                                processed.add(binding);
+                            }
+                        });
+                    });
+                }
+
+                // Process root properties
+                this.pending.forEach(prop => {
+                    const bindings = this.bindingsByProperty.get(prop) || new Set();
+
+                    bindings.forEach(binding => {
+                        if (!processed.has(binding)) {
+                            relevantBindings.set(binding, {prop, value: this.pendingVals[prop]});
+                            processed.add(binding);
+                        }
+                    });
+                });
+            },
+
+            _safeUpdateBinding(binding, prop, value) {
+                try {
+                    // Skip shouldUpdateBinding check since we already filtered
+                    const updaters = {
+                        text: () => this.updateText(binding, prop, value),
+                        attribute: () => this.updateAttribute(binding, prop, value),
+                        input: () => this.updateInput(binding, prop, value),
+                        checked: () => this.updateChecked(binding, prop, value),
+                        visible: () => this.updateVisible(binding, value),
+                        foreach: () => this.updateForeach(binding, prop, value)
+                    };
+
+                    const updater = updaters[binding.type];
+                    if (updater) {
+                        updater();
+                    }
+                } catch (error) {
+                    console.error(`Error updating ${binding.type} binding for property ${prop}:`, error);
+                }
             },
 
             /**
@@ -1208,10 +1284,7 @@
              * Eliminates duplication of attribute set/remove logic
              */
             setElementAttribute(element, name, value) {
-                // Boolean attributes that should be present/absent, not true/false
-                const booleanAttrs = ['disabled', 'readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
-
-                if (booleanAttrs.includes(name)) {
+                if (BOOLEAN_ATTRS.includes(name)) {
                     if (value) {
                         element.setAttribute(name, name);  // <input disabled="disabled">
                     } else {
@@ -2084,6 +2157,7 @@
             setupBindings() {
                 this.findTextBindings();    // Setup {{property}} text interpolation bindings
                 this.findAttrBindings();    // Setup data-pac-bind attribute bindings
+                this._buildBindingIndex();  // Build index for O(1) binding lookups
             },
 
             /**
@@ -2156,7 +2230,14 @@
 
                 // Register all discovered text bindings in the bindings map
                 // Each binding gets a unique ID and can be looked up for updates
-                bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
+                bindings.forEach(([key, binding]) => {
+                    this.bindings.set(key, binding);
+
+                    // Update index when adding new bindings
+                    if (this.bindingsByProperty && binding.property) {
+                        this._addToIndex(this.bindingsByProperty, binding.property, binding);
+                    }
+                });
             },
 
             /**
@@ -2196,7 +2277,6 @@
                         } else if (U.isEvent(type)) {
                             bindings.push([key, this.createEventBinding(el, type, target)]);
                         } else if (bind.includes(':') && target) {
-                            // THIS IS WHERE THE MAGIC HAPPENS - Enhanced attribute binding
                             bindings.push([key, this.createAttributeBinding.call(this, el, type, target)]);
                         } else if (!bind.includes(':')) {
                             console.error(`Invalid binding syntax: "${bind}". Use "type:target" format.`);
@@ -2204,7 +2284,40 @@
                     });
                 });
 
-                bindings.forEach(([key, binding]) => this.bindings.set(key, binding));
+                bindings.forEach(([key, binding]) => {
+                    this.bindings.set(key, binding);
+
+                    // Update index when adding new bindings
+                    if (this.bindingsByProperty && binding.property) {
+                        this._addToIndex(this.bindingsByProperty, binding.property, binding);
+                    }
+                });
+            },
+
+            _buildBindingIndex() {
+                this.bindingsByProperty = new Map(); // prop -> Set of bindings
+
+                this.bindings.forEach(binding => {
+                    // Index by root property
+                    if (binding.property) {
+                        this._addToIndex(this.bindingsByProperty, binding.property, binding);
+                    }
+
+                    // Index by dependencies (for expression bindings)
+                    if (binding.dependencies) {
+                        binding.dependencies.forEach(dep => {
+                            this._addToIndex(this.bindingsByProperty, dep, binding);
+                        });
+                    }
+                });
+            },
+
+            _addToIndex(index, key, binding) {
+                if (!index.has(key)) {
+                    index.set(key, new Set());
+                }
+
+                index.get(key).add(binding);
             },
 
             /**
@@ -2502,6 +2615,7 @@
 
             parseEventModifiers(element) {
                 const modifiersAttr = element.getAttribute('data-pac-modifiers');
+
                 if (!modifiersAttr) {
                     return [];
                 }
@@ -2510,93 +2624,43 @@
                 return modifiersAttr.trim().split(/\s+/).filter(mod => mod.length > 0);
             },
 
+            /**
+             * Applies event modifiers to validate if an event should trigger a handler
+             * @param {Event} event - The DOM event object to validate
+             * @param {Array} modifiers - Array of modifier strings to check against
+             * @param {Element} element - The DOM element the event occurred on
+             * @returns {boolean} - True if all modifiers pass validation, false otherwise
+             */
             applyEventModifiers(event, modifiers, element) {
-                // Process each modifier
+                // Process each modifier in the modifiers array
                 for (const modifier of modifiers) {
-                    switch (modifier.toLowerCase()) {
-                        case 'prevent':
-                            event.preventDefault();
-                            break;
+                    // Get the expected key(s) from the EVENT_KEY_MAP for this modifier
+                    // Convert modifier to lowercase for case-insensitive matching
+                    const expectedKey = EVENT_KEY_MAP[modifier.toLowerCase()];
 
-                        case 'stop':
-                            event.stopPropagation();
-                            break;
-
-                        case 'passive':
-                            // This is handled during event listener setup, not here
-                            break;
-
-                        case 'once':
-                            // This is handled after method execution, not here
-                            break;
-
-                        // Key modifiers
-                        case 'enter':
-                            if (event.key !== 'Enter') return false;
-                            break;
-
-                        case 'escape':
-                        case 'esc':
-                            if (event.key !== 'Escape') return false;
-                            break;
-
-                        case 'space':
-                            if (event.key !== ' ') return false;
-                            break;
-
-                        case 'tab':
-                            if (event.key !== 'Tab') return false;
-                            break;
-
-                        case 'delete':
-                        case 'del':
-                            if (event.key !== 'Delete' && event.key !== 'Backspace') return false;
-                            break;
-
-                        // Arrow keys
-                        case 'up':
-                            if (event.key !== 'ArrowUp') return false;
-                            break;
-
-                        case 'down':
-                            if (event.key !== 'ArrowDown') return false;
-                            break;
-
-                        case 'left':
-                            if (event.key !== 'ArrowLeft') return false;
-                            break;
-
-                        case 'right':
-                            if (event.key !== 'ArrowRight') return false;
-                            break;
-
-                        // Meta keys
-                        case 'ctrl':
-                            if (!event.ctrlKey) return false;
-                            break;
-
-                        case 'alt':
-                            if (!event.altKey) return false;
-                            break;
-
-                        case 'shift':
-                            if (!event.shiftKey) return false;
-                            break;
-
-                        case 'meta':
-                            if (!event.metaKey) return false;
-                            break;
-
-                        default:
-                            // For custom key names, try exact match
-                            if (event.key.toLowerCase() !== modifier.toLowerCase()) {
-                                console.warn(`Unknown event modifier: ${modifier}`);
+                    // Only proceed if this modifier has a mapped key in EVENT_KEY_MAP
+                    if (expectedKey) {
+                        // Check if expectedKey is an array (multiple valid keys for this modifier)
+                        if (Array.isArray(expectedKey)) {
+                            // If the pressed key is not in the array of valid keys, validation fails
+                            if (!expectedKey.includes(event.key)) {
+                                return false;
                             }
-                            break;
+                        } else {
+                            // Single expected key - check for exact match
+                            if (event.key !== expectedKey) {
+                                return false;
+                            }
+                        }
+
+                        // Break after first successful match to avoid processing remaining modifiers
+                        // This suggests only one key-based modifier should be processed per event
+                        break;
                     }
                 }
 
-                return true; // All modifiers passed, execute handler
+                // All modifiers passed validation, allow the event handler to execute
+                return true;
             },
 
             /**
@@ -2817,7 +2881,23 @@
                 this.delays.forEach(id => clearTimeout(id));
                 this.delays.clear();
 
-                // Remove event listeners with error handling
+                // Clear all caches
+                this.computedCache.clear();
+                this.expressionCache.clear();
+                this.pathSplitCache.clear();
+                this.lastValues.clear();
+
+                // Remove from global registry
+                window.PACRegistry.unregister(selector);
+
+                // Clear references
+                this.bindings.clear();
+                this.bindingsByProperty.clear();
+
+                // Clean up hierarchy relationships
+                this.cleanupHierarchy();
+
+                // Remove event listeners
                 this.listeners.forEach((listenerData, type) => {
                     try {
                         if (typeof listenerData === 'function') {
@@ -2830,8 +2910,14 @@
                     }
                 });
 
-                // Clear hierarchy with proper notifications
-                this.cleanupHierarchy();
+                this.listeners.clear();
+
+                // Null out object references
+                Object.keys(this).forEach(key => {
+                    if (typeof this[key] === 'object') {
+                        this[key] = null;
+                    }
+                });
 
                 // Null out references to prevent memory leaks
                 this.abstraction = null;
