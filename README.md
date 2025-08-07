@@ -44,11 +44,13 @@ This results in more predictable data flow and easier debugging than traditional
 **Option 1: Direct Download**
 ```html
 <script src="wakapac.js"></script>
+<script src="wakapac.min.js"></script>
 ```
 
 **Option 2: JSDelivr CDN (GitHub)**
 ```html
-<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@v1.0.0/wakapac.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@1.0.0/wakapac.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@1.0.0/wakapac.min.js"></script>
 ```
 
 **Option 3: Module Import**
@@ -63,7 +65,7 @@ import { wakaPAC } from './wakapac.js';
 <!DOCTYPE html>
 <html>
 <head>
-    <script src="wakapac.js"></script>
+    <script src="wakapac.min.js"></script>
 </head>
 <body>
     <div id="my-app">
