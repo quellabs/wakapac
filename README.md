@@ -49,8 +49,8 @@ This results in more predictable data flow and easier debugging than traditional
 
 **Option 2: JSDelivr CDN (GitHub)**
 ```html
-<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@1.0.0/wakapac.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@1.0.0/wakapac.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.min.js"></script>
 ```
 
 **Option 3: Module Import**
