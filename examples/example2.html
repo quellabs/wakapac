@@ -2,20 +2,21 @@
 <body>
 
 <div id="todo-app">
-    <input data-pac-bind="value:newTodo" placeholder="Add todo...">
-    <button data-pac-bind="click:addTodo">Add</button>
+    <input data-pac-bind="value: newTodo" placeholder="Add todo...">
+    <button data-pac-bind="click: addTodo">Add</button>
 
-    <ul data-pac-bind="foreach:todos" data-pac-item="todo" data-pac-index="index">
+    <ul data-pac-bind="foreach: todos" data-pac-item="todo" data-pac-index="index">
         <li>
-            <input type="checkbox" data-pac-bind="checked:todo.completed">
+            <input type="checkbox" data-pac-bind="checked: todo.completed">
             <span>{{todo.text}}</span>
-            <button data-pac-bind="click:removeTodo">Remove</button>
+            <button data-pac-bind="click: removeTodo">Remove</button>
         </li>
     </ul>
 
     <p>Completed: {{completedCount}}</p>
 </div>
 
+<script src="../wakapac.js"></script>
 <script>
     const todoApp = wakaPAC('#todo-app', {
         newTodo: '',
@@ -42,6 +43,10 @@
 
         removeTodo(todo, index, event) {
             this.todos.splice(index, 1);
+        },
+
+        toggleTodo(todo, index, event) {
+            todo.completed = !todo.completed;
         }
     });
 </script>
