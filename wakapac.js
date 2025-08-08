@@ -1136,7 +1136,6 @@
              * Sets up input element attributes for binding
              */
             setupInputElement(element, property, bindingType = 'value') {
-                console.log('setupInputElement called:', element, property, bindingType); // ADD THIS DEBUG LINE
                 element.setAttribute('data-pac-property', property);
                 element.setAttribute('data-pac-binding-type', bindingType);
                 element.setAttribute('data-pac-update-mode', element.getAttribute('data-pac-update') || this.config.updateMode);
@@ -1744,7 +1743,10 @@
 
                 // Process elements with data binding attributes
                 [element, ...element.querySelectorAll('[data-pac-bind]')].forEach(el => {
+                    // Fetch pac bind
                     const bindAttr = el.getAttribute('data-pac-bind');
+
+                    // If no bind found, do nothing
                     if (!bindAttr) {
                         return;
                     }
@@ -1753,14 +1755,13 @@
                     bindAttr.split(',').forEach(bind => {
                         const [type, target] = bind.trim().split(':').map(s => s.trim());
 
-                        // FIX: Set up input elements for automatic two-way binding
+                        // Set up input elements for automatic two-way binding
                         if (type === 'value' || type === 'checked') {
                             // Resolve the target property path for the current item
                             if (target.startsWith(`${itemName}.`)) {
                                 const propertyPath = target.substring(itemName.length + 1);
                                 const resolvedTarget = `${collectionName}.${index}.${propertyPath}`;
                                 this.setupInputElement(el, resolvedTarget, type);
-                                console.log(`Set up ${type} binding for:`, resolvedTarget, 'on element:', el); // DEBUG
                             }
                         }
 
@@ -1773,7 +1774,6 @@
             /**
              * Processes individual bindings within foreach templates by applying the appropriate
              * DOM manipulation based on the binding type (class, checked, event, or attribute)
-             *
              * @param {HTMLElement} element - The DOM element to apply the binding to
              * @param {string} type - The type of binding (class, checked, event name, or attribute name)
              * @param {string} target - The expression or property path to evaluate
