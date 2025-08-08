@@ -1532,21 +1532,32 @@
             },
 
             /**
-             * Updates text content with interpolated values
+             * Updates text content with interpolated values - FIXED VERSION
+             * Now handles multiple placeholders in the same text node correctly
              */
             updateTextBinding(binding, property, value) {
                 const textNode = binding.element;
                 let text = binding.originalText;
 
-                // Handle expression evaluation
-                if (binding.parsedExpression) {
-                    const result = ExpressionParser.evaluate(binding.parsedExpression, this.abstraction);
-                    const formattedValue = Utils.formatValue(result);
-                    text = text.replace(binding.fullMatch, formattedValue);
+                // Find ALL interpolation patterns in the original text
+                const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+
+                if (matches) {
+                    // Replace each match with its evaluated value
+                    matches.forEach(match => {
+                        const expression = match.replace(/[{}\s]/g, '');
+                        const parsed = ExpressionParser.parse(expression);
+                        const result = ExpressionParser.evaluate(parsed, this.abstraction);
+                        const formattedValue = Utils.formatValue(result);
+
+                        // Replace this specific match in the text
+                        text = text.replace(match, formattedValue);
+                    });
                 }
 
                 // Update text content if changed
                 const cacheKey = `text_${binding.id}`;
+
                 if (this.lastValues.get(cacheKey) !== text) {
                     this.lastValues.set(cacheKey, text);
                     textNode.textContent = text;
@@ -1986,20 +1997,7 @@
                 const bindingType = target.getAttribute('data-pac-binding-type') || 'value';
 
                 // Extract the appropriate value based on the input type
-                // For checkboxes/radios, use the 'checked' property; for other inputs, use 'value'
-                let value;
-
-                if (bindingType === 'checked') {
-                    value = target.checked;
-                } else if (target.type === 'radio') {
-                    // Only update property if radio is being checked, not unchecked
-                    if (!target.checked) {
-                        return; // Don't process uncheck events for radios
-                    }
-                    value = target.value;
-                } else {
-                    value = target.value;
-                }
+                const value = this.readDOMValue(target);
 
                 // Apply the update based on the configured mode
                 switch (updateMode) {
@@ -2405,25 +2403,29 @@
             },
 
             /**
-             * Reads DOM state from a specific element and stores it in a data model property
-             * @param {string} elementSelector - CSS selector or ID to find the element
-             * @returns {boolean|boolean|*|string|string}
+             * Reads the current value from a DOM element (input, select, textarea, etc.)
+             * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
+             * @returns {string|boolean} The element's value (string for most inputs, boolean for checkboxes)
              */
-            readDOMValue: (elementSelector) => {
+            readDOMValue: (elementOrSelector) => {
                 // Find the element using either ID selector (#id) or CSS selector
                 // Check if selector starts with '#' to use getElementById for better performance
                 let element;
 
-                if (elementSelector.startsWith('#')) {
-                    element = document.getElementById(elementSelector.slice(1));
-                } else {
-                    element = document.querySelector(elementSelector);
+                if (typeof elementOrSelector === 'string') {
+                    if (elementOrSelector.startsWith('#')) {
+                        element = document.getElementById(elementOrSelector.slice(1));
+                    } else {
+                        element = document.querySelector(elementOrSelector);
+                    }
+                } else if (elementOrSelector && elementOrSelector.nodeType) {
+                    element = elementOrSelector;
                 }
 
                 // Early return if element doesn't exist to prevent errors
                 if (!element) {
-                    console.warn(`Element not found: ${elementSelector}`);
-                    return;
+                    console.warn(`Element not found: ${elementOrSelector}`);
+                    return false;
                 }
 
                 // Use switch(true) pattern to check multiple conditions in order of priority
