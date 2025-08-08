@@ -16,6 +16,7 @@
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
+
 (function () {
     'use strict';
 
@@ -33,7 +34,7 @@
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
-    const BOOLEAN_ATTRS = ['disabled', 'readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
+    const BOOLEAN_ATTRS = ['readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
 
     /**
      * Common DOM event types for event listeners
@@ -1539,24 +1540,44 @@
              * Sets element attribute with special handling for boolean attributes
              */
             setElementAttribute(element, name, value) {
-                if (name === 'class') {
-                    element.className = value || '';
-                } else if (name === 'style') {
-                    if (typeof value === 'object' && value) {
-                        Object.assign(element.style, value);
-                    } else {
-                        element.style.cssText = value || '';
-                    }
-                } else if (BOOLEAN_ATTRS.includes(name)) {
-                    if (value) {
-                        element.setAttribute(name, name);
-                    } else {
-                        element.removeAttribute(name);
-                    }
-                } else if (value != null) {
-                    element.setAttribute(name, value);
-                } else {
-                    element.removeAttribute(name);
+                switch (name) {
+                    case 'class':
+                        element.className = value || '';
+                        break;
+
+                    case 'style':
+                        if (typeof value === 'object' && value) {
+                            Object.assign(element.style, value);
+                        } else {
+                            element.style.cssText = value || '';
+                        }
+
+                        break;
+
+                    case 'enabled':
+                        // Handle 'enabled' as reverse of 'disabled'
+                        if (value) {
+                            element.removeAttribute('disabled');
+                        } else {
+                            element.setAttribute('disabled', 'disabled');
+                        }
+
+                        break;
+
+                    default:
+                        if (BOOLEAN_ATTRS.includes(name)) {
+                            if (value) {
+                                element.setAttribute(name, name);
+                            } else {
+                                element.removeAttribute(name);
+                            }
+                        } else if (value != null) {
+                            element.setAttribute(name, value);
+                        } else {
+                            element.removeAttribute(name);
+                        }
+
+                        break;
                 }
             },
 
@@ -1618,10 +1639,9 @@
                 // Ensure we have a valid array to work with
                 const array = Array.isArray(value) ? value : [];
                 const previous = binding.previous || [];
-                const forceUpdate = binding.previous === null; // Cache was cleared, force update
+                const forceUpdate = binding.previous === null;
 
                 // Skip update if arrays are deeply equal AND we're not forcing an update
-                // This optimization prevents unnecessary DOM manipulation
                 if (!forceUpdate && Utils.arraysEqual(previous, array)) {
                     binding.previous = [...array];
                     return;
@@ -1640,34 +1660,27 @@
                         item,                 // Current item data
                         index,                // Current item index
                         binding.itemName,     // Variable name for item in template
-                        binding.indexName     // Variable name for index in template
+                        binding.indexName,    // Variable name for index in template
+                        binding.collection    // FIX: Pass collection name to template processor
                     );
 
                     fragment.appendChild(itemElement);
                 });
 
                 // Replace all existing content with new rendered items
-                // Clear existing content first, then append new fragment
                 binding.element.innerHTML = '';
                 binding.element.appendChild(fragment);
             },
 
             /**
-             * Renders a single item for foreach bindings
-             * @param {string} template - HTML template string to render
-             * @param {*} item - The current data item being rendered
-             * @param {number} index - The index of the current item in the collection
-             * @param {string} itemName - Variable name to bind the item data to
-             * @param {string} indexName - Variable name to bind the index to
-             * @returns {Node} The rendered DOM element or text node
+             * Replace the renderForeachItem method to accept collection name:
              */
-            renderForeachItem(template, item, index, itemName, indexName) {
+            renderForeachItem(template, item, index, itemName, indexName, collectionName) {
                 // Create a temporary container div to parse the HTML template string
                 const div = document.createElement('div');
                 div.innerHTML = template;
 
                 // Extract the first element or node from the parsed template
-                // firstElementChild gets the first HTML element, firstChild gets any node type
                 const element = div.firstElementChild || div.firstChild;
 
                 // Handle case where template is empty or invalid
@@ -1679,30 +1692,22 @@
                 const clone = element.cloneNode(true);
 
                 // Process the cloned template, replacing placeholders with actual data
-                // This likely handles variable substitution and data binding
-                this.processForeachTemplate(clone, item, index, itemName, indexName);
+                this.processForeachTemplate(clone, item, index, itemName, indexName, collectionName);
 
                 // Return the processed element ready for insertion into the DOM
                 return clone;
             },
 
             /**
-             * Processes template for foreach item rendering
-             * @param {Element} element - The DOM element to process
-             * @param {*} item - The current item from the foreach loop
-             * @param {number} index - The current index in the foreach loop
-             * @param {string} itemName - The variable name for the item (e.g., 'user', 'product')
-             * @param {string} indexName - The variable name for the index (e.g., 'i', 'index')
+             * Update processForeachTemplate signature and fix the target resolution:
              */
-            processForeachTemplate(element, item, index, itemName, indexName) {
+            processForeachTemplate(element, item, index, itemName, indexName, collectionName) {
                 // Create a TreeWalker to traverse all text nodes in the element
-                // This allows us to find and replace template variables in text content
                 const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
                 const textNodes = [];
                 let node;
 
                 // Collect all text nodes first to avoid modifying the DOM while traversing
-                // This prevents potential issues with the TreeWalker iterator
                 while (node = walker.nextNode()) {
                     textNodes.push(node);
                 }
@@ -1712,57 +1717,55 @@
                     let text = textNode.textContent;
 
                     // Replace item property references like {{user.name}} or {{product.price}}
-                    // Uses regex to match the pattern and extract the property name
                     text = text.replace(
                         new RegExp(`\\{\\{\\s*${itemName}\\.(\\w+)\\s*\\}\\}`, 'g'),
                         (match, prop) => {
-                            // Check if item exists and has the requested property
-                            // Return the property value or empty string if not found
                             return item && item.hasOwnProperty(prop) ? item[prop] : '';
                         }
                     );
 
                     // Replace direct item references like {{user}} or {{product}}
-                    // Handles both object and primitive values
                     text = text.replace(
                         new RegExp(`\\{\\{\\s*${itemName}\\s*\\}\\}`, 'g'),
                         () => {
-                            // Convert objects to JSON string, use primitive values directly
                             return typeof item === 'object' ? JSON.stringify(item) : item || '';
                         }
                     );
 
                     // Replace index references like {{i}} or {{index}}
-                    // Simply substitutes with the current loop index
                     text = text.replace(
-                        new RegExp(`\{\{\s*${indexName}\s*}\}`, 'g'),
+                        new RegExp(`\\{\\{\\s*${indexName}\\s*\\}\\}`, 'g'),
                         () => index
                     );
 
-                    // Update the text node with the processed content
                     textNode.textContent = text;
                 });
 
                 // Process elements with data binding attributes
-                // Include the root element and all descendant elements with data-pac-bind
                 [element, ...element.querySelectorAll('[data-pac-bind]')].forEach(el => {
-                    // Get the binding attribute value (e.g., "value:user.name,class:user.status")
+                    // Fetch pac bind
                     const bindAttr = el.getAttribute('data-pac-bind');
 
-                    // Skip elements without binding attributes
+                    // If no bind found, do nothing
                     if (!bindAttr) {
                         return;
                     }
 
                     // Split multiple bindings by comma and process each one
-                    // Example: "value:user.name,class:user.status" becomes ["value:user.name", "class:user.status"]
                     bindAttr.split(',').forEach(bind => {
-                        // Parse each binding into type and target
-                        // Example: "value:user.name" becomes type="value", target="user.name"
                         const [type, target] = bind.trim().split(':').map(s => s.trim());
 
-                        // Delegate to the specific binding processor
-                        // This method handles the actual DOM manipulation for each binding type
+                        // Set up input elements for automatic two-way binding
+                        if (type === 'value' || type === 'checked') {
+                            // Resolve the target property path for the current item
+                            if (target.startsWith(`${itemName}.`)) {
+                                const propertyPath = target.substring(itemName.length + 1);
+                                const resolvedTarget = `${collectionName}.${index}.${propertyPath}`;
+                                this.setupInputElement(el, resolvedTarget, type);
+                            }
+                        }
+
+                        // Process the binding
                         this.processForeachBinding(el, type, target, item, index, itemName, indexName);
                     });
                 });
@@ -1771,7 +1774,6 @@
             /**
              * Processes individual bindings within foreach templates by applying the appropriate
              * DOM manipulation based on the binding type (class, checked, event, or attribute)
-             *
              * @param {HTMLElement} element - The DOM element to apply the binding to
              * @param {string} type - The type of binding (class, checked, event name, or attribute name)
              * @param {string} target - The expression or property path to evaluate
@@ -1932,34 +1934,37 @@
              * Handles input events for two-way data binding
              * @param {Event} event - The DOM event (input, change, etc.)
              * @param {HTMLElement} target - The input element that triggered the event
-             * @param {string} property - The property name in the abstraction object to update
+             * @param {string} property - The property path to update (e.g., "todos.0.completed")
              */
             handleInputEvent(event, target, property) {
-                // Determine update mode: use element's data attribute or fall back to global config
+                // Determine the update mode - check element's data attribute first, fall back to global config
                 const updateMode = target.getAttribute('data-pac-update-mode') || this.config.updateMode;
 
-                // Determine binding type: 'value' for text inputs, 'checked' for checkboxes/radios
+                // Determine the binding type - 'value' for most inputs, 'checked' for checkboxes/radios
                 const bindingType = target.getAttribute('data-pac-binding-type') || 'value';
 
-                // Extract the appropriate value based on binding type
+                // Extract the appropriate value based on the input type
+                // For checkboxes/radios, use the 'checked' property; for other inputs, use 'value'
                 const value = bindingType === 'checked' ? target.checked : target.value;
 
-                // Handle different update modes
+                // Apply the update based on the configured mode
                 switch (updateMode) {
                     case 'immediate':
-                        // Update abstraction immediately on any input event
-                        this.abstraction[property] = value;
+                        // Update the data model immediately as the user types/changes the input
+                        this.setNestedProperty(property, value);
                         break;
 
                     case 'delayed':
-                        // Use debounced/throttled update mechanism (typically for performance)
+                        // Debounce the update - wait for a pause in user input before updating
+                        // This prevents excessive updates during rapid typing
                         this.handleDelayedUpdate(target, property, value);
                         break;
 
                     case 'change':
-                        // Only update when the input loses focus or user presses Enter
+                        // Only update when the input loses focus or user explicitly commits the change
+                        // This prevents updates during intermediate typing states
                         if (event.type === 'change') {
-                            this.abstraction[property] = value;
+                            this.setNestedProperty(property, value);
                         }
 
                         break;
@@ -1967,10 +1972,49 @@
             },
 
             /**
+             * Sets a nested property value (e.g., "todos.0.completed" = true)
+             * @param {string} propertyPath - Dot-separated property path
+             * @param {*} value - Value to set
+             */
+            setNestedProperty(propertyPath, value) {
+                // Split the property path into individual parts (e.g., "todos.0.completed" → ["todos", "0", "completed"])
+                const parts = propertyPath.split('.');
+
+                // Simple property (no nesting)
+                // If there's only one part, we're setting a top-level property directly
+                if (parts.length === 1) {
+                    this.abstraction[propertyPath] = value;
+                    return;
+                }
+
+                // Navigate to the parent object
+                // We need to traverse through all parts except the last one to reach the parent
+                let current = this.abstraction;
+
+                for (let i = 0; i < parts.length - 1; i++) {
+                    // Move deeper into the nested structure using the current part as a key
+                    current = current[parts[i]];
+
+                    // Check if the current path exists - if not, we can't set the property
+                    if (!current) {
+                        // Show which part of the path failed for debugging purposes
+                        console.warn(`Cannot set property: ${propertyPath} - path not found at '${parts.slice(0, i + 1).join('.')}'`);
+                        return;
+                    }
+                }
+
+                // Set the final property
+                // Extract the last part of the path (the actual property name to set)
+                const finalProperty = parts[parts.length - 1];
+
+                // Set the value on the parent object we navigated to
+                current[finalProperty] = value;
+            },
+
+            /**
              * Handles delayed updates with proper debouncing
              * This method ensures that rapid consecutive updates to the same property
              * are debounced, so only the final value is applied after a delay period.
-             *
              * @param {HTMLElement} element - The DOM element that triggered the update
              * @param {string} property - The property name to update on the abstraction object
              * @param {*} value - The new value to set for the property
@@ -2016,6 +2060,18 @@
              * @param {Element} target - The DOM element that triggered the event
              */
             handleCustomEvent(event, eventType, target) {
+                // For submit events, we need to check if the target is a form or if we should look for a parent form
+                let actualTarget = target;
+
+                if (eventType === 'submit' && target.tagName !== 'FORM') {
+                    // Find the closest form element
+                    actualTarget = target.closest('form');
+
+                    if (!actualTarget) {
+                        return; // No form found, can't handle submit
+                    }
+                }
+
                 // Parse event modifiers (e.g., .prevent, .stop, .once) from the target element
                 const modifiers = this.parseEventModifiers(target);
 

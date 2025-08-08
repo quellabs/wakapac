@@ -1,0 +1,50 @@
+<html>
+<body>
+
+<div id="todo-app">
+    <input data-pac-bind="value: newTodo" placeholder="Add todo...">
+    <button data-pac-bind="click: addTodo">Add</button>
+
+    <ul data-pac-bind="foreach: todos" data-pac-item="todo" data-pac-index="index">
+        <li>
+            <input type="checkbox" data-pac-bind="checked: todo.completed">
+            <span>{{todo.text}}</span>
+            <button data-pac-bind="click: removeTodo">Remove</button>
+        </li>
+    </ul>
+
+    <p>Completed: {{completedCount}}</p>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const todoApp = wakaPAC('#todo-app', {
+        newTodo: '',
+        todos: [
+            {id: 1, text: 'Learn PAC Framework', completed: false}
+        ],
+
+        computed: {
+            completedCount() {
+                return this.todos.filter(todo => todo.completed).length;
+            }
+        },
+
+        addTodo() {
+            if (this.newTodo.trim()) {
+                this.todos.push({
+                    id: Date.now(),
+                    text: this.newTodo.trim(),
+                    completed: false
+                });
+                this.newTodo = '';
+            }
+        },
+
+        removeTodo(todo, index, event) {
+            this.todos.splice(index, 1);
+        }
+    });
+</script>
+</body>
+</html>

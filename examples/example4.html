@@ -1,0 +1,45 @@
+<html>
+<body>
+
+<div id="parent-component">
+    <h1>Parent: {{message}}</h1>
+    <button data-pac-bind="click:sendToChild">Send to Child</button>
+
+    <div id="child-component">
+        <h2>Child: {{childMessage}}</h2>
+        <button data-pac-bind="click:notifyParent">Notify Parent</button>
+    </div>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const parent = wakaPAC('#parent-component', {
+        message: 'Hello from parent',
+
+        sendToChild() {
+            this.sendToChild('#child-component', 'updateMessage', 'Hello from parent!');
+        },
+
+        onChildUpdate(type, data, child) {
+            if (type === 'messageChanged') {
+                this.message = `Child says: ${data.message}`;
+            }
+        }
+    });
+
+    const child = wakaPAC('#child-component', {
+        childMessage: 'Hello from child',
+
+        receiveFromParent(command, data) {
+            if (command === 'updateMessage') {
+                this.childMessage = data;
+            }
+        },
+
+        notifyParent() {
+            this.notifyParent('messageChanged', {message: this.childMessage});
+        }
+    });
+</script>
+</body>
+</html>
