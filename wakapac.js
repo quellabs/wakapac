@@ -2405,6 +2405,53 @@
             },
 
             /**
+             * Reads DOM state from a specific element and stores it in a data model property
+             * @param {string} elementSelector - CSS selector or ID to find the element
+             * @returns {boolean|boolean|*|string|string}
+             */
+            readDOMValue: (elementSelector) => {
+                // Find the element using either ID selector (#id) or CSS selector
+                // Check if selector starts with '#' to use getElementById for better performance
+                let element;
+
+                if (elementSelector.startsWith('#')) {
+                    element = document.getElementById(elementSelector.slice(1));
+                } else {
+                    element = document.querySelector(elementSelector);
+                }
+
+                // Early return if element doesn't exist to prevent errors
+                if (!element) {
+                    console.warn(`Element not found: ${elementSelector}`);
+                    return;
+                }
+
+                // Use switch(true) pattern to check multiple conditions in order of priority
+                switch (true) {
+                    case element.tagName === 'SELECT':
+                        return element.value; // Get selected option value
+
+                    case element.type === 'checkbox':
+                        return element.checked; // true/false based on checked state
+
+                    case element.type === 'radio':
+                        // Radio buttons work in groups, so find the currently checked one
+                        // Use the 'name' attribute to identify radio buttons in the same group
+                        const checkedRadio = document.querySelector(`input[name="${element.name}"]:checked`);
+                        return checkedRadio ? checkedRadio.value : ''; // Get value or empty string
+
+                    case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA':
+                        return element.value; // Get the input value
+
+                    default:
+                        // Extract text content, preferring textContent over innerText
+                        // textContent gets all text including hidden elements
+                        // innerText respects styling and returns visible text only
+                        return element.textContent || element.innerText;
+                }
+            },
+
+            /**
              * Initializes the PAC component
              */
             initialize() {
@@ -2653,6 +2700,13 @@
                             throw error; // Re-throw for promise chain handling
                         });
                 },
+
+                /**
+                 * Reads DOM state from a specific element and stores it in a data model property
+                 * @param {string} elementSelector - CSS selector or ID to find the element
+                 * @returns {boolean|boolean|*|string|string}
+                 */
+                readDOMValue: (elementSelector) => control.readDOMValue(elementSelector),
 
                 /**
                  * Destroys the component and cleans up resources
