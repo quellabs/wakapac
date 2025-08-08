@@ -87,11 +87,6 @@
         resetForm() {
             this.selectedColor = null;
             this.selectedSize = null;
-
-            // Also clear DOM radio buttons
-            document.querySelectorAll('input[type="radio"]').forEach(radio => {
-                radio.checked = false;
-            });
         },
 
         setDefaults() {
