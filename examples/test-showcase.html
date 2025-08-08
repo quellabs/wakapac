@@ -300,7 +300,7 @@
 
             <div data-pac-bind="foreach:filteredTodos" data-pac-item="todo" data-pac-index="index" style="margin-top: 10px;">
                 <div style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; margin: 5px 0; border-radius: 4px;" data-pac-bind="class:todo.completed">
-                    <input type="checkbox" data-pac-bind="checked:todo.completed,change:toggleTodoById" style="margin-right: 10px;">
+                    <input type="checkbox" data-pac-bind="checked:todo.completed" style="margin-right: 10px;">
                     <span style="flex: 1;" data-pac-bind="class:todo.completed">{{todo.text}}</span>
                     <button class="btn-danger" data-pac-bind="click:removeTodoById" style="padding: 4px 8px; font-size: 12px;">✕</button>
                 </div>
@@ -423,7 +423,7 @@
     <div><span class="timestamp">[System]</span> PAC Framework Communication Log - Watch bidirectional messages below:</div>
 </div>
 
-<script src="../wakapac.js"></script>
+<script src="wakapac.js"></script>
 <script>
     // Enhanced logging function
     function logMessage(sender, message, data = null) {
@@ -562,7 +562,8 @@
             },
 
             allCompleted() {
-                return this.todos.length > 0 && this.todos.every(todo => todo.completed);
+                const todos = this.todos; // Ensure we're accessing the reactive array
+                return todos.length > 0 && todos.every(todo => todo.completed);
             },
 
             toggleAllButtonText() {
@@ -572,7 +573,6 @@
 
         addTodo(event) {
             event.preventDefault();
-
             if (this.newTodo.trim()) {
                 console.log('Adding todo:', this.newTodo);
                 console.log('Current todos before:', this.todos.length);
@@ -589,11 +589,6 @@
 
                 this.newTodo = '';
             }
-        },
-
-        toggleTodoById(todo, index, event) {
-            // Demonstrate deep reactivity - nested property changes
-            todo.completed = !todo.completed;
         },
 
         removeTodoById(todo, index, event) {
@@ -621,11 +616,28 @@
         },
 
         toggleAllTodos() {
+            console.log(JSON.stringify(this.toJSON()));
+
+            console.log('toggleAllTodos called');
             const allCompleted = this.allCompleted;
-            this.todos.forEach(todo => {
+            console.log('allCompleted:', allCompleted);
+            this.todos.forEach((todo, index) => {
+                console.log(`Setting todo ${index} completed from ${todo.completed} to ${!allCompleted}`);
                 todo.completed = !allCompleted;
             });
         }
+
+        /*
+        toggleAllTodos() {
+            const hasIncomplete = this.todos.some(todo => !todo.completed);
+
+            // Create new todo objects to ensure reactivity
+            this.todos = this.todos.map(todo => ({
+                ...todo,
+                completed: hasIncomplete
+            }));
+        }
+        */
     });
 
     // Hierarchical Communication Components
