@@ -3,11 +3,11 @@
 
 <div id="parent-component">
     <h1>Parent: {{message}}</h1>
-    <button data-pac-bind="click:sendToChild">Send to Child</button>
+    <button data-pac-bind="click:sendMessageToChild">Send to Child</button>
 
     <div id="child-component">
         <h2>Child: {{childMessage}}</h2>
-        <button data-pac-bind="click:notifyParent">Notify Parent</button>
+        <button data-pac-bind="click:sendNotificationToParent">Notify Parent</button>
     </div>
 </div>
 
@@ -16,7 +16,7 @@
     const parent = wakaPAC('#parent-component', {
         message: 'Hello from parent',
 
-        sendToChild() {
+        sendMessageToChild() {
             this.sendToChild('#child-component', 'updateMessage', 'Hello from parent!');
         },
 
@@ -36,7 +36,7 @@
             }
         },
 
-        notifyParent() {
+        sendNotificationToParent() {
             this.notifyParent('messageChanged', {message: this.childMessage});
         }
     });
