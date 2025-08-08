@@ -1025,33 +1025,65 @@
              * Finds and creates attribute bindings data-pac-bind="..."
              */
             setupAttributeBindings() {
+                // Find all elements in the container that have the data-pac-bind attribute
+                // This attribute contains binding configurations for data binding
                 const elements = this.container.querySelectorAll('[data-pac-bind]');
 
+                // Process each element that has binding attributes
                 Array.from(elements).forEach(element => {
+                    // Get the binding configuration string from the data-pac-bind attribute
+                    // Example: "value:userName,visible:isLoggedIn"
                     const bindingString = element.getAttribute('data-pac-bind');
 
+                    // Split by comma to handle multiple bindings on a single element
+                    // Then process each individual binding configuration
                     bindingString.split(',').forEach(bind => {
+                        // Parse the binding format "type:target" (e.g., "value:userName")
+                        // type = binding type (value, visible, foreach, etc.)
+                        // target = property name or expression to bind to
                         const [type, target] = bind.trim().split(':').map(s => s.trim());
 
-                        let binding;
+                        // Handle different binding types based on the specified type
+                        let binding; // Will hold the created binding object
 
                         if (type === 'foreach') {
+                            // Create a repeating template binding for arrays/collections
+                            // Used to render lists of items dynamically
                             binding = this.createForeachBinding(element, target);
-                            element.innerHTML = ''; // Clear template
+                            element.innerHTML = ''; // Clear the template content after creating binding
                         } else if (type === 'visible') {
+                            // Create a visibility binding to show/hide elements based on data
                             binding = this.createVisibilityBinding(element, target);
                         } else if (type === 'value') {
+                            // Set up two-way data binding for input elements
+                            // This handles both displaying values and capturing user input
                             this.setupInputElement(element, target);
                             binding = this.createInputBinding(element, target);
                         } else if (type === 'checked') {
-                            this.setupInputElement(element, target, 'checked');
-                            binding = this.createCheckedBinding(element, target);
+                            // Handle checkbox and radio button checked state
+                            if (element.type === 'radio') {
+                                // Special handling: radio buttons should use 'value' binding instead of 'checked'
+                                // This is because radio buttons typically bind to a value, not just a boolean
+                                console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
+                                this.setupInputElement(element, target);
+                                binding = this.createInputBinding(element, target);
+                            } else {
+                                // For checkboxes, set up checked state binding
+                                this.setupInputElement(element, target, 'checked');
+                                binding = this.createCheckedBinding(element, target);
+                            }
                         } else if (Utils.isEventType(type)) {
+                            // Handle event bindings (click, change, etc.)
+                            // These bind DOM events to methods or functions
                             binding = this.createEventBinding(element, type, target);
                         } else if (target) {
+                            // Default case: create a generic attribute binding
+                            // This handles binding data to any HTML attribute (class, src, href, etc.)
                             binding = this.createAttributeBinding(element, type, target);
                         }
 
+                        // If a binding was successfully created, store it in the bindings collection
+                        // The binding ID is used for later reference and cleanup
                         if (binding) {
                             this.bindings.set(binding.id, binding);
                         }
@@ -1585,10 +1617,20 @@
              * Updates input element values
              */
             updateInputBinding(binding, property, value) {
-                const actualValue = Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property);
+                const element = binding.element;
 
-                if (binding.element.value !== actualValue) {
-                    binding.element.value = actualValue || '';
+                // Special handling for radio buttons
+                if (element.type === 'radio') {
+                    // For radio buttons, we check if the element's value matches the property value
+                    const actualValue = Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property);
+                    element.checked = (element.value === actualValue);
+                    return;
+                }
+
+                // Regular input handling (text, number, etc.)
+                const actualValue = Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property);
+                if (element.value !== String(actualValue || '')) {
+                    element.value = actualValue || '';
                 }
             },
 
@@ -1945,7 +1987,19 @@
 
                 // Extract the appropriate value based on the input type
                 // For checkboxes/radios, use the 'checked' property; for other inputs, use 'value'
-                const value = bindingType === 'checked' ? target.checked : target.value;
+                let value;
+
+                if (bindingType === 'checked') {
+                    value = target.checked;
+                } else if (target.type === 'radio') {
+                    // Only update property if radio is being checked, not unchecked
+                    if (!target.checked) {
+                        return; // Don't process uncheck events for radios
+                    }
+                    value = target.value;
+                } else {
+                    value = target.value;
+                }
 
                 // Apply the update based on the configured mode
                 switch (updateMode) {

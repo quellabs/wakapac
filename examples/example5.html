@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wakaPAC Radio Test</title>
+</head>
+<body>
+<h1>wakaPAC Radio Button Test</h1>
+
+<div id="test-form">
+    <h3>Test 1: Basic Radio Group</h3>
+    <label>
+        <input type="radio" name="color" value="red" data-pac-bind="value:selectedColor">
+        Red
+    </label><br>
+    <label>
+        <input type="radio" name="color" value="green" data-pac-bind="value:selectedColor">
+        Green
+    </label><br>
+    <label>
+        <input type="radio" name="color" value="blue" data-pac-bind="value:selectedColor">
+        Blue
+    </label><br>
+
+    <p>Selected color: <strong>{{selectedColor}}</strong></p>
+
+    <hr>
+
+    <h3>Test 2: Another Radio Group</h3>
+    <label>
+        <input type="radio" name="size" value="small" data-pac-bind="value:selectedSize">
+        Small
+    </label><br>
+    <label>
+        <input type="radio" name="size" value="medium" data-pac-bind="value:selectedSize">
+        Medium
+    </label><br>
+    <label>
+        <input type="radio" name="size" value="large" data-pac-bind="value:selectedSize">
+        Large
+    </label><br>
+
+    <p>Selected size: <strong>{{selectedSize}}</strong></p>
+
+    <hr>
+
+    <h3>Test 3: Conditional Display</h3>
+    <div data-pac-bind="visible:selectedColor">
+        <p>You chose the color: <strong style="color: {{selectedColor}}">{{selectedColor}}</strong></p>
+    </div>
+
+    <div data-pac-bind="visible:bothSelected">
+        <p>Complete selection: {{selectedColor}} {{selectedSize}}</p>
+    </div>
+
+    <hr>
+
+    <h3>Debug Info</h3>
+    <button data-pac-bind="click:resetForm">Reset Form</button>
+    <button data-pac-bind="click:setDefaults">Set Defaults</button>
+
+    <pre>{{debugInfo}}</pre>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    // Real wakaPAC implementation
+    const testApp = wakaPAC('#test-form', {
+        selectedColor: null,
+        selectedSize: null,
+
+        computed: {
+            bothSelected() {
+                return this.selectedColor && this.selectedSize;
+            },
+
+            debugInfo() {
+                return JSON.stringify({
+                    selectedColor: this.selectedColor,
+                    selectedSize: this.selectedSize,
+                    bothSelected: this.bothSelected
+                }, null, 2);
+            }
+        },
+
+        resetForm() {
+            this.selectedColor = null;
+            this.selectedSize = null;
+
+            // Also clear DOM radio buttons
+            document.querySelectorAll('input[type="radio"]').forEach(radio => {
+                radio.checked = false;
+            });
+        },
+
+        setDefaults() {
+            this.selectedColor = 'green';
+            this.selectedSize = 'medium';
+        }
+    });
+</script>
+
+</body>
+</html>
