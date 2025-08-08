@@ -1,0 +1,24 @@
+<html>
+<body>
+
+<div id="counter">
+    <p>Count: {{count}}</p>
+    <button data-pac-bind="click:increment">+</button>
+    <button data-pac-bind="click:decrement">-</button>
+</div>
+
+<script>
+    const counter = wakaPAC('#counter', {
+        count: 0,
+
+        increment() {
+            this.count++;
+        },
+
+        decrement() {
+            this.count--;
+        }
+    });
+</script>
+</body>
+</html>

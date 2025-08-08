@@ -1,0 +1,41 @@
+<html>
+<body>
+
+<form id="signup-form" data-pac-bind="submit:handleSubmit">
+    <input data-pac-bind="value:email" type="email" placeholder="Email">
+    <span data-pac-bind="visible:emailError" class="error">{{emailError}}</span>
+
+    <input data-pac-bind="value:password" type="password" placeholder="Password">
+    <span data-pac-bind="visible:passwordError" class="error">{{passwordError}}</span>
+
+    <button type="submit" data-pac-bind="disabled:!isValid">Sign Up</button>
+</form>
+
+<script>
+    const signupForm = wakaPAC('#signup-form', {
+        email: '',
+        password: '',
+        emailError: '',
+        passwordError: '',
+
+        computed: {
+            isValid() {
+                return this.email.includes('@') && this.password.length >= 6;
+            }
+        },
+
+        handleSubmit(event) {
+            event.preventDefault();
+
+            // Validate
+            this.emailError = this.email.includes('@') ? '' : 'Invalid email';
+            this.passwordError = this.password.length >= 6 ? '' : 'Password too short';
+
+            if (this.isValid) {
+                console.log('Form submitted:', this.toJSON());
+            }
+        }
+    });
+</script>
+</body>
+</html>
