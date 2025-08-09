@@ -148,31 +148,6 @@
         },
 
         /**
-         * Compares arrays for equality (deep comparison of elements)
-         * @param {Array} a - The first array to compare
-         * @param {Array} b - The second array to compare
-         * @returns {boolean} True if arrays are equal, false otherwise
-         */
-        arraysEqual(a, b) {
-            // First, check if arrays have different lengths - if so, they can't be equal
-            if (a.length !== b.length) {
-                return false;
-            }
-
-            // Use deep equality comparison for each item
-            // Loop through each element and compare using Utils.isEqual for deep comparison
-            for (let i = 0; i < a.length; i++) {
-                // If any pair of elements at the same index are not equal, arrays are not equal
-                if (!this.isEqual(a[i], b[i])) {
-                    return false;
-                }
-            }
-
-            // If we made it through all comparisons without finding differences, arrays are equal
-            return true;
-        },
-
-        /**
          * Generates a unique identifier
          * @returns {string} Unique ID string
          */
@@ -1063,6 +1038,7 @@
 
                         // Create the binding immediately for non-deferred types
                         const binding = this.createBindingByType(element, type, target);
+
                         if (binding) {
                             // Store the binding in the bindings map using its unique ID
                             this.bindings.set(binding.id, binding);
@@ -1106,49 +1082,36 @@
              */
             createBindingByType(element, type, target) {
                 if (type === 'foreach') {
-                    // Create a foreach binding for iterating over arrays/collections
                     const binding = this.createForeachBinding(element, target);
-
-                    // Clear the element's content as foreach will populate it
                     element.innerHTML = '';
                     return binding;
                 }
 
                 if (type === 'visible') {
-                    // Create a visibility binding to show/hide elements
                     return this.createVisibilityBinding(element, target);
                 }
 
                 if (type === 'value') {
-                    // Set up the input element for two-way data binding
                     this.setupInputElement(element, target);
-
-                    // Create the value binding for form inputs
                     return this.createInputBinding(element, target);
                 }
 
                 if (type === 'checked') {
-                    // Handle checked bindings for checkboxes and radio buttons
                     if (element.type === 'radio') {
-                        // Radio buttons should use value binding, not checked binding
                         console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
                         this.setupInputElement(element, target);
                         return this.createInputBinding(element, target);
                     }
 
-                    // For checkboxes, set up checked binding
                     this.setupInputElement(element, target, 'checked');
                     return this.createCheckedBinding(element, target);
                 }
 
                 if (Utils.isEventType(type)) {
-                    // Handle event bindings (click, change, etc.)
                     return this.createEventBinding(element, type, target);
                 }
 
                 if (target) {
-                    // Default case: create an attribute binding for any other type
-                    // This handles custom attributes, text content, etc.
                     return this.createAttributeBinding(element, type, target);
                 }
 
@@ -1804,7 +1767,7 @@
                 const forceUpdate = binding.previous === null;
 
                 // Skip update if arrays are deeply equal AND we're not forcing an update
-                if (!forceUpdate && Utils.arraysEqual(previous, array)) {
+                if (!forceUpdate && Utils.isEqual(previous, array)) {
                     binding.previous = [...array];
                     return;
                 }
