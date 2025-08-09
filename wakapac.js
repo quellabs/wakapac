@@ -998,45 +998,27 @@
 
             /**
              * Finds and creates attribute bindings data-pac-bind="..."
-             * This method processes all elements with data-pac-bind attributes and sets up
-             * the appropriate binding types. It handles deferred bindings for cases where
-             * foreach bindings need to complete before value/checked bindings are processed.
              */
             setupAttributeBindings() {
                 // Find all elements in the container that have data-pac-bind attributes
                 const elements = this.container.querySelectorAll('[data-pac-bind]');
 
-                // Array to store bindings that need to be processed after foreach completes
-                const deferredBindings = [];
-
                 // Process each element with binding attributes
                 Array.from(elements).forEach(element => {
-                    // Get the binding string (e.g., "foreach:items,value:name")
+                    // Get the binding string (e.g., "value:selectedItem,foreach:items")
                     const bindingString = element.getAttribute('data-pac-bind');
 
                     // Parse the binding string into individual binding pairs
-                    // Split by comma, then split each pair by colon to get type:target
                     const bindingPairs = bindingString.split(',').map(bind => {
                         const [type, target] = bind.trim().split(':').map(s => s.trim());
                         return { type, target };
                     });
 
-                    // Check if this element has a foreach binding
-                    const hasForeach = bindingPairs.some(b => b.type === 'foreach');
+                    // Automatically reorder bindings: foreach first, then others
+                    const reorderedBindings = this.reorderBindings(bindingPairs);
 
-                    // Determine if a binding type needs to be deferred
-                    // Value and checked bindings must wait for foreach to complete first
-                    const needsDefer = (type) => (type === 'value' || type === 'checked') && hasForeach;
-
-                    // Process each binding pair for this element
-                    bindingPairs.forEach(({ type, target }) => {
-                        // If this binding needs to be deferred, add it to the deferred array
-                        if (needsDefer(type)) {
-                            deferredBindings.push({ type, target, element });
-                            return; // Skip processing now, will handle later
-                        }
-
-                        // Create the binding immediately for non-deferred types
+                    // Process each binding pair in the correct order
+                    reorderedBindings.forEach(({ type, target }) => {
                         const binding = this.createBindingByType(element, type, target);
 
                         if (binding) {
@@ -1045,30 +1027,6 @@
                         }
                     });
                 });
-
-                // Process deferred bindings after foreach completes
-                // This ensures DOM manipulation from foreach is finished before
-                // setting up value/checked bindings on the newly created elements
-                if (deferredBindings.length > 0) {
-                    setTimeout(() => {
-                        deferredBindings.forEach(({ type, target, element }) => {
-                            // Create the deferred binding
-                            const binding = this.createBindingByType(element, type, target);
-                            if (binding) {
-                                // Store the binding in the bindings map
-                                this.bindings.set(binding.id, binding);
-
-                                // Add to binding index for property-based lookups
-                                this.addToBindingIndex(binding);
-
-                                // Immediately update the binding with current data
-                                // Get the current value from the abstraction layer
-                                this.updateBinding(binding, binding.property,
-                                    Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property));
-                            }
-                        });
-                    }, 0); // Use setTimeout(0) to defer to next event loop cycle
-                }
             },
 
             /**
@@ -1119,43 +1077,40 @@
             },
 
             /**
-             * Helper method to add binding to index (extracted for reuse)
+             * Reorders binding pairs to ensure optimal execution order:
+             * 1. foreach bindings (DOM structure changes)
+             * 2. visible bindings (element visibility)
+             * 3. value/checked bindings (form state)
+             * 4. event bindings (user interactions)
+             * 5. attribute bindings (other attributes)
              *
-             * This method maintains a bidirectional index that tracks:
-             * 1. Which bindings are associated with each property
-             * 2. Which bindings depend on each property for dependency resolution
-             *
-             * @param {Object} binding - The binding object to add to the index
-             * @param {string} binding.property - The property this binding is bound to
-             * @param {Array} binding.dependencies - Array of property names this binding depends on
+             * @param {Array} bindingPairs - Array of {type, target} objects
+             * @returns {Array} Reordered binding pairs
              */
-            addToBindingIndex(binding) {
-                // Index the binding by its own property (if it has one)
-                // This allows quick lookup of all bindings associated with a specific property
-                if (binding.property) {
-                    // Initialize a new Set for this property if it doesn't exist yet
-                    if (!this.bindingIndex.has(binding.property)) {
-                        this.bindingIndex.set(binding.property, new Set());
-                    }
-                    // Add this binding to the property's set
-                    // Using Set ensures no duplicate bindings for the same property
-                    this.bindingIndex.get(binding.property).add(binding);
-                }
+            reorderBindings(bindingPairs) {
+                // Define binding priority order (lower number = higher priority)
+                const priorityOrder = {
+                    'foreach': 1,    // Must come first - creates DOM structure
+                    'visible': 2,    // Show/hide elements before setting their values
+                    'value': 3,      // Form values after DOM exists
+                    'checked': 3,    // Checkbox state after DOM exists
+                    'click': 4,      // Event handlers after elements are ready
+                    'change': 4,     // Event handlers after elements are ready
+                    'input': 4,      // Event handlers after elements are ready
+                    'submit': 4,     // Event handlers after elements are ready
+                    'focus': 4,      // Event handlers after elements are ready
+                    'blur': 4,       // Event handlers after elements are ready
+                    'keyup': 4,      // Event handlers after elements are ready
+                    'keydown': 4,    // Event handlers after elements are ready
+                    // All other bindings get priority 5 (attributes, etc.)
+                };
 
-                // Index the binding by each of its dependencies
-                // This enables efficient dependency resolution and change propagation
-                if (binding.dependencies) {
-                    binding.dependencies.forEach(dep => {
-                        // Initialize a new Set for this dependency if it doesn't exist yet
-                        if (!this.bindingIndex.has(dep)) {
-                            this.bindingIndex.set(dep, new Set());
-                        }
-
-                        // Add this binding to the dependency's set
-                        // When the dependency changes, we can quickly find all affected bindings
-                        this.bindingIndex.get(dep).add(binding);
-                    });
-                }
+                // Sort bindings by priority, maintaining original order for same priority
+                return bindingPairs.sort((a, b) => {
+                    const priorityA = priorityOrder[a.type] || 5;
+                    const priorityB = priorityOrder[b.type] || 5;
+                    return priorityA - priorityB;
+                });
             },
 
             /**
