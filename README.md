@@ -358,16 +358,16 @@ Bind DOM events to methods using the `data-pac-bind` attribute:
 ```javascript
 const app = wakaPAC('#app', {
     searchQuery: '',
-    
+
     handleClick(event) {
         console.log('Button clicked!', event);
     },
-    
+
     handleSubmit(event) {
         event.preventDefault();
         console.log('Searching for:', this.searchQuery);
     },
-    
+
     handleInput(event) {
         console.log('Input changed:', event.target.value);
     }
@@ -382,17 +382,17 @@ Reduce boilerplate with declarative event modifiers:
 <!-- ✅ Prevent form submission redirect -->
 <form data-pac-bind="submit:handleSubmit" data-pac-modifiers="prevent">
 
-<!-- ✅ Search on Enter key -->
-<input data-pac-bind="keyup:search" data-pac-modifiers="enter">
+    <!-- ✅ Search on Enter key -->
+    <input data-pac-bind="keyup:search" data-pac-modifiers="enter">
 
-<!-- ✅ Close modal on Escape -->
-<div data-pac-bind="keyup:closeModal" data-pac-modifiers="escape">
+    <!-- ✅ Close modal on Escape -->
+    <div data-pac-bind="keyup:closeModal" data-pac-modifiers="escape">
 
-<!-- ✅ One-time event (auto-removes after first trigger) -->
-<button data-pac-bind="click:initialize" data-pac-modifiers="once">
+        <!-- ✅ One-time event (auto-removes after first trigger) -->
+        <button data-pac-bind="click:initialize" data-pac-modifiers="once">
 
-<!-- ✅ Multiple modifiers -->
-<form data-pac-bind="submit:handleForm" data-pac-modifiers="prevent stop">
+            <!-- ✅ Multiple modifiers -->
+            <form data-pac-bind="submit:handleForm" data-pac-modifiers="prevent stop">
 ```
 
 #### Supported Event Modifiers:
@@ -437,18 +437,18 @@ const app = wakaPAC('#app', {
     firstName: 'John',
     lastName: 'Doe',
     items: [{price: 10}, {price: 20}, {price: 15}],
-    
+
     computed: {
         // Simple computed property
         fullName() {
             return `${this.firstName} ${this.lastName}`;
         },
-        
+
         // Array-dependent computed property
         totalPrice() {
             return this.items.reduce((sum, item) => sum + item.price, 0);
         },
-        
+
         // Dependent on other computed properties
         greeting() {
             return `Hello, ${this.fullName}! Your total is $${this.totalPrice}`;
@@ -467,7 +467,7 @@ computed: {
         // Automatically depends on 'items' property
         return this.items.filter(item => item.price > 15);
     },
-    
+
     summary() {
         // Depends on multiple properties and computed properties
         return `${this.fullName} has ${this.expensiveItems.length} expensive items`;
@@ -528,17 +528,17 @@ const app = wakaPAC('#app', {
         {id: 1, text: 'Learn WakaPAC', completed: false},
         {id: 2, text: 'Build an app', completed: true}
     ],
-    
+
     computed: {
         todoCount() {
             return this.todos.length;
         },
-        
+
         completedCount() {
             return this.todos.filter(todo => todo.completed).length;
         }
     },
-    
+
     // Event handlers receive item, index, and event
     removeTodo(todo, index, event) {
         const todoIndex = this.todos.findIndex(t => t.id === todo.id);
@@ -548,6 +548,92 @@ const app = wakaPAC('#app', {
     }
 });
 ```
+
+### Foreach Callbacks
+
+Execute custom logic whenever a foreach list is updated using the `then` syntax:
+
+```html
+<!-- Basic callback after list updates -->
+<ul data-pac-bind="foreach:todos then onTodosUpdated" data-pac-item="todo">
+    <li>{{todo.text}}</li>
+</ul>
+
+<!-- Select dropdown with callback -->
+<select data-pac-bind="value:selectedCountry,foreach:countries then onCountriesRendered" 
+        data-pac-item="country">
+    <option data-pac-bind="value:country.code">{{country.name}}</option>
+</select>
+
+<!-- Complex list with status tracking -->
+<div data-pac-bind="foreach:products then onProductsUpdated" data-pac-item="product" data-pac-index="i">
+    <div class="product-card">
+        <h3>{{product.name}}</h3>
+        <p>Price: ${{product.price}}</p>
+    </div>
+</div>
+```
+
+```javascript
+const app = wakaPAC('#app', {
+    todos: [],
+    countries: [],
+    products: [],
+    selectedCountry: '',
+    status: 'Ready',
+    
+    // Callback receives: (currentArray, metadata)
+    onTodosUpdated(todos, meta) {
+        this.status = `Todo list updated with ${todos.length} items`;
+        console.log('Todos changed:', meta);
+        
+        // Scroll to top when list changes significantly
+        if (meta.element) {
+            meta.element.scrollTop = 0;
+        }
+    },
+    
+    onCountriesRendered(countries, meta) {
+        // Auto-select first country if none selected
+        if (!this.selectedCountry && countries.length > 0) {
+            this.selectedCountry = countries[0].code;
+        }
+        
+        console.log(`Rendered ${countries.length} countries`);
+    },
+    
+    onProductsUpdated(products, meta) {
+        // Track analytics when product list changes
+        this.trackEvent('products_displayed', { 
+            count: products.length,
+            timestamp: Date.now()
+        });
+    },
+    
+    addTodo() {
+        this.todos.push({
+            text: 'New todo',
+            completed: false
+        });
+        // onTodosUpdated will be called automatically
+    }
+});
+```
+
+**Callback Metadata Object:**
+The callback receives a metadata object with:
+- `element`: The DOM element containing the foreach list
+- `previous`: The previous array state (for comparison)
+- `current`: The current array state (same as first parameter)
+- `binding`: The internal binding object
+
+**Use Cases for Foreach Callbacks:**
+- **State synchronization**: Update related properties when lists change
+- **UI management**: Scroll to top, focus elements, or animate changes
+- **Validation**: Ensure dependent data remains valid when lists update
+- **Analytics**: Track user interactions with dynamic lists
+- **Performance**: Optimize rendering for large lists
+- **Selection management**: Auto-select items in dropdowns when options change
 
 ## 🔗 Hierarchical Communication
 
@@ -752,6 +838,11 @@ const component = wakaPAC(selector, abstraction, options);
 <div data-pac-bind="foreach:items" data-pac-item="item" data-pac-index="index">
     <span>{{index}}: {{item.name}}</span>
 </div>
+
+<!-- List rendering with callback -->
+<div data-pac-bind="foreach:items then onItemsUpdated" data-pac-item="item" data-pac-index="index">
+    <span>{{index}}: {{item.name}}</span>
+</div>
 ```
 
 ### Core Methods
@@ -779,8 +870,8 @@ const component = wakaPAC(selector, abstraction, options);
 ```javascript
 {
     updateMode: 'immediate',    // 'immediate', 'delayed', 'change'
-    delay: 300,                 // Delay for 'delayed' mode (ms)
-    deepReactivity: true        // Enable deep object reactivity
+        delay: 300,                 // Delay for 'delayed' mode (ms)
+        deepReactivity: true        // Enable deep object reactivity
 }
 ```
 

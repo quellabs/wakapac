@@ -1,0 +1,53 @@
+<html>
+<body>
+
+<div id="todolist">
+    <h3>Todo List ({{todos.length}} items)</h3>
+
+    <input type="text" data-pac-bind="value:newTodo" placeholder="Add new todo...">
+    <button data-pac-bind="click:addTodo">Add</button>
+
+    <ul data-pac-bind="foreach:todos then onTodosUpdated" data-pac-item="todo" data-pac-index="i">
+        <li>
+            <input type="checkbox" data-pac-bind="checked:todo.completed">
+            <span>{{todo.text}}</span>
+            <button data-pac-bind="click:removeTodo">Remove</button>
+        </li>
+    </ul>
+
+    <p>Status: <span>{{status}}</span></p>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const todoList = wakaPAC('#todolist', {
+        newTodo: '',
+        status: 'Ready',
+        todos: [
+            { text: 'Learn WakaPAC', completed: false },
+            { text: 'Build something cool', completed: false }
+        ],
+
+        addTodo() {
+            if (this.newTodo.trim()) {
+                this.todos.push({
+                    text: this.newTodo.trim(),
+                    completed: false
+                });
+
+                this.newTodo = '';
+            }
+        },
+
+        removeTodo(todo, index) {
+            this.todos.splice(index, 1);
+        },
+
+        onTodosUpdated(todos, meta) {
+            this.status = `List updated with ${todos.length} items`;
+            console.log('Todos changed:', meta);
+        }
+    });
+</script>
+</body>
+</html>

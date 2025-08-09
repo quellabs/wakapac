@@ -1094,10 +1094,15 @@
             /**
              * Creates a foreach binding for rendering lists
              */
-            createForeachBinding(element, target) {
+            createForeachBinding(element, target, type) {
+                const parts = target.split(' then ');
+                const collection = parts[0].trim();
+                const callback = parts[1] ? parts[1].trim() : null;
+
                 return this.createBinding('foreach', element, {
-                    target: target,
-                    collection: target,
+                    target: collection,
+                    collection: collection,
+                    callback: callback,
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: element.innerHTML,
@@ -1714,7 +1719,7 @@
                         index,                // Current item index
                         binding.itemName,     // Variable name for item in template
                         binding.indexName,    // Variable name for index in template
-                        binding.collection    // FIX: Pass collection name to template processor
+                        binding.collection    // Pass collection name to template processor
                     );
 
                     fragment.appendChild(itemElement);
@@ -1723,6 +1728,18 @@
                 // Replace all existing content with new rendered items
                 binding.element.innerHTML = '';
                 binding.element.appendChild(fragment);
+
+                // Call the callback if specified (deferred to next tick)
+                if (binding.callback && typeof this.abstraction[binding.callback] === 'function') {
+                    setTimeout(() => {
+                        this.abstraction[binding.callback].call(this.abstraction, value, {
+                            element: binding.element,
+                            previous: previous,
+                            current: array,
+                            binding: binding
+                        });
+                    }, 0);
+                }
             },
 
             /**
