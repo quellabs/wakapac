@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PAC If Binding Demo</title>
+</head>
+<body>
+
+<div id="app">
+    <p>
+        <label>
+            <input type="checkbox" data-pac-bind="checked:showMessage"> Show Message
+        </label>
+    </p>
+
+    <div data-pac-bind="if: showMessage">
+        <p>Hello! This message appears when checkbox is checked.</p>
+    </div>
+
+    <div data-pac-bind="if: !showMessage">
+        <p>Check the box above to see a message.</p>
+    </div>
+</div>
+
+<script src="../wakapac.js"></script>
+
+<script>
+    wakaPAC('#app', {
+        showMessage: false
+    });
+</script>
+</body>
+</html>

@@ -501,6 +501,7 @@
             const result = this.parseTernary(expression) ||
                 this.parseLogical(expression) ||
                 this.parseComparison(expression) ||
+                this.parseUnary(expression) ||
                 this.parseProperty(expression);
 
             // Store the parsed result in cache for future lookups
@@ -510,6 +511,26 @@
             // Return the parsed expression object containing type, dependencies,
             // and operator-specific properties for evaluation
             return result;
+        },
+
+        /**
+         * Attempts to parse a unary expression (!expression)
+         */
+        parseUnary(expression) {
+            const unaryMatch = expression.match(/^!\s*(.+)$/);
+
+            if (!unaryMatch) {
+                return null;
+            }
+
+            const [, operand] = unaryMatch;
+
+            return {
+                type: 'unary',
+                operator: '!',
+                operand: operand.trim(),
+                dependencies: this.extractDependencies(operand.trim())
+            };
         },
 
         /**
@@ -722,6 +743,10 @@
                     } else {
                         return false;
                     }
+
+                case 'unary':
+                    const operandValue = this.evaluateCondition(parsedExpr.operand, context);
+                    return parsedExpr.operator === '!' ? !operandValue : operandValue;
 
                 case 'comparison':
                     const leftValue = Utils.getNestedValue(context, parsedExpr.left);
@@ -1045,6 +1070,10 @@
                     return binding;
                 }
 
+                if (type === 'if') {
+                    return this.createConditionalBinding(element, target);
+                }
+
                 if (type === 'visible') {
                     return this.createVisibilityBinding(element, target);
                 }
@@ -1114,6 +1143,27 @@
             },
 
             /**
+             * Creates a conditional "if" binding that renders/removes DOM elements based on data values
+             * @param {HTMLElement} element - The DOM element to conditionally render
+             * @param {string} target - The data property name to watch (may include '!' for negation)
+             * @returns {Object} The created binding object with conditional rendering configuration
+             */
+            createConditionalBinding(element, target) {
+                // Parse the full expression using expression parser (handles negation, comparisons, etc.)
+                const parsed = ExpressionParser.parse(target);
+
+                return this.createBinding('conditional', element, {
+                    target: target,
+                    parsedExpression: parsed,
+                    dependencies: parsed.dependencies,
+                    placeholder: null,
+                    originalParent: element.parentNode,
+                    originalNextSibling: element.nextSibling,
+                    isRendered: true
+                });
+            },
+
+            /**
              * Creates a foreach binding for rendering lists
              */
             createForeachBinding(element, target, type) {
@@ -1136,12 +1186,13 @@
              * Creates a visibility binding
              */
             createVisibilityBinding(element, target) {
-                const isNegated = target.startsWith('!');
-                const cleanTarget = target.replace(/^!/, '');
+                // Parse the full expression (including any negation) using expression parser
+                const parsed = ExpressionParser.parse(target);
 
                 return this.createBinding('visible', element, {
-                    target: cleanTarget,
-                    isNegated: isNegated
+                    target: target,
+                    parsedExpression: parsed,
+                    dependencies: parsed.dependencies
                 });
             },
 
@@ -1549,12 +1600,56 @@
                             this.updateVisibilityBinding(binding, property, value);
                             break;
 
+                        case 'conditional':
+                            this.updateConditionalBinding(binding, property, value);
+                            break;
+
                         case 'foreach':
                             this.updateForeachBinding(binding, property, value);
                             break;
                     }
                 } catch (error) {
                     console.error(`Error updating ${binding.type} binding:`, error);
+                }
+            },
+
+            /**
+             * Updates the conditional binding by adding/removing DOM elements based on property values
+             * @param {Object} binding - The binding object containing element, placeholder, and condition info
+             * @param {string} property - The property name being bound (may be unused in current implementation)
+             * @param {*} value - The new value (may be unused in current implementation)
+             */
+            updateConditionalBinding(binding, property, value) {
+                // Determine if element should be rendered based on the value and negation flag
+                const shouldRender = ExpressionParser.evaluate(binding.parsedExpression, this.abstraction);
+
+                // Early exit if the rendering state hasn't changed
+                if (binding.isRendered === shouldRender) {
+                    return;
+                }
+
+                if (shouldRender) {
+                    // Add element to DOM: Replace the placeholder comment with the actual DOM element
+                    if (binding.placeholder && binding.placeholder.parentNode) {
+                        binding.placeholder.parentNode.replaceChild(binding.element, binding.placeholder);
+                    }
+
+                    // Update the binding state to reflect that element is now in the DOM
+                    binding.isRendered = true;
+                } else {
+                    // Remove element from DOM: Replace the DOM element with a placeholder comment
+                    // Create placeholder comment if it doesn't exist yet
+                    if (!binding.placeholder) {
+                        binding.placeholder = document.createComment(`pac-if: ${binding.target}`);
+                    }
+
+                    // Replace the element with the invisible placeholder comment (removes from DOM)
+                    if (binding.element.parentNode) {
+                        binding.element.parentNode.replaceChild(binding.placeholder, binding.element);
+                    }
+
+                    // Update the binding state to reflect that element is now removed from DOM
+                    binding.isRendered = false;
                 }
             },
 
@@ -1684,16 +1779,19 @@
              * Updates element visibility
              */
             updateVisibilityBinding(binding, property, value) {
-                const actualValue = Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property);
-                const shouldShow = binding.isNegated ? !actualValue : Boolean(actualValue);
+                // Use expression parser to evaluate the visibility condition
+                // This handles negation, comparisons, logical operators, etc.
+                const shouldShow = ExpressionParser.evaluate(binding.parsedExpression, this.abstraction);
 
                 if (shouldShow) {
+                    // Show element: restore original display value
                     if (binding.element.hasAttribute('data-pac-hidden')) {
                         binding.element.style.display = binding.element.getAttribute('data-pac-orig-display') || '';
                         binding.element.removeAttribute('data-pac-hidden');
                         binding.element.removeAttribute('data-pac-orig-display');
                     }
                 } else {
+                    // Hide element: save current display and set to none
                     if (!binding.element.hasAttribute('data-pac-hidden')) {
                         const currentDisplay = getComputedStyle(binding.element).display;
 
