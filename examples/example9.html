@@ -1,51 +1,86 @@
 <html>
 <body>
 
-<div id="todolist">
-    <h3>Todo List ({{todos.length}} items)</h3>
+<div id="dropdowns">
+    <h3>Dynamic Dropdowns Example</h3>
 
-    <input type="text" data-pac-bind="value:newTodo" placeholder="Add new todo...">
-    <button data-pac-bind="click:addTodo">Add</button>
+    <div>
+        <label>Select Category:</label>
+        <select data-pac-bind="value:selectedCategory,change:updateSubcategories">
+            <option value="">-- Choose Category --</option>
+            <option value="electronics">Electronics</option>
+            <option value="clothing">Clothing</option>
+            <option value="books">Books</option>
+        </select>
+    </div>
 
-    <ul data-pac-bind="foreach:todos then onTodosUpdated" data-pac-item="todo" data-pac-index="i">
-        <li>
-            <input type="checkbox" data-pac-bind="checked:todo.completed">
-            <span>{{todo.text}}</span>
-            <button data-pac-bind="click:removeTodo">Remove</button>
-        </li>
-    </ul>
+    <div>
+        <label>Select Subcategory:</label>
+        <select data-pac-bind="foreach:subcategories" data-pac-item="item">
+            <option data-pac-bind="value: item.value">{{item.label}}</option>
+        </select>
+    </div>
 
-    <p>Status: <span>{{status}}</span></p>
+    <div data-pac-bind="visible:selectedCategory">
+        <p>Selected Category: <strong>{{selectedCategory}}</strong></p>
+    </div>
+
+    <div data-pac-bind="visible:selectedSubcategory">
+        <p>Selected Subcategory: <strong>{{selectedSubcategory}}</strong></p>
+    </div>
 </div>
 
 <script src="../wakapac.js"></script>
 <script>
-    const todoList = wakaPAC('#todolist', {
-        newTodo: '',
-        status: 'Ready',
-        todos: [
-            { text: 'Learn WakaPAC', completed: false },
-            { text: 'Build something cool', completed: false }
+    const dropdowns = wakaPAC('#dropdowns', {
+        selectedCategory: '',
+        selectedSubcategory: '',
+        subcategories: [
+            { value: '', label: '-- Select Category First --' }
         ],
 
-        addTodo() {
-            if (this.newTodo.trim()) {
-                this.todos.push({
-                    text: this.newTodo.trim(),
-                    completed: false
-                });
+        categoryData: {
+            electronics: [
+                { value: '', label: '-- Choose Subcategory --' },
+                { value: 'phones', label: 'Mobile Phones' },
+                { value: 'laptops', label: 'Laptops' },
+                { value: 'tablets', label: 'Tablets' },
+                { value: 'headphones', label: 'Headphones' }
+            ],
+            clothing: [
+                { value: '', label: '-- Choose Subcategory --' },
+                { value: 'shirts', label: 'Shirts' },
+                { value: 'pants', label: 'Pants' },
+                { value: 'dresses', label: 'Dresses' },
+                { value: 'shoes', label: 'Shoes' }
+            ],
+            books: [
+                { value: '', label: '-- Choose Subcategory --' },
+                { value: 'fiction', label: 'Fiction' },
+                { value: 'non-fiction', label: 'Non-Fiction' },
+                { value: 'science', label: 'Science' },
+                { value: 'history', label: 'History' }
+            ]
+        },
 
-                this.newTodo = '';
+        updateSubcategories() {
+            console.log('updateSubcategories called! selectedCategory:', this.selectedCategory);
+
+            // Clear the current subcategory selection
+            this.selectedSubcategory = '';
+
+            // Update subcategories based on selected category
+            if (this.selectedCategory && this.categoryData[this.selectedCategory]) {
+                console.log('Setting subcategories to:', this.categoryData[this.selectedCategory]);
+                this.subcategories = this.categoryData[this.selectedCategory];
+            } else {
+                console.log('Setting subcategories to default');
+                this.subcategories = [
+                    { value: '', label: '-- Select Category First --' }
+                ];
             }
-        },
 
-        removeTodo(todo, index) {
-            this.todos.splice(index, 1);
-        },
-
-        onTodosUpdated(todos, meta) {
-            this.status = `List updated with ${todos.length} items`;
-            console.log('Todos changed:', meta);
+            console.log('subcategories is now:', this.subcategories);
         }
     });
 </script>

@@ -1985,18 +1985,26 @@
 
             /**
              * Handles DOM events with routing to appropriate handlers
+             * Processes both form input events and custom event bindings
+             * @param {Event} event - The DOM event object
              */
             handleEvent(event) {
+                // Extract event type and target element for processing
                 const {type, target} = event;
+
+                // Get the property name from data attribute (used for form binding)
                 const property = target.getAttribute('data-pac-property');
 
-                // Handle form input events
+                // Handle form input events ONLY if there's a data-pac-property
+                // This ensures we only process elements that are bound to data properties
                 if ((type === 'input' || type === 'change') && property) {
+                    // Route to specialized input handler for form data binding
                     this.handleInputEvent(event, target, property);
-                    return;
                 }
 
-                // Handle custom event bindings
+                // Always also check for custom event bindings
+                // This allows for additional event handling beyond form inputs
+                // (e.g., clicks, custom events, etc.)
                 this.handleCustomEvent(event, type, target);
             },
 
