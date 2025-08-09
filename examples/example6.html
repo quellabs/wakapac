@@ -1,0 +1,24 @@
+<html>
+<body>
+
+<div id="test">
+	
+	<select name="test" data-pac-bind="value: test">
+		<option>1</option>
+		<option>2</option>
+		<option>3</option>
+		<option>4</option>
+	</select>
+	
+	Selected option: {{ test }}
+	
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const test = wakaPAC('#test', {
+        test: '1',
+    });
+</script>
+</body>
+</html>

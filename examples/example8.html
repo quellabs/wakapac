@@ -1,0 +1,138 @@
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .demo-box {
+            border: 2px solid #ccc;
+            margin: 10px 0;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        .controls { margin: 10px 0; }
+        button { padding: 8px 12px; margin: 4px; cursor: pointer; }
+        input[type="range"] { width: 200px; margin: 0 10px; }
+        input[type="color"] { margin: 0 5px; }
+    </style>
+</head>
+<body>
+
+<div id="style-demo">
+    <!-- Main demo box with dynamic styles -->
+    <div class="demo-box" data-pac-bind="style: boxStyles">
+        <h3>Dynamic Styled Box</h3>
+        <p>Width: {{width}}px | Height: {{height}}px</p>
+        <p>Background: {{backgroundColor}} | Color: {{textColor}}</p>
+        <p>Border Radius: {{borderRadius}}px</p>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <h4>Size Controls:</h4>
+        <label>Width: <input type="range" min="200" max="600" data-pac-bind="value: width"></label>
+        <span>{{width}}px</span><br>
+
+        <label>Height: <input type="range" min="100" max="400" data-pac-bind="value: height"></label>
+        <span>{{height}}px</span><br>
+
+        <label>Border Radius: <input type="range" min="0" max="50" data-pac-bind="value: borderRadius"></label>
+        <span>{{borderRadius}}px</span>
+    </div>
+
+    <div class="controls">
+        <h4>Color Controls:</h4>
+        <label>Background: <input type="color" data-pac-bind="value: backgroundColor"></label>
+        <label>Text Color: <input type="color" data-pac-bind="value: textColor"></label>
+    </div>
+
+    <div class="controls">
+        <h4>Quick Presets:</h4>
+        <button data-pac-bind="click: setRedTheme">Red Theme</button>
+        <button data-pac-bind="click: setBlueTheme">Blue Theme</button>
+        <button data-pac-bind="click: setGreenTheme">Green Theme</button>
+        <button data-pac-bind="click: resetStyles">Reset</button>
+    </div>
+
+    <!-- Second demo box with different style binding -->
+    <div class="demo-box" data-pac-bind="style: borderStyle">
+        <h3>Dynamic Border Box</h3>
+        <p>Border width: {{borderWidth}}px | Border color: {{borderColor}}</p>
+    </div>
+
+    <div class="controls">
+        <label>Border Width: <input type="range" min="1" max="10" data-pac-bind="value: borderWidth"></label>
+        <span>{{borderWidth}}px</span><br>
+        <label>Border Color: <input type="color" data-pac-bind="value: borderColor"></label>
+    </div>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const styleDemo = wakaPAC('#style-demo', {
+        // Size properties
+        width: 300,
+        height: 200,
+        borderRadius: 10,
+
+        // Color properties
+        backgroundColor: '#f0f8ff',
+        textColor: '#333333',
+
+        // Border properties
+        borderWidth: 2,
+        borderColor: '#4169e1',
+
+        computed: {
+            // Main box styles object
+            boxStyles() {
+                return {
+                    width: this.width + 'px',
+                    height: this.height + 'px',
+                    backgroundColor: this.backgroundColor,
+                    color: this.textColor,
+                    borderRadius: this.borderRadius + 'px'
+                };
+            },
+
+            // Border box styles object
+            borderStyle() {
+                return {
+                    borderWidth: this.borderWidth + 'px',
+                    borderColor: this.borderColor,
+                    borderStyle: 'solid'
+                };
+            }
+        },
+
+        // Theme preset methods
+        setRedTheme() {
+            this.backgroundColor = '#ffebee';
+            this.textColor = '#c62828';
+            this.borderRadius = 20;
+        },
+
+        setBlueTheme() {
+            this.backgroundColor = '#e3f2fd';
+            this.textColor = '#1565c0';
+            this.borderRadius = 5;
+        },
+
+        setGreenTheme() {
+            this.backgroundColor = '#e8f5e8';
+            this.textColor = '#2e7d32';
+            this.borderRadius = 15;
+        },
+
+        resetStyles() {
+            this.width = 300;
+            this.height = 200;
+            this.borderRadius = 10;
+            this.backgroundColor = '#f0f8ff';
+            this.textColor = '#333333';
+            this.borderWidth = 2;
+            this.borderColor = '#4169e1';
+        }
+    });
+</script>
+</body>
+</html>

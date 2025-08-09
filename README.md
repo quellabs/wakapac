@@ -68,54 +68,54 @@ import { wakaPAC } from './wakapac.js';
     <script src="wakapac.min.js"></script>
 </head>
 <body>
-    <div id="my-app">
-        <h1>Hello {{fullName}}!</h1>
-        <p>You clicked {{count}} times</p>
-        <p>Double count: {{doubleCount}}</p>
+<div id="my-app">
+    <h1>Hello {{fullName}}!</h1>
+    <p>You clicked {{count}} times</p>
+    <p>Double count: {{doubleCount}}</p>
 
-        <input data-pac-bind="value:firstName" placeholder="First name">
-        <input data-pac-bind="value:lastName" placeholder="Last name">
+    <input data-pac-bind="value:firstName" placeholder="First name">
+    <input data-pac-bind="value:lastName" placeholder="Last name">
 
-        <button data-pac-bind="click:increment">Click me!</button>
+    <button data-pac-bind="click:increment">Click me!</button>
 
-        <div data-pac-bind="visible:showMessage">
-            This message is conditionally shown!
-        </div>
-        <div data-pac-bind="visible:!hideWelcome">
-            Welcome message (hidden when hideWelcome is true)
-        </div>
+    <div data-pac-bind="visible:showMessage">
+        This message is conditionally shown!
     </div>
+    <div data-pac-bind="visible:!hideWelcome">
+        Welcome message (hidden when hideWelcome is true)
+    </div>
+</div>
 
-    <script>
-        wakaPAC('#my-app', {
-            // Abstraction: Your data and business logic
-            firstName: 'John',
-            lastName: 'Doe',
-            count: 0,
-            showMessage: true,
-            hideWelcome: false,
+<script>
+    wakaPAC('#my-app', {
+        // Abstraction: Your data and business logic
+        firstName: 'John',
+        lastName: 'Doe',
+        count: 0,
+        showMessage: true,
+        hideWelcome: false,
 
-            // Computed properties (like Vue computed or Knockout computed observables)
-            computed: {
-                fullName() {
-                    return this.firstName + ' ' + this.lastName;
-                },
-                doubleCount() {
-                    return this.count * 2;
-                }
+        // Computed properties (like Vue computed or Knockout computed observables)
+        computed: {
+            fullName() {
+                return this.firstName + ' ' + this.lastName;
             },
-
-            // Methods (like React methods or Vue methods)
-            increment() {
-                this.count++;
-                if (this.count > 5) {
-                    this.showMessage = false;
-                }
+            doubleCount() {
+                return this.count * 2;
             }
-        });
-        // Control layer automatically created by WakaPAC
-        // Presentation layer is your HTML template above
-    </script>
+        },
+
+        // Methods (like React methods or Vue methods)
+        increment() {
+            this.count++;
+            if (this.count > 5) {
+                this.showMessage = false;
+            }
+        }
+    });
+    // Control layer automatically created by WakaPAC
+    // Presentation layer is your HTML template above
+</script>
 </body>
 </html>
 ```
@@ -244,7 +244,57 @@ Use `data-pac-bind` to bind data to element attributes:
 <!-- Visibility binding -->
 <div data-pac-bind="visible:showDetails">Details here</div>
 <div data-pac-bind="visible:!hideContent">Content</div>
+
+<!-- Enable/Disable controls -->
+<button data-pac-bind="enable:isFormValid">Submit</button>
+<input data-pac-bind="enable:!isReadOnly" type="text">
 ```
+
+### Enable/Disable Binding
+
+The `enable` binding provides an intuitive way to control whether form elements are enabled or disabled:
+
+```html
+<!-- ✅ Enable button when form is valid -->
+<button data-pac-bind="enable:isFormValid">Submit</button>
+
+<!-- ✅ Disable input when in read-only mode -->
+<input data-pac-bind="enable:!isReadOnly" type="text" placeholder="Enter data">
+
+<!-- ✅ Enable select when user has permission -->
+<select data-pac-bind="enable:hasEditPermission">
+    <option>Option 1</option>
+    <option>Option 2</option>
+</select>
+
+<!-- ✅ Complex expressions -->
+<button data-pac-bind="enable:user.isAdmin && !isLoading">Admin Action</button>
+```
+
+```javascript
+wakaPAC('#form-app', {
+    isFormValid: false,
+    isReadOnly: false,
+    hasEditPermission: true,
+    isLoading: false,
+    user: { isAdmin: true },
+
+    validateForm() {
+        // Update form validity
+        this.isFormValid = this.name && this.email && this.password;
+    },
+
+    toggleReadOnly() {
+        this.isReadOnly = !this.isReadOnly;
+    }
+});
+```
+
+**How `enable` works:**
+- When the bound expression is `true`, the element is enabled (no `disabled` attribute)
+- When the bound expression is `false`, the element is disabled (`disabled="disabled"`)
+- The `enable` binding is the logical opposite of the `disabled` attribute
+- Works with all form elements: `<input>`, `<button>`, `<select>`, `<textarea>`
 
 ### Conditional Attribute Binding
 
@@ -616,6 +666,51 @@ const app = wakaPAC('#app', {
 });
 ```
 
+## 🔍 DOM Value Reading
+
+WakaPAC provides a convenient method to read values from DOM elements:
+
+### Basic Usage
+
+```javascript
+const app = wakaPAC('#app', {
+    validateForm() {
+        // Read current values from form inputs
+        const email = this.readDOMValue('#email-input');
+        const agreeToTerms = this.readDOMValue('#terms-checkbox');
+        
+        return email.includes('@') && agreeToTerms;
+    }
+});
+```
+
+### Supported Input Types
+
+```html
+<!-- Text inputs (returns string) -->
+<input id="username" type="text">
+<textarea id="message"></textarea>
+
+<!-- Checkboxes (returns boolean) -->
+<input id="newsletter" type="checkbox">
+
+<!-- Radio buttons (returns selected value) -->
+<input name="gender" type="radio" value="male">
+<input name="gender" type="radio" value="female">
+
+<!-- Select dropdowns (returns selected value) -->
+<select id="country">
+    <option value="us">United States</option>
+    <option value="uk">United Kingdom</option>
+</select>
+```
+
+**Return Value Types:**
+- **Text inputs, textareas, selects**: Returns `string` value
+- **Checkboxes**: Returns `boolean` (true if checked, false if unchecked)
+- **Radio buttons**: Returns `string` value of the checked option, or empty string if none checked
+- **Other elements**: Returns `textContent` or `innerText` as `string`
+
 ## 📋 API Reference
 
 ### Creating a PAC Component
@@ -651,6 +746,7 @@ const component = wakaPAC(selector, abstraction, options);
 <!-- Conditional attributes -->
 <div data-pac-bind="class:isActive ? 'btn-primary' : 'btn-secondary'">Button</div>
 <button data-pac-bind="disabled:loading || !isValid">Submit</button>
+<button data-pac-bind="enable:isFormValid && !isSubmitting">Submit</button>
 
 <!-- List rendering -->
 <div data-pac-bind="foreach:items" data-pac-item="item" data-pac-index="index">
@@ -671,7 +767,8 @@ const component = wakaPAC(selector, abstraction, options);
 - `findChild(predicate)`: Find child matching predicate
 - `findChildren(predicate)`: Find all children matching predicate
 
-#### Server Communication
+#### DOM Interaction
+- `readDOMValue(selector)`: Read current value from DOM element
 - `control(url, options)`: Built-in fetch wrapper
 
 #### Lifecycle

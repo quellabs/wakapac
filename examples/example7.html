@@ -1,0 +1,53 @@
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .light { background: #fff; color: #333; }
+        .dark { background: #333; color: #fff; }
+        .primary { background: #007bff; color: white; }
+        button { padding: 8px 12px; margin: 4px; cursor: pointer; }
+        div { padding: 10px; margin: 10px 0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div id="theme-switcher">
+    <div data-pac-bind="class: currentTheme">
+        <h2>Dynamic Theme Example</h2>
+        <p>Current theme: {{currentTheme}}</p>
+        <p>Is dark mode: {{isDarkMode}}</p>
+    </div>
+
+    <button data-pac-bind="click: setLightTheme">Light Theme</button>
+    <button data-pac-bind="click: setDarkTheme">Dark Theme</button>
+    <button data-pac-bind="click: setPrimaryTheme">Primary Theme</button>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const themeSwitcher = wakaPAC('#theme-switcher', {
+        currentTheme: 'light',
+        currentSize: 'normal',
+        showSizeDemo: true,
+
+        computed: {
+            isDarkMode() {
+                return this.currentTheme === 'dark';
+            }
+        },
+
+        setLightTheme() {
+            this.currentTheme = 'light';
+        },
+
+        setDarkTheme() {
+            this.currentTheme = 'dark';
+        },
+
+        setPrimaryTheme() {
+            this.currentTheme = 'primary';
+        }
+    });
+</script>
+</body>
+</html>
