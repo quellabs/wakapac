@@ -16,16 +16,16 @@
 
     <div>
         <label>Select Subcategory:</label>
-        <select data-pac-bind="foreach:subcategories" data-pac-item="item">
+        <select data-pac-bind="value: selectedSubcategory, foreach: subcategories" data-pac-item="item">
             <option data-pac-bind="value: item.value">{{item.label}}</option>
         </select>
     </div>
 
-    <div data-pac-bind="visible:selectedCategory">
+    <div data-pac-bind="visible: selectedCategory">
         <p>Selected Category: <strong>{{selectedCategory}}</strong></p>
     </div>
 
-    <div data-pac-bind="visible:selectedSubcategory">
+    <div data-pac-bind="visible: selectedSubcategory">
         <p>Selected Subcategory: <strong>{{selectedSubcategory}}</strong></p>
     </div>
 </div>
@@ -64,23 +64,17 @@
         },
 
         updateSubcategories() {
-            console.log('updateSubcategories called! selectedCategory:', this.selectedCategory);
-
             // Clear the current subcategory selection
             this.selectedSubcategory = '';
 
             // Update subcategories based on selected category
             if (this.selectedCategory && this.categoryData[this.selectedCategory]) {
-                console.log('Setting subcategories to:', this.categoryData[this.selectedCategory]);
                 this.subcategories = this.categoryData[this.selectedCategory];
             } else {
-                console.log('Setting subcategories to default');
                 this.subcategories = [
                     { value: '', label: '-- Select Category First --' }
                 ];
             }
-
-            console.log('subcategories is now:', this.subcategories);
         }
     });
 </script>
