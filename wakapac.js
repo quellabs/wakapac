@@ -1023,72 +1023,176 @@
 
             /**
              * Finds and creates attribute bindings data-pac-bind="..."
+             * This method processes all elements with data-pac-bind attributes and sets up
+             * the appropriate binding types. It handles deferred bindings for cases where
+             * foreach bindings need to complete before value/checked bindings are processed.
              */
             setupAttributeBindings() {
-                // Find all elements in the container that have the data-pac-bind attribute
-                // This attribute contains binding configurations for data binding
+                // Find all elements in the container that have data-pac-bind attributes
                 const elements = this.container.querySelectorAll('[data-pac-bind]');
 
-                // Process each element that has binding attributes
+                // Array to store bindings that need to be processed after foreach completes
+                const deferredBindings = [];
+
+                // Process each element with binding attributes
                 Array.from(elements).forEach(element => {
-                    // Get the binding configuration string from the data-pac-bind attribute
-                    // Example: "value:userName,visible:isLoggedIn"
+                    // Get the binding string (e.g., "foreach:items,value:name")
                     const bindingString = element.getAttribute('data-pac-bind');
 
-                    // Split by comma to handle multiple bindings on a single element
-                    // Then process each individual binding configuration
-                    bindingString.split(',').forEach(bind => {
-                        // Parse the binding format "type:target" (e.g., "value:userName")
-                        // type = binding type (value, visible, foreach, etc.)
-                        // target = property name or expression to bind to
+                    // Parse the binding string into individual binding pairs
+                    // Split by comma, then split each pair by colon to get type:target
+                    const bindingPairs = bindingString.split(',').map(bind => {
                         const [type, target] = bind.trim().split(':').map(s => s.trim());
+                        return { type, target };
+                    });
 
-                        // Handle different binding types based on the specified type
-                        let binding; // Will hold the created binding object
+                    // Check if this element has a foreach binding
+                    const hasForeach = bindingPairs.some(b => b.type === 'foreach');
 
-                        if (type === 'foreach') {
-                            // Create a repeating template binding for arrays/collections
-                            // Used to render lists of items dynamically
-                            binding = this.createForeachBinding(element, target);
-                            element.innerHTML = ''; // Clear the template content after creating binding
-                        } else if (type === 'visible') {
-                            // Create a visibility binding to show/hide elements based on data
-                            binding = this.createVisibilityBinding(element, target);
-                        } else if (type === 'value') {
-                            // Set up two-way data binding for input elements
-                            // This handles both displaying values and capturing user input
-                            this.setupInputElement(element, target);
-                            binding = this.createInputBinding(element, target);
-                        } else if (type === 'checked') {
-                            // Handle checkbox and radio button checked state
-                            if (element.type === 'radio') {
-                                // Special handling: radio buttons should use 'value' binding instead of 'checked'
-                                // This is because radio buttons typically bind to a value, not just a boolean
-                                console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
-                                this.setupInputElement(element, target);
-                                binding = this.createInputBinding(element, target);
-                            } else {
-                                // For checkboxes, set up checked state binding
-                                this.setupInputElement(element, target, 'checked');
-                                binding = this.createCheckedBinding(element, target);
-                            }
-                        } else if (Utils.isEventType(type)) {
-                            // Handle event bindings (click, change, etc.)
-                            // These bind DOM events to methods or functions
-                            binding = this.createEventBinding(element, type, target);
-                        } else if (target) {
-                            // Default case: create a generic attribute binding
-                            // This handles binding data to any HTML attribute (class, src, href, etc.)
-                            binding = this.createAttributeBinding(element, type, target);
+                    // Determine if a binding type needs to be deferred
+                    // Value and checked bindings must wait for foreach to complete first
+                    const needsDefer = (type) => (type === 'value' || type === 'checked') && hasForeach;
+
+                    // Process each binding pair for this element
+                    bindingPairs.forEach(({ type, target }) => {
+                        // If this binding needs to be deferred, add it to the deferred array
+                        if (needsDefer(type)) {
+                            deferredBindings.push({ type, target, element });
+                            return; // Skip processing now, will handle later
                         }
 
-                        // If a binding was successfully created, store it in the bindings collection
-                        // The binding ID is used for later reference and cleanup
+                        // Create the binding immediately for non-deferred types
+                        const binding = this.createBindingByType(element, type, target);
                         if (binding) {
+                            // Store the binding in the bindings map using its unique ID
                             this.bindings.set(binding.id, binding);
                         }
                     });
                 });
+
+                // Process deferred bindings after foreach completes
+                // This ensures DOM manipulation from foreach is finished before
+                // setting up value/checked bindings on the newly created elements
+                if (deferredBindings.length > 0) {
+                    setTimeout(() => {
+                        deferredBindings.forEach(({ type, target, element }) => {
+                            // Create the deferred binding
+                            const binding = this.createBindingByType(element, type, target);
+                            if (binding) {
+                                // Store the binding in the bindings map
+                                this.bindings.set(binding.id, binding);
+
+                                // Add to binding index for property-based lookups
+                                this.addToBindingIndex(binding);
+
+                                // Immediately update the binding with current data
+                                // Get the current value from the abstraction layer
+                                this.updateBinding(binding, binding.property,
+                                    Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property));
+                            }
+                        });
+                    }, 0); // Use setTimeout(0) to defer to next event loop cycle
+                }
+            },
+
+            /**
+             * Helper method to create bindings by type (extracted for reuse)
+             * This method acts as a factory for different binding types based on the
+             * binding type string and target property.
+             * @param {HTMLElement} element - The DOM element to bind to
+             * @param {string} type - The type of binding (foreach, visible, value, etc.)
+             * @param {string} target - The target property or method name
+             * @returns {Object|null} The created binding object, or null if invalid
+             */
+            createBindingByType(element, type, target) {
+                if (type === 'foreach') {
+                    // Create a foreach binding for iterating over arrays/collections
+                    const binding = this.createForeachBinding(element, target);
+
+                    // Clear the element's content as foreach will populate it
+                    element.innerHTML = '';
+                    return binding;
+                }
+
+                if (type === 'visible') {
+                    // Create a visibility binding to show/hide elements
+                    return this.createVisibilityBinding(element, target);
+                }
+
+                if (type === 'value') {
+                    // Set up the input element for two-way data binding
+                    this.setupInputElement(element, target);
+
+                    // Create the value binding for form inputs
+                    return this.createInputBinding(element, target);
+                }
+
+                if (type === 'checked') {
+                    // Handle checked bindings for checkboxes and radio buttons
+                    if (element.type === 'radio') {
+                        // Radio buttons should use value binding, not checked binding
+                        console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
+                        this.setupInputElement(element, target);
+                        return this.createInputBinding(element, target);
+                    }
+
+                    // For checkboxes, set up checked binding
+                    this.setupInputElement(element, target, 'checked');
+                    return this.createCheckedBinding(element, target);
+                }
+
+                if (Utils.isEventType(type)) {
+                    // Handle event bindings (click, change, etc.)
+                    return this.createEventBinding(element, type, target);
+                }
+
+                if (target) {
+                    // Default case: create an attribute binding for any other type
+                    // This handles custom attributes, text content, etc.
+                    return this.createAttributeBinding(element, type, target);
+                }
+
+                return null;
+            },
+
+            /**
+             * Helper method to add binding to index (extracted for reuse)
+             *
+             * This method maintains a bidirectional index that tracks:
+             * 1. Which bindings are associated with each property
+             * 2. Which bindings depend on each property for dependency resolution
+             *
+             * @param {Object} binding - The binding object to add to the index
+             * @param {string} binding.property - The property this binding is bound to
+             * @param {Array} binding.dependencies - Array of property names this binding depends on
+             */
+            addToBindingIndex(binding) {
+                // Index the binding by its own property (if it has one)
+                // This allows quick lookup of all bindings associated with a specific property
+                if (binding.property) {
+                    // Initialize a new Set for this property if it doesn't exist yet
+                    if (!this.bindingIndex.has(binding.property)) {
+                        this.bindingIndex.set(binding.property, new Set());
+                    }
+                    // Add this binding to the property's set
+                    // Using Set ensures no duplicate bindings for the same property
+                    this.bindingIndex.get(binding.property).add(binding);
+                }
+
+                // Index the binding by each of its dependencies
+                // This enables efficient dependency resolution and change propagation
+                if (binding.dependencies) {
+                    binding.dependencies.forEach(dep => {
+                        // Initialize a new Set for this dependency if it doesn't exist yet
+                        if (!this.bindingIndex.has(dep)) {
+                            this.bindingIndex.set(dep, new Set());
+                        }
+
+                        // Add this binding to the dependency's set
+                        // When the dependency changes, we can quickly find all affected bindings
+                        this.bindingIndex.get(dep).add(binding);
+                    });
+                }
             },
 
             /**
