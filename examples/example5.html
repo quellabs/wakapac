@@ -72,7 +72,7 @@
 
         computed: {
             bothSelected() {
-                return this.selectedColor && this.selectedSize;
+                return !!(this.selectedColor && this.selectedSize);
             },
 
             debugInfo() {
