@@ -11,15 +11,15 @@
 <div id="test-form">
     <h3>Test 1: Basic Radio Group</h3>
     <label>
-        <input type="radio" name="color" value="red" data-pac-bind="value:selectedColor">
+        <input type="radio" name="color" value="red" data-pac-bind="value: selectedColor">
         Red
     </label><br>
     <label>
-        <input type="radio" name="color" value="green" data-pac-bind="value:selectedColor">
+        <input type="radio" name="color" value="green" data-pac-bind="value: selectedColor">
         Green
     </label><br>
     <label>
-        <input type="radio" name="color" value="blue" data-pac-bind="value:selectedColor">
+        <input type="radio" name="color" value="blue" data-pac-bind="value: selectedColor">
         Blue
     </label><br>
 
@@ -29,15 +29,15 @@
 
     <h3>Test 2: Another Radio Group</h3>
     <label>
-        <input type="radio" name="size" value="small" data-pac-bind="value:selectedSize">
+        <input type="radio" name="size" value="small" data-pac-bind="value: selectedSize">
         Small
     </label><br>
     <label>
-        <input type="radio" name="size" value="medium" data-pac-bind="value:selectedSize">
+        <input type="radio" name="size" value="medium" data-pac-bind="value: selectedSize">
         Medium
     </label><br>
     <label>
-        <input type="radio" name="size" value="large" data-pac-bind="value:selectedSize">
+        <input type="radio" name="size" value="large" data-pac-bind="value: selectedSize">
         Large
     </label><br>
 
@@ -46,19 +46,19 @@
     <hr>
 
     <h3>Test 3: Conditional Display</h3>
-    <div data-pac-bind="visible:selectedColor">
+    <div data-pac-bind="visible: selectedColor">
         <p>You chose the color: <strong>{{selectedColor}}</strong></p>
     </div>
 
-    <div data-pac-bind="visible:bothSelected">
+    <div data-pac-bind="visible: bothSelected">
         <p>Complete selection: {{selectedColor}} {{selectedSize}}</p>
     </div>
 
     <hr>
 
     <h3>Debug Info</h3>
-    <button data-pac-bind="click:resetForm">Reset Form</button>
-    <button data-pac-bind="click:setDefaults">Set Defaults</button>
+    <button data-pac-bind="click: resetForm">Reset Form</button>
+    <button data-pac-bind="click: setDefaults">Set Defaults</button>
 
     <pre>{{debugInfo}}</pre>
 </div>
