@@ -1597,8 +1597,8 @@
 
                         break;
 
-                    case 'enabled':
-                        // Handle 'enabled' as reverse of 'disabled'
+                    case 'enable':
+                        // Handle 'enable' as reverse of 'disabled'
                         if (value) {
                             element.removeAttribute('disabled');
                         } else {
