@@ -778,7 +778,7 @@
                 // Short-circuit evaluation
                 if (operator === '&&') {
                     return leftResult ? this.evaluateCondition(right.trim(), context) : false;
-                } else if (operator === '||') {
+                } else {
                     return leftResult ? true : this.evaluateCondition(right.trim(), context);
                 }
             }
