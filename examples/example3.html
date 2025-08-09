@@ -6,10 +6,10 @@
         <input data-pac-bind="value: email" type="email" placeholder="Email">
         <span data-pac-bind="visible: emailError" class="error">{{emailError}}</span>
 
-        <input data-pac-bind="value: password" type="password" placeholder="Password">
+        <input data-pac-bind="value: password" type="password" placeholder="Password (minimum 6 characters)">
         <span data-pac-bind="visible: passwordError" class="error">{{passwordError}}</span>
 
-        <button type="submit" data-pac-bind="disabled:!isValid">Sign Up</button>
+        <button type="submit" data-pac-bind="enable: isValid">Sign Up</button>
     </form>
 
     <p><strong>Note:</strong> Client-side validation is for user experience only. All validation must also be performed on the server side for security.</p>
