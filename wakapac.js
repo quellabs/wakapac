@@ -1106,13 +1106,7 @@
             },
 
             /**
-             * Reorders binding pairs to ensure optimal execution order:
-             * 1. foreach bindings (DOM structure changes)
-             * 2. visible bindings (element visibility)
-             * 3. value/checked bindings (form state)
-             * 4. event bindings (user interactions)
-             * 5. attribute bindings (other attributes)
-             *
+             * Reorders binding pairs to ensure optimal execution order
              * @param {Array} bindingPairs - Array of {type, target} objects
              * @returns {Array} Reordered binding pairs
              */
@@ -1120,24 +1114,25 @@
                 // Define binding priority order (lower number = higher priority)
                 const priorityOrder = {
                     'foreach': 1,    // Must come first - creates DOM structure
-                    'visible': 2,    // Show/hide elements before setting their values
-                    'value': 3,      // Form values after DOM exists
-                    'checked': 3,    // Checkbox state after DOM exists
-                    'click': 4,      // Event handlers after elements are ready
-                    'change': 4,     // Event handlers after elements are ready
-                    'input': 4,      // Event handlers after elements are ready
-                    'submit': 4,     // Event handlers after elements are ready
-                    'focus': 4,      // Event handlers after elements are ready
-                    'blur': 4,       // Event handlers after elements are ready
-                    'keyup': 4,      // Event handlers after elements are ready
-                    'keydown': 4,    // Event handlers after elements are ready
-                    // All other bindings get priority 5 (attributes, etc.)
+                    'if': 2,         // Conditional DOM existence - before visibility
+                    'visible': 3,    // Show/hide elements before setting their values
+                    'value': 4,      // Form values after DOM exists and is visible
+                    'checked': 4,    // Checkbox state after DOM exists and is visible
+                    'click': 5,      // Event handlers after elements are ready
+                    'change': 5,     // Event handlers after elements are ready
+                    'input': 5,      // Event handlers after elements are ready
+                    'submit': 5,     // Event handlers after elements are ready
+                    'focus': 5,      // Event handlers after elements are ready
+                    'blur': 5,       // Event handlers after elements are ready
+                    'keyup': 5,      // Event handlers after elements are ready
+                    'keydown': 5,    // Event handlers after elements are ready
+                    // All other bindings get priority 6 (attributes, etc.)
                 };
 
                 // Sort bindings by priority, maintaining original order for same priority
                 return bindingPairs.sort((a, b) => {
-                    const priorityA = priorityOrder[a.type] || 5;
-                    const priorityB = priorityOrder[b.type] || 5;
+                    const priorityA = priorityOrder[a.type] || 6;
+                    const priorityB = priorityOrder[b.type] || 6;
                     return priorityA - priorityB;
                 });
             },
