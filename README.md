@@ -227,68 +227,48 @@ wakaPAC('#app', {
 Use `data-pac-bind` to bind data to element attributes:
 
 ```html
+<!-- Simple attribute binding -->
+<div data-pac-bind="class: statusClass, title: statusText"></div>
+
 <!-- Two-way data binding -->
-<input type="text" data-pac-bind="value:name">
-<textarea data-pac-bind="value:description"></textarea>
-<select data-pac-bind="value:category">
+<input type="text" data-pac-bind="value: name">
+<textarea data-pac-bind="value: description"></textarea>
+<select data-pac-bind="value: category">
     <option value="A">Category A</option>
     <option value="B">Category B</option>
 </select>
 
-<!-- Checkbox binding -->
+<!-- Checkbox binding (boolean values) -->
 <input type="checkbox" data-pac-bind="checked:isActive">
+<input type="checkbox" data-pac-bind="checked:user.hasPermission">
 
-<!-- Simple attribute binding -->
-<div data-pac-bind="class:statusClass,title:statusText"></div>
+<!-- Radio button groups (use value binding, NOT checked) -->
+<input type="radio" name="theme" value="light" data-pac-bind="value:selectedTheme">
+<input type="radio" name="theme" value="dark" data-pac-bind="value:selectedTheme">
+<input type="radio" name="theme" value="auto" data-pac-bind="value:selectedTheme">
 
-<!-- Visibility binding -->
-<div data-pac-bind="visible:showDetails">Details here</div>
-<div data-pac-bind="visible:!hideContent">Content</div>
+<!-- Radio buttons with complex values -->
+<input type="radio" name="plan" value="free" data-pac-bind="value:user.plan">
+<input type="radio" name="plan" value="pro" data-pac-bind="value:user.plan">
+<input type="radio" name="plan" value="enterprise" data-pac-bind="value:user.plan">
+
+<!-- Multiple bindings on single elements -->
+<div data-pac-bind="class:statusClass,style:dynamicStyle"></div>
+<button data-pac-bind="click:handleSubmit,enable:isFormValid,class:buttonClass">Submit</button>
+<img data-pac-bind="src:imageUrl,alt:imageDescription">
+<input data-pac-bind="value:searchTerm,placeholder:searchPlaceholder">
+<a data-pac-bind="href:linkUrl,title:linkTooltip">{{linkText}}</a>
 
 <!-- Enable/Disable controls -->
 <button data-pac-bind="enable:isFormValid">Submit</button>
 <input data-pac-bind="enable:!isReadOnly" type="text">
 ```
 
-### Enable/Disable Binding
-
-The `enable` binding provides an intuitive way to control whether form elements are enabled or disabled:
-
-```html
-<!-- ✅ Enable button when form is valid -->
-<button data-pac-bind="enable:isFormValid">Submit</button>
-
-<!-- ✅ Disable input when in read-only mode -->
-<input data-pac-bind="enable:!isReadOnly" type="text" placeholder="Enter data">
-
-<!-- ✅ Enable select when user has permission -->
-<select data-pac-bind="enable:hasEditPermission">
-    <option>Option 1</option>
-    <option>Option 2</option>
-</select>
-
-<!-- ✅ Complex expressions -->
-<button data-pac-bind="enable:user.isAdmin && !isLoading">Admin Action</button>
-```
-
-```javascript
-wakaPAC('#form-app', {
-    isFormValid: false,
-    isReadOnly: false,
-    hasEditPermission: true,
-    isLoading: false,
-    user: { isAdmin: true },
-
-    validateForm() {
-        // Update form validity
-        this.isFormValid = this.name && this.email && this.password;
-    },
-
-    toggleReadOnly() {
-        this.isReadOnly = !this.isReadOnly;
-    }
-});
-```
+**Important Notes:**
+- **Checkboxes**: Use `checked:property` binding with boolean values
+- **Radio buttons**: Use `value:property` binding - the selected radio's value will be stored in the property
+- **Multiple bindings**: Separate with commas, no spaces around colons
+- **Binding order**: WakaPAC automatically reorders bindings for optimal execution (foreach → if → visible → value/checked → events → attributes)
 
 **How `enable` works:**
 - When the bound expression is `true`, the element is enabled (no `disabled` attribute)
@@ -296,26 +276,158 @@ wakaPAC('#form-app', {
 - The `enable` binding is the logical opposite of the `disabled` attribute
 - Works with all form elements: `<input>`, `<button>`, `<select>`, `<textarea>`
 
-### Conditional Attribute Binding
+### Conditional Rendering: `visible` vs `if`
 
-WakaPAC supports powerful conditional expressions directly in attribute bindings:
+WakaPAC provides two ways to conditionally show/hide content:
+
+#### `visible` Binding - CSS Display Control
+```html
+<!-- Element stays in DOM, hidden with display: none -->
+<div data-pac-bind="visible:showDetails">Details here</div>
+<div data-pac-bind="visible:!hideContent">Content</div>
+```
+
+#### `if` Binding - DOM Element Control
+```html
+<!-- This entire div and its contents are added/removed from DOM -->
+<div data-pac-bind="if:user.isAdmin">
+    Admin Panel
+</div>
+<div data-pac-bind="if:!isLoading">Content loaded</div>
+```
+
+#### Visual Comparison
+
+When the condition is **false**:
 
 ```html
-<!-- ✅ Conditional classes -->
-<div data-pac-bind="class:isActive ? 'btn-primary' : 'btn-secondary'">Button</div>
+<!-- visible: element stays in DOM but hidden -->
+<div data-pac-bind="visible:showPanel" style="display: none;">Panel</div>
 
-<!-- ✅ Multiple conditions -->
-<button data-pac-bind="disabled:loading || !isValid">Submit</button>
+<!-- if: element completely absent from DOM -->
+<!-- (nothing rendered, not even a placeholder) -->
+```
 
-<!-- ✅ Complex expressions -->
-<div data-pac-bind="class:user.role === 'admin' && user.isActive ? 'admin-panel' : 'user-panel'">
-    Panel
+#### Quick Reference
+
+| Feature           | `visible`                   | `if`                        |
+|-------------------|-----------------------------|-----------------------------|
+| DOM presence      | Always present              | Added/removed               |
+| Performance       | Better for frequent toggles | Better for rare changes     |
+| Form values       | Preserved when hidden       | Lost when removed           |
+| CSS transitions   | ✅ Supported                 | ❌ Not applicable            |
+| Memory usage      | Higher (elements stay)      | Lower (elements removed)    |
+| SEO/Accessibility | Content always crawlable    | Content excluded when false |
+
+#### When to Use Each
+
+**Use `visible` for:**
+- Content that toggles frequently (better performance)
+- Preserving form input values when hidden
+- CSS transitions and animations
+- Responsive design show/hide patterns
+- When you need content to remain accessible to screen readers
+
+**Use `if` for:**
+- Content that changes infrequently
+- Preventing scripts/resources from loading
+- Better performance with large DOM trees
+- Security-sensitive content that shouldn't exist in DOM
+- Reducing memory usage for complex interfaces
+
+#### Expression Support
+Both bindings support complex expressions:
+
+```html
+<!-- Comparisons -->
+<div data-pac-bind="if:user.role === 'admin'">Admin tools</div>
+<div data-pac-bind="visible:items.length > 0">Item list</div>
+
+<!-- Logical operators -->
+<div data-pac-bind="if:user.isActive && user.hasPermission">Restricted content</div>
+<div data-pac-bind="visible:loading || hasError">Status message</div>
+
+<!-- Complex conditions -->
+<div data-pac-bind="if:user.age >= 18 ? user.hasAccount : false">Adult features</div>
+```
+
+#### Expression Support
+Both bindings support complex expressions:
+
+```html
+<!-- Comparisons -->
+<div data-pac-bind="if:user.role === 'admin'">Admin tools</div>
+<div data-pac-bind="visible:items.length > 0">Item list</div>
+
+<!-- Logical operators -->
+<div data-pac-bind="if:user.isActive && user.hasPermission">Restricted content</div>
+<div data-pac-bind="visible:loading || hasError">Status message</div>
+
+<!-- Complex conditions -->
+<div data-pac-bind="if:user.age >= 18 ? user.hasAccount : false">Adult features</div>
+```
+
+## Update the "Template Syntax Reference" section
+
+Add this line to the conditional rendering section:
+
+```html
+<!-- Conditional rendering -->
+<div data-pac-bind="visible:isLoggedIn">User dashboard</div>
+<div data-pac-bind="visible:!isLoggedIn">Please log in</div>
+<div data-pac-bind="if:user.isAdmin">Admin panel</div>
+<div data-pac-bind="if:!isGuest">Member content</div>
+```
+
+## Add example to "Your First Component" section
+
+Update the quick start example to include an `if` binding:
+
+```html
+<!-- Add this after the existing visible binding example -->
+<div data-pac-bind="if: count > 10">
+    <p>Congratulations! You've clicked more than 10 times!</p>
+    <button data-pac-bind="click:reset">Reset Counter</button>
 </div>
+```
 
-<!-- ✅ Dynamic styles -->
-<div data-pac-bind="style:theme === 'dark' ? 'background: #333; color: white' : 'background: white; color: black'">
-    Content
-</div>
+And add the reset method to the JavaScript:
+
+```javascript
+// Add this method to the component
+reset() {
+    this.count = 0;
+    this.showMessage = true;
+}
+```
+
+## Performance section update
+
+Add this bullet point to the performance features:
+
+- **Smart DOM management** - `if` bindings remove unused elements entirely while `visible` bindings provide fast CSS toggling
+
+## Migration guides updates
+
+### From Vue.js
+```html
+<!-- Vue -->
+<div v-if="isVisible">Content</div>
+<div v-show="isVisible">Content</div>
+
+<!-- WakaPAC -->
+<div data-pac-bind="if: isVisible">Content</div>
+<div data-pac-bind="visible: isVisible">Content</div>
+```
+
+### From React
+```javascript
+// React
+{isVisible && <div>Content</div>}
+{isVisible ? <div>Content</div> : null}
+
+// WakaPAC
+<div data-pac-bind="if: isVisible">Content</div>
 ```
 
 #### Supported Expression Types:
@@ -483,7 +595,10 @@ Control when form inputs update your data model:
 Updates on every keystroke:
 ```html
 <input type="text" data-pac-bind="value:name">
+<span>Hello {{name}}!</span> <!-- Updates as you type -->
 ```
+
+***Use for***: Search fields, real-time validation, character counters
 
 ### Change Mode
 Updates only when input loses focus:
@@ -491,12 +606,16 @@ Updates only when input loses focus:
 <input type="text" data-pac-bind="value:name" data-pac-update-mode="change">
 ```
 
+***Use for:*** Server validation, complex computed properties, auto-save functionality
+
 ### Delayed Mode
-Updates after specified delay (debounced):
+Updates after specified delay (debounced) - best for search and API calls:
 ```html
 <input type="text" data-pac-bind="value:searchQuery"
        data-pac-update-mode="delayed" data-pac-update-delay="500">
 ```
+
+***Use for:*** Search autocomplete, API queries, expensive calculations
 
 ### Global Configuration
 ```javascript
@@ -548,6 +667,12 @@ const app = wakaPAC('#app', {
     }
 });
 ```
+
+**Key Points:**
+- **Item parameter**: The current object from your array
+- **Index parameter**: Zero-based position (0, 1, 2...)
+- **Event parameter**: Standard DOM event with target, type, etc.
+- **This context**: Still refers to your component's abstraction object
 
 ### Foreach Callbacks
 

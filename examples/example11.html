@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WakaPAC Attribute Binding Test</title>
+</head>
+<body>
+<h1>WakaPAC Attribute Binding Test</h1>
+
+<div id="test-app">
+    <h2>Image Attribute Test</h2>
+    <p>Testing src and alt bindings:</p>
+    <img data-pac-bind="src:imageUrl,alt:imageAlt" width="200">
+
+    <h2>Other Attribute Tests</h2>
+    <p>Testing various attributes:</p>
+    <input type="text" data-pac-bind="placeholder:dynamicPlaceholder,value:inputValue">
+    <br><br>
+    <a data-pac-bind="href:linkUrl">{{linkText}}</a>
+    <br><br>
+    <div data-pac-bind="title:tooltipText">Hover over me for tooltip: {{tooltipText}}</div>
+
+    <h2>Controls</h2>
+    <button data-pac-bind="click:changeImage">Change Image</button>
+    <button data-pac-bind="click:changePlaceholder">Change Placeholder</button>
+    <button data-pac-bind="click:changeLink">Change Link</button>
+    <button data-pac-bind="click:changeTooltip">Change Tooltip</button>
+
+    <h2>Current Values</h2>
+    <p>Image URL: {{imageUrl}}</p>
+    <p>Image Alt: {{imageAlt}}</p>
+    <p>Placeholder: {{dynamicPlaceholder}}</p>
+    <p>Link URL: {{linkUrl}}</p>
+    <p>Link Text: {{linkText}}</p>
+    <p>Tooltip: {{tooltipText}}</p>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    wakaPAC('#test-app', {
+        imageUrl: 'https://canvasphp.com/images/custom/funny.png',
+        imageAlt: 'Initial placeholder image',
+        dynamicPlaceholder: 'Enter some text...',
+        inputValue: '',
+        linkUrl: 'https://example.com',
+        linkText: 'Example Link',
+        tooltipText: 'Initial tooltip text',
+
+        changeImage() {
+            this.imageUrl = 'https://canvasphp.com/images/custom/funny-bw.png';
+            this.imageAlt = 'Changed placeholder image';
+        },
+
+        changePlaceholder() {
+            this.dynamicPlaceholder = 'New placeholder text...';
+        },
+
+        changeLink() {
+            this.linkUrl = 'https://github.com';
+            this.linkText = 'GitHub Link';
+        },
+
+        changeTooltip() {
+            this.tooltipText = 'Updated tooltip text!';
+        }
+    });
+</script>
+</body>
+</html>
