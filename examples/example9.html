@@ -1,0 +1,82 @@
+<html>
+<body>
+
+<div id="dropdowns">
+    <h3>Dynamic Dropdowns Example</h3>
+
+    <div>
+        <label>Select Category:</label>
+        <select data-pac-bind="value: selectedCategory, change: updateSubcategories">
+            <option value="">-- Choose Category --</option>
+            <option value="electronics">Electronics</option>
+            <option value="clothing">Clothing</option>
+            <option value="books">Books</option>
+        </select>
+    </div>
+
+    <div>
+        <label>Select Subcategory:</label>
+        <select data-pac-bind="value: selectedSubcategory, foreach: subcategories" data-pac-item="item">
+            <option data-pac-bind="value: item.value">{{item.label}}</option>
+        </select>
+    </div>
+
+    <div data-pac-bind="visible: selectedCategory">
+        <p>Selected Category: <strong>{{selectedCategory}}</strong></p>
+    </div>
+
+    <div data-pac-bind="visible: selectedSubcategory">
+        <p>Selected Subcategory: <strong>{{selectedSubcategory}}</strong></p>
+    </div>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const dropdowns = wakaPAC('#dropdowns', {
+        selectedCategory: '',
+        selectedSubcategory: '',
+        subcategories: [
+            { value: '', label: '-- Select Category First --' }
+        ],
+
+        categoryData: {
+            electronics: [
+                { value: '', label: '-- Choose Subcategory --' },
+                { value: 'phones', label: 'Mobile Phones' },
+                { value: 'laptops', label: 'Laptops' },
+                { value: 'tablets', label: 'Tablets' },
+                { value: 'headphones', label: 'Headphones' }
+            ],
+            clothing: [
+                { value: '', label: '-- Choose Subcategory --' },
+                { value: 'shirts', label: 'Shirts' },
+                { value: 'pants', label: 'Pants' },
+                { value: 'dresses', label: 'Dresses' },
+                { value: 'shoes', label: 'Shoes' }
+            ],
+            books: [
+                { value: '', label: '-- Choose Subcategory --' },
+                { value: 'fiction', label: 'Fiction' },
+                { value: 'non-fiction', label: 'Non-Fiction' },
+                { value: 'science', label: 'Science' },
+                { value: 'history', label: 'History' }
+            ]
+        },
+
+        updateSubcategories() {
+            // Clear the current subcategory selection
+            this.selectedSubcategory = '';
+
+            // Update subcategories based on selected category
+            if (this.selectedCategory && this.categoryData[this.selectedCategory]) {
+                this.subcategories = this.categoryData[this.selectedCategory];
+            } else {
+                this.subcategories = [
+                    { value: '', label: '-- Select Category First --' }
+                ];
+            }
+        }
+    });
+</script>
+</body>
+</html>
