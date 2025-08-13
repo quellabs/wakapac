@@ -514,6 +514,99 @@
         },
 
         /**
+         * Parses a simple property access expression (fallback for non-operator expressions)
+         * @param {string} expression - The property access expression to parse (e.g., "user.name", "items[0].value")
+         * @returns {Object} Parsed property object containing:
+         *   - type: Always set to 'property' to identify this as a property access
+         *   - path: The original expression string for later evaluation
+         *   - dependencies: Array of variable names this expression depends on
+         */
+        parseProperty(expression) {
+            return {
+                // Mark this as a property access type for the evaluation engine
+                type: 'property',
+
+                // Store the original expression path for runtime evaluation
+                path: expression,
+
+                // Extract all variable dependencies from this expression
+                // This helps with change detection and reactive updates
+                dependencies: this.extractDependencies(expression)
+            };
+        },
+
+        /**
+         * Attempts to parse a comparison expression (===, !==, ==, !=, >=, <=, >, <)
+         * @param {string} expression - Expression to parse
+         * @returns {Object|null} Parsed comparison object or null if not a comparison expression
+         */
+        parseComparison(expression) {
+            // Use regex to match comparison expressions with operators
+            // Pattern breakdown:
+            // - ^(.+?) - Capture group 1: left operand (non-greedy to avoid capturing operator)
+            // - \s* - Optional whitespace before operator
+            // - (===|!==|==|!=|>=|<=|>|<) - Capture group 2: comparison operator (ordered by precedence)
+            // - \s* - Optional whitespace after operator
+            // - (.+?)$ - Capture group 3: right operand (non-greedy, matches to end of string)
+            const comparisonMatch = expression.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+?)$/);
+
+            // If no comparison operator pattern is found, this isn't a comparison expression
+            if (!comparisonMatch) {
+                return null;
+            }
+
+            // Destructure the regex match results
+            // Skip index 0 (full match) and extract the three capture groups
+            const [, left, operator, right] = comparisonMatch;
+
+            // Return structured comparison object
+            return {
+                type: 'comparison',                                 // Identifies this as a comparison expression
+                left: left.trim(),                                  // Left operand with whitespace removed
+                operator: operator.trim(),                          // Comparison operator with whitespace removed
+                right: this.parseValue(right.trim()),               // Right operand parsed as a value (could be literal, variable, etc.)
+                dependencies: this.extractDependencies(left.trim()) // Extract any variable dependencies from left operand
+            };
+        },
+
+        /**
+         * Attempts to parse a logical expression (&&, ||)
+         * @param {string} expression - Expression to parse
+         * @returns {Object|null} Parsed logical object or null if not a logical expression
+         */
+        parseLogical(expression) {
+            // Use regex to match logical expressions with && or || operators
+            // Pattern breakdown: ^(.+?)\s*(&&|\|\|)\s*(.+?)$
+            // - ^(.+?) : Capture group 1 - left operand (non-greedy match from start)
+            // - \s* : Optional whitespace
+            // - (&&|\|\|) : Capture group 2 - logical operator (AND or OR)
+            // - \s* : Optional whitespace
+            // - (.+?)$ : Capture group 3 - right operand (non-greedy match to end)
+            const logicalMatch = expression.match(/^(.+?)\s*(&&|\|\|)\s*(.+?)$/);
+
+            // If no logical operator found, this isn't a logical expression
+            if (!logicalMatch) {
+                return null;
+            }
+
+            // Destructure the regex capture groups
+            // logicalMatch[0] is the full match, so we skip it with the empty comma
+            const [, left, operator, right] = logicalMatch;
+
+            // Return structured object representing the parsed logical expression
+            return {
+                type: 'logical',                                // Mark this as a logical expression type
+                left: left.trim(),                              // Left operand with whitespace removed
+                operator: operator.trim(),                      // Logical operator (&&, ||)
+                right: right.trim(),                            // Right operand with whitespace removed
+                dependencies: [                                 // Collect all dependencies from both sides
+                    ...this.extractDependencies(left.trim()),   // Dependencies from left operand
+                    ...this.extractDependencies(right.trim())   // Dependencies from right operand
+                ]
+            };
+        },
+
+        /**
          * Attempts to parse a unary expression (!expression)
          */
         parseUnary(expression) {
@@ -560,99 +653,6 @@
                 trueValue: this.parseValue(trueValue.trim()),            // Recursively parse the true branch value
                 falseValue: this.parseValue(falseValue.trim()),          // Recursively parse the false branch value
                 dependencies: this.extractDependencies(condition.trim()) // Extract variable dependencies from condition
-            };
-        },
-
-        /**
-         * Attempts to parse a logical expression (&&, ||)
-         * @param {string} expression - Expression to parse
-         * @returns {Object|null} Parsed logical object or null if not a logical expression
-         */
-        parseLogical(expression) {
-            // Use regex to match logical expressions with && or || operators
-            // Pattern breakdown: ^(.+?)\s*(&&|\|\|)\s*(.+?)$
-            // - ^(.+?) : Capture group 1 - left operand (non-greedy match from start)
-            // - \s* : Optional whitespace
-            // - (&&|\|\|) : Capture group 2 - logical operator (AND or OR)
-            // - \s* : Optional whitespace
-            // - (.+?)$ : Capture group 3 - right operand (non-greedy match to end)
-            const logicalMatch = expression.match(/^(.+?)\s*(&&|\|\|)\s*(.+?)$/);
-
-            // If no logical operator found, this isn't a logical expression
-            if (!logicalMatch) {
-                return null;
-            }
-
-            // Destructure the regex capture groups
-            // logicalMatch[0] is the full match, so we skip it with the empty comma
-            const [, left, operator, right] = logicalMatch;
-
-            // Return structured object representing the parsed logical expression
-            return {
-                type: 'logical',                                // Mark this as a logical expression type
-                left: left.trim(),                              // Left operand with whitespace removed
-                operator: operator.trim(),                      // Logical operator (&&, ||)
-                right: right.trim(),                            // Right operand with whitespace removed
-                dependencies: [                                 // Collect all dependencies from both sides
-                    ...this.extractDependencies(left.trim()),   // Dependencies from left operand
-                    ...this.extractDependencies(right.trim())   // Dependencies from right operand
-                ]
-            };
-        },
-
-        /**
-         * Attempts to parse a comparison expression (===, !==, ==, !=, >=, <=, >, <)
-         * @param {string} expression - Expression to parse
-         * @returns {Object|null} Parsed comparison object or null if not a comparison expression
-         */
-        parseComparison(expression) {
-            // Use regex to match comparison expressions with operators
-            // Pattern breakdown:
-            // - ^(.+?) - Capture group 1: left operand (non-greedy to avoid capturing operator)
-            // - \s* - Optional whitespace before operator
-            // - (===|!==|==|!=|>=|<=|>|<) - Capture group 2: comparison operator (ordered by precedence)
-            // - \s* - Optional whitespace after operator
-            // - (.+?)$ - Capture group 3: right operand (non-greedy, matches to end of string)
-            const comparisonMatch = expression.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+?)$/);
-
-            // If no comparison operator pattern is found, this isn't a comparison expression
-            if (!comparisonMatch) {
-                return null;
-            }
-
-            // Destructure the regex match results
-            // Skip index 0 (full match) and extract the three capture groups
-            const [, left, operator, right] = comparisonMatch;
-
-            // Return structured comparison object
-            return {
-                type: 'comparison',                                 // Identifies this as a comparison expression
-                left: left.trim(),                                  // Left operand with whitespace removed
-                operator: operator.trim(),                          // Comparison operator with whitespace removed
-                right: this.parseValue(right.trim()),               // Right operand parsed as a value (could be literal, variable, etc.)
-                dependencies: this.extractDependencies(left.trim()) // Extract any variable dependencies from left operand
-            };
-        },
-
-        /**
-         * Parses a simple property access expression (fallback for non-operator expressions)
-         * @param {string} expression - The property access expression to parse (e.g., "user.name", "items[0].value")
-         * @returns {Object} Parsed property object containing:
-         *   - type: Always set to 'property' to identify this as a property access
-         *   - path: The original expression string for later evaluation
-         *   - dependencies: Array of variable names this expression depends on
-         */
-        parseProperty(expression) {
-            return {
-                // Mark this as a property access type for the evaluation engine
-                type: 'property',
-
-                // Store the original expression path for runtime evaluation
-                path: expression,
-
-                // Extract all variable dependencies from this expression
-                // This helps with change detection and reactive updates
-                dependencies: this.extractDependencies(expression)
             };
         },
 
@@ -804,17 +804,6 @@
         },
 
         /**
-         * Parses and evaluates a value in context (for dynamic right-hand sides)
-         * @param {string} valueStr - Value string to parse and evaluate
-         * @param {Object} context - Evaluation context
-         * @returns {*} Evaluated value
-         */
-        parseAndEvaluateValue(valueStr, context) {
-            const parsed = this.parseValue(valueStr);
-            return this.evaluateValue(parsed, context);
-        },
-
-        /**
          * Evaluates a value object
          * @param {Object} valueObj - Value object to evaluate
          * @param {Object} context - Evaluation context
@@ -830,6 +819,17 @@
             }
 
             return undefined;
+        },
+
+        /**
+         * Parses and evaluates a value in context (for dynamic right-hand sides)
+         * @param {string} valueStr - Value string to parse and evaluate
+         * @param {Object} context - Evaluation context
+         * @returns {*} Evaluated value
+         */
+        parseAndEvaluateValue(valueStr, context) {
+            const parsed = this.parseValue(valueStr);
+            return this.evaluateValue(parsed, context);
         },
 
         /**
@@ -933,346 +933,17 @@
             // Event handling
             eventListeners: new Map(),
 
-            /**
-             * Creates different types of bindings using a factory pattern
-             * @param {string} type - Binding type
-             * @param {Element} element - Target element
-             * @param {Object} config - Binding configuration
-             * @returns {Object} Binding object
-             */
-            createBinding(type, element, config) {
-                const binding = {
-                    id: Utils.generateId(),
-                    type: type,
-                    element: element,
-                    ...config
-                };
-
-                // Add property tracking
-                if (config.target) {
-                    binding.property = Utils.splitPath(config.target)[0];
-                    binding.propertyPath = config.target;
-                }
-
-                return binding;
-            },
+            // === INITIALIZATION SECTION ===
 
             /**
-             * Determines if a binding should update for a property change
-             * Optimized to only update bindings affected by the specific property path
-             * @param {Object} binding - Binding to check
-             * @param {string} changedProperty - Property that changed
-             * @returns {boolean} True if binding should update
+             * Initializes the PAC component
              */
-            shouldUpdateBinding(binding, changedProperty) {
-                // Direct property match
-                if (binding.property === changedProperty) {
-                    return true;
-                }
-
-                // Property path match (e.g., 'user.name' starts with 'user')
-                if (binding.propertyPath && binding.propertyPath.startsWith(changedProperty + '.')) {
-                    return true;
-                }
-
-                // Expression dependencies
-                return !!(binding.dependencies && binding.dependencies.includes(changedProperty));
-            },
-
-            /**
-             * Sets up all DOM bindings by scanning for directives
-             */
-            setupBindings() {
-                this.setupTextBindings();
-                this.setupAttributeBindings();
-                this.buildBindingIndex();
-            },
-
-            /**
-             * Finds and creates text interpolation bindings {{property}}
-             */
-            setupTextBindings() {
-                const walker = document.createTreeWalker(
-                    this.container,
-                    NodeFilter.SHOW_TEXT
-                );
-
-                let node;
-                while (node = walker.nextNode()) {
-                    const text = node.textContent;
-                    const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
-
-                    if (matches) {
-                        matches.forEach(match => {
-                            const expression = match.replace(/[{}\s]/g, '');
-                            const parsed = ExpressionParser.parse(expression);
-
-                            const binding = this.createBinding('text', node, {
-                                target: expression,
-                                originalText: text,
-                                fullMatch: match,
-                                parsedExpression: parsed,
-                                dependencies: parsed.dependencies
-                            });
-
-                            this.bindings.set(binding.id, binding);
-                        });
-                    }
-                }
-            },
-
-            /**
-             * Finds and creates attribute bindings data-pac-bind="..."
-             */
-            setupAttributeBindings() {
-                // Find all elements in the container that have data-pac-bind attributes
-                const elements = this.container.querySelectorAll('[data-pac-bind]');
-
-                // Process each element with binding attributes
-                Array.from(elements).forEach(element => {
-                    // Get the binding string (e.g., "value:selectedItem,foreach:items")
-                    const bindingString = element.getAttribute('data-pac-bind');
-
-                    // Parse the binding string into individual binding pairs
-                    const bindingPairs = bindingString.split(',').map(bind => {
-                        const [type, target] = bind.trim().split(':').map(s => s.trim());
-                        return { type, target };
-                    });
-
-                    // Automatically reorder bindings: foreach first, then others
-                    const reorderedBindings = this.reorderBindings(bindingPairs);
-
-                    // Process each binding pair in the correct order
-                    reorderedBindings.forEach(({ type, target }) => {
-                        const binding = this.createBindingByType(element, type, target);
-
-                        if (binding) {
-                            // Store the binding in the bindings map using its unique ID
-                            this.bindings.set(binding.id, binding);
-                        }
-                    });
-                });
-            },
-
-            /**
-             * Helper method to create bindings by type (extracted for reuse)
-             * This method acts as a factory for different binding types based on the
-             * binding type string and target property.
-             * @param {HTMLElement} element - The DOM element to bind to
-             * @param {string} type - The type of binding (foreach, visible, value, etc.)
-             * @param {string} target - The target property or method name
-             * @returns {Object|null} The created binding object, or null if invalid
-             */
-            createBindingByType(element, type, target) {
-                if (type === 'foreach') {
-                    const binding = this.createForeachBinding(element, target);
-                    element.innerHTML = '';
-                    return binding;
-                }
-
-                if (type === 'if') {
-                    return this.createConditionalBinding(element, target);
-                }
-
-                if (type === 'visible') {
-                    return this.createVisibilityBinding(element, target);
-                }
-
-                if (type === 'value') {
-                    this.setupInputElement(element, target);
-                    return this.createInputBinding(element, target);
-                }
-
-                if (type === 'checked') {
-                    if (element.type === 'radio') {
-                        console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
-                        this.setupInputElement(element, target);
-                        return this.createInputBinding(element, target);
-                    }
-
-                    this.setupInputElement(element, target, 'checked');
-                    return this.createCheckedBinding(element, target);
-                }
-
-                if (Utils.isEventType(type)) {
-                    return this.createEventBinding(element, type, target);
-                }
-
-                if (target) {
-                    return this.createAttributeBinding(element, type, target);
-                }
-
-                return null;
-            },
-
-            /**
-             * Reorders binding pairs to ensure optimal execution order
-             * @param {Array} bindingPairs - Array of {type, target} objects
-             * @returns {Array} Reordered binding pairs
-             */
-            reorderBindings(bindingPairs) {
-                // Define binding priority order (lower number = higher priority)
-                const priorityOrder = {
-                    'foreach': 1,    // Must come first - creates DOM structure
-                    'if': 2,         // Conditional DOM existence - before visibility
-                    'visible': 3,    // Show/hide elements before setting their values
-                    'value': 4,      // Form values after DOM exists and is visible
-                    'checked': 4,    // Checkbox state after DOM exists and is visible
-                    'click': 5,      // Event handlers after elements are ready
-                    'change': 5,     // Event handlers after elements are ready
-                    'input': 5,      // Event handlers after elements are ready
-                    'submit': 5,     // Event handlers after elements are ready
-                    'focus': 5,      // Event handlers after elements are ready
-                    'blur': 5,       // Event handlers after elements are ready
-                    'keyup': 5,      // Event handlers after elements are ready
-                    'keydown': 5,    // Event handlers after elements are ready
-                    // All other bindings get priority 6 (attributes, etc.)
-                };
-
-                // Sort bindings by priority, maintaining original order for same priority
-                return bindingPairs.sort((a, b) => {
-                    const priorityA = priorityOrder[a.type] || 6;
-                    const priorityB = priorityOrder[b.type] || 6;
-                    return priorityA - priorityB;
-                });
-            },
-
-            /**
-             * Creates a conditional "if" binding that renders/removes DOM elements based on data values
-             * @param {HTMLElement} element - The DOM element to conditionally render
-             * @param {string} target - The data property name to watch (may include '!' for negation)
-             * @returns {Object} The created binding object with conditional rendering configuration
-             */
-            createConditionalBinding(element, target) {
-                // Parse the full expression using expression parser (handles negation, comparisons, etc.)
-                const parsed = ExpressionParser.parse(target);
-
-                return this.createBinding('conditional', element, {
-                    target: target,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies,
-                    placeholder: null,
-                    originalParent: element.parentNode,
-                    originalNextSibling: element.nextSibling,
-                    isRendered: true
-                });
-            },
-
-            /**
-             * Creates a foreach binding for rendering lists
-             */
-            createForeachBinding(element, target, type) {
-                const parts = target.split(' then ');
-                const collection = parts[0].trim();
-                const callback = parts[1] ? parts[1].trim() : null;
-
-                return this.createBinding('foreach', element, {
-                    target: collection,
-                    collection: collection,
-                    callback: callback,
-                    itemName: element.getAttribute('data-pac-item') || 'item',
-                    indexName: element.getAttribute('data-pac-index') || 'index',
-                    template: element.innerHTML,
-                    previous: []
-                });
-            },
-
-            /**
-             * Creates a visibility binding
-             */
-            createVisibilityBinding(element, target) {
-                // Parse the full expression (including any negation) using expression parser
-                const parsed = ExpressionParser.parse(target);
-
-                return this.createBinding('visible', element, {
-                    target: target,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies
-                });
-            },
-
-            /**
-             * Creates an input value binding
-             */
-            createInputBinding(element, target) {
-                return this.createBinding('input', element, {
-                    target: target,
-                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
-                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
-                });
-            },
-
-            /**
-             * Creates a checkbox/radio checked binding
-             */
-            createCheckedBinding(element, target) {
-                return this.createBinding('checked', element, {
-                    target: target,
-                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
-                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
-                });
-            },
-
-            /**
-             * Creates an event binding
-             */
-            createEventBinding(element, eventType, target) {
-                return this.createBinding('event', element, {
-                    eventType: eventType,
-                    method: target
-                });
-            },
-
-            /**
-             * Creates an attribute binding
-             */
-            createAttributeBinding(element, attributeName, target) {
-                const parsed = ExpressionParser.parse(target);
-
-                return this.createBinding('attribute', element, {
-                    target: target,
-                    attribute: attributeName,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies
-                });
-            },
-
-            /**
-             * Sets up input element attributes for binding
-             */
-            setupInputElement(element, property, bindingType = 'value') {
-                element.setAttribute('data-pac-property', property);
-                element.setAttribute('data-pac-binding-type', bindingType);
-                element.setAttribute('data-pac-update-mode', element.getAttribute('data-pac-update') || this.config.updateMode);
-                element.setAttribute('data-pac-update-delay', element.getAttribute('data-pac-delay') || this.config.delay);
-            },
-
-            /**
-             * Builds an index of bindings by property for efficient lookups
-             */
-            buildBindingIndex() {
-                this.bindingIndex.clear();
-
-                this.bindings.forEach(binding => {
-                    if (binding.property) {
-                        if (!this.bindingIndex.has(binding.property)) {
-                            this.bindingIndex.set(binding.property, new Set());
-                        }
-
-                        this.bindingIndex.get(binding.property).add(binding);
-                    }
-
-                    // Index dependencies for expression bindings
-                    if (binding.dependencies) {
-                        binding.dependencies.forEach(dep => {
-                            if (!this.bindingIndex.has(dep)) {
-                                this.bindingIndex.set(dep, new Set());
-                            }
-
-                            this.bindingIndex.get(dep).add(binding);
-                        });
-                    }
-                });
+            initialize() {
+                this.setupBindings();
+                this.abstraction = this.createReactiveAbstraction();
+                this.setupEventHandling();
+                this.performInitialUpdate();
+                return this;
             },
 
             /**
@@ -1424,6 +1095,442 @@
                 });
             },
 
+            // === BINDING SETUP SECTION ===
+
+            /**
+             * Sets up all DOM bindings by scanning for directives
+             */
+            setupBindings() {
+                this.setupTextBindings();
+                this.setupAttributeBindings();
+                this.buildBindingIndex();
+            },
+
+            /**
+             * Finds and creates text interpolation bindings {{property}}
+             */
+            setupTextBindings() {
+                const walker = document.createTreeWalker(
+                    this.container,
+                    NodeFilter.SHOW_TEXT
+                );
+
+                let node;
+                while (node = walker.nextNode()) {
+                    const text = node.textContent;
+                    const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+
+                    if (matches) {
+                        matches.forEach(match => {
+                            const expression = match.replace(/[{}\s]/g, '');
+                            const parsed = ExpressionParser.parse(expression);
+
+                            const binding = this.createBinding('text', node, {
+                                target: expression,
+                                originalText: text,
+                                fullMatch: match,
+                                parsedExpression: parsed,
+                                dependencies: parsed.dependencies
+                            });
+
+                            this.bindings.set(binding.id, binding);
+                        });
+                    }
+                }
+            },
+
+            /**
+             * Finds and creates attribute bindings data-pac-bind="..."
+             */
+            setupAttributeBindings() {
+                // Find all elements in the container that have data-pac-bind attributes
+                const elements = this.container.querySelectorAll('[data-pac-bind]');
+
+                // Process each element with binding attributes
+                Array.from(elements).forEach(element => {
+                    // Get the binding string (e.g., "value:selectedItem,foreach:items")
+                    const bindingString = element.getAttribute('data-pac-bind');
+
+                    // Parse the binding string into individual binding pairs
+                    const bindingPairs = bindingString.split(',').map(bind => {
+                        const [type, target] = bind.trim().split(':').map(s => s.trim());
+                        return { type, target };
+                    });
+
+                    // Automatically reorder bindings: foreach first, then others
+                    const reorderedBindings = this.reorderBindings(bindingPairs);
+
+                    // Process each binding pair in the correct order
+                    reorderedBindings.forEach(({ type, target }) => {
+                        const binding = this.createBindingByType(element, type, target);
+
+                        if (binding) {
+                            // Store the binding in the bindings map using its unique ID
+                            this.bindings.set(binding.id, binding);
+                        }
+                    });
+                });
+            },
+
+            /**
+             * Builds an index of bindings by property for efficient lookups
+             */
+            buildBindingIndex() {
+                this.bindingIndex.clear();
+
+                this.bindings.forEach(binding => {
+                    if (binding.property) {
+                        if (!this.bindingIndex.has(binding.property)) {
+                            this.bindingIndex.set(binding.property, new Set());
+                        }
+
+                        this.bindingIndex.get(binding.property).add(binding);
+                    }
+
+                    // Index dependencies for expression bindings
+                    if (binding.dependencies) {
+                        binding.dependencies.forEach(dep => {
+                            if (!this.bindingIndex.has(dep)) {
+                                this.bindingIndex.set(dep, new Set());
+                            }
+
+                            this.bindingIndex.get(dep).add(binding);
+                        });
+                    }
+                });
+            },
+
+            // === BINDING CREATION SECTION ===
+
+            /**
+             * Creates different types of bindings using a factory pattern
+             * @param {string} type - Binding type
+             * @param {Element} element - Target element
+             * @param {Object} config - Binding configuration
+             * @returns {Object} Binding object
+             */
+            createBinding(type, element, config) {
+                const binding = {
+                    id: Utils.generateId(),
+                    type: type,
+                    element: element,
+                    ...config
+                };
+
+                // Add property tracking
+                if (config.target) {
+                    binding.property = Utils.splitPath(config.target)[0];
+                    binding.propertyPath = config.target;
+                }
+
+                return binding;
+            },
+
+            /**
+             * Reorders binding pairs to ensure optimal execution order
+             * @param {Array} bindingPairs - Array of {type, target} objects
+             * @returns {Array} Reordered binding pairs
+             */
+            reorderBindings(bindingPairs) {
+                // Define binding priority order (lower number = higher priority)
+                const priorityOrder = {
+                    'foreach': 1,    // Must come first - creates DOM structure
+                    'if': 2,         // Conditional DOM existence - before visibility
+                    'visible': 3,    // Show/hide elements before setting their values
+                    'value': 4,      // Form values after DOM exists and is visible
+                    'checked': 4,    // Checkbox state after DOM exists and is visible
+                    'click': 5,      // Event handlers after elements are ready
+                    'change': 5,     // Event handlers after elements are ready
+                    'input': 5,      // Event handlers after elements are ready
+                    'submit': 5,     // Event handlers after elements are ready
+                    'focus': 5,      // Event handlers after elements are ready
+                    'blur': 5,       // Event handlers after elements are ready
+                    'keyup': 5,      // Event handlers after elements are ready
+                    'keydown': 5,    // Event handlers after elements are ready
+                    // All other bindings get priority 6 (attributes, etc.)
+                };
+
+                // Sort bindings by priority, maintaining original order for same priority
+                return bindingPairs.sort((a, b) => {
+                    const priorityA = priorityOrder[a.type] || 6;
+                    const priorityB = priorityOrder[b.type] || 6;
+                    return priorityA - priorityB;
+                });
+            },
+
+            /**
+             * Helper method to create bindings by type (extracted for reuse)
+             * This method acts as a factory for different binding types based on the
+             * binding type string and target property.
+             * @param {HTMLElement} element - The DOM element to bind to
+             * @param {string} type - The type of binding (foreach, visible, value, etc.)
+             * @param {string} target - The target property or method name
+             * @returns {Object|null} The created binding object, or null if invalid
+             */
+            createBindingByType(element, type, target) {
+                if (type === 'foreach') {
+                    const binding = this.createForeachBinding(element, target);
+                    element.innerHTML = '';
+                    return binding;
+                }
+
+                if (type === 'if') {
+                    return this.createConditionalBinding(element, target);
+                }
+
+                if (type === 'visible') {
+                    return this.createVisibilityBinding(element, target);
+                }
+
+                if (type === 'value') {
+                    this.setupInputElement(element, target);
+                    return this.createInputBinding(element, target);
+                }
+
+                if (type === 'checked') {
+                    if (element.type === 'radio') {
+                        console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
+                        this.setupInputElement(element, target);
+                        return this.createInputBinding(element, target);
+                    }
+
+                    this.setupInputElement(element, target, 'checked');
+                    return this.createCheckedBinding(element, target);
+                }
+
+                if (Utils.isEventType(type)) {
+                    return this.createEventBinding(element, type, target);
+                }
+
+                if (target) {
+                    return this.createAttributeBinding(element, type, target);
+                }
+
+                return null;
+            },
+
+            /**
+             * Creates a foreach binding for rendering lists
+             */
+            createForeachBinding(element, target, type) {
+                const parts = target.split(' then ');
+                const collection = parts[0].trim();
+                const callback = parts[1] ? parts[1].trim() : null;
+
+                return this.createBinding('foreach', element, {
+                    target: collection,
+                    collection: collection,
+                    callback: callback,
+                    itemName: element.getAttribute('data-pac-item') || 'item',
+                    indexName: element.getAttribute('data-pac-index') || 'index',
+                    template: element.innerHTML,
+                    previous: []
+                });
+            },
+
+            /**
+             * Creates a conditional "if" binding that renders/removes DOM elements based on data values
+             * @param {HTMLElement} element - The DOM element to conditionally render
+             * @param {string} target - The data property name to watch (may include '!' for negation)
+             * @returns {Object} The created binding object with conditional rendering configuration
+             */
+            createConditionalBinding(element, target) {
+                // Parse the full expression using expression parser (handles negation, comparisons, etc.)
+                const parsed = ExpressionParser.parse(target);
+
+                return this.createBinding('conditional', element, {
+                    target: target,
+                    parsedExpression: parsed,
+                    dependencies: parsed.dependencies,
+                    placeholder: null,
+                    originalParent: element.parentNode,
+                    originalNextSibling: element.nextSibling,
+                    isRendered: true
+                });
+            },
+
+            /**
+             * Creates a visibility binding
+             */
+            createVisibilityBinding(element, target) {
+                // Parse the full expression (including any negation) using expression parser
+                const parsed = ExpressionParser.parse(target);
+
+                return this.createBinding('visible', element, {
+                    target: target,
+                    parsedExpression: parsed,
+                    dependencies: parsed.dependencies
+                });
+            },
+
+            /**
+             * Creates an input value binding
+             */
+            createInputBinding(element, target) {
+                return this.createBinding('input', element, {
+                    target: target,
+                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
+                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
+                });
+            },
+
+            /**
+             * Creates a checkbox/radio checked binding
+             */
+            createCheckedBinding(element, target) {
+                return this.createBinding('checked', element, {
+                    target: target,
+                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
+                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
+                });
+            },
+
+            /**
+             * Creates an event binding
+             */
+            createEventBinding(element, eventType, target) {
+                return this.createBinding('event', element, {
+                    eventType: eventType,
+                    method: target
+                });
+            },
+
+            /**
+             * Creates an attribute binding
+             */
+            createAttributeBinding(element, attributeName, target) {
+                const parsed = ExpressionParser.parse(target);
+
+                return this.createBinding('attribute', element, {
+                    target: target,
+                    attribute: attributeName,
+                    parsedExpression: parsed,
+                    dependencies: parsed.dependencies
+                });
+            },
+
+            /**
+             * Sets up input element attributes for binding
+             */
+            setupInputElement(element, property, bindingType = 'value') {
+                element.setAttribute('data-pac-property', property);
+                element.setAttribute('data-pac-binding-type', bindingType);
+                element.setAttribute('data-pac-update-mode', element.getAttribute('data-pac-update') || this.config.updateMode);
+                element.setAttribute('data-pac-update-delay', element.getAttribute('data-pac-delay') || this.config.delay);
+            },
+
+            // === UPDATE MANAGEMENT SECTION ===
+
+            /**
+             * Determines if a binding should update for a property change
+             * Optimized to only update bindings affected by the specific property path
+             * @param {Object} binding - Binding to check
+             * @param {string} changedProperty - Property that changed
+             * @returns {boolean} True if binding should update
+             */
+            shouldUpdateBinding(binding, changedProperty) {
+                // Direct property match
+                if (binding.property === changedProperty) {
+                    return true;
+                }
+
+                // Property path match (e.g., 'user.name' starts with 'user')
+                if (binding.propertyPath && binding.propertyPath.startsWith(changedProperty + '.')) {
+                    return true;
+                }
+
+                // Expression dependencies
+                return !!(binding.dependencies && binding.dependencies.includes(changedProperty));
+            },
+
+            /**
+             * Schedules DOM updates using requestAnimationFrame for optimal performance
+             */
+            scheduleUpdate(property, value) {
+                if (!this.pendingUpdates) {
+                    this.pendingUpdates = new Set();
+                    this.pendingValues = {};
+
+                    // Use requestAnimationFrame for smooth updates
+                    (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => {
+                        this.flushUpdates();
+                    });
+                }
+
+                this.pendingUpdates.add(property);
+                this.pendingValues[property] = value;
+            },
+
+            /**
+             * Processes all pending DOM updates in a single batch
+             */
+            flushUpdates() {
+                if (!this.pendingUpdates) {
+                    return;
+                }
+
+                // Collect only bindings that need updates
+                const relevantBindings = new Map();
+
+                this.pendingUpdates.forEach(property => {
+                    const bindings = this.bindingIndex.get(property) || new Set();
+
+                    bindings.forEach(binding => {
+                        if (this.shouldUpdateBinding(binding, property)) {
+                            relevantBindings.set(binding, {
+                                property: property,
+                                value: this.pendingValues[property]
+                            });
+                        }
+                    });
+                });
+
+                // Update all relevant bindings
+                relevantBindings.forEach(({property, value}, binding) => {
+                    this.updateBinding(binding, property, value);
+                });
+
+                // Clear pending state
+                this.pendingUpdates = null;
+                this.pendingValues = null;
+            },
+
+            /**
+             * Updates computed properties that depend on a changed property
+             */
+            updateComputedProperties(changedProperty) {
+                const dependentComputed = this.propertyDeps.get(changedProperty) || [];
+
+                dependentComputed.forEach(computedName => {
+                    const oldValue = this.computedCache.get(computedName);
+
+                    // Clear cache to force recomputation
+                    this.computedCache.delete(computedName);
+
+                    // Get new value
+                    const newValue = this.abstraction[computedName];
+
+                    // Check if any foreach bindings use this computed property
+                    const hasArrayBinding = Array.from(this.bindings.values())
+                        .some(b => b.type === 'foreach' && b.collection === computedName);
+
+                    // Update if value changed or if array binding needs update
+                    if (hasArrayBinding || !Utils.isEqual(oldValue, newValue)) {
+                        this.scheduleUpdate(computedName, newValue);
+
+                        this.notifyParent('propertyChange', {
+                            property: computedName,
+                            oldValue: oldValue,
+                            newValue: newValue,
+                            computed: true
+                        });
+
+                        // Recursively update dependent computed properties
+                        this.updateComputedProperties(computedName);
+                    }
+                });
+            },
+
             /**
              * Handles deep property changes in nested objects/arrays
              */
@@ -1483,105 +1590,63 @@
             },
 
             /**
-             * Updates computed properties that depend on a changed property
+             * Performs initial DOM synchronization
              */
-            updateComputedProperties(changedProperty) {
-                const dependentComputed = this.propertyDeps.get(changedProperty) || [];
+            performInitialUpdate() {
+                // Update all regular properties
+                Object.keys(this.abstraction).forEach(key => {
+                    // Only process non-function properties that belong to the object itself
+                    if (this.abstraction.hasOwnProperty(key) && typeof this.abstraction[key] !== 'function') {
+                        // Schedule an update for each property with its current value
+                        this.scheduleUpdate(key, this.abstraction[key]);
+                    }
+                });
 
-                dependentComputed.forEach(computedName => {
-                    const oldValue = this.computedCache.get(computedName);
+                // Update computed properties
+                if (this.original.computed) {
+                    // Iterate through all defined computed properties
+                    Object.keys(this.original.computed).forEach(name => {
+                        // Schedule update for computed property using its calculated value
+                        this.scheduleUpdate(name, this.abstraction[name]);
+                    });
+                }
 
-                    // Clear cache to force recomputation
-                    this.computedCache.delete(computedName);
+                // Initialize foreach bindings
+                this.bindings.forEach(binding => {
+                    // Only process foreach-type bindings
+                    if (binding.type === 'foreach') {
+                        // Initialize the previous state as empty array for change detection
+                        binding.previous = [];
 
-                    // Get new value
-                    const newValue = this.abstraction[computedName];
+                        // Get the current collection value from the abstraction
+                        const value = this.abstraction[binding.collection];
 
-                    // Check if any foreach bindings use this computed property
-                    const hasArrayBinding = Array.from(this.bindings.values())
-                        .some(b => b.type === 'foreach' && b.collection === computedName);
-
-                    // Update if value changed or if array binding needs update
-                    if (hasArrayBinding || !Utils.isEqual(oldValue, newValue)) {
-                        this.scheduleUpdate(computedName, newValue);
-
-                        this.notifyParent('propertyChange', {
-                            property: computedName,
-                            oldValue: oldValue,
-                            newValue: newValue,
-                            computed: true
-                        });
-
-                        // Recursively update dependent computed properties
-                        this.updateComputedProperties(computedName);
+                        // Only update if the collection has a defined value
+                        if (value !== undefined) {
+                            // Perform initial rendering of the foreach binding
+                            this.updateForeachBinding(binding, binding.collection, value);
+                        }
                     }
                 });
             },
 
-            /**
-             * Schedules DOM updates using requestAnimationFrame for optimal performance
-             */
-            scheduleUpdate(property, value) {
-                if (!this.pendingUpdates) {
-                    this.pendingUpdates = new Set();
-                    this.pendingValues = {};
-
-                    // Use requestAnimationFrame for smooth updates
-                    (window.requestAnimationFrame || (f => setTimeout(f, 0)))(() => {
-                        this.flushUpdates();
-                    });
-                }
-
-                this.pendingUpdates.add(property);
-                this.pendingValues[property] = value;
-            },
-
-            /**
-             * Processes all pending DOM updates in a single batch
-             */
-            flushUpdates() {
-                if (!this.pendingUpdates) {
-                    return;
-                }
-
-                // Collect only bindings that need updates
-                const relevantBindings = new Map();
-
-                this.pendingUpdates.forEach(property => {
-                    const bindings = this.bindingIndex.get(property) || new Set();
-
-                    bindings.forEach(binding => {
-                        if (this.shouldUpdateBinding(binding, property)) {
-                            relevantBindings.set(binding, {
-                                property: property,
-                                value: this.pendingValues[property]
-                            });
-                        }
-                    });
-                });
-
-                // Update all relevant bindings
-                relevantBindings.forEach(({property, value}, binding) => {
-                    this.updateBinding(binding, property, value);
-                });
-
-                // Clear pending state
-                this.pendingUpdates = null;
-                this.pendingValues = null;
-            },
+            // === BINDING UPDATE SECTION ===
 
             /**
              * Updates a specific binding based on its type
              */
             updateBinding(binding, property, value) {
                 try {
+                    // Check if binding element has foreach context
+                    const context = this.getBindingContext(binding.element);
+
                     switch (binding.type) {
                         case 'text':
                             this.updateTextBinding(binding, property, value);
                             break;
 
                         case 'attribute':
-                            this.updateAttributeBinding(binding, property, value);
+                            this.updateAttributeBinding(binding, property, value, context);
                             break;
 
                         case 'input':
@@ -1593,11 +1658,11 @@
                             break;
 
                         case 'visible':
-                            this.updateVisibilityBinding(binding, property, value);
+                            this.updateVisibilityBinding(binding, property, value, context);
                             break;
 
                         case 'conditional':
-                            this.updateConditionalBinding(binding, property, value);
+                            this.updateConditionalBinding(binding, property, value, context);
                             break;
 
                         case 'foreach':
@@ -1606,46 +1671,6 @@
                     }
                 } catch (error) {
                     console.error(`Error updating ${binding.type} binding:`, error);
-                }
-            },
-
-            /**
-             * Updates the conditional binding by adding/removing DOM elements based on property values
-             * @param {Object} binding - The binding object containing element, placeholder, and condition info
-             * @param {string} property - The property name being bound (may be unused in current implementation)
-             * @param {*} value - The new value (may be unused in current implementation)
-             */
-            updateConditionalBinding(binding, property, value) {
-                // Determine if element should be rendered based on the value and negation flag
-                const shouldRender = ExpressionParser.evaluate(binding.parsedExpression, this.abstraction);
-
-                // Early exit if the rendering state hasn't changed
-                if (binding.isRendered === shouldRender) {
-                    return;
-                }
-
-                if (shouldRender) {
-                    // Add element to DOM: Replace the placeholder comment with the actual DOM element
-                    if (binding.placeholder && binding.placeholder.parentNode) {
-                        binding.placeholder.parentNode.replaceChild(binding.element, binding.placeholder);
-                    }
-
-                    // Update the binding state to reflect that element is now in the DOM
-                    binding.isRendered = true;
-                } else {
-                    // Remove element from DOM: Replace the DOM element with a placeholder comment
-                    // Create placeholder comment if it doesn't exist yet
-                    if (!binding.placeholder) {
-                        binding.placeholder = document.createComment(`pac-if: ${binding.target}`);
-                    }
-
-                    // Replace the element with the invisible placeholder comment (removes from DOM)
-                    if (binding.element.parentNode) {
-                        binding.element.parentNode.replaceChild(binding.placeholder, binding.element);
-                    }
-
-                    // Update the binding state to reflect that element is now removed from DOM
-                    binding.isRendered = false;
                 }
             },
 
@@ -1685,61 +1710,19 @@
             /**
              * Updates element attributes
              */
-            updateAttributeBinding(binding, property, value) {
+            updateAttributeBinding(binding, property, value, context = null) {
+                // Use provided context or default to main abstraction
+                const evalContext = context || this.abstraction;
+
                 let actualValue;
 
                 if (binding.parsedExpression) {
-                    actualValue = ExpressionParser.evaluate(binding.parsedExpression, this.abstraction);
+                    actualValue = ExpressionParser.evaluate(binding.parsedExpression, evalContext);
                 } else {
-                    actualValue = Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property);
+                    actualValue = Utils.getNestedValue(evalContext, binding.propertyPath || binding.property);
                 }
 
                 this.setElementAttribute(binding.element, binding.attribute, actualValue);
-            },
-
-            /**
-             * Sets element attribute with special handling for boolean attributes
-             */
-            setElementAttribute(element, name, value) {
-                switch (name) {
-                    case 'class':
-                        element.className = value || '';
-                        break;
-
-                    case 'style':
-                        if (typeof value === 'object' && value) {
-                            Object.assign(element.style, value);
-                        } else {
-                            element.style.cssText = value || '';
-                        }
-
-                        break;
-
-                    case 'enable':
-                        // Handle 'enable' as reverse of 'disabled'
-                        if (value) {
-                            element.removeAttribute('disabled');
-                        } else {
-                            element.setAttribute('disabled', 'disabled');
-                        }
-
-                        break;
-
-                    default:
-                        if (BOOLEAN_ATTRS.includes(name)) {
-                            if (value) {
-                                element.setAttribute(name, name);
-                            } else {
-                                element.removeAttribute(name);
-                            }
-                        } else if (value != null) {
-                            element.setAttribute(name, value);
-                        } else {
-                            element.removeAttribute(name);
-                        }
-
-                        break;
-                }
             },
 
             /**
@@ -1774,30 +1757,56 @@
             /**
              * Updates element visibility
              */
-            updateVisibilityBinding(binding, property, value) {
+            updateVisibilityBinding(binding, property, value, context = null) {
+                // Use provided context or default to main abstraction
+                const evalContext = context || this.abstraction;
+
                 // Use expression parser to evaluate the visibility condition
-                // This handles negation, comparisons, logical operators, etc.
-                const shouldShow = ExpressionParser.evaluate(binding.parsedExpression, this.abstraction);
+                const shouldShow = ExpressionParser.evaluate(binding.parsedExpression, evalContext);
 
-                if (shouldShow) {
-                    // Show element: restore original display value
-                    if (binding.element.hasAttribute('data-pac-hidden')) {
-                        binding.element.style.display = binding.element.getAttribute('data-pac-orig-display') || '';
-                        binding.element.removeAttribute('data-pac-hidden');
-                        binding.element.removeAttribute('data-pac-orig-display');
+                this.applyVisibilityBinding(binding.element, shouldShow);
+            },
+
+            /**
+             * Updates the conditional binding by adding/removing DOM elements based on property values
+             * @param {Object} binding - The binding object containing element, placeholder, and condition info
+             * @param {string} property - The property name being bound (may be unused in current implementation)
+             * @param {*} value - The new value (may be unused in current implementation)
+             */
+            updateConditionalBinding(binding, property, value, context = null) {
+                // Use provided context or default to main abstraction
+                const evalContext = context || this.abstraction;
+
+                // Determine if element should be rendered based on the value and negation flag
+                const shouldRender = ExpressionParser.evaluate(binding.parsedExpression, evalContext);
+
+                // Early exit if the rendering state hasn't changed
+                if (binding.isRendered === shouldRender) {
+                    return;
+                }
+
+                if (shouldRender) {
+                    // Add element to DOM: Replace the placeholder comment with the actual DOM element
+                    if (binding.placeholder && binding.placeholder.parentNode) {
+                        binding.placeholder.parentNode.replaceChild(binding.element, binding.placeholder);
                     }
+
+                    // Update the binding state to reflect that element is now in the DOM
+                    binding.isRendered = true;
                 } else {
-                    // Hide element: save current display and set to none
-                    if (!binding.element.hasAttribute('data-pac-hidden')) {
-                        const currentDisplay = getComputedStyle(binding.element).display;
-
-                        if (currentDisplay !== 'none') {
-                            binding.element.setAttribute('data-pac-orig-display', currentDisplay);
-                        }
-
-                        binding.element.style.display = 'none';
-                        binding.element.setAttribute('data-pac-hidden', 'true');
+                    // Remove element from DOM: Replace the DOM element with a placeholder comment
+                    // Create placeholder comment if it doesn't exist yet
+                    if (!binding.placeholder) {
+                        binding.placeholder = document.createComment(`pac-if: ${binding.target}`);
                     }
+
+                    // Replace the element with the invisible placeholder comment (removes from DOM)
+                    if (binding.element.parentNode) {
+                        binding.element.parentNode.replaceChild(binding.placeholder, binding.element);
+                    }
+
+                    // Update the binding state to reflect that element is now removed from DOM
+                    binding.isRendered = false;
                 }
             },
 
@@ -1857,6 +1866,8 @@
                     }, 0);
                 }
             },
+
+            // === FOREACH RENDERING SECTION ===
 
             /**
              * Replace the renderForeachItem method to accept collection name:
@@ -1977,71 +1988,43 @@
              * @param {string} indexName - The variable name for the current index in the template
              */
             processForeachBinding(element, type, target, item, index, itemName, indexName) {
-                // Evaluate the binding expression with the current foreach context
-                const value = this.evaluateForeachExpression(target, item, index, itemName, indexName);
+                // Store foreach context on the element for later use by binding updates
+                element._foreachContext = {
+                    item: item,
+                    index: index,
+                    itemName: itemName,
+                    indexName: indexName
+                };
 
-                // Handle class binding - adds CSS class if expression evaluates to truthy
-                if (type === 'class') {
-                    this.handleClassBinding(element, target, value);
-                    return;
-                }
-
-                // Handle checkbox/radio checked state binding
-                if (type === 'checked') {
-                    element.checked = Boolean(value);
-                    return;
-                }
-
-                // Handle event listener binding (click, change, etc.)
+                // For event bindings, handle them specially since they need item/index passed
                 if (Utils.isEventType(type)) {
                     this.handleEventBinding(element, type, target, item, index);
                     return;
                 }
 
-                // Handle generic attribute binding - only set if value is not null/undefined
-                if (value != null) {
-                    element.setAttribute(type, value);
+                // For all other bindings, evaluate using foreach context
+                const foreachContext = this.createForeachContext(item, index, itemName, indexName);
+                const parsed = ExpressionParser.parse(target);
+                const value = ExpressionParser.evaluate(parsed, foreachContext);
+
+                // Apply the binding based on type
+                switch (type) {
+                    case 'visible':
+                        this.applyVisibilityBinding(element, Boolean(value));
+                        break;
+
+                    case 'checked':
+                        this.applyCheckedBinding(element, Boolean(value));
+                        break;
+
+                    case 'class':
+                        this.applyClassBinding(element, target, value);
+                        break;
+
+                    default:
+                        this.applyAttributeBinding(element, type, value);
+                        break;
                 }
-            },
-
-            /**
-             * Handles CSS class binding by extracting the class name and adding it to the element
-             * @param {HTMLElement} element - The target DOM element
-             * @param {string} target - The class expression (may include dot notation)
-             * @param {*} value - The evaluated expression value
-             */
-            handleClassBinding(element, target, value) {
-                // Only add class if the expression evaluates to truthy
-                if (!value) {
-                    return;
-                }
-
-                // Extract class name from dot notation (e.g., "item.active" -> "active")
-                const className = target.includes('.') ? target.split('.').pop() : target;
-                element.classList.add(className);
-            },
-
-            /**
-             * Handles event listener binding by attaching the event handler to the element
-             * @param {HTMLElement} element - The target DOM element
-             * @param {string} type - The event type (click, change, etc.)
-             * @param {string} target - The method name to call on the abstraction
-             * @param {*} item - The current foreach item to pass to the handler
-             * @param {number} index - The current foreach index to pass to the handler
-             */
-            handleEventBinding(element, type, target, item, index) {
-                element.addEventListener(type, (event) => {
-                    // Verify the target method exists before calling it
-                    const method = this.abstraction[target];
-
-                    if (typeof method !== 'function') {
-                        console.warn(`Event handler "${target}" is not a function`);
-                        return;
-                    }
-
-                    // Call the method with proper context and foreach parameters
-                    method.call(this.abstraction, item, index, event);
-                });
             },
 
             /**
@@ -2081,6 +2064,56 @@
                 // This handles literal values or expressions that don't reference foreach variables
                 return expression;
             },
+
+            /**
+             * Creates a context object for foreach loops that combines the main abstraction
+             * with loop-specific variables (item and index).
+             * @param {*} item - The current item in the foreach iteration
+             * @param {number} index - The current index in the foreach iteration
+             * @param {string} itemName - The variable name to use for the current item
+             * @param {string} indexName - The variable name to use for the current index
+             * @returns {Object} A context object with access to both main abstraction and loop variables
+             */
+            createForeachContext(item, index, itemName, indexName) {
+                // Create a context that includes both the foreach item and the main abstraction
+                // Using Object.create() ensures the main abstraction properties are inherited
+                // while allowing foreach-specific properties to be added without mutation
+                const context = Object.create(this.abstraction);
+
+                // Add the foreach-specific variables to the context
+                // These will shadow any properties with the same names from the parent abstraction
+                context[itemName] = item;
+                context[indexName] = index;
+                return context;
+            },
+
+            /**
+             * Retrieves the appropriate binding context for a given DOM element.
+             * Elements within foreach loops get special context with loop variables,
+             * while other elements use the main abstraction.
+             * @param {HTMLElement} element - The DOM element to get context for
+             * @returns {Object} The binding context object for this element
+             */
+            getBindingContext(element) {
+                // Check if element has stored foreach context data
+                // This would have been set when the element was created within a foreach loop
+                if (element._foreachContext) {
+                    // Recreate the foreach context using the stored metadata
+                    // This ensures each access gets a fresh context object
+                    return this.createForeachContext(
+                        element._foreachContext.item,        // Current loop item
+                        element._foreachContext.index,       // Current loop index
+                        element._foreachContext.itemName,    // Variable name for item
+                        element._foreachContext.indexName    // Variable name for index
+                    );
+                }
+
+                // Default to main abstraction for elements not in foreach loops
+                // This provides access to the root-level data and methods
+                return this.abstraction;
+            },
+
+            // === EVENT HANDLING SECTION ===
 
             /**
              * Sets up event handling with delegation
@@ -2173,88 +2206,6 @@
             },
 
             /**
-             * Sets a nested property value (e.g., "todos.0.completed" = true)
-             * @param {string} propertyPath - Dot-separated property path
-             * @param {*} value - Value to set
-             */
-            setNestedProperty(propertyPath, value) {
-                // Split the property path into individual parts (e.g., "todos.0.completed" → ["todos", "0", "completed"])
-                const parts = propertyPath.split('.');
-
-                // Simple property (no nesting)
-                // If there's only one part, we're setting a top-level property directly
-                if (parts.length === 1) {
-                    this.abstraction[propertyPath] = value;
-                    return;
-                }
-
-                // Navigate to the parent object
-                // We need to traverse through all parts except the last one to reach the parent
-                let current = this.abstraction;
-
-                for (let i = 0; i < parts.length - 1; i++) {
-                    // Move deeper into the nested structure using the current part as a key
-                    current = current[parts[i]];
-
-                    // Check if the current path exists - if not, we can't set the property
-                    if (!current) {
-                        // Show which part of the path failed for debugging purposes
-                        console.warn(`Cannot set property: ${propertyPath} - path not found at '${parts.slice(0, i + 1).join('.')}'`);
-                        return;
-                    }
-                }
-
-                // Set the final property
-                // Extract the last part of the path (the actual property name to set)
-                const finalProperty = parts[parts.length - 1];
-
-                // Set the value on the parent object we navigated to
-                current[finalProperty] = value;
-            },
-
-            /**
-             * Handles delayed updates with proper debouncing
-             * This method ensures that rapid consecutive updates to the same property
-             * are debounced, so only the final value is applied after a delay period.
-             * @param {HTMLElement} element - The DOM element that triggered the update
-             * @param {string} property - The property name to update on the abstraction object
-             * @param {*} value - The new value to set for the property
-             */
-            handleDelayedUpdate(element, property, value) {
-                // Get the delay from element's data attribute, fallback to config default
-                // This allows per-element customization of delay timing
-                const delay = parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay;
-
-                // Create a consistent key based on property name only
-                // This ensures all updates to the same property share the same debounce timer
-                // Note: Using property-only key means updates to different elements but same property
-                // will debounce together (which may be intentional behavior)
-                const key = `delayed_${property}`;
-
-                // Debouncing logic: Clear any existing timeout for this property
-                // This cancels the previous delayed update, ensuring only the most recent
-                // value will be applied after the delay period expires
-                if (this.updateTimeouts.has(key)) {
-                    clearTimeout(this.updateTimeouts.get(key));
-                }
-
-                // Set up new delayed execution
-                // Only this timeout will execute unless another update comes in first
-                const timeoutId = setTimeout(() => {
-                    // Apply the final value to the abstraction object
-                    this.abstraction[property] = value;
-
-                    // Clean up: remove the timeout reference since it's completed
-                    // This prevents memory leaks from accumulating timeout references
-                    this.updateTimeouts.delete(key);
-                }, delay);
-
-                // Store the new timeout ID so it can be cleared if needed
-                // This maintains the debouncing mechanism for subsequent calls
-                this.updateTimeouts.set(key, timeoutId);
-            },
-
-            /**
              * Handles custom event bindings by processing modifiers and executing bound methods
              * @param {Event} event - The DOM event object
              * @param {string} eventType - The type of event (e.g., 'click', 'keydown')
@@ -2307,6 +2258,29 @@
             },
 
             /**
+             * Handles event listener binding by attaching the event handler to the element
+             * @param {HTMLElement} element - The target DOM element
+             * @param {string} type - The event type (click, change, etc.)
+             * @param {string} target - The method name to call on the abstraction
+             * @param {*} item - The current foreach item to pass to the handler
+             * @param {number} index - The current foreach index to pass to the handler
+             */
+            handleEventBinding(element, type, target, item, index) {
+                element.addEventListener(type, (event) => {
+                    // Verify the target method exists before calling it
+                    const method = this.abstraction[target];
+
+                    if (typeof method !== 'function') {
+                        console.warn(`Event handler "${target}" is not a function`);
+                        return;
+                    }
+
+                    // Call the method with proper context and foreach parameters
+                    method.call(this.abstraction, item, index, event);
+                });
+            },
+
+            /**
              * Parses event modifiers from data-pac-modifiers attribute
              */
             parseEventModifiers(element) {
@@ -2354,6 +2328,265 @@
             },
 
             /**
+             * Handles delayed updates with proper debouncing
+             * This method ensures that rapid consecutive updates to the same property
+             * are debounced, so only the final value is applied after a delay period.
+             * @param {HTMLElement} element - The DOM element that triggered the update
+             * @param {string} property - The property name to update on the abstraction object
+             * @param {*} value - The new value to set for the property
+             */
+            handleDelayedUpdate(element, property, value) {
+                // Get the delay from element's data attribute, fallback to config default
+                // This allows per-element customization of delay timing
+                const delay = parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay;
+
+                // Create a consistent key based on property name only
+                // This ensures all updates to the same property share the same debounce timer
+                // Note: Using property-only key means updates to different elements but same property
+                // will debounce together (which may be intentional behavior)
+                const key = `delayed_${property}`;
+
+                // Debouncing logic: Clear any existing timeout for this property
+                // This cancels the previous delayed update, ensuring only the most recent
+                // value will be applied after the delay period expires
+                if (this.updateTimeouts.has(key)) {
+                    clearTimeout(this.updateTimeouts.get(key));
+                }
+
+                // Set up new delayed execution
+                // Only this timeout will execute unless another update comes in first
+                const timeoutId = setTimeout(() => {
+                    // Apply the final value to the abstraction object
+                    this.abstraction[property] = value;
+
+                    // Clean up: remove the timeout reference since it's completed
+                    // This prevents memory leaks from accumulating timeout references
+                    this.updateTimeouts.delete(key);
+                }, delay);
+
+                // Store the new timeout ID so it can be cleared if needed
+                // This maintains the debouncing mechanism for subsequent calls
+                this.updateTimeouts.set(key, timeoutId);
+            },
+
+            // === UTILITY METHODS SECTION ===
+
+            /**
+             * Sets element attribute with special handling for boolean attributes
+             * @param element
+             * @param name
+             * @param value
+             */
+            setElementAttribute(element, name, value) {
+                switch (name) {
+                    case 'class':
+                        element.className = value || '';
+                        break;
+
+                    case 'style':
+                        if (typeof value === 'object' && value) {
+                            Object.assign(element.style, value);
+                        } else {
+                            element.style.cssText = value || '';
+                        }
+
+                        break;
+
+                    case 'enable':
+                        // Handle 'enable' as reverse of 'disabled'
+                        if (value) {
+                            element.removeAttribute('disabled');
+                        } else {
+                            element.setAttribute('disabled', 'disabled');
+                        }
+
+                        break;
+
+                    default:
+                        if (BOOLEAN_ATTRS.includes(name)) {
+                            if (value) {
+                                element.setAttribute(name, name);
+                            } else {
+                                element.removeAttribute(name);
+                            }
+                        } else if (value != null) {
+                            element.setAttribute(name, value);
+                        } else {
+                            element.removeAttribute(name);
+                        }
+
+                        break;
+                }
+            },
+
+            /**
+             * Sets a nested property value (e.g., "todos.0.completed" = true)
+             * @param {string} propertyPath - Dot-separated property path
+             * @param {*} value - Value to set
+             */
+            setNestedProperty(propertyPath, value) {
+                // Split the property path into individual parts (e.g., "todos.0.completed" → ["todos", "0", "completed"])
+                const parts = propertyPath.split('.');
+
+                // Simple property (no nesting)
+                // If there's only one part, we're setting a top-level property directly
+                if (parts.length === 1) {
+                    this.abstraction[propertyPath] = value;
+                    return;
+                }
+
+                // Navigate to the parent object
+                // We need to traverse through all parts except the last one to reach the parent
+                let current = this.abstraction;
+
+                for (let i = 0; i < parts.length - 1; i++) {
+                    // Move deeper into the nested structure using the current part as a key
+                    current = current[parts[i]];
+
+                    // Check if the current path exists - if not, we can't set the property
+                    if (!current) {
+                        // Show which part of the path failed for debugging purposes
+                        console.warn(`Cannot set property: ${propertyPath} - path not found at '${parts.slice(0, i + 1).join('.')}'`);
+                        return;
+                    }
+                }
+
+                // Set the final property
+                // Extract the last part of the path (the actual property name to set)
+                const finalProperty = parts[parts.length - 1];
+
+                // Set the value on the parent object we navigated to
+                current[finalProperty] = value;
+            },
+
+            /**
+             * Applies visibility binding to an element by showing or hiding it
+             * while preserving the original display style value
+             * @param {HTMLElement} element - The DOM element to show or hide.
+             * @param {boolean} shouldShow - Determines the visibility action to perform
+             */
+            applyVisibilityBinding(element, shouldShow) {
+                if (shouldShow) {
+                    // Show element: restore original display value
+                    if (element.hasAttribute('data-pac-hidden')) {
+                        // Restore the original display value (or empty string if none was saved)
+                        element.style.display = element.getAttribute('data-pac-orig-display') || '';
+
+                        // Clean up our tracking attributes
+                        element.removeAttribute('data-pac-hidden');
+                        element.removeAttribute('data-pac-orig-display');
+                    }
+                } else {
+                    // Hide element: save current display and set to none
+                    if (!element.hasAttribute('data-pac-hidden')) {
+                        // Get the computed display style before we change it
+                        const currentDisplay = getComputedStyle(element).display;
+
+                        // Only save the display value if it's not already 'none'
+                        // (no point in saving 'none' as the original value)
+                        if (currentDisplay !== 'none') {
+                            element.setAttribute('data-pac-orig-display', currentDisplay);
+                        }
+
+                        // Hide the element and mark it as hidden by our binding
+                        element.style.display = 'none';
+                        element.setAttribute('data-pac-hidden', 'true');
+                    }
+                }
+            },
+
+            /**
+             * Applies checked state to an element
+             * @param {HTMLElement} element - The target DOM element
+             * @param {boolean} checked - Whether the element should be checked
+             */
+            applyCheckedBinding(element, checked) {
+                element.checked = checked;
+            },
+
+            /**
+             * Applies CSS class binding by extracting the class name and adding it to the element
+             * @param {HTMLElement} element - The target DOM element
+             * @param {string} target - The class expression (may include dot notation)
+             * @param {*} value - The evaluated expression value
+             */
+            applyClassBinding(element, target, value) {
+                // Only add class if the expression evaluates to truthy
+                if (!value) {
+                    return;
+                }
+
+                // Extract class name from dot notation (e.g., "item.active" -> "active")
+                const className = target.includes('.') ? target.split('.').pop() : target;
+                element.classList.add(className);
+            },
+
+            /**
+             * Applies attribute binding to an element
+             * @param {HTMLElement} element - The target DOM element
+             * @param {string} attributeName - The name of the attribute to set
+             * @param {*} value - The value to set for the attribute
+             */
+            applyAttributeBinding(element, attributeName, value) {
+                if (value != null) {
+                    element.setAttribute(attributeName, value);
+                }
+            },
+
+            /**
+             * Reads the current value from a DOM element (input, select, textarea, etc.)
+             * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
+             * @returns {string|boolean} The element's value (string for most inputs, boolean for checkboxes)
+             */
+            readDOMValue: (elementOrSelector) => {
+                // Find the element using either ID selector (#id) or CSS selector
+                // Check if selector starts with '#' to use getElementById for better performance
+                let element;
+
+                if (typeof elementOrSelector === 'string') {
+                    if (elementOrSelector.startsWith('#')) {
+                        element = document.getElementById(elementOrSelector.slice(1));
+                    } else {
+                        element = document.querySelector(elementOrSelector);
+                    }
+                } else if (elementOrSelector && elementOrSelector.nodeType) {
+                    element = elementOrSelector;
+                }
+
+                // Early return if element doesn't exist to prevent errors
+                if (!element) {
+                    console.warn(`Element not found: ${elementOrSelector}`);
+                    return false;
+                }
+
+                // Use switch(true) pattern to check multiple conditions in order of priority
+                switch (true) {
+                    case element.tagName === 'SELECT':
+                        return element.value; // Get selected option value
+
+                    case element.type === 'checkbox':
+                        return element.checked; // true/false based on checked state
+
+                    case element.type === 'radio':
+                        // Radio buttons work in groups, so find the currently checked one
+                        // Use the 'name' attribute to identify radio buttons in the same group
+                        const checkedRadio = document.querySelector(`input[name="${element.name}"]:checked`);
+                        return checkedRadio ? checkedRadio.value : ''; // Get value or empty string
+
+                    case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA':
+                        return element.value; // Get the input value
+
+                    default:
+                        // Extract text content, preferring textContent over innerText
+                        // textContent gets all text including hidden elements
+                        // innerText respects styling and returns visible text only
+                        return element.textContent || element.innerText;
+                }
+            },
+
+            // === HIERARCHY SECTION ===
+
+            /**
              * Establishes parent-child relationships in component hierarchy
              */
             establishHierarchy() {
@@ -2387,10 +2620,6 @@
                     }
                 });
             },
-
-            // ==========================================================
-            // Communication methods for hierarchical components
-            // ==========================================================
 
             /**
              * Notifies the parent component of an event or state change
@@ -2475,6 +2704,8 @@
                 }
             },
 
+            // === HTTP/SERIALIZATION SECTION ===
+
             /**
              * Makes an HTTP request with PAC-specific headers and handling
              * @param {string} url - URL to request
@@ -2495,12 +2726,14 @@
                         if (opts.onSuccess) {
                             opts.onSuccess.call(this.abstraction, data);
                         }
+
                         return data;
                     })
                     .catch(error => {
                         if (opts.onError) {
                             opts.onError.call(this.abstraction, error);
                         }
+
                         throw error;
                     });
             },
@@ -2540,108 +2773,7 @@
                 return result;
             },
 
-            /**
-             * Performs initial DOM synchronization
-             */
-            performInitialUpdate() {
-                // Update all regular properties
-                Object.keys(this.abstraction).forEach(key => {
-                    // Only process non-function properties that belong to the object itself
-                    if (this.abstraction.hasOwnProperty(key) && typeof this.abstraction[key] !== 'function') {
-                        // Schedule an update for each property with its current value
-                        this.scheduleUpdate(key, this.abstraction[key]);
-                    }
-                });
-
-                // Update computed properties
-                if (this.original.computed) {
-                    // Iterate through all defined computed properties
-                    Object.keys(this.original.computed).forEach(name => {
-                        // Schedule update for computed property using its calculated value
-                        this.scheduleUpdate(name, this.abstraction[name]);
-                    });
-                }
-
-                // Initialize foreach bindings
-                this.bindings.forEach(binding => {
-                    // Only process foreach-type bindings
-                    if (binding.type === 'foreach') {
-                        // Initialize the previous state as empty array for change detection
-                        binding.previous = [];
-
-                        // Get the current collection value from the abstraction
-                        const value = this.abstraction[binding.collection];
-
-                        // Only update if the collection has a defined value
-                        if (value !== undefined) {
-                            // Perform initial rendering of the foreach binding
-                            this.updateForeachBinding(binding, binding.collection, value);
-                        }
-                    }
-                });
-            },
-
-            /**
-             * Reads the current value from a DOM element (input, select, textarea, etc.)
-             * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
-             * @returns {string|boolean} The element's value (string for most inputs, boolean for checkboxes)
-             */
-            readDOMValue: (elementOrSelector) => {
-                // Find the element using either ID selector (#id) or CSS selector
-                // Check if selector starts with '#' to use getElementById for better performance
-                let element;
-
-                if (typeof elementOrSelector === 'string') {
-                    if (elementOrSelector.startsWith('#')) {
-                        element = document.getElementById(elementOrSelector.slice(1));
-                    } else {
-                        element = document.querySelector(elementOrSelector);
-                    }
-                } else if (elementOrSelector && elementOrSelector.nodeType) {
-                    element = elementOrSelector;
-                }
-
-                // Early return if element doesn't exist to prevent errors
-                if (!element) {
-                    console.warn(`Element not found: ${elementOrSelector}`);
-                    return false;
-                }
-
-                // Use switch(true) pattern to check multiple conditions in order of priority
-                switch (true) {
-                    case element.tagName === 'SELECT':
-                        return element.value; // Get selected option value
-
-                    case element.type === 'checkbox':
-                        return element.checked; // true/false based on checked state
-
-                    case element.type === 'radio':
-                        // Radio buttons work in groups, so find the currently checked one
-                        // Use the 'name' attribute to identify radio buttons in the same group
-                        const checkedRadio = document.querySelector(`input[name="${element.name}"]:checked`);
-                        return checkedRadio ? checkedRadio.value : ''; // Get value or empty string
-
-                    case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA':
-                        return element.value; // Get the input value
-
-                    default:
-                        // Extract text content, preferring textContent over innerText
-                        // textContent gets all text including hidden elements
-                        // innerText respects styling and returns visible text only
-                        return element.textContent || element.innerText;
-                }
-            },
-
-            /**
-             * Initializes the PAC component
-             */
-            initialize() {
-                this.setupBindings();
-                this.abstraction = this.createReactiveAbstraction();
-                this.setupEventHandling();
-                this.performInitialUpdate();
-                return this;
-            },
+            // === CLEANUP SECTION ===
 
             /**
              * Main cleanup method that orchestrates component destruction
