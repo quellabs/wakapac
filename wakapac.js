@@ -2028,44 +2028,6 @@
             },
 
             /**
-             * This method handles variable resolution and property access within foreach loops.
-             * It supports accessing the current item, loop index, and nested object properties.
-             * @param {string} expression - The expression to evaluate (e.g., "item", "index", "user.name")
-             * @param {*} item - The current item being iterated over
-             * @param {number} index - The current loop index (0-based)
-             * @param {string} itemName - The variable name for the current item (e.g., "user", "product")
-             * @param {string} indexName - The variable name for the current index (e.g., "i", "index")
-             * @returns {*|string} The evaluated result or the original expression if no match
-             */
-            evaluateForeachExpression(expression, item, index, itemName, indexName) {
-                // If expression matches the index variable name, return the current index
-                if (expression === indexName) {
-                    return index;
-                }
-
-                // If expression matches the item variable name, return the current item
-                if (expression === itemName) {
-                    return item;
-                }
-
-                // Handle property access on the item (e.g., "user.name" or "product.price.amount")
-                if (expression.startsWith(`${itemName}.`)) {
-                    // Remove the item name prefix and the dot to get the property path
-                    return expression.substring(itemName.length + 1)
-                        .split('.')
-                        .reduce((val, prop) => {
-                            // Check if current value exists and has the property before accessing it
-                            // This prevents errors when accessing properties on null/undefined values
-                            return val && val.hasOwnProperty(prop) ? val[prop] : undefined;
-                        }, item);
-                }
-
-                // If none of the above conditions match, return the expression as-is
-                // This handles literal values or expressions that don't reference foreach variables
-                return expression;
-            },
-
-            /**
              * Creates a context object for foreach loops that combines the main abstraction
              * with loop-specific variables (item and index).
              * @param {*} item - The current item in the foreach iteration
