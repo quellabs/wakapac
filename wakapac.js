@@ -1886,72 +1886,80 @@
 
             /**
              * Update processForeachTemplate signature and fix the target resolution:
+             * Processes a template element for foreach loops, handling text interpolation and data bindings
+             * @param {Element} element - The DOM element to process
+             * @param {*} item - The current item from the collection being iterated
+             * @param {number} index - The current index in the iteration
+             * @param {string} itemName - The variable name for the current item (e.g., 'user')
+             * @param {string} indexName - The variable name for the current index (e.g., 'i')
+             * @param {string} collectionName - The name of the collection being iterated
              */
             processForeachTemplate(element, item, index, itemName, indexName, collectionName) {
-                // Create a TreeWalker to traverse all text nodes in the element
+                // Create a tree walker to traverse all text nodes in the element
+                // This allows us to find and process text interpolations like {{item.name}}
                 const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
                 const textNodes = [];
-                let node;
 
-                // Collect all text nodes first to avoid modifying the DOM while traversing
+                // Collect all text nodes first to avoid modifying the tree while traversing
+                let node;
                 while (node = walker.nextNode()) {
                     textNodes.push(node);
                 }
 
-                // Process each text node for variable interpolation
+                // Process each text node for template interpolation
                 textNodes.forEach(textNode => {
-                    let text = textNode.textContent;
+                    // Replace template expressions in the format {{expression}}
+                    textNode.textContent = textNode.textContent.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, expr) => {
+                        expr = expr.trim();
 
-                    // Replace item property references like {{user.name}} or {{product.price}}
-                    text = text.replace(
-                        new RegExp(`\\{\\{\\s*${itemName}\\.(\\w+)\\s*\\}\\}`, 'g'),
-                        (match, prop) => {
-                            return item && item.hasOwnProperty(prop) ? item[prop] : '';
+                        // Handle index variable (e.g., {{i}} -> current index)
+                        if (expr === indexName) {
+                            return index;
                         }
-                    );
 
-                    // Replace direct item references like {{user}} or {{product}}
-                    text = text.replace(
-                        new RegExp(`\\{\\{\\s*${itemName}\\s*\\}\\}`, 'g'),
-                        () => {
-                            return typeof item === 'object' ? JSON.stringify(item) : item || '';
+                        // Handle item variable (e.g., {{item}} -> formatted item value)
+                        if (expr === itemName) {
+                            return Utils.formatValue(item);
                         }
-                    );
 
-                    // Replace index references like {{i}} or {{index}}
-                    text = text.replace(
-                        new RegExp(`\\{\\{\\s*${indexName}\\s*\\}\\}`, 'g'),
-                        () => index
-                    );
+                        // Handle item property access (e.g., {{item.name}} -> item's name property)
+                        if (expr.startsWith(`${itemName}.`)) {
+                            // Extract the property path after the item name
+                            return Utils.formatValue(Utils.getNestedValue(item, expr.substring(itemName.length + 1)));
+                        }
 
-                    textNode.textContent = text;
+                        // If no pattern matches, return the original expression unchanged
+                        return match;
+                    });
                 });
 
-                // Process elements with data binding attributes
+                // Process data binding attributes on the current element and all its descendants
+                // Look for elements with data-pac-bind attribute for two-way data binding
                 [element, ...element.querySelectorAll('[data-pac-bind]')].forEach(el => {
-                    // Fetch pac bind
-                    const bindAttr = el.getAttribute('data-pac-bind');
+                    const bindings = el.getAttribute('data-pac-bind');
 
-                    // If no bind found, do nothing
-                    if (!bindAttr) {
+                    // Skip elements without binding attributes
+                    if (!bindings) {
                         return;
                     }
 
-                    // Split multiple bindings by comma and process each one
-                    bindAttr.split(',').forEach(bind => {
+                    // Parse multiple bindings separated by commas (e.g., "value:item.name, class:item.status")
+                    bindings.split(',').forEach(bind => {
+                        // Split binding into type and target (e.g., "value:item.name" -> ["value", "item.name"])
                         const [type, target] = bind.trim().split(':').map(s => s.trim());
 
-                        // Set up input elements for automatic two-way binding
-                        if (type === 'value' || type === 'checked') {
-                            // Resolve the target property path for the current item
-                            if (target.startsWith(`${itemName}.`)) {
-                                const propertyPath = target.substring(itemName.length + 1);
-                                const resolvedTarget = `${collectionName}.${index}.${propertyPath}`;
-                                this.setupInputElement(el, resolvedTarget, type);
-                            }
+                        // Set up two-way binding for form inputs
+                        // This handles input/textarea value binding and checkbox/radio checked binding
+                        if ((type === 'value' || type === 'checked') && target.startsWith(`${itemName}.`)) {
+                            // Extract the property path from the target (e.g., "item.name" -> "name")
+                            const propertyPath = target.substring(itemName.length + 1);
+
+                            // Create a full path including collection and index for proper data binding
+                            // (e.g., "users.0.name" for the name property of the first user)
+                            this.setupInputElement(el, `${collectionName}.${index}.${propertyPath}`, type);
                         }
 
-                        // Process the binding
+                        // Process other types of bindings (e.g., class, style, attributes)
                         this.processForeachBinding(el, type, target, item, index, itemName, indexName);
                     });
                 });
