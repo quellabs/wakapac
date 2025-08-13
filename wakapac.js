@@ -1304,7 +1304,8 @@
                     sendToChildren: (cmd, data) => this.sendToChildren(cmd, data),
                     sendToChild: (selector, cmd, data) => this.sendToChild(selector, cmd, data),
                     findChild: predicate => Array.from(this.children).find(predicate),
-                    toJSON: () => this.serializeToJSON()
+                    toJSON: () => this.serializeToJSON(),
+                    control: (url, opts = {}) => this.makeHttpRequest(url, opts)
                 });
 
                 return reactive;
@@ -2467,6 +2468,36 @@
             },
 
             /**
+             * Makes an HTTP request with PAC-specific headers and handling
+             * @param {string} url - URL to request
+             * @param {Object} opts - Request options
+             * @returns {Promise} Promise that resolves with response data
+             */
+            makeHttpRequest(url, opts = {}) {
+                return fetch(url, {
+                    method: opts.method || 'GET',
+                    headers: Object.assign({
+                        'Content-Type': 'application/json',
+                        'X-PAC-Request': 'true'
+                    }, opts.headers || {}),
+                    body: opts.data ? JSON.stringify(opts.data) : undefined
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (opts.onSuccess) {
+                            opts.onSuccess.call(this.abstraction, data);
+                        }
+                        return data;
+                    })
+                    .catch(error => {
+                        if (opts.onError) {
+                            opts.onError.call(this.abstraction, error);
+                        }
+                        throw error;
+                    });
+            },
+
+            /**
              * Serializes component state to JSON
              * @returns {Object} A plain object containing only the serializable properties
              */
@@ -2713,6 +2744,7 @@
             // This allows external code to access the component's abstraction layer
             Object.keys(unit.abstraction).forEach(key => {
                 const descriptor = Object.getOwnPropertyDescriptor(unit.abstraction, key);
+
                 if (descriptor) {
                     // Preserve property descriptors (getters, setters, configurability)
                     Object.defineProperty(api, key, descriptor);
@@ -2817,31 +2849,7 @@
                  * @param {Function} [opts.onError] - Error callback
                  * @returns {Promise} Promise that resolves with response data
                  */
-                control: (url, opts = {}) => {
-                    return fetch(url, {
-                        method: opts.method || 'GET',
-                        headers: Object.assign({
-                            'Content-Type': 'application/json',
-                            'X-PAC-Request': 'true' // Identify this as a PAC component request
-                        }, opts.headers || {}),
-                        body: opts.data ? JSON.stringify(opts.data) : undefined
-                    })
-                        .then(response => response.json())
-                        .then(data => {
-                            // Call success callback in the context of the abstraction
-                            if (opts.onSuccess) {
-                                opts.onSuccess.call(control.abstraction, data);
-                            }
-                            return data;
-                        })
-                        .catch(error => {
-                            // Call error callback in the context of the abstraction
-                            if (opts.onError) {
-                                opts.onError.call(control.abstraction, error);
-                            }
-                            throw error; // Re-throw for promise chain handling
-                        });
-                },
+                control: (url, opts = {}) => control.makeHttpRequest(url, opts),
 
                 /**
                  * Reads DOM state from a specific element and stores it in a data model property
