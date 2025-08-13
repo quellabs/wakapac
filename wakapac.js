@@ -2744,7 +2744,7 @@
             // This allows external code to access the component's abstraction layer
             Object.keys(unit.abstraction).forEach(key => {
                 const descriptor = Object.getOwnPropertyDescriptor(unit.abstraction, key);
-                
+
                 if (descriptor) {
                     // Preserve property descriptors (getters, setters, configurability)
                     Object.defineProperty(api, key, descriptor);
