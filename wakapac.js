@@ -1187,20 +1187,38 @@
                         this.bindingIndex.get(binding.property).add(binding);
                     }
 
-                    // Index dependencies for expression bindings
-                    if (binding.dependencies) {
-                        binding.dependencies.forEach(dep => {
-                            if (!this.bindingIndex.has(dep)) {
-                                this.bindingIndex.set(dep, new Set());
-                            }
+                    // Index dependencies for expression bindings (lazy-loaded)
+                    // For bindings that haven't been parsed yet, we need to parse them to get dependencies
+                    if (binding.target) {
+                        const parsed = this.getParsedExpression(binding);
 
-                            this.bindingIndex.get(dep).add(binding);
-                        });
+                        if (parsed.dependencies) {
+                            parsed.dependencies.forEach(dep => {
+                                if (!this.bindingIndex.has(dep)) {
+                                    this.bindingIndex.set(dep, new Set());
+                                }
+
+                                this.bindingIndex.get(dep).add(binding);
+                            });
+                        }
                     }
                 });
             },
 
             // === BINDING CREATION SECTION ===
+
+            /**
+             * Gets or creates parsed expression for a binding (lazy compilation with caching)
+             * @param {Object} binding - The binding object
+             * @returns {Object} Parsed expression object
+             */
+            getParsedExpression(binding) {
+                if (!binding.parsedExpression) {
+                    binding.parsedExpression = ExpressionParser.parse(binding.target);
+                    binding.dependencies = binding.parsedExpression.dependencies;
+                }
+                return binding.parsedExpression;
+            },
 
             /**
              * Creates different types of bindings using a factory pattern
@@ -1316,16 +1334,11 @@
                 const parts = target.split(' then ');
                 const collection = parts[0].trim();
                 const callback = parts[1] ? parts[1].trim() : null;
-                const collectionParsed = ExpressionParser.parse(collection);
-                const callbackParsed = callback ? ExpressionParser.parse(callback) : null;
 
                 return this.createBinding('foreach', element, {
                     target: collection,
                     collection: collection,
                     callback: callback,
-                    parsedExpression: collectionParsed,
-                    callbackExpression: callbackParsed,
-                    dependencies: collectionParsed.dependencies,
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: element.innerHTML,
@@ -1372,12 +1385,8 @@
              * Creates an input value binding
              */
             createInputBinding(element, target) {
-                const parsed = ExpressionParser.parse(target);
-
                 return this.createBinding('input', element, {
                     target: target,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies,
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
                 });
@@ -1387,12 +1396,8 @@
              * Creates a checkbox/radio checked binding
              */
             createCheckedBinding(element, target) {
-                const parsed = ExpressionParser.parse(target);
-
                 return this.createBinding('checked', element, {
                     target: target,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies,
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
                 });
@@ -1402,13 +1407,10 @@
              * Creates an event binding
              */
             createEventBinding(element, eventType, target) {
-                const parsed = ExpressionParser.parse(target);
-
                 return this.createBinding('event', element, {
                     eventType: eventType,
                     method: target,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies
+                    target: target
                 });
             },
 
@@ -1454,6 +1456,12 @@
                 // Property path match (e.g., 'user.name' starts with 'user')
                 if (binding.propertyPath && binding.propertyPath.startsWith(changedProperty + '.')) {
                     return true;
+                }
+
+                // For lazy-parsed expressions, check dependencies
+                if (binding.target && !binding.dependencies) {
+                    const parsed = this.getParsedExpression(binding);
+                    // Dependencies are now cached on the binding
                 }
 
                 // Expression dependencies
@@ -1730,15 +1738,9 @@
             updateAttributeBinding(binding, property, value, context = null) {
                 // Use provided context or default to main abstraction
                 const evalContext = context || this.abstraction;
+                const parsed = this.getParsedExpression(binding);
 
-                let actualValue;
-
-                if (binding.parsedExpression) {
-                    actualValue = ExpressionParser.evaluate(binding.parsedExpression, evalContext);
-                } else {
-                    actualValue = Utils.getNestedValue(evalContext, binding.propertyPath || binding.property);
-                }
-
+                const actualValue = ExpressionParser.evaluate(parsed, evalContext);
                 this.setElementAttribute(binding.element, binding.attribute, actualValue);
             },
 
@@ -1748,17 +1750,18 @@
             updateInputBinding(binding, property, value, foreachVars = null) {
                 const element = binding.element;
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
+                const parsed = this.getParsedExpression(binding);
 
                 // Special handling for radio buttons
                 if (element.type === 'radio') {
                     // For radio buttons, we check if the element's value matches the property value
-                    const actualValue = ExpressionParser.evaluate(binding.parsedExpression, context);
+                    const actualValue = ExpressionParser.evaluate(parsed, context);
                     element.checked = (element.value === actualValue);
                     return;
                 }
 
                 // Regular input handling (text, number, etc.)
-                const actualValue = ExpressionParser.evaluate(binding.parsedExpression, context);
+                const actualValue = ExpressionParser.evaluate(parsed, context);
 
                 if (element.value !== String(actualValue || '')) {
                     element.value = actualValue || '';
@@ -1768,8 +1771,10 @@
             /**
              * Updates checkbox/radio checked state
              */
-            updateCheckedBinding(binding, property, value) {
-                const actualValue = Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property);
+            updateCheckedBinding(binding, property, value, foreachVars = null) {
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
+                const parsed = this.getParsedExpression(binding);
+                const actualValue = ExpressionParser.evaluate(parsed, context);
                 binding.element.checked = Boolean(actualValue);
             },
 
@@ -1779,10 +1784,10 @@
             updateVisibilityBinding(binding, property, value, context = null) {
                 // Use provided context or default to main abstraction
                 const evalContext = context || this.abstraction;
+                const parsed = this.getParsedExpression(binding);
 
                 // Use expression parser to evaluate the visibility condition
-                const shouldShow = ExpressionParser.evaluate(binding.parsedExpression, evalContext);
-
+                const shouldShow = ExpressionParser.evaluate(parsed, evalContext);
                 this.applyVisibilityBinding(binding.element, shouldShow);
             },
 
@@ -1795,9 +1800,10 @@
             updateConditionalBinding(binding, property, value, context = null) {
                 // Use provided context or default to main abstraction
                 const evalContext = context || this.abstraction;
+                const parsed = this.getParsedExpression(binding);
 
                 // Determine if element should be rendered based on the value and negation flag
-                const shouldRender = ExpressionParser.evaluate(binding.parsedExpression, evalContext);
+                const shouldRender = ExpressionParser.evaluate(parsed, evalContext);
 
                 // Early exit if the rendering state hasn't changed
                 if (binding.isRendered === shouldRender) {
@@ -1840,7 +1846,8 @@
 
                 // Use parsed expression to get the array value
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
-                const arrayValue = ExpressionParser.evaluate(binding.parsedExpression, context);
+                const parsed = this.getParsedExpression(binding);
+                const arrayValue = ExpressionParser.evaluate(parsed, context);
 
                 // Ensure we have a valid array to work with
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
