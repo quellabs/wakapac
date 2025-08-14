@@ -1487,6 +1487,28 @@
             },
 
             /**
+             * Updates all bindings within a specific element with foreach context
+             * @param {Element} element - The element to find bindings within
+             * @param {Object|null} foreachVars - Foreach variables to pass to binding updates
+             */
+            updateBindingsInElement(element, foreachVars = null) {
+                // Find all bindings that belong to this element or its children
+                this.bindings.forEach(binding => {
+                    if (binding.element === element || element.contains(binding.element)) {
+                        // For bindings within foreach elements, we need to determine what property changed
+                        // Since we don't know the specific property, we'll check all dependencies
+                        if (binding.dependencies) {
+                            binding.dependencies.forEach(dep => {
+                                this.updateBinding(binding, dep, this.abstraction[dep], foreachVars);
+                            });
+                        } else if (binding.property) {
+                            this.updateBinding(binding, binding.property, this.abstraction[binding.property], foreachVars);
+                        }
+                    }
+                });
+            },
+
+            /**
              * Processes all pending DOM updates in a single batch
              */
             flushUpdates() {
@@ -1510,9 +1532,9 @@
                     });
                 });
 
-                // Update all relevant bindings
+                // Update all relevant bindings (no foreach context at root level)
                 relevantBindings.forEach(({property, value}, binding) => {
-                    this.updateBinding(binding, property, value);
+                    this.updateBinding(binding, property, value, null);
                 });
 
                 // Clear pending state
@@ -1660,38 +1682,35 @@
             /**
              * Updates a specific binding based on its type
              */
-            updateBinding(binding, property, value) {
+            updateBinding(binding, property, value, foreachVars = null) {
                 try {
-                    // Check if binding element has foreach context
-                    const context = this.getBindingContext(binding.element);
-
                     switch (binding.type) {
                         case 'text':
-                            this.updateTextBinding(binding, property, value);
+                            this.updateTextBinding(binding, property, value, foreachVars);
                             break;
 
                         case 'attribute':
-                            this.updateAttributeBinding(binding, property, value, context);
+                            this.updateAttributeBinding(binding, property, value, foreachVars);
                             break;
 
                         case 'input':
-                            this.updateInputBinding(binding, property, value);
+                            this.updateInputBinding(binding, property, value, foreachVars);
                             break;
 
                         case 'checked':
-                            this.updateCheckedBinding(binding, property, value);
+                            this.updateCheckedBinding(binding, property, value, foreachVars);
                             break;
 
                         case 'visible':
-                            this.updateVisibilityBinding(binding, property, value, context);
+                            this.updateVisibilityBinding(binding, property, value, foreachVars);
                             break;
 
                         case 'conditional':
-                            this.updateConditionalBinding(binding, property, value, context);
+                            this.updateConditionalBinding(binding, property, value, foreachVars);
                             break;
 
                         case 'foreach':
-                            this.updateForeachBinding(binding, property, value);
+                            this.updateForeachBinding(binding, property, value, foreachVars);
                             break;
                     }
                 } catch (error) {
@@ -1735,12 +1754,11 @@
             /**
              * Updates element attributes
              */
-            updateAttributeBinding(binding, property, value, context = null) {
-                // Use provided context or default to main abstraction
-                const evalContext = context || this.abstraction;
+            updateAttributeBinding(binding, property, value, foreachVars = null) {
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
                 const parsed = this.getParsedExpression(binding);
 
-                const actualValue = ExpressionParser.evaluate(parsed, evalContext);
+                const actualValue = ExpressionParser.evaluate(parsed, context);
                 this.setElementAttribute(binding.element, binding.attribute, actualValue);
             },
 
@@ -1781,29 +1799,28 @@
             /**
              * Updates element visibility
              */
-            updateVisibilityBinding(binding, property, value, context = null) {
-                // Use provided context or default to main abstraction
-                const evalContext = context || this.abstraction;
+            updateVisibilityBinding(binding, property, value, foreachVars = null) {
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
                 const parsed = this.getParsedExpression(binding);
 
                 // Use expression parser to evaluate the visibility condition
-                const shouldShow = ExpressionParser.evaluate(parsed, evalContext);
+                const shouldShow = ExpressionParser.evaluate(parsed, context);
                 this.applyVisibilityBinding(binding.element, shouldShow);
             },
 
             /**
-             * Updates the conditional binding by adding/removing DOM elements based on property values
-             * @param {Object} binding - The binding object containing element, placeholder, and condition info
-             * @param {string} property - The property name being bound (may be unused in current implementation)
-             * @param {*} value - The new value (may be unused in current implementation)
+             * Updates the conditional binding by adding/removing DOM elements based on expression evaluation
+             * @param {Object} binding - The binding object containing element, placeholder, and parsed expression
+             * @param {string} property - The property name that changed (used for change detection)
+             * @param {*} value - The new property value (may be unused in current implementation)
+             * @param {Object|null} foreachVars - Optional foreach variables to merge into evaluation context
              */
-            updateConditionalBinding(binding, property, value, context = null) {
-                // Use provided context or default to main abstraction
-                const evalContext = context || this.abstraction;
+            updateConditionalBinding(binding, property, value, foreachVars = null) {
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
                 const parsed = this.getParsedExpression(binding);
 
-                // Determine if element should be rendered based on the value and negation flag
-                const shouldRender = ExpressionParser.evaluate(parsed, evalContext);
+                // Determine if element should be rendered based on the expression evaluation
+                const shouldRender = ExpressionParser.evaluate(parsed, context);
 
                 // Early exit if the rendering state hasn't changed
                 if (binding.isRendered === shouldRender) {
@@ -1926,7 +1943,6 @@
             },
 
             /**
-             * Update processForeachTemplate signature and fix the target resolution:
              * Processes a template element for foreach loops, handling text interpolation and data bindings
              * @param {Element} element - The DOM element to process
              * @param {*} item - The current item from the collection being iterated
@@ -1936,8 +1952,13 @@
              * @param {string} collectionName - The name of the collection being iterated
              */
             processForeachTemplate(element, item, index, itemName, indexName, collectionName) {
+                // Create foreach variables for this iteration
+                const foreachVars = {
+                    [itemName]: item,
+                    [indexName]: index
+                };
+
                 // Create a tree walker to traverse all text nodes in the element
-                // This allows us to find and process text interpolations like {{item.name}}
                 const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
                 const textNodes = [];
 
@@ -1975,7 +1996,6 @@
                 });
 
                 // Process data binding attributes on the current element and all its descendants
-                // Look for elements with data-pac-bind attribute for two-way data binding
                 [element, ...element.querySelectorAll('[data-pac-bind]')].forEach(el => {
                     const bindings = el.getAttribute('data-pac-bind');
 
@@ -1984,58 +2004,44 @@
                         return;
                     }
 
-                    // Parse multiple bindings separated by commas (e.g., "value:item.name, class:item.status")
+                    // Parse multiple bindings separated by commas
                     bindings.split(',').forEach(bind => {
-                        // Split binding into type and target (e.g., "value:item.name" -> ["value", "item.name"])
+                        // Split binding into type and target
                         const [type, target] = bind.trim().split(':').map(s => s.trim());
 
                         // Set up two-way binding for form inputs
-                        // This handles input/textarea value binding and checkbox/radio checked binding
                         if ((type === 'value' || type === 'checked') && target.startsWith(`${itemName}.`)) {
-                            // Extract the property path from the target (e.g., "item.name" -> "name")
+                            // Extract the property path from the target
                             const propertyPath = target.substring(itemName.length + 1);
-
                             // Create a full path including collection and index for proper data binding
-                            // (e.g., "users.0.name" for the name property of the first user)
                             this.setupInputElement(el, `${collectionName}.${index}.${propertyPath}`, type);
                         }
 
-                        // Process other types of bindings (e.g., class, style, attributes)
-                        this.processForeachBinding(el, type, target, item, index, itemName, indexName);
+                        // Process other types of bindings using unified expression evaluation
+                        this.processForeachBinding(el, type, target, foreachVars);
                     });
                 });
             },
 
             /**
              * Processes individual bindings within foreach templates by applying the appropriate
-             * DOM manipulation based on the binding type (class, checked, event, or attribute)
+             * DOM manipulation based on the binding type using unified expression evaluation
              * @param {HTMLElement} element - The DOM element to apply the binding to
              * @param {string} type - The type of binding (class, checked, event name, or attribute name)
              * @param {string} target - The expression or property path to evaluate
-             * @param {*} item - The current item from the foreach iteration
-             * @param {number} index - The current index in the foreach iteration
-             * @param {string} itemName - The variable name for the current item in the template
-             * @param {string} indexName - The variable name for the current index in the template
+             * @param {Object} foreachVars - The foreach variables (item, index, etc.)
              */
-            processForeachBinding(element, type, target, item, index, itemName, indexName) {
-                // Store foreach context on the element for later use by binding updates
-                element._foreachContext = {
-                    item: item,
-                    index: index,
-                    itemName: itemName,
-                    indexName: indexName
-                };
-
+            processForeachBinding(element, type, target, foreachVars) {
                 // For event bindings, handle them specially since they need item/index passed
                 if (Utils.isEventType(type)) {
-                    this.handleEventBinding(element, type, target, item, index);
+                    this.handleEventBinding(element, type, target, foreachVars[Object.keys(foreachVars)[0]], foreachVars[Object.keys(foreachVars)[1]]);
                     return;
                 }
 
-                // For all other bindings, evaluate using foreach context
-                const foreachContext = this.createForeachContext(item, index, itemName, indexName);
+                // For all other bindings, evaluate using unified expression system
+                const context = Object.assign({}, this.abstraction, foreachVars);
                 const parsed = ExpressionParser.parse(target);
-                const value = ExpressionParser.evaluate(parsed, foreachContext);
+                const value = ExpressionParser.evaluate(parsed, context);
 
                 // Apply the binding based on type
                 switch (type) {
@@ -2055,54 +2061,6 @@
                         this.applyAttributeBinding(element, type, value);
                         break;
                 }
-            },
-
-            /**
-             * Creates a context object for foreach loops that combines the main abstraction
-             * with loop-specific variables (item and index).
-             * @param {*} item - The current item in the foreach iteration
-             * @param {number} index - The current index in the foreach iteration
-             * @param {string} itemName - The variable name to use for the current item
-             * @param {string} indexName - The variable name to use for the current index
-             * @returns {Object} A context object with access to both main abstraction and loop variables
-             */
-            createForeachContext(item, index, itemName, indexName) {
-                // Create a context that includes both the foreach item and the main abstraction
-                // Using Object.create() ensures the main abstraction properties are inherited
-                // while allowing foreach-specific properties to be added without mutation
-                const context = Object.create(this.abstraction);
-
-                // Add the foreach-specific variables to the context
-                // These will shadow any properties with the same names from the parent abstraction
-                context[itemName] = item;
-                context[indexName] = index;
-                return context;
-            },
-
-            /**
-             * Retrieves the appropriate binding context for a given DOM element.
-             * Elements within foreach loops get special context with loop variables,
-             * while other elements use the main abstraction.
-             * @param {HTMLElement} element - The DOM element to get context for
-             * @returns {Object} The binding context object for this element
-             */
-            getBindingContext(element) {
-                // Check if element has stored foreach context data
-                // This would have been set when the element was created within a foreach loop
-                if (element._foreachContext) {
-                    // Recreate the foreach context using the stored metadata
-                    // This ensures each access gets a fresh context object
-                    return this.createForeachContext(
-                        element._foreachContext.item,        // Current loop item
-                        element._foreachContext.index,       // Current loop index
-                        element._foreachContext.itemName,    // Variable name for item
-                        element._foreachContext.indexName    // Variable name for index
-                    );
-                }
-
-                // Default to main abstraction for elements not in foreach loops
-                // This provides access to the root-level data and methods
-                return this.abstraction;
             },
 
             // === EVENT HANDLING SECTION ===
