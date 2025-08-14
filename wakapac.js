@@ -1312,15 +1312,20 @@
             /**
              * Creates a foreach binding for rendering lists
              */
-            createForeachBinding(element, target, type) {
+            createForeachBinding(element, target) {
                 const parts = target.split(' then ');
                 const collection = parts[0].trim();
                 const callback = parts[1] ? parts[1].trim() : null;
+                const collectionParsed = ExpressionParser.parse(collection);
+                const callbackParsed = callback ? ExpressionParser.parse(callback) : null;
 
                 return this.createBinding('foreach', element, {
                     target: collection,
                     collection: collection,
                     callback: callback,
+                    parsedExpression: collectionParsed,
+                    callbackExpression: callbackParsed,
+                    dependencies: collectionParsed.dependencies,
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: element.innerHTML,
@@ -1397,9 +1402,13 @@
              * Creates an event binding
              */
             createEventBinding(element, eventType, target) {
+                const parsed = ExpressionParser.parse(target);
+
                 return this.createBinding('event', element, {
                     eventType: eventType,
-                    method: target
+                    method: target,
+                    parsedExpression: parsed,
+                    dependencies: parsed.dependencies
                 });
             },
 
@@ -1823,14 +1832,18 @@
             /**
              * Updates foreach bindings for list rendering
              */
-            updateForeachBinding(binding, property, value) {
+            updateForeachBinding(binding, property, value, foreachVars = null) {
                 // Only update if this binding is for the changed property
                 if (binding.collection !== property) {
                     return;
                 }
 
+                // Use parsed expression to get the array value
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
+                const arrayValue = ExpressionParser.evaluate(binding.parsedExpression, context);
+
                 // Ensure we have a valid array to work with
-                const array = Array.isArray(value) ? value : [];
+                const array = Array.isArray(arrayValue) ? arrayValue : [];
                 const previous = binding.previous || [];
                 const forceUpdate = binding.previous === null;
 
@@ -1867,7 +1880,7 @@
                 // Call the callback if specified (deferred to next tick)
                 if (binding.callback && typeof this.abstraction[binding.callback] === 'function') {
                     setTimeout(() => {
-                        this.abstraction[binding.callback].call(this.abstraction, value, {
+                        this.abstraction[binding.callback].call(this.abstraction, arrayValue, {
                             element: binding.element,
                             previous: previous,
                             current: array,
