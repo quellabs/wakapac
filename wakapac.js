@@ -1367,8 +1367,12 @@
              * Creates an input value binding
              */
             createInputBinding(element, target) {
+                const parsed = ExpressionParser.parse(target);
+
                 return this.createBinding('input', element, {
                     target: target,
+                    parsedExpression: parsed,
+                    dependencies: parsed.dependencies,
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
                 });
@@ -1378,8 +1382,12 @@
              * Creates a checkbox/radio checked binding
              */
             createCheckedBinding(element, target) {
+                const parsed = ExpressionParser.parse(target);
+
                 return this.createBinding('checked', element, {
                     target: target,
+                    parsedExpression: parsed,
+                    dependencies: parsed.dependencies,
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
                 });
@@ -1728,19 +1736,21 @@
             /**
              * Updates input element values
              */
-            updateInputBinding(binding, property, value) {
+            updateInputBinding(binding, property, value, foreachVars = null) {
                 const element = binding.element;
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
 
                 // Special handling for radio buttons
                 if (element.type === 'radio') {
                     // For radio buttons, we check if the element's value matches the property value
-                    const actualValue = Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property);
+                    const actualValue = ExpressionParser.evaluate(binding.parsedExpression, context);
                     element.checked = (element.value === actualValue);
                     return;
                 }
 
                 // Regular input handling (text, number, etc.)
-                const actualValue = Utils.getNestedValue(this.abstraction, binding.propertyPath || binding.property);
+                const actualValue = ExpressionParser.evaluate(binding.parsedExpression, context);
+
                 if (element.value !== String(actualValue || '')) {
                     element.value = actualValue || '';
                 }
