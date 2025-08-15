@@ -1112,25 +1112,30 @@
             setupTextBindings() {
                 const walker = document.createTreeWalker(
                     this.container,
-                    NodeFilter.SHOW_TEXT
+                    NodeFilter.SHOW_TEXT,
+                    null,
+                    false
                 );
 
                 let node;
+                let nodeCount = 0;
                 while (node = walker.nextNode()) {
+                    nodeCount++;
                     const text = node.textContent;
-                    const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+
+                    // Enhanced regex to catch ALL interpolation patterns, including complex expressions
+                    const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
 
                     if (matches) {
-                        matches.forEach(match => {
-                            const expression = match.replace(/[{}\s]/g, '');
-                            const parsed = ExpressionParser.parse(expression);
+                        matches.forEach((match, index) => {
+                            const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
 
                             const binding = this.createBinding('text', node, {
                                 target: expression,
                                 originalText: text,
                                 fullMatch: match,
-                                parsedExpression: parsed,
-                                dependencies: parsed.dependencies
+                                parsedExpression: null,  // Will be lazily parsed on first use
+                                dependencies: null       // Will be lazily extracted on first use
                             });
 
                             this.bindings.set(binding.id, binding);
@@ -1187,20 +1192,10 @@
                         this.bindingIndex.get(binding.property).add(binding);
                     }
 
-                    // Index dependencies for expression bindings (lazy-loaded)
-                    // For bindings that haven't been parsed yet, we need to parse them to get dependencies
-                    if (binding.target) {
+                    // For text bindings, we need to parse them immediately to get dependencies for indexing
+                    // This is different from other bindings that can be truly lazy
+                    if (binding.type === 'text' && binding.target) {
                         const parsed = this.getParsedExpression(binding);
-
-                        if (parsed.dependencies) {
-                            parsed.dependencies.forEach(dep => {
-                                if (!this.bindingIndex.has(dep)) {
-                                    this.bindingIndex.set(dep, new Set());
-                                }
-
-                                this.bindingIndex.get(dep).add(binding);
-                            });
-                        }
                     }
                 });
             },
@@ -1214,8 +1209,20 @@
              */
             getParsedExpression(binding) {
                 if (!binding.parsedExpression) {
+                    // Parse the expression for the first time
                     binding.parsedExpression = ExpressionParser.parse(binding.target);
                     binding.dependencies = binding.parsedExpression.dependencies;
+
+                    // Index dependencies
+                    if (binding.dependencies && binding.dependencies.length > 0) {
+                        binding.dependencies.forEach(dep => {
+                            if (!this.bindingIndex.has(dep)) {
+                                this.bindingIndex.set(dep, new Set());
+                            }
+
+                            this.bindingIndex.get(dep).add(binding);
+                        });
+                    }
                 }
 
                 return binding.parsedExpression;
@@ -1354,13 +1361,10 @@
              * @returns {Object} The created binding object with conditional rendering configuration
              */
             createConditionalBinding(element, target) {
-                // Parse the full expression using expression parser (handles negation, comparisons, etc.)
-                const parsed = ExpressionParser.parse(target);
-
                 return this.createBinding('conditional', element, {
                     target: target,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies,
+                    parsedExpression: null,
+                    dependencies: null,
                     placeholder: null,
                     originalParent: element.parentNode,
                     originalNextSibling: element.nextSibling,
@@ -1372,13 +1376,10 @@
              * Creates a visibility binding
              */
             createVisibilityBinding(element, target) {
-                // Parse the full expression (including any negation) using expression parser
-                const parsed = ExpressionParser.parse(target);
-
                 return this.createBinding('visible', element, {
                     target: target,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies
+                    parsedExpression: null,
+                    dependencies: null
                 });
             },
 
@@ -1419,13 +1420,11 @@
              * Creates an attribute binding
              */
             createAttributeBinding(element, attributeName, target) {
-                const parsed = ExpressionParser.parse(target);
-
                 return this.createBinding('attribute', element, {
                     target: target,
                     attribute: attributeName,
-                    parsedExpression: parsed,
-                    dependencies: parsed.dependencies
+                    parsedExpression: null,
+                    dependencies: null
                 });
             },
 
@@ -1459,10 +1458,9 @@
                     return true;
                 }
 
-                // For lazy-parsed expressions, check dependencies
+                // For lazy-parsed expressions, parse them now if needed
                 if (binding.target && !binding.dependencies) {
                     const parsed = this.getParsedExpression(binding);
-                    // Dependencies are now cached on the binding
                 }
 
                 // Expression dependencies
@@ -1511,7 +1509,7 @@
                     });
                 });
 
-                // Update all relevant bindings (no foreach context at root level)
+                // Update all relevant bindings
                 relevantBindings.forEach(({property, value}, binding) => {
                     this.updateBinding(binding, property, value, null);
                 });
@@ -1714,7 +1712,7 @@
                 let text = binding.originalText;
 
                 // Find ALL interpolation patterns in the original text
-                const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+                const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
 
                 if (matches) {
                     // Replace each match with its evaluated value
@@ -1731,8 +1729,9 @@
 
                 // Update text content if changed
                 const cacheKey = `text_${binding.id}`;
+                const lastValue = this.lastValues.get(cacheKey);
 
-                if (this.lastValues.get(cacheKey) !== text) {
+                if (lastValue !== text) {
                     this.lastValues.set(cacheKey, text);
                     textNode.textContent = text;
                 }
@@ -2079,7 +2078,7 @@
                     'visible': 'visible',
                     'checked': 'checked',
                     'value': 'input',
-                    'class': 'class'  // Add explicit class mapping
+                    'class': 'class'
                 };
 
                 const bindingType = bindingTypeMap[type] || 'attribute';
@@ -2089,9 +2088,7 @@
                     type: bindingType,
                     element: element,
                     target: target,
-                    // For attribute bindings, store the attribute name
                     attribute: bindingType === 'attribute' ? type : null,
-                    // Parse expression immediately since this is temporary
                     parsedExpression: null, // Will be set by getParsedExpression
                     dependencies: null // Will be set by getParsedExpression
                 };
