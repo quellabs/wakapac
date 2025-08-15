@@ -1182,20 +1182,11 @@
              */
             buildBindingIndex() {
                 this.bindingIndex.clear();
+                this.unparsedBindings = new Set();
 
                 this.bindings.forEach(binding => {
-                    if (binding.property) {
-                        if (!this.bindingIndex.has(binding.property)) {
-                            this.bindingIndex.set(binding.property, new Set());
-                        }
-
-                        this.bindingIndex.get(binding.property).add(binding);
-                    }
-
-                    // For text bindings, we need to parse them immediately to get dependencies for indexing
-                    // This is different from other bindings that can be truly lazy
-                    if (binding.type === 'text' && binding.target) {
-                        const parsed = this.getParsedExpression(binding);
+                    if (binding.target) {
+                        this.unparsedBindings.add(binding);
                     }
                 });
             },
@@ -1209,20 +1200,18 @@
              */
             getParsedExpression(binding) {
                 if (!binding.parsedExpression) {
-                    // Parse the expression for the first time
+                    // Parse the expression only when needed
                     binding.parsedExpression = ExpressionParser.parse(binding.target);
-                    binding.dependencies = binding.parsedExpression.dependencies;
+                    binding.dependencies = binding.parsedExpression.dependencies || [];
 
-                    // Index dependencies
-                    if (binding.dependencies && binding.dependencies.length > 0) {
-                        binding.dependencies.forEach(dep => {
-                            if (!this.bindingIndex.has(dep)) {
-                                this.bindingIndex.set(dep, new Set());
-                            }
+                    // Index this binding under each of its dependencies
+                    binding.dependencies.forEach(dep => {
+                        if (!this.bindingIndex.has(dep)) {
+                            this.bindingIndex.set(dep, new Set());
+                        }
 
-                            this.bindingIndex.get(dep).add(binding);
-                        });
-                    }
+                        this.bindingIndex.get(dep).add(binding);
+                    });
                 }
 
                 return binding.parsedExpression;
@@ -1493,25 +1482,39 @@
                     return;
                 }
 
-                // Collect only bindings that need updates
-                const relevantBindings = new Map();
+                // Collect bindings that need updates with lazy parsing
+                const relevantBindings = new Set();
 
                 this.pendingUpdates.forEach(property => {
-                    const bindings = this.bindingIndex.get(property) || new Set();
+                    // Get already-indexed bindings for this property
+                    const indexedBindings = this.bindingIndex.get(property) || new Set();
 
-                    bindings.forEach(binding => {
+                    // Add all already-indexed bindings
+                    indexedBindings.forEach(binding => {
                         if (this.shouldUpdateBinding(binding, property)) {
-                            relevantBindings.set(binding, {
-                                property: property,
-                                value: this.pendingValues[property]
-                            });
+                            relevantBindings.add(binding);
+                        }
+                    });
+
+                    // Check unparsed bindings (lazy parsing happens here)
+                    this.unparsedBindings.forEach(binding => {
+                        if (!binding.parsedExpression) {
+                            // Lazy parse: only when we need to check dependencies
+                            this.getParsedExpression(binding);
+                            // Remove from unparsed set since it's now parsed and indexed
+                            this.unparsedBindings.delete(binding);
+                        }
+
+                        // Check if this binding should update for this property
+                        if (this.shouldUpdateBinding(binding, property)) {
+                            relevantBindings.add(binding);
                         }
                     });
                 });
 
                 // Update all relevant bindings
-                relevantBindings.forEach(({property, value}, binding) => {
-                    this.updateBinding(binding, property, value, null);
+                relevantBindings.forEach(binding => {
+                    this.updateBinding(binding, null, null);
                 });
 
                 // Clear pending state
@@ -1648,7 +1651,7 @@
                         // Only update if the collection has a defined value
                         if (value !== undefined) {
                             // Perform initial rendering of the foreach binding
-                            this.updateForeachBinding(binding, binding.collection, value);
+                            this.updateForeachBinding(binding, binding.collection);
                         }
                     }
                 });
@@ -1659,39 +1662,39 @@
             /**
              * Updates a specific binding based on its type
              */
-            updateBinding(binding, property, value, foreachVars = null) {
+            updateBinding(binding, property, foreachVars = null) {
                 try {
                     switch (binding.type) {
                         case 'text':
-                            this.updateTextBinding(binding, property, value, foreachVars);
+                            this.updateTextBinding(binding, property, foreachVars);
                             break;
 
                         case 'attribute':
-                            this.updateAttributeBinding(binding, property, value, foreachVars);
+                            this.updateAttributeBinding(binding, property, foreachVars);
                             break;
 
                         case 'input':
-                            this.updateInputBinding(binding, property, value, foreachVars);
+                            this.updateInputBinding(binding, property, foreachVars);
                             break;
 
                         case 'checked':
-                            this.updateCheckedBinding(binding, property, value, foreachVars);
+                            this.updateCheckedBinding(binding, property, foreachVars);
                             break;
 
                         case 'visible':
-                            this.updateVisibilityBinding(binding, property, value, foreachVars);
+                            this.updateVisibilityBinding(binding, property, foreachVars);
                             break;
 
                         case 'conditional':
-                            this.updateConditionalBinding(binding, property, value, foreachVars);
+                            this.updateConditionalBinding(binding, property, foreachVars);
                             break;
 
                         case 'foreach':
-                            this.updateForeachBinding(binding, property, value, foreachVars);
+                            this.updateForeachBinding(binding, property, foreachVars);
                             break;
 
                         case 'class':
-                            this.updateClassBinding(binding, property, value, foreachVars);
+                            this.updateClassBinding(binding, property, foreachVars);
                             break;
 
                         case 'event':
@@ -1707,7 +1710,7 @@
              * Updates text content with interpolated values - FIXED VERSION
              * Now handles multiple placeholders in the same text node correctly
              */
-            updateTextBinding(binding, property, value) {
+            updateTextBinding(binding, property) {
                 const textNode = binding.element;
                 let text = binding.originalText;
 
@@ -1740,7 +1743,7 @@
             /**
              * Updates element attributes
              */
-            updateAttributeBinding(binding, property, value, foreachVars = null) {
+            updateAttributeBinding(binding, property, foreachVars = null) {
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
                 const parsed = this.getParsedExpression(binding);
 
@@ -1751,7 +1754,7 @@
             /**
              * Updates input element values
              */
-            updateInputBinding(binding, property, value, foreachVars = null) {
+            updateInputBinding(binding, property, foreachVars = null) {
                 const element = binding.element;
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
                 const parsed = this.getParsedExpression(binding);
@@ -1775,7 +1778,7 @@
             /**
              * Updates checkbox/radio checked state
              */
-            updateCheckedBinding(binding, property, value, foreachVars = null) {
+            updateCheckedBinding(binding, property, foreachVars = null) {
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
                 const parsed = this.getParsedExpression(binding);
                 const actualValue = ExpressionParser.evaluate(parsed, context);
@@ -1785,7 +1788,7 @@
             /**
              * Updates element visibility
              */
-            updateVisibilityBinding(binding, property, value, foreachVars = null) {
+            updateVisibilityBinding(binding, property, foreachVars = null) {
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
                 const parsed = this.getParsedExpression(binding);
 
@@ -1798,10 +1801,9 @@
              * Updates the conditional binding by adding/removing DOM elements based on expression evaluation
              * @param {Object} binding - The binding object containing element, placeholder, and parsed expression
              * @param {string} property - The property name that changed (used for change detection)
-             * @param {*} value - The new property value (may be unused in current implementation)
              * @param {Object|null} foreachVars - Optional foreach variables to merge into evaluation context
              */
-            updateConditionalBinding(binding, property, value, foreachVars = null) {
+            updateConditionalBinding(binding, property, foreachVars = null) {
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
                 const parsed = this.getParsedExpression(binding);
 
@@ -1841,9 +1843,10 @@
             /**
              * Updates foreach bindings for list rendering
              */
-            updateForeachBinding(binding, property, value, foreachVars = null) {
+            updateForeachBinding(binding, property, foreachVars = null) {
                 // Only update if this binding is for the changed property
-                if (binding.collection !== property) {
+                // OR if property is null (force update)
+                if (property && binding.collection !== property) {
                     return;
                 }
 
@@ -1905,10 +1908,9 @@
              * Handles both regular property bindings (e.g., "isActive") and foreach context bindings (e.g., "todo.completed")
              * @param {Object} binding - The binding object containing element, target expression, and parsed data
              * @param {string} property - The property name that changed (used for change detection, can be null for full evaluation)
-             * @param {*} value - The new property value (can be null when doing full evaluation)
              * @param {Object|null} foreachVars - Optional foreach variables (item, index, etc.) to merge into evaluation context
              */
-            updateClassBinding(binding, property, value, foreachVars = null) {
+            updateClassBinding(binding, property, foreachVars = null) {
                 // Create evaluation context by merging the component's abstraction with foreach variables
                 // For regular bindings: context = this.abstraction
                 // For foreach bindings: context = this.abstraction + {item: todoItem, index: 0, ...}
@@ -2060,7 +2062,7 @@
                 const tempBinding = this.createForeachEvaluationBinding(element, type, target);
 
                 // Use the unified updateBinding method with foreach context
-                this.updateBinding(tempBinding, null, null, foreachVars);
+                this.updateBinding(tempBinding, null, foreachVars);
             },
 
             /**
@@ -2503,18 +2505,6 @@
                     element.classList.add(className);
                 } else {
                     element.classList.remove(className);
-                }
-            },
-
-            /**
-             * Applies attribute binding to an element
-             * @param {HTMLElement} element - The target DOM element
-             * @param {string} attributeName - The name of the attribute to set
-             * @param {*} value - The value to set for the attribute
-             */
-            applyAttributeBinding(element, attributeName, value) {
-                if (value != null) {
-                    element.setAttribute(attributeName, value);
                 }
             },
 
