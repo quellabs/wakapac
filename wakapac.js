@@ -1157,10 +1157,7 @@
                     const bindingString = element.getAttribute('data-pac-bind');
 
                     // Parse the binding string into individual binding pairs
-                    const bindingPairs = bindingString.split(',').map(bind => {
-                        const [type, target] = bind.trim().split(':').map(s => s.trim());
-                        return { type, target };
-                    });
+                    const bindingPairs = this.parseBindingString(bindingString);
 
                     // Automatically reorder bindings: foreach first, then others
                     const reorderedBindings = this.reorderBindings(bindingPairs);
@@ -1175,6 +1172,129 @@
                         }
                     });
                 });
+            },
+
+            /**
+             * Parses a binding string into an array of type-target pairs.
+             * Handles comma separation while respecting quoted strings, parentheses, and escaped characters.
+             * Supports ternary operators and other expressions with parentheses.
+             * @param {string} bindingString - String in format "type1:target1,type2:target2"
+             * @returns {Array<{type: string, target: string}>} Array of parsed binding pairs
+             */
+            parseBindingString(bindingString) {
+                const pairs = [];
+                let current = '';
+                let inQuotes = false;
+                let quoteChar = '';
+                let parenDepth = 0; // Track parentheses nesting
+
+                // Parse each character in the binding string
+                for (let i = 0; i < bindingString.length; i++) {
+                    const char = bindingString[i];
+                    const isEscaped = i > 0 && bindingString[i - 1] === '\\';
+
+                    // Handle quote characters (both single and double quotes)
+                    if ((char === '"' || char === "'") && !isEscaped) {
+                        if (!inQuotes) {
+                            // Start of quoted section
+                            inQuotes = true;
+                            quoteChar = char;
+                        } else if (char === quoteChar) {
+                            // End of quoted section (matching quote)
+                            inQuotes = false;
+                            quoteChar = '';
+                        }
+                    }
+
+                    // Track parentheses depth when not in quotes
+                    if (!inQuotes) {
+                        if (char === '(') {
+                            parenDepth++;
+                        } else if (char === ')') {
+                            parenDepth--;
+                        }
+                    }
+
+                    // Split on commas that are outside of quotes and parentheses
+                    if (char === ',' && !inQuotes && parenDepth === 0) {
+                        // Process the current pair if it's not empty
+                        this.addPairIfValid(current, pairs);
+                        current = '';
+                    } else {
+                        // Build up the current pair string
+                        current += char;
+                    }
+                }
+
+                // Process the final pair (no trailing comma)
+                this.addPairIfValid(current, pairs);
+
+                // Return result
+                return pairs;
+            },
+
+            /**
+             * Helper function to parse a single pair string and add it to the pairs array if valid.
+             * Splits on the first colon that's outside of parentheses to separate type from target.
+             * Handles ternary operators and other expressions with colons inside parentheses.
+             * @param {string} pairString - Raw pair string (may contain whitespace)
+             * @param {Array} pairs - Array to push the parsed pair object to
+             */
+            addPairIfValid(pairString, pairs) {
+                const trimmed = pairString.trim();
+
+                if (!trimmed) {
+                    return;
+                }
+
+                // Find the first colon that's outside of parentheses and quotes
+                let colonIndex = -1;
+                let inQuotes = false;
+                let quoteChar = '';
+                let parenDepth = 0;
+
+                for (let i = 0; i < trimmed.length; i++) {
+                    const char = trimmed[i];
+                    const isEscaped = i > 0 && trimmed[i - 1] === '\\';
+
+                    // Handle quotes
+                    if ((char === '"' || char === "'") && !isEscaped) {
+                        if (!inQuotes) {
+                            inQuotes = true;
+                            quoteChar = char;
+                        } else if (char === quoteChar) {
+                            inQuotes = false;
+                            quoteChar = '';
+                        }
+                    }
+
+                    // Track parentheses when not in quotes
+                    if (!inQuotes) {
+                        if (char === '(') {
+                            parenDepth++;
+                        } else if (char === ')') {
+                            parenDepth--;
+                        } else if (char === ':' && parenDepth === 0 && colonIndex === -1) {
+                            // Found the binding separator colon (not inside parentheses or ternary)
+                            colonIndex = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (colonIndex === -1) {
+                    // No binding colon found, treat entire string as type with empty target
+                    pairs.push({
+                        type: trimmed,
+                        target: ''
+                    });
+                } else {
+                    // Split into type and target parts
+                    pairs.push({
+                        type: trimmed.substring(0, colonIndex).trim(),
+                        target: trimmed.substring(colonIndex + 1).trim()
+                    });
+                }
             },
 
             /**
@@ -2023,10 +2143,7 @@
                     }
 
                     // Parse multiple bindings separated by commas
-                    bindings.split(',').forEach(bind => {
-                        // Split binding into type and target
-                        const [type, target] = bind.trim().split(':').map(s => s.trim());
-
+                    this.parseBindingString(bindings).forEach(({ type, target }) => {
                         // Set up two-way binding for form inputs
                         if ((type === 'value' || type === 'checked') && target.startsWith(`${itemName}.`)) {
                             // Extract the property path from the target
