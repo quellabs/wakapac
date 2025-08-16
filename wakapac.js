@@ -91,6 +91,19 @@
         },
 
         /**
+         * Check if the property should be reactive
+         * @param {string} propertyName - Name of the property
+         * @returns {boolean} True if property should be reactive
+         */
+        shouldPropertyBeReactive(propertyName) {
+            return !propertyName.startsWith('_') &&
+                !propertyName.startsWith('$') &&
+                propertyName !== 'constructor' &&
+                propertyName !== 'prototype' &&
+                propertyName !== '__proto__';
+        },
+
+        /**
          * Deep equality comparison optimized for performance
          * @param {*} a - First value
          * @param {*} b - Second value
@@ -1111,19 +1124,6 @@
             },
 
             /**
-             * Check if the property should be reactive
-             * @param {string} propertyName - Name of the property
-             * @returns {boolean} True if property should be reactive
-             */
-            shouldPropertyBeReactive(propertyName) {
-                return !propertyName.startsWith('_') &&
-                    !propertyName.startsWith('$') &&
-                    propertyName !== 'constructor' &&
-                    propertyName !== 'prototype' &&
-                    propertyName !== '__proto__';
-            },
-
-            /**
              * Creates the reactive abstraction object with computed properties
              * @returns {Object} Reactive abstraction
              */
@@ -1148,7 +1148,7 @@
                             // Bind functions to the reactive object so 'this' refers to reactive
                             // This ensures methods can access other reactive properties
                             reactive[key] = value.bind(reactive);
-                        } else if (!this.shouldPropertyBeReactive(key)) {
+                        } else if (!Utils.shouldPropertyBeReactive(key, value)) {
                             // Non-reactive property - assign directly without proxy wrapping
                             // Useful for external library instances, DOM objects, or circular references
                             // These properties won't trigger change detection or DOM updates
