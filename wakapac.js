@@ -951,34 +951,62 @@
              * @returns {Object} Reactive abstraction
              */
             createReactiveAbstraction() {
+                // Create the base reactive object that will be returned
                 const reactive = {};
 
-                // Set up computed properties first
+                // Set up computed properties first (these depend on other properties)
+                // Computed properties are processed before regular properties to ensure
+                // proper dependency resolution
                 this.setupComputedProperties(reactive);
 
-                // Set up regular properties
+                // Set up regular properties by iterating through the original object
                 Object.keys(this.original).forEach(key => {
+                    // Only process own properties, skip inherited ones and the 'computed' key
+                    // which was already handled by setupComputedProperties
                     if (this.original.hasOwnProperty(key) && key !== 'computed') {
                         const value = this.original[key];
 
+                        // Handle different property types appropriately
                         if (typeof value === 'function') {
+                            // Bind functions to the reactive object so 'this' refers to reactive
+                            // This ensures methods can access other reactive properties
                             reactive[key] = value.bind(reactive);
+                        } else if (key.startsWith('_')) {
+                            // Non-reactive property - assign directly without proxy wrapping
+                            // Useful for external library instances, DOM objects, or circular references
+                            // These properties won't trigger change detection or DOM updates
+                            reactive[key] = value;
                         } else {
+                            // Reactive property - wrap with change detection and DOM synchronization
+                            // These properties will trigger DOM updates when changed
                             this.createReactiveProperty(reactive, key, value);
                         }
                     }
                 });
 
-                // Add communication methods
+                // Add communication and utility methods to the reactive object
+                // These methods provide the reactive object with capabilities for:
                 Object.assign(reactive, {
+                    // Parent-child component communication
                     notifyParent: (type, data) => this.notifyParent(type, data),
+
+                    // Broadcasting messages to all child components
                     sendToChildren: (cmd, data) => this.sendToChildren(cmd, data),
+
+                    // Sending targeted messages to a specific child component
                     sendToChild: (selector, cmd, data) => this.sendToChild(selector, cmd, data),
+
+                    // Finding a specific child component using a predicate function
                     findChild: predicate => Array.from(this.children).find(predicate),
+
+                    // Serializing the reactive object to JSON (excluding non-serializable properties)
                     toJSON: () => this.serializeToJSON(),
+
+                    // Making HTTP requests with built-in error handling and response processing
                     control: (url, opts = {}) => this.makeHttpRequest(url, opts)
                 });
 
+                // Return the fully configured reactive object
                 return reactive;
             },
 
