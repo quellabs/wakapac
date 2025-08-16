@@ -1,62 +1,34 @@
 # WakaPAC
 
-## 🌟 Introduction
+**WakaPAC** is a lightweight, powerful reactive JavaScript library that implements the **PAC (Presentation-Abstraction-Control)** architectural pattern. Inspired by Knockout.js with modern features from Vue and React.
 
-**WakaPAC** is a lightweight, powerful reactive JavaScript library that implements the **PAC (Presentation-Abstraction-Control)** architectural pattern. **Knockout.js was the main inspiration** for WakaPAC, enhanced with the best ideas from Vue and React to create a modern development experience.
+## Why WakaPAC?
 
-### Why WakaPAC?
+**🪶 Zero Build Complexity**
+- No webpack, vite, or toolchain required
+- Works directly in the browser with vanilla HTML/JS
+- Drop into existing projects without rewriting everything
 
-If you love **Knockout's declarative data binding** but want modern component hierarchy from React and clean template syntax from Vue, WakaPAC is for you. It evolves Knockout's proven foundation with contemporary features and performance optimizations.
+**⚡ Modern Reactivity**
+- Write normal JavaScript objects instead of wrapping everything in observables
+- Deep reactivity for nested objects and arrays
+- Intelligent batching and performance optimizations
 
-**🪶 Lightweight Alternative**
-- **No build tools required** - works directly in the browser with vanilla HTML/JS
-- **No virtual DOM overhead** - direct DOM manipulation with intelligent batching
-- **No complex toolchain** - just include one JavaScript file and start building
+**🎯 Clean Architecture**
+- PAC pattern provides better separation of concerns than MVC
+- Component hierarchy with parent-child communication
+- Expressive templates with Vue-like syntax
 
-**🎯 Key Improvements WakaPAC Brings:**
-1. **Natural Reactivity**: Write normal JavaScript objects instead of wrapping everything in observables
-2. **Component Hierarchy**: True parent-child relationships with bidirectional communication (inspired by React)
-3. **Modern Templates**: Clean interpolation syntax and intuitive binding attributes (inspired by Vue)
-4. **Deep Reactivity**: Automatically track changes in nested objects and arrays without manual setup
-5. **Performance Optimizations**: Batched DOM updates, intelligent change detection, and computed property caching
-6. **Architectural Clarity**: PAC structure provides better organization for complex applications
-
-### What is PAC Architecture?
-
-**PAC (Presentation-Abstraction-Control)** is a hierarchical architectural pattern that creates a clean separation between:
-
-1. **Presentation**: Your HTML templates and DOM elements - what the user sees
-2. **Abstraction**: Your data model and business logic - what your app knows
-3. **Control**: The reactive layer that mediates between presentation and abstraction - how they stay in sync
-
-Unlike MVC where models and views can talk directly, PAC uses the Control layer as a smart mediator that:
-- **Automatically syncs** data changes to the DOM
-- **Handles events** from the presentation layer
-- **Manages reactivity** and computed properties
-- **Coordinates communication** between components
-
-This results in more predictable data flow and easier debugging than traditional MVC patterns.
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
-**Option 1: Direct Download**
 ```html
-<script src="wakapac.js"></script>
-<script src="wakapac.min.js"></script>
-```
-
-**Option 2: JSDelivr CDN (GitHub)**
-```html
-<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.js"></script>
+<!-- CDN -->
 <script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.min.js"></script>
-```
 
-**Option 3: Module Import**
-```javascript
-// If using as an ES module
-import { wakaPAC } from './wakapac.js';
+<!-- Or download -->
+<script src="wakapac.min.js"></script>
 ```
 
 ### Your First Component
@@ -70,32 +42,30 @@ import { wakaPAC } from './wakapac.js';
 <body>
 <div id="my-app">
     <h1>Hello {{fullName}}!</h1>
-    <p>You clicked {{count}} times</p>
-    <p>Double count: {{doubleCount}}</p>
+    <p>You clicked {{count}} times (Double: {{doubleCount}})</p>
 
     <input data-pac-bind="value:firstName" placeholder="First name">
     <input data-pac-bind="value:lastName" placeholder="Last name">
-
     <button data-pac-bind="click:increment">Click me!</button>
 
     <div data-pac-bind="visible:showMessage">
         This message is conditionally shown!
     </div>
-    <div data-pac-bind="visible:!hideWelcome">
-        Welcome message (hidden when hideWelcome is true)
+    <div data-pac-bind="if:count > 10">
+        <p>Congratulations! You've clicked more than 10 times!</p>
+        <button data-pac-bind="click:reset">Reset</button>
     </div>
 </div>
 
 <script>
     wakaPAC('#my-app', {
-        // Abstraction: Your data and business logic
+        // Data
         firstName: 'John',
         lastName: 'Doe',
         count: 0,
         showMessage: true,
-        hideWelcome: false,
 
-        // Computed properties (like Vue computed or Knockout computed observables)
+        // Computed properties
         computed: {
             fullName() {
                 return this.firstName + ' ' + this.lastName;
@@ -105,86 +75,95 @@ import { wakaPAC } from './wakapac.js';
             }
         },
 
-        // Methods (like React methods or Vue methods)
+        // Methods
         increment() {
             this.count++;
             if (this.count > 5) {
                 this.showMessage = false;
             }
+        },
+
+        reset() {
+            this.count = 0;
+            this.showMessage = true;
         }
     });
-    // Control layer automatically created by WakaPAC
-    // Presentation layer is your HTML template above
 </script>
 </body>
 </html>
 ```
 
-**WakaPAC** gives you the simplicity of Vue-style templates with the power of React-style component hierarchies and the automatic reactivity of Knockout-style observables, but without any build tools or complex setup.
+## PAC Architecture
 
-## 🔄 Core Features
+**PAC (Presentation-Abstraction-Control)** creates clean separation between:
 
-### Reactive Data Binding
-- **Automatic DOM updates** when JavaScript object properties change
-- **Deep reactivity** for nested objects and arrays with path tracking
-- **Two-way binding** between form inputs and data properties
-- **Intelligent change detection** with batched DOM updates
-- **Array mutation tracking** - `push()`, `pop()`, `splice()` automatically trigger updates
+- **Presentation**: Your HTML templates and DOM elements (what the user sees)
+- **Abstraction**: Your data model and business logic (what your app knows)
+- **Control**: The reactive layer that automatically syncs data changes to the DOM (how they stay synchronized)
 
-### Template Syntax (Vue-inspired)
-- Simple `{{propertyName}}` syntax for dynamic content in HTML
-- Support for computed properties with automatic dependency tracking
-- **Conditional expressions** in text interpolation with ternary operators
-- Conditional rendering with `data-pac-bind="visible:property"` and negation support `visible:!property`
+Unlike MVC where models and views can talk directly, PAC uses the Control layer as a smart mediator that handles reactivity, events, and component communication.
 
-### Enhanced Attribute Binding
-- **Conditional attribute binding** with expressions
-- **Multiple binding support** on single elements
-- **Performance-optimized** expression parsing and caching
-
-### Event Handling (React-inspired)
-- Declarative event binding via data attributes
-- Method binding with `data-pac-bind="click:methodName"`
-- **Event modifiers** for common patterns like prevent default and key filtering
-- Automatic event delegation for performance
-
-### Hierarchical Components (React-inspired)
-- **Parent-to-child commands**: Send instructions and data down the hierarchy
-- **Child-to-parent notifications**: Report status and request resources
-- **Multi-level communication**: Messages can flow through intermediate components
-- **Child querying**: Find and manipulate children by selectors, properties, or functions
-
-### Performance Optimized
-- Batched DOM updates using `requestAnimationFrame`
-- Intelligent caching of computed properties
-- **Expression caching** to avoid re-parsing
-- Event delegation to minimize memory usage
-- **Proxy-based reactivity** for modern browsers with fallback for older browsers
-
-## 📊 Data Binding
+## Data Binding
 
 ### Text Interpolation
 
-Use double braces `{{}}` to bind data to text content:
+```html
+<!-- Simple properties -->
+<p>Hello, {{name}}!</p>
+
+<!-- Nested properties -->
+<p>User: {{user.name}} ({{user.age}})</p>
+
+<!-- Ternary expressions -->
+<p>Status: {{user.age >= 18 ? 'Adult' : 'Minor'}}</p>
+
+<!-- Computed properties -->
+<p>Total: {{totalPrice}}</p>
+```
+
+### Attribute Binding
 
 ```html
-<!-- ✅ Simple properties -->
-<p>Hello, {{name}}!</p>
-<p>User name: {{userName}}</p>
-<p>Computed value: {{computedProperty}}</p>
+<!-- Basic attributes -->
+<div data-pac-bind="class:statusClass, title:statusText"></div>
 
-<!-- ✅ Nested property access -->
-<p>User info: {{user.name}} ({{user.age}})</p>
-<p>Theme: {{user.preferences.theme}}</p>
+<!-- Two-way data binding -->
+<input data-pac-bind="value:name" type="text">
+<textarea data-pac-bind="value:description"></textarea>
+<select data-pac-bind="value:category">
+    <option value="A">Category A</option>
+    <option value="B">Category B</option>
+</select>
 
-<!-- ✅ Ternary expressions -->
-<p>Status: {{user.age >= 18 ? 'Adult' : 'Minor'}}</p>
-<p>Theme mode: {{user.preferences.theme === 'dark' ? 'Dark Mode' : 'Light Mode'}}</p>
+<!-- Checkboxes (boolean values) -->
+<input type="checkbox" data-pac-bind="checked:isActive">
 
-<!-- ✅ Computed properties for complex logic -->
-<p>Total items: {{itemCount}}</p>
-<p>Completed todos: {{completedTodosCount}}</p>
+<!-- Radio buttons (use value binding) -->
+<input type="radio" name="theme" value="light" data-pac-bind="value:selectedTheme">
+<input type="radio" name="theme" value="dark" data-pac-bind="value:selectedTheme">
+
+<!-- Enable/Disable controls -->
+<button data-pac-bind="enable:isFormValid">Submit</button>
+
+<!-- Multiple bindings -->
+<div data-pac-bind="class:statusClass,style:dynamicStyle,click:handleClick"></div>
 ```
+
+### Conditional Rendering
+
+```html
+<!-- visible: CSS display control (stays in DOM) -->
+<div data-pac-bind="visible:showDetails">Details here</div>
+<div data-pac-bind="visible:!hideContent">Content</div>
+
+<!-- if: DOM element control (added/removed from DOM) -->
+<div data-pac-bind="if:user.isAdmin">Admin Panel</div>
+<div data-pac-bind="if:!isLoading">Content loaded</div>
+```
+
+**When to use each:**
+- **`visible`**: Fast toggling, preserving form values, CSS transitions
+- **`if`**: Better performance for large DOM trees, security-sensitive content
 
 ### Deep Reactivity
 
@@ -194,361 +173,107 @@ WakaPAC automatically tracks changes in nested objects and arrays:
 wakaPAC('#app', {
     user: {
         name: 'John',
-        preferences: {
-            theme: 'dark',
-            notifications: true
-        }
+        preferences: { theme: 'dark' }
     },
     todos: [],
 
     addTodo() {
-        // ✅ Array mutations are automatically reactive
-        this.todos.push({
-            id: Date.now(),
-            text: 'New todo',
-            completed: false
-        });
+        // Array mutations are automatically reactive
+        this.todos.push({ text: 'New todo', completed: false });
     },
 
     toggleTodo(index) {
-        // ✅ Deep nested changes are reactive
+        // Deep nested changes are reactive
         this.todos[index].completed = !this.todos[index].completed;
     },
 
     updateTheme(newTheme) {
-        // ✅ Deep nested property changes are reactive
+        // Deep nested property changes are reactive
         this.user.preferences.theme = newTheme;
     }
 });
 ```
 
-### Basic Attribute Binding
-
-Use `data-pac-bind` to bind data to element attributes:
-
-```html
-<!-- Simple attribute binding -->
-<div data-pac-bind="class: statusClass, title: statusText"></div>
-
-<!-- Two-way data binding -->
-<input type="text" data-pac-bind="value: name">
-<textarea data-pac-bind="value: description"></textarea>
-<select data-pac-bind="value: category">
-    <option value="A">Category A</option>
-    <option value="B">Category B</option>
-</select>
-
-<!-- Checkbox binding (boolean values) -->
-<input type="checkbox" data-pac-bind="checked:isActive">
-<input type="checkbox" data-pac-bind="checked:user.hasPermission">
-
-<!-- Radio button groups (use value binding, NOT checked) -->
-<input type="radio" name="theme" value="light" data-pac-bind="value:selectedTheme">
-<input type="radio" name="theme" value="dark" data-pac-bind="value:selectedTheme">
-<input type="radio" name="theme" value="auto" data-pac-bind="value:selectedTheme">
-
-<!-- Radio buttons with complex values -->
-<input type="radio" name="plan" value="free" data-pac-bind="value:user.plan">
-<input type="radio" name="plan" value="pro" data-pac-bind="value:user.plan">
-<input type="radio" name="plan" value="enterprise" data-pac-bind="value:user.plan">
-
-<!-- Multiple bindings on single elements -->
-<div data-pac-bind="class:statusClass,style:dynamicStyle"></div>
-<button data-pac-bind="click:handleSubmit,enable:isFormValid,class:buttonClass">Submit</button>
-<img data-pac-bind="src:imageUrl,alt:imageDescription">
-<input data-pac-bind="value:searchTerm,placeholder:searchPlaceholder">
-<a data-pac-bind="href:linkUrl,title:linkTooltip">{{linkText}}</a>
-
-<!-- Enable/Disable controls -->
-<button data-pac-bind="enable:isFormValid">Submit</button>
-<input data-pac-bind="enable:!isReadOnly" type="text">
-```
-
-**Important Notes:**
-- **Checkboxes**: Use `checked:property` binding with boolean values
-- **Radio buttons**: Use `value:property` binding - the selected radio's value will be stored in the property
-- **Multiple bindings**: Separate with commas, no spaces around colons
-- **Binding order**: WakaPAC automatically reorders bindings for optimal execution (foreach → if → visible → value/checked → events → attributes)
-
-**How `enable` works:**
-- When the bound expression is `true`, the element is enabled (no `disabled` attribute)
-- When the bound expression is `false`, the element is disabled (`disabled="disabled"`)
-- The `enable` binding is the logical opposite of the `disabled` attribute
-- Works with all form elements: `<input>`, `<button>`, `<select>`, `<textarea>`
-
-### Conditional Rendering: `visible` vs `if`
-
-WakaPAC provides two ways to conditionally show/hide content:
-
-#### `visible` Binding - CSS Display Control
-```html
-<!-- Element stays in DOM, hidden with display: none -->
-<div data-pac-bind="visible:showDetails">Details here</div>
-<div data-pac-bind="visible:!hideContent">Content</div>
-```
-
-#### `if` Binding - DOM Element Control
-```html
-<!-- This entire div and its contents are added/removed from DOM -->
-<div data-pac-bind="if:user.isAdmin">
-    Admin Panel
-</div>
-<div data-pac-bind="if:!isLoading">Content loaded</div>
-```
-
-#### Visual Comparison
-
-When the condition is **false**:
-
-```html
-<!-- visible: element stays in DOM but hidden -->
-<div data-pac-bind="visible:showPanel" style="display: none;">Panel</div>
-
-<!-- if: element completely absent from DOM -->
-<!-- (nothing rendered, not even a placeholder) -->
-```
-
-#### Quick Reference
-
-| Feature           | `visible`                   | `if`                        |
-|-------------------|-----------------------------|-----------------------------|
-| DOM presence      | Always present              | Added/removed               |
-| Performance       | Better for frequent toggles | Better for rare changes     |
-| Form values       | Preserved when hidden       | Lost when removed           |
-| CSS transitions   | ✅ Supported                 | ❌ Not applicable            |
-| Memory usage      | Higher (elements stay)      | Lower (elements removed)    |
-| SEO/Accessibility | Content always crawlable    | Content excluded when false |
-
-#### When to Use Each
-
-**Use `visible` for:**
-- Content that toggles frequently (better performance)
-- Preserving form input values when hidden
-- CSS transitions and animations
-- Responsive design show/hide patterns
-- When you need content to remain accessible to screen readers
-
-**Use `if` for:**
-- Content that changes infrequently
-- Preventing scripts/resources from loading
-- Better performance with large DOM trees
-- Security-sensitive content that shouldn't exist in DOM
-- Reducing memory usage for complex interfaces
-
-#### Expression Support
-Both bindings support complex expressions:
-
-```html
-<!-- Comparisons -->
-<div data-pac-bind="if:user.role === 'admin'">Admin tools</div>
-<div data-pac-bind="visible:items.length > 0">Item list</div>
-
-<!-- Logical operators -->
-<div data-pac-bind="if:user.isActive && user.hasPermission">Restricted content</div>
-<div data-pac-bind="visible:loading || hasError">Status message</div>
-
-<!-- Complex conditions -->
-<div data-pac-bind="if:user.age >= 18 ? user.hasAccount : false">Adult features</div>
-```
-
-#### Expression Support
-Both bindings support complex expressions:
-
-```html
-<!-- Comparisons -->
-<div data-pac-bind="if:user.role === 'admin'">Admin tools</div>
-<div data-pac-bind="visible:items.length > 0">Item list</div>
-
-<!-- Logical operators -->
-<div data-pac-bind="if:user.isActive && user.hasPermission">Restricted content</div>
-<div data-pac-bind="visible:loading || hasError">Status message</div>
-
-<!-- Complex conditions -->
-<div data-pac-bind="if:user.age >= 18 ? user.hasAccount : false">Adult features</div>
-```
-
-## Update the "Template Syntax Reference" section
-
-Add this line to the conditional rendering section:
-
-```html
-<!-- Conditional rendering -->
-<div data-pac-bind="visible:isLoggedIn">User dashboard</div>
-<div data-pac-bind="visible:!isLoggedIn">Please log in</div>
-<div data-pac-bind="if:user.isAdmin">Admin panel</div>
-<div data-pac-bind="if:!isGuest">Member content</div>
-```
-
-## Add example to "Your First Component" section
-
-Update the quick start example to include an `if` binding:
-
-```html
-<!-- Add this after the existing visible binding example -->
-<div data-pac-bind="if: count > 10">
-    <p>Congratulations! You've clicked more than 10 times!</p>
-    <button data-pac-bind="click:reset">Reset Counter</button>
-</div>
-```
-
-And add the reset method to the JavaScript:
-
-```javascript
-// Add this method to the component
-reset() {
-    this.count = 0;
-    this.showMessage = true;
-}
-```
-
-## Performance section update
-
-Add this bullet point to the performance features:
-
-- **Smart DOM management** - `if` bindings remove unused elements entirely while `visible` bindings provide fast CSS toggling
-
-## Migration guides updates
-
-### From Vue.js
-```html
-<!-- Vue -->
-<div v-if="isVisible">Content</div>
-<div v-show="isVisible">Content</div>
-
-<!-- WakaPAC -->
-<div data-pac-bind="if: isVisible">Content</div>
-<div data-pac-bind="visible: isVisible">Content</div>
-```
-
-### From React
-```javascript
-// React
-{isVisible && <div>Content</div>}
-{isVisible ? <div>Content</div> : null}
-
-// WakaPAC
-<div data-pac-bind="if: isVisible">Content</div>
-```
-
-#### Supported Expression Types:
-
-**Ternary Operators:**
-```html
-<!-- condition ? trueValue : falseValue -->
-<div data-pac-bind="class:isActive ? 'active highlight' : 'inactive'">
-```
-
-**Comparison Operators:**
-```html
-<!-- ===, !==, ==, !=, >=, <=, >, < -->
-<div data-pac-bind="visible:user.age >= 18">Adult content</div>
-<div data-pac-bind="class:status === 'complete' ? 'done' : 'pending'">
-```
-
-**Logical Operators:**
-```html
-<!-- && (AND), || (OR) -->
-<button data-pac-bind="disabled:loading || !isValid">Submit</button>
-<div data-pac-bind="visible:user.isLoggedIn && user.hasPermission">Admin panel</div>
-```
-
-## ⚡ Event Handling
+## Event Handling
 
 ### Basic Events
-
-Bind DOM events to methods using the `data-pac-bind` attribute:
 
 ```html
 <button data-pac-bind="click:handleClick">Click me</button>
 <form data-pac-bind="submit:handleSubmit">
-    <input type="text" data-pac-bind="value:searchQuery">
+    <input data-pac-bind="value:searchQuery">
     <button type="submit">Search</button>
 </form>
-<input data-pac-bind="input:handleInput,focus:handleFocus,blur:handleBlur">
-```
-
-```javascript
-const app = wakaPAC('#app', {
-    searchQuery: '',
-
-    handleClick(event) {
-        console.log('Button clicked!', event);
-    },
-
-    handleSubmit(event) {
-        event.preventDefault();
-        console.log('Searching for:', this.searchQuery);
-    },
-
-    handleInput(event) {
-        console.log('Input changed:', event.target.value);
-    }
-});
+<input data-pac-bind="input:handleInput,focus:handleFocus">
 ```
 
 ### Event Modifiers
 
-Reduce boilerplate with declarative event modifiers:
-
 ```html
-<!-- ✅ Prevent form submission redirect -->
+<!-- Prevent form submission redirect -->
 <form data-pac-bind="submit:handleSubmit" data-pac-modifiers="prevent">
 
-    <!-- ✅ Search on Enter key -->
-    <input data-pac-bind="keyup:search" data-pac-modifiers="enter">
+<!-- Search on Enter key -->
+<input data-pac-bind="keyup:search" data-pac-modifiers="enter">
 
-    <!-- ✅ Close modal on Escape -->
-    <div data-pac-bind="keyup:closeModal" data-pac-modifiers="escape">
+<!-- Close modal on Escape -->
+<div data-pac-bind="keyup:closeModal" data-pac-modifiers="escape">
 
-        <!-- ✅ One-time event (auto-removes after first trigger) -->
-        <button data-pac-bind="click:initialize" data-pac-modifiers="once">
+<!-- One-time event -->
+<button data-pac-bind="click:initialize" data-pac-modifiers="once">
 
-            <!-- ✅ Multiple modifiers -->
-            <form data-pac-bind="submit:handleForm" data-pac-modifiers="prevent stop">
+<!-- Multiple modifiers -->
+<form data-pac-bind="submit:handleForm" data-pac-modifiers="prevent stop">
 ```
 
-#### Supported Event Modifiers:
+**Available modifiers:**
+- **Keys**: `enter`, `escape`/`esc`, `space`, `tab`, `delete`/`del`, `up`, `down`, `left`, `right`
+- **Behavior**: `prevent`, `stop`, `once`
 
-**Key Modifiers:**
-- `enter`, `escape`/`esc`, `space`, `tab`
-- `delete`/`del`, `up`, `down`, `left`, `right`
+## Lists and For-Each
 
-**Behavior Modifiers:**
-- `prevent` - Calls `event.preventDefault()`
-- `stop` - Calls `event.stopPropagation()`
-- `once` - Removes the event listener after first execution
+```html
+<div data-pac-bind="foreach:todos" data-pac-item="todo" data-pac-index="index">
+    <div class="todo-item">
+        <span>{{index}}. {{todo.text}}</span>
+        <input type="checkbox" data-pac-bind="checked:todo.completed">
+        <button data-pac-bind="click:removeTodo">Remove</button>
+    </div>
+</div>
 
-### Event Handler Signatures
-
-**Regular elements:** `handler(event)`
-```javascript
-handleClick(event) {
-    console.log('Clicked');
-}
+<!-- With callback -->
+<ul data-pac-bind="foreach:items then onItemsUpdated" data-pac-item="item">
+    <li>{{item.name}}</li>
+</ul>
 ```
 
-**Inside foreach loops:** `handler(item, index, event)`
 ```javascript
-toggleTodo(todo, index, event) {
-    todo.completed = !todo.completed;
-}
+wakaPAC('#app', {
+    todos: [
+        {id: 1, text: 'Learn WakaPAC', completed: false},
+        {id: 2, text: 'Build an app', completed: true}
+    ],
+
+    // Event handlers receive item, index, and event
+    removeTodo(todo, index, event) {
+        const todoIndex = this.todos.findIndex(t => t.id === todo.id);
+        this.todos.splice(todoIndex, 1);
+    },
+
+    // Foreach callback receives array and metadata
+    onItemsUpdated(items, meta) {
+        console.log(`List updated with ${items.length} items`);
+    }
+});
 ```
 
-### Supported Events
-
-- `click`, `submit`, `change`, `input`
-- `focus`, `blur`
-- `keyup`, `keydown`
-
-## 🧮 Computed Properties
-
-Computed properties automatically recalculate when their dependencies change:
+## Computed Properties
 
 ```javascript
-const app = wakaPAC('#app', {
+wakaPAC('#app', {
     firstName: 'John',
     lastName: 'Doe',
-    items: [{price: 10}, {price: 20}, {price: 15}],
+    items: [{price: 10}, {price: 20}],
 
     computed: {
         // Simple computed property
@@ -563,452 +288,179 @@ const app = wakaPAC('#app', {
 
         // Dependent on other computed properties
         greeting() {
-            return `Hello, ${this.fullName}! Your total is $${this.totalPrice}`;
+            return `Hello, ${this.fullName}! Total: $${this.totalPrice}`;
         }
     }
 });
 ```
 
-### Automatic Dependency Tracking
+## Non-Reactive Properties
 
-The library automatically analyzes computed functions to determine dependencies:
+Use underscore prefix (`_`) for properties that shouldn't be reactive:
 
 ```javascript
-computed: {
-    expensiveItems() {
-        // Automatically depends on 'items' property
-        return this.items.filter(item => item.price > 15);
-    },
-
-    summary() {
-        // Depends on multiple properties and computed properties
-        return `${this.fullName} has ${this.expensiveItems.length} expensive items`;
+wakaPAC('#map-app', {
+    // ✅ Reactive properties (trigger DOM updates)
+    tracking: false,
+    currentLocation: null,
+    
+    // ✅ Non-reactive properties (no DOM updates, no circular references)
+    _map: null,
+    _markers: [],
+    
+    startTracking() {
+        this.tracking = true; // Updates UI
+        this._map = L.map('map'); // Safe for complex objects
     }
-}
+});
 ```
 
-## 🔧 Update Modes
+**Use non-reactive properties for:**
+- External library instances (maps, charts, WebGL contexts)
+- Large datasets that never change
+- Objects with circular references
+- Configuration objects
 
-Control when form inputs update your data model:
+## Update Modes
 
-### Immediate Mode (Default)
-Updates on every keystroke:
+Control when form inputs update your data:
+
 ```html
-<input type="text" data-pac-bind="value:name">
-<span>Hello {{name}}!</span> <!-- Updates as you type -->
-```
+<!-- Immediate (default) - updates on every keystroke -->
+<input data-pac-bind="value:name">
 
-***Use for***: Search fields, real-time validation, character counters
+<!-- Change - updates when input loses focus -->
+<input data-pac-bind="value:name" data-pac-update-mode="change">
 
-### Change Mode
-Updates only when input loses focus:
-```html
-<input type="text" data-pac-bind="value:name" data-pac-update-mode="change">
-```
-
-***Use for:*** Server validation, complex computed properties, auto-save functionality
-
-### Delayed Mode
-Updates after specified delay (debounced) - best for search and API calls:
-```html
-<input type="text" data-pac-bind="value:searchQuery"
+<!-- Delayed - updates after specified delay (debounced) -->
+<input data-pac-bind="value:searchQuery" 
        data-pac-update-mode="delayed" data-pac-update-delay="500">
 ```
 
-***Use for:*** Search autocomplete, API queries, expensive calculations
+**Use cases:**
+- **Immediate**: Real-time validation, character counters
+- **Change**: Server validation, auto-save functionality
+- **Delayed**: Search autocomplete, API queries
 
-### Global Configuration
-```javascript
-const app = wakaPAC('#app', {
-    name: 'John'
-}, {
-    updateMode: 'delayed',
-    delay: 300
-});
-```
+## Component Hierarchy
 
-## 📋 Arrays and For-Each Binding
-
-Display dynamic lists with the `foreach` binding:
-
-```html
-<div data-pac-bind="foreach:todos" data-pac-item="todo" data-pac-index="index">
-    <div class="todo-item">
-        <span>{{index}}. {{todo.text}}</span>
-        <input type="checkbox" data-pac-bind="checked:todo.completed">
-        <button data-pac-bind="click:removeTodo">Remove</button>
-    </div>
-</div>
-```
+### Parent-Child Communication
 
 ```javascript
-const app = wakaPAC('#app', {
-    todos: [
-        {id: 1, text: 'Learn WakaPAC', completed: false},
-        {id: 2, text: 'Build an app', completed: true}
-    ],
-
-    computed: {
-        todoCount() {
-            return this.todos.length;
-        },
-
-        completedCount() {
-            return this.todos.filter(todo => todo.completed).length;
-        }
-    },
-
-    // Event handlers receive item, index, and event
-    removeTodo(todo, index, event) {
-        const todoIndex = this.todos.findIndex(t => t.id === todo.id);
-        if (todoIndex !== -1) {
-            this.todos.splice(todoIndex, 1);
-        }
-    }
-});
-```
-
-**Key Points:**
-- **Item parameter**: The current object from your array
-- **Index parameter**: Zero-based position (0, 1, 2...)
-- **Event parameter**: Standard DOM event with target, type, etc.
-- **This context**: Still refers to your component's abstraction object
-
-### Foreach Callbacks
-
-Execute custom logic whenever a foreach list is updated using the `then` syntax:
-
-```html
-<!-- Basic callback after list updates -->
-<ul data-pac-bind="foreach:todos then onTodosUpdated" data-pac-item="todo">
-    <li>{{todo.text}}</li>
-</ul>
-
-<!-- Select dropdown with callback -->
-<select data-pac-bind="value:selectedCountry,foreach:countries then onCountriesRendered" 
-        data-pac-item="country">
-    <option data-pac-bind="value:country.code">{{country.name}}</option>
-</select>
-
-<!-- Complex list with status tracking -->
-<div data-pac-bind="foreach:products then onProductsUpdated" data-pac-item="product" data-pac-index="i">
-    <div class="product-card">
-        <h3>{{product.name}}</h3>
-        <p>Price: ${{product.price}}</p>
-    </div>
-</div>
-```
-
-```javascript
-const app = wakaPAC('#app', {
-    todos: [],
-    countries: [],
-    products: [],
-    selectedCountry: '',
-    status: 'Ready',
-    
-    // Callback receives: (currentArray, metadata)
-    onTodosUpdated(todos, meta) {
-        this.status = `Todo list updated with ${todos.length} items`;
-        console.log('Todos changed:', meta);
-        
-        // Scroll to top when list changes significantly
-        if (meta.element) {
-            meta.element.scrollTop = 0;
-        }
-    },
-    
-    onCountriesRendered(countries, meta) {
-        // Auto-select first country if none selected
-        if (!this.selectedCountry && countries.length > 0) {
-            this.selectedCountry = countries[0].code;
-        }
-        
-        console.log(`Rendered ${countries.length} countries`);
-    },
-    
-    onProductsUpdated(products, meta) {
-        // Track analytics when product list changes
-        this.trackEvent('products_displayed', { 
-            count: products.length,
-            timestamp: Date.now()
-        });
-    },
-    
-    addTodo() {
-        this.todos.push({
-            text: 'New todo',
-            completed: false
-        });
-        // onTodosUpdated will be called automatically
-    }
-});
-```
-
-**Callback Metadata Object:**
-The callback receives a metadata object with:
-- `element`: The DOM element containing the foreach list
-- `previous`: The previous array state (for comparison)
-- `current`: The current array state (same as first parameter)
-- `binding`: The internal binding object
-
-**Use Cases for Foreach Callbacks:**
-- **State synchronization**: Update related properties when lists change
-- **UI management**: Scroll to top, focus elements, or animate changes
-- **Validation**: Ensure dependent data remains valid when lists update
-- **Analytics**: Track user interactions with dynamic lists
-- **Performance**: Optimize rendering for large lists
-- **Selection management**: Auto-select items in dropdowns when options change
-
-## 🔗 Hierarchical Communication
-
-### Parent-Child Relationships
-
-WakaPAC automatically establishes parent-child relationships based on DOM hierarchy:
-
-```html
-<div id="parent-app">
-    <h1>Parent Component</h1>
-    
-    <div id="child-app">
-        <h2>Child Component</h2>
-        
-        <div id="grandchild-app">
-            <h3>Grandchild Component</h3>
-        </div>
-    </div>
-</div>
-```
-
-### Communication Methods
-
-#### Child to Parent (Notifications)
-```javascript
-// In child component
+// Child to Parent (Notifications)
 const child = wakaPAC('#child-app', {
     sendAlert() {
         this.notifyParent('alert', {
-            message: 'Something important happened',
-            timestamp: Date.now()
+            message: 'Something important happened'
         });
     }
 });
 
-// In parent component
+// Parent receives notifications
 const parent = wakaPAC('#parent-app', {
     onChildUpdate(eventType, data, childPAC) {
         if (eventType === 'alert') {
-            console.log('Received alert:', data.message);
+            console.log('Alert:', data.message);
         }
     }
 });
-```
 
-#### Parent to Child (Commands)
-```javascript
-// In parent component
+// Parent to Child (Commands)
 const parent = wakaPAC('#parent-app', {
     broadcastMessage() {
         // Send to all children
         this.sendToChildren('update', {theme: 'dark'});
         
         // Send to specific child
-        this.sendToChild('#child-app', 'focus', {reason: 'user action'});
+        this.sendToChild('#child-app', 'focus');
     }
 });
 
-// In child component
+// Child receives commands
 const child = wakaPAC('#child-app', {
     receiveFromParent(command, data) {
-        switch(command) {
-            case 'update':
-                this.applyTheme(data.theme);
-                break;
-            case 'focus':
-                this.handleFocus(data.reason);
-                break;
+        if (command === 'update') {
+            this.applyTheme(data.theme);
         }
     }
 });
 ```
 
-## 🌐 Server Communication
-
-Built-in fetch wrapper with PAC-specific features:
+## Server Communication
 
 ```javascript
-const app = wakaPAC('#app', {
+wakaPAC('#app', {
     user: null,
     loading: false,
     error: null,
-    
+
     async loadUser() {
         this.loading = true;
-        this.error = null;
-        
+
         try {
-            const userData = await this.control('/api/user', {
+            await this.control('/api/user', {
                 method: 'GET',
                 onSuccess: (data) => {
                     this.user = data;
-                    console.log('User loaded:', data);
                 },
                 onError: (error) => {
                     this.error = error.message;
-                    console.error('Failed to load user:', error);
                 }
             });
-        } catch (error) {
-            this.error = error.message;
         } finally {
             this.loading = false;
         }
     },
-    
+
     async saveUser() {
         await this.control('/api/user', {
             method: 'POST',
-            data: {
-                name: this.user.name,
-                email: this.user.email
-            }
+            data: this.user
         });
     }
 });
 ```
 
-## 🔍 DOM Value Reading
+## API Reference
 
-WakaPAC provides a convenient method to read values from DOM elements:
-
-### Basic Usage
-
-```javascript
-const app = wakaPAC('#app', {
-    validateForm() {
-        // Read current values from form inputs
-        const email = this.readDOMValue('#email-input');
-        const agreeToTerms = this.readDOMValue('#terms-checkbox');
-        
-        return email.includes('@') && agreeToTerms;
-    }
-});
-```
-
-### Supported Input Types
-
-```html
-<!-- Text inputs (returns string) -->
-<input id="username" type="text">
-<textarea id="message"></textarea>
-
-<!-- Checkboxes (returns boolean) -->
-<input id="newsletter" type="checkbox">
-
-<!-- Radio buttons (returns selected value) -->
-<input name="gender" type="radio" value="male">
-<input name="gender" type="radio" value="female">
-
-<!-- Select dropdowns (returns selected value) -->
-<select id="country">
-    <option value="us">United States</option>
-    <option value="uk">United Kingdom</option>
-</select>
-```
-
-**Return Value Types:**
-- **Text inputs, textareas, selects**: Returns `string` value
-- **Checkboxes**: Returns `boolean` (true if checked, false if unchecked)
-- **Radio buttons**: Returns `string` value of the checked option, or empty string if none checked
-- **Other elements**: Returns `textContent` or `innerText` as `string`
-
-## 📋 API Reference
-
-### Creating a PAC Component
+### Creating Components
 
 ```javascript
 const component = wakaPAC(selector, abstraction, options);
 ```
 
 **Parameters:**
-- **selector** `{string}`: CSS selector for the container element
-- **abstraction** `{object}`: Object containing properties, methods, and computed properties
-- **options** `{object}`: Configuration object (optional)
-
-### Template Syntax Reference
-
-```html
-<!-- Text interpolation -->
-<span>Welcome {{userName}}!</span>
-<span>Status: {{status === 'active' ? 'Online' : 'Offline'}}</span>
-
-<!-- Conditional rendering -->
-<div data-pac-bind="visible:isLoggedIn">User dashboard</div>
-<div data-pac-bind="visible:!isLoggedIn">Please log in</div>
-
-<!-- Event binding -->
-<button data-pac-bind="click:handleLogin" data-pac-modifiers="once">Login</button>
-<form data-pac-bind="submit:handleSubmit" data-pac-modifiers="prevent">...</form>
-
-<!-- Input binding -->
-<input data-pac-bind="value:email" type="email">
-<textarea data-pac-bind="value:message"></textarea>
-
-<!-- Conditional attributes -->
-<div data-pac-bind="class:isActive ? 'btn-primary' : 'btn-secondary'">Button</div>
-<button data-pac-bind="disabled:loading || !isValid">Submit</button>
-<button data-pac-bind="enable:isFormValid && !isSubmitting">Submit</button>
-
-<!-- List rendering -->
-<div data-pac-bind="foreach:items" data-pac-item="item" data-pac-index="index">
-    <span>{{index}}: {{item.name}}</span>
-</div>
-
-<!-- List rendering with callback -->
-<div data-pac-bind="foreach:items then onItemsUpdated" data-pac-item="item" data-pac-index="index">
-    <span>{{index}}: {{item.name}}</span>
-</div>
-```
+- `selector`: CSS selector for container element
+- `abstraction`: Object with properties, methods, computed properties
+- `options`: Configuration object (optional)
 
 ### Core Methods
 
-#### Communication
-- `notifyParent(type, data)`: Send notification to parent
-- `sendToChildren(command, data)`: Send command to all children
-- `sendToChild(selector, command, data)`: Send command to specific child
+```javascript
+// Communication
+component.notifyParent(type, data)
+component.sendToChildren(command, data)
+component.sendToChild(selector, command, data)
 
-#### Hierarchy Management
-- `addChild(childPAC)`: Manually add a child
-- `removeChild(childPAC)`: Remove a child
-- `findChild(predicate)`: Find child matching predicate
-- `findChildren(predicate)`: Find all children matching predicate
+// DOM interaction
+component.readDOMValue(selector)
+component.control(url, options)
 
-#### DOM Interaction
-- `readDOMValue(selector)`: Read current value from DOM element
-- `control(url, options)`: Built-in fetch wrapper
-
-#### Lifecycle
-- `destroy()`: Clean up the PAC unit
+// Lifecycle
+component.destroy()
+```
 
 ### Configuration Options
 
 ```javascript
-{
+wakaPAC('#app', data, {
     updateMode: 'immediate',    // 'immediate', 'delayed', 'change'
-        delay: 300,                 // Delay for 'delayed' mode (ms)
-        deepReactivity: true        // Enable deep object reactivity
-}
+    delay: 300,                 // Delay for 'delayed' mode (ms)
+    deepReactivity: true        // Enable deep object reactivity
+});
 ```
 
-## 🎯 Browser Support
-
-WakaPAC supports:
-- **Modern browsers**: Chrome, Firefox, Safari, Edge (ES6 Proxy support)
-- **Legacy browsers**: IE11+ (with fallback reactivity using Object.defineProperty)
-
-The library automatically detects Proxy support and falls back gracefully.
-
-## 🔄 Migration Guide
+## Migration Guide
 
 ### From Vue.js
 ```html
@@ -1017,11 +469,13 @@ The library automatically detects Proxy support and falls back gracefully.
 <input v-model="name">
 <button @click="handleClick">Click</button>
 <div v-if="isVisible">Content</div>
+<div v-show="isVisible">Content</div>
 
 <!-- WakaPAC -->
 <div>{{message}}</div>
 <input data-pac-bind="value:name">
 <button data-pac-bind="click:handleClick">Click</button>
+<div data-pac-bind="if:isVisible">Content</div>
 <div data-pac-bind="visible:isVisible">Content</div>
 ```
 
@@ -1035,7 +489,7 @@ const increment = () => setCount(count + 1);
 wakaPAC('#app', {
     count: 0,
     increment() {
-        this.count++; // Direct assignment, no setState needed
+        this.count++; // Direct assignment
     }
 });
 ```
@@ -1045,49 +499,40 @@ wakaPAC('#app', {
 // Knockout
 const viewModel = {
     firstName: ko.observable('John'),
-    lastName: ko.observable('Doe'),
-    fullName: ko.computed(function() {
-        return this.firstName() + ' ' + this.lastName();
-    })
+    fullName: ko.computed(() => this.firstName())
 };
 
 // WakaPAC
 wakaPAC('#app', {
     firstName: 'John',
-    lastName: 'Doe',
     computed: {
         fullName() {
-            return this.firstName + ' ' + this.lastName;
+            return this.firstName;
         }
     }
 });
 ```
 
-## 🎯 Why Choose WakaPAC?
+## When to Choose WakaPAC
 
-**Choose WakaPAC when you want:**
-- **Zero build complexity** - Start building immediately without webpack, vite, or any toolchain
-- **Modern reactivity** - Get Vue/React-level reactivity with simpler mental models
-- **Expressive templates** - Write conditions directly in templates without bloating your component logic
-- **Architectural clarity** - PAC pattern provides better separation of concerns than MVC
-- **Performance by default** - Direct DOM manipulation with intelligent batching
-- **Progressive enhancement** - Drop into existing projects without rewriting everything
-- **Component hierarchy** - Build complex applications with parent-child communication
+**✅ Perfect for:**
+- Complex single-page applications with clean architecture
+- Dashboard and admin interfaces
+- Data-heavy applications with reactive binding
+- Real-time applications where performance matters
+- Rapid prototyping and legacy modernization
+- Projects that need zero build complexity
 
-**WakaPAC excels at:**
-- **Complex single-page applications** with clean architecture
-- **Dashboard and admin interfaces** with rich interactivity
-- **Data-heavy applications** that benefit from reactive binding
-- **Real-time applications** where performance matters
-- **Enterprise applications** that need maintainable code structure
-- **Rapid prototyping** when you need to move fast
-- **Legacy modernization** where you can't start from scratch
+**⚠️ Consider alternatives for:**
+- Server-side rendering requirements
+- Mobile app development
+- Teams requiring extensive TypeScript tooling
 
-**Consider other tools for:**
-- **Server-side rendering** (add a backend framework like Next.js/Nuxt)
-- **Mobile app development** (use React Native/Flutter alongside WakaPAC for web)
-- **Massive teams** requiring extensive TypeScript tooling (though WakaPAC works with TypeScript)
+## Browser Support
 
-## 📄 License
+- **Modern browsers**: Chrome, Firefox, Safari, Edge (with ES6 Proxy)
+- **Legacy browsers**: IE11+ (fallback using Object.defineProperty)
 
-WakaPAC is released under the **MIT License**
+## License
+
+MIT License
