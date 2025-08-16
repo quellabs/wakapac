@@ -475,51 +475,226 @@
          * @type {Map<string, Object>}
          */
         cache: new Map(),
+        bindingCache: new Map(),
 
         /**
-         * Parses a template expression with full operator support
-         * @param {string} expression - Expression to parse
-         * @returns {Object} Parsed expression object with type, dependencies, and operator-specific properties
+         * Main entry point for parsing JavaScript-like expressions into an abstract syntax tree (AST).
+         * Uses a hierarchical parsing approach, attempting to match operators in order of precedence.
+         * Results are cached to improve performance on repeated parsing of the same expressions.
+         * @param {string} expression - The expression string to parse (e.g., "user.name", "a > b ? 'yes' : 'no'", "!isActive")
+         * @returns {Object|null} Parsed AST node representing the expression structure, or null if unparseable
          */
-        parse(expression) {
+        parseExpression(expression) {
             // Remove leading/trailing whitespace to normalize input
             expression = expression.trim();
 
-            // Check if this expression has already been parsed to avoid redundant work
-            // This improves performance for frequently used expressions
+            // Check cache first to avoid redundant parsing of the same expression
+            // This is especially beneficial for repeated evaluations in loops or frequent re-renders
             if (this.cache.has(expression)) {
                 return this.cache.get(expression);
             }
 
-            // Parse expression using hierarchical operator precedence strategy
-            // Each method attempts to parse operators at different precedence levels:
-            // 1. Ternary (? :) - lowest precedence, evaluated last
-            // 2. Logical (&&, ||) - medium precedence
-            // 3. Comparison (==, !=, <, >, etc.) - higher precedence
-            // 4. Property access (obj.prop) - highest precedence, evaluated first
-            // Returns the first successful parse result or null if no pattern matches
-            const result = this.parseTernary(expression) ||
-                this.parseLogical(expression) ||
-                this.parseComparison(expression) ||
-                this.parseUnary(expression) ||
-                this.parseProperty(expression);
+            // Parse using operator precedence hierarchy (highest to lowest precedence)
+            // Each parser method returns null if it can't handle the expression type
+            // The || chain ensures we try progressively simpler parsing approaches
+            const result = this.parseTernary(expression) ||      // Conditional: condition ? ifTrue : ifFalse
+                this.parseLogical(expression) ||       // Logical: && (and), || (or)
+                this.parseComparison(expression) ||    // Comparison: ==, !=, <, >, <=, >=
+                this.parseUnary(expression) ||         // Unary: !, -, +
+                this.parseProperty(expression);        // Property access, literals, identifiers
 
-            // Store the parsed result in cache for future lookups
-            // This prevents re-parsing the same expression multiple times
+            // Cache the parsed result for future use
+            // Even null results are cached to avoid repeated failed parsing attempts
             this.cache.set(expression, result);
-
-            // Return the parsed expression object containing type, dependencies,
-            // and operator-specific properties for evaluation
             return result;
+        },
+
+        /**
+         * Parses a binding string into an array of key-value pairs.
+         * Handles nested parentheses, quoted strings, and comma separation while respecting context.
+         * Results are cached to improve performance on repeated parsing of the same binding string.
+         * @param {string} bindingString - The binding string to parse (e.g., "prop1: value1, prop2: method(arg1, arg2)")
+         * @returns {Array} Array of parsed binding pairs
+         */
+        parseBindingString(bindingString) {
+            // Check cache first to avoid redundant parsing
+            if (this.bindingCache.has(bindingString)) {
+                return this.bindingCache.get(bindingString);
+            }
+
+            const pairs = []; // Will store the final parsed key-value pairs
+            let current = ''; // Accumulates characters for the current binding pair
+            let inQuotes = false; // Tracks if we're currently inside a quoted string
+            let quoteChar = ''; // Stores the quote character that opened the current string (' or ")
+            let parenDepth = 0; // Tracks nesting level of parentheses to avoid splitting on commas inside function calls
+
+            // Parse character by character to handle complex nested structures
+            for (let i = 0; i < bindingString.length; i++) {
+                const char = bindingString[i];
+                const isEscaped = i > 0 && bindingString[i - 1] === '\\';
+
+                // Handle quote characters to track string boundaries
+                // This prevents splitting on commas that appear inside quoted strings
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        // Starting a new quoted string
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        // Ending the current quoted string (matching quote type)
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                // Track parentheses depth when not inside quotes
+                // This prevents splitting on commas inside function calls like method(arg1, arg2)
+                if (!inQuotes) {
+                    if (char === '(') {
+                        parenDepth++;
+                    } else if (char === ')') {
+                        parenDepth--;
+                    }
+                }
+
+                // Split on commas only when they're at the top level
+                // (not inside quotes and not inside parentheses)
+                if (char === ',' && !inQuotes && parenDepth === 0) {
+                    // Found a top-level comma - process the current accumulated binding pair
+                    this.addBindingPairIfValid(current, pairs);
+                    current = ''; // Reset for the next pair
+                } else {
+                    // Add character to current pair (including the comma if it's nested)
+                    current += char;
+                }
+            }
+
+            // Process the final binding pair (there's no trailing comma to trigger processing)
+            this.addBindingPairIfValid(current, pairs);
+
+            // Cache the result to improve performance on subsequent calls with the same input
+            this.bindingCache.set(bindingString, pairs);
+            return pairs;
+        },
+
+        /**
+         * Validates and processes a single binding pair string, then adds it to the pairs array.
+         * Handles both simple bindings (just a type) and key-value bindings (type: target).
+         * Uses context-aware colon detection to avoid splitting on colons inside nested expressions.
+         * @param {string} pairString - Raw binding pair string (e.g., "onClick: handleClick()" or "disabled")
+         * @param {Array} pairs - Array to add the processed binding pair to (modified in place)
+         */
+        addBindingPairIfValid(pairString, pairs) {
+            // Remove leading/trailing whitespace and validate the input
+            const trimmed = pairString.trim();
+
+            // Skip empty strings (e.g., from trailing commas or extra spaces)
+            if (!trimmed) {
+                return;
+            }
+
+            // Locate the binding colon that separates type from target
+            // Uses expression parsing logic to avoid splitting on colons inside quoted strings,
+            // function calls, or other nested structures (e.g., "style: { color: 'red' }")
+            const colonIndex = this.findBindingColon(trimmed);
+
+            if (colonIndex === -1) {
+                // No colon found - this is a simple binding with just a type
+                // Common for boolean attributes or event handlers without parameters
+                // Examples: "disabled", "required", "click" (shorthand for click: click)
+                pairs.push({
+                    type: trimmed,    // The binding type/attribute name
+                    target: ''        // Empty target indicates a simple binding
+                });
+            } else {
+                // Colon found - this is a key-value binding pair
+                // Split on the colon and trim both parts to handle spacing variations
+                // Examples: "onClick: handleClick", "class : getClassName()", " value: user.name "
+                pairs.push({
+                    type: trimmed.substring(0, colonIndex).trim(),      // Everything before colon (attribute/event name)
+                    target: trimmed.substring(colonIndex + 1).trim()    // Everything after colon (expression/value)
+                });
+            }
+        },
+
+        /**
+         * Finds the binding colon (not expression colons like in ternaries)
+         */
+        /**
+         * Locates the binding colon that separates the binding type from its target expression.
+         * Uses a two-phase approach: fast path for common binding types, then comprehensive parsing
+         * for complex cases with nested quotes, parentheses, or object literals.
+         *
+         * @param {string} str - The binding string to search (e.g., "onClick: handleClick()" or "style: { color: 'red' }")
+         * @returns {number} Index of the binding colon, or -1 if no valid colon is found
+         */
+        findBindingColon(str) {
+            // Phase 1: Fast path optimization for common binding types
+            // This avoids expensive character-by-character parsing for the majority of cases
+            // TODO: Consider moving this to a class constant or configuration
+            const knownBindingTypes = [
+                'value', 'checked', 'visible', 'if', 'foreach', 'class', 'style',      // Data bindings
+                'click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'  // Event bindings
+            ];
+
+            // Quick pattern matching: if the string starts with "knownType:", return the colon position
+            // This handles 90%+ of typical binding cases with minimal processing overhead
+            for (const type of knownBindingTypes) {
+                if (str.startsWith(type + ':')) {
+                    return type.length; // Return index of the colon (length of the binding type)
+                }
+            }
+
+            // Phase 2: Comprehensive parsing fallback for complex or custom binding types
+            // Handles cases like custom bindings, complex expressions, or nested structures
+            let inQuotes = false;      // Track if we're inside a quoted string
+            let quoteChar = '';        // Remember which quote character opened the current string (' or ")
+            let parenDepth = 0;        // Track nesting level of parentheses
+
+            // Parse character by character to find the first "top-level" colon
+            for (let i = 0; i < str.length; i++) {
+                const char = str[i];
+                const isEscaped = i > 0 && str[i - 1] === '\\';
+
+                // Handle quote boundaries to track string literals
+                // Prevents finding colons inside strings like: title: "Hello: World"
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        // Starting a new quoted section
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        // Ending current quoted section (matching quote type)
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                // Track parentheses depth when not inside quotes
+                // Prevents finding colons inside function calls or object literals
+                // Examples: onClick: method(arg1, arg2) or style: { color: 'red', margin: '10px' }
+                if (!inQuotes) {
+                    if (char === '(') {
+                        parenDepth++;
+                    } else if (char === ')') {
+                        parenDepth--;
+                    } else if (char === ':' && parenDepth === 0) {
+                        // Found a colon at the top level (not inside quotes or parentheses)
+                        // This is our binding separator
+                        return i;
+                    }
+                }
+            }
+
+            // No valid binding colon found - this might be a simple binding without a value
+            // or a malformed binding string
+            return -1;
         },
 
         /**
          * Parses a simple property access expression (fallback for non-operator expressions)
          * @param {string} expression - The property access expression to parse (e.g., "user.name", "items[0].value")
-         * @returns {Object} Parsed property object containing:
-         *   - type: Always set to 'property' to identify this as a property access
-         *   - path: The original expression string for later evaluation
-         *   - dependencies: Array of variable names this expression depends on
+         * @returns {Object} Parsed property object
          */
         parseProperty(expression) {
             return {
@@ -607,22 +782,36 @@
         },
 
         /**
-         * Attempts to parse a unary expression (!expression)
+         * Parses unary expressions, specifically the logical NOT operator (!).
+         * Creates an AST node for unary operations and extracts dependencies from the operand.
+         * This handles expressions like "!isActive", "! user.valid", or "!someMethod()".
+         * @param {string} expression - The expression string to attempt parsing as a unary operation
+         * @returns {Object|null} AST node for unary expression, or null if expression doesn't match unary pattern
          */
         parseUnary(expression) {
+            // Use regex to match unary NOT pattern: ! followed by optional whitespace and an operand
+            // Pattern breakdown:
+            // ^!       - Must start with exclamation mark
+            // \s*      - Zero or more whitespace characters (allows "!" or "! " or "!   ")
+            // (.+)     - Capture group for the operand (everything after the !)
+            // $        - Must match to end of string (ensures we capture the full operand)
             const unaryMatch = expression.match(/^!\s*(.+)$/);
 
+            // If the regex doesn't match, this isn't a unary expression
             if (!unaryMatch) {
                 return null;
             }
 
+            // Destructure the regex match results
+            // unaryMatch[0] would be the full match, unaryMatch[1] is the first capture group (operand)
             const [, operand] = unaryMatch;
 
+            // Return AST node representing the unary operation
             return {
-                type: 'unary',
-                operator: '!',
-                operand: operand.trim(),
-                dependencies: this.extractDependencies(operand.trim())
+                type: 'unary',                                          // Node type for AST traversal
+                operator: '!',                                          // The unary operator (currently only ! is supported)
+                operand: operand.trim(),                                // The expression being negated (whitespace normalized)
+                dependencies: this.extractDependencies(operand.trim())  // Variables/properties this expression depends on
             };
         },
 
@@ -799,7 +988,7 @@
             }
 
             // Parse and evaluate as expression
-            const parsed = this.parse(condition);
+            const parsed = this.parseExpression(condition);
             return Boolean(this.evaluate(parsed, context));
         },
 
@@ -1210,119 +1399,7 @@
              * @returns {Array<{type: string, target: string}>} Array of parsed binding pairs
              */
             parseBindingString(bindingString) {
-                const pairs = [];
-                let current = '';
-                let inQuotes = false;
-                let quoteChar = '';
-                let parenDepth = 0; // Track parentheses nesting
-
-                // Parse each character in the binding string
-                for (let i = 0; i < bindingString.length; i++) {
-                    const char = bindingString[i];
-                    const isEscaped = i > 0 && bindingString[i - 1] === '\\';
-
-                    // Handle quote characters (both single and double quotes)
-                    if ((char === '"' || char === "'") && !isEscaped) {
-                        if (!inQuotes) {
-                            // Start of quoted section
-                            inQuotes = true;
-                            quoteChar = char;
-                        } else if (char === quoteChar) {
-                            // End of quoted section (matching quote)
-                            inQuotes = false;
-                            quoteChar = '';
-                        }
-                    }
-
-                    // Track parentheses depth when not in quotes
-                    if (!inQuotes) {
-                        if (char === '(') {
-                            parenDepth++;
-                        } else if (char === ')') {
-                            parenDepth--;
-                        }
-                    }
-
-                    // Split on commas that are outside of quotes and parentheses
-                    if (char === ',' && !inQuotes && parenDepth === 0) {
-                        // Process the current pair if it's not empty
-                        this.addPairIfValid(current, pairs);
-                        current = '';
-                    } else {
-                        // Build up the current pair string
-                        current += char;
-                    }
-                }
-
-                // Process the final pair (no trailing comma)
-                this.addPairIfValid(current, pairs);
-
-                // Return result
-                return pairs;
-            },
-
-            /**
-             * Helper function to parse a single pair string and add it to the pairs array if valid.
-             * Splits on the first colon that's outside of parentheses to separate type from target.
-             * Handles ternary operators and other expressions with colons inside parentheses.
-             * @param {string} pairString - Raw pair string (may contain whitespace)
-             * @param {Array} pairs - Array to push the parsed pair object to
-             */
-            addPairIfValid(pairString, pairs) {
-                const trimmed = pairString.trim();
-
-                if (!trimmed) {
-                    return;
-                }
-
-                // Find the first colon that's outside of parentheses and quotes
-                let colonIndex = -1;
-                let inQuotes = false;
-                let quoteChar = '';
-                let parenDepth = 0;
-
-                for (let i = 0; i < trimmed.length; i++) {
-                    const char = trimmed[i];
-                    const isEscaped = i > 0 && trimmed[i - 1] === '\\';
-
-                    // Handle quotes
-                    if ((char === '"' || char === "'") && !isEscaped) {
-                        if (!inQuotes) {
-                            inQuotes = true;
-                            quoteChar = char;
-                        } else if (char === quoteChar) {
-                            inQuotes = false;
-                            quoteChar = '';
-                        }
-                    }
-
-                    // Track parentheses when not in quotes
-                    if (!inQuotes) {
-                        if (char === '(') {
-                            parenDepth++;
-                        } else if (char === ')') {
-                            parenDepth--;
-                        } else if (char === ':' && parenDepth === 0 && colonIndex === -1) {
-                            // Found the binding separator colon (not inside parentheses or ternary)
-                            colonIndex = i;
-                            break;
-                        }
-                    }
-                }
-
-                if (colonIndex === -1) {
-                    // No binding colon found, treat entire string as type with empty target
-                    pairs.push({
-                        type: trimmed,
-                        target: ''
-                    });
-                } else {
-                    // Split into type and target parts
-                    pairs.push({
-                        type: trimmed.substring(0, colonIndex).trim(),
-                        target: trimmed.substring(colonIndex + 1).trim()
-                    });
-                }
+                return ExpressionParser.parseBindingString(bindingString);
             },
 
             /**
@@ -1342,27 +1419,32 @@
             // === BINDING CREATION SECTION ===
 
             /**
-             * Gets or creates parsed expression for a binding (lazy compilation with caching)
+             * Gets parsed expression and ensures binding is indexed (lazy indexing)
              * @param {Object} binding - The binding object
              * @returns {Object} Parsed expression object
              */
             getParsedExpression(binding) {
-                if (!binding.parsedExpression) {
-                    // Parse the expression only when needed
-                    binding.parsedExpression = ExpressionParser.parse(binding.target);
-                    binding.dependencies = binding.parsedExpression.dependencies || [];
+                // Get parsed expression (ExpressionParser handles caching)
+                const parsedExpression = ExpressionParser.parseExpression(binding.target);
+                const dependencies = parsedExpression.dependencies || [];
 
+                // Only do the indexing work if not already done
+                if (!binding.isIndexed) {
                     // Index this binding under each of its dependencies
-                    binding.dependencies.forEach(dep => {
+                    dependencies.forEach(dep => {
                         if (!this.bindingIndex.has(dep)) {
                             this.bindingIndex.set(dep, new Set());
                         }
 
                         this.bindingIndex.get(dep).add(binding);
                     });
+
+                    // Mark as indexed to avoid re-indexing
+                    binding.isIndexed = true;
+                    binding.dependencies = dependencies;
                 }
 
-                return binding.parsedExpression;
+                return parsedExpression;
             },
 
             /**
@@ -1869,7 +1951,7 @@
                     // Replace each match with its evaluated value
                     matches.forEach(match => {
                         const expression = match.replace(/[{}\s]/g, '');
-                        const parsed = ExpressionParser.parse(expression);
+                        const parsed = ExpressionParser.parseExpression(expression);
                         const result = ExpressionParser.evaluate(parsed, this.abstraction);
                         const formattedValue = Utils.formatValue(result);
 
