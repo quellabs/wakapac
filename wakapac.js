@@ -97,54 +97,29 @@
          * @returns {boolean} True if values are deeply equal
          */
         isEqual(a, b) {
-            // Fast path: check strict equality (handles primitives, null, undefined, same reference)
             if (a === b) {
                 return true;
             }
 
-            // Early exit for null/undefined or different types
-            // Also handles cases where one is object and other is primitive
+            // Handle NaN case
+            if (typeof a === 'number' && typeof b === 'number' && Number.isNaN(a) && Number.isNaN(b)) {
+                return true;
+            }
+
             if (!a || !b || typeof a !== typeof b || typeof a !== 'object') {
                 return false;
             }
 
-            // Handle array comparison
             if (Array.isArray(a)) {
-                // Ensure both are arrays and same length
-                if (!Array.isArray(b) || a.length !== b.length) {
-                    return false;
-                }
-
-                // Recursively compare each element
-                for (let i = 0; i < a.length; i++) {
-                    if (!Utils.isEqual(a[i], b[i])) {
-                        return false;
-                    }
-                }
-
-                return true;
+                return Array.isArray(b) && a.length === b.length &&
+                    a.every((item, i) => Utils.isEqual(item, b[i]));
             }
 
-            // Handle object comparison
             const keysA = Object.keys(a);
             const keysB = Object.keys(b);
 
-            // Quick check: different number of properties
-            if (keysA.length !== keysB.length) {
-                return false;
-            }
-
-            // Compare each property recursively
-            for (let i = 0; i < keysA.length; i++) {
-                const key = keysA[i];
-
-                // Check if property exists in b and values are equal
-                if (!b.hasOwnProperty(key) || !Utils.isEqual(a[key], b[key])) {
-                    return false;
-                }
-            }
-
-            return true;
+            return keysA.length === keysB.length &&
+                keysA.every(key => b.hasOwnProperty(key) && Utils.isEqual(a[key], b[key]));
         },
 
         /**
