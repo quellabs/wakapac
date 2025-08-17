@@ -1200,6 +1200,7 @@
                     // Only process own properties, skip inherited ones and the 'computed' key
                     // which was already handled by setupComputedProperties
                     if (this.original.hasOwnProperty(key) && key !== 'computed') {
+                        // Read value
                         const value = this.original[key];
 
                         // Handle different property types appropriately
