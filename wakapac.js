@@ -77,30 +77,89 @@
         hasProxy: typeof Proxy !== 'undefined',
 
         /**
-         * Determines if a value should be made reactive
+         * Determines if a value should be made reactive using Proxy mechanism
+         * Simple values (primitives) are handled separately and don't need Proxy
          * @param {*} value - Value to test
-         * @returns {boolean} True if value should be reactive
+         * @returns {boolean} True if value should be proxied for deep reactivity
          */
         isReactive(value) {
-            return value &&
-                typeof value === 'object' &&
-                !value.nodeType &&
-                !(value instanceof Date) &&
-                !(value instanceof RegExp) &&
-                !(value instanceof File);
+            // Primitives don't need Proxy - they're handled by property descriptors
+            if (!value || typeof value !== 'object') {
+                return false;
+            }
+
+            // Null check
+            if (value === null) {
+                return false;
+            }
+
+            // Plain objects (created with {} or new Object() or Object.create(null))
+            if (this.isPlainObject(value)) {
+                return true;
+            }
+
+            // Arrays (but not typed arrays)
+            if (Array.isArray(value)) {
+                return true;
+            }
+
+            // Everything else is NOT reactive by default
+            return false;
         },
 
         /**
          * Check if the property should be reactive
          * @param {string} propertyName - Name of the property
+         * @param {*} value - Value to test
          * @returns {boolean} True if property should be reactive
          */
-        shouldPropertyBeReactive(propertyName) {
-            return !propertyName.startsWith('_') &&
-                !propertyName.startsWith('$') &&
-                propertyName !== 'constructor' &&
-                propertyName !== 'prototype' &&
-                propertyName !== '__proto__';
+        shouldPropertyBeReactive(propertyName, value) {
+            // Library convention (jQuery, etc.)
+            if (propertyName.startsWith('_') ||
+                propertyName.startsWith('$') ||
+                propertyName === 'constructor' ||
+                propertyName === 'prototype' ||
+                propertyName === '__proto__'
+            ) {
+                return false;
+            }
+
+            // Primitives are always reactive (handled by property descriptors)
+            if (value === null || value === undefined ||
+                typeof value === 'string' ||
+                typeof value === 'number' ||
+                typeof value === 'boolean') {
+                return true;
+            }
+
+            // For objects, check if they should be proxied for deep reactivity
+            return this.isReactive(value);
+        },
+
+        /**
+         * Checks if an object is a "plain object" - created with object literal,
+         * new Object(), or Object.create(null)
+         * @param {*} obj - Object to test
+         * @returns {boolean} True if it's a plain object
+         */
+        isPlainObject(obj) {
+            // Basic object check
+            if (typeof obj !== 'object' || obj === null) {
+                return false;
+            }
+
+            // Objects created with Object.create(null) have no prototype
+            if (Object.getPrototypeOf(obj) === null) {
+                return true;
+            }
+
+            // Objects created with {} or new Object()
+            let proto = obj;
+            while (Object.getPrototypeOf(proto) !== null) {
+                proto = Object.getPrototypeOf(proto);
+            }
+
+            return Object.getPrototypeOf(obj) === Object.prototype;
         },
 
         /**
