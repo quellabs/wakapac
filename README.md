@@ -651,13 +651,13 @@ WakaPAC automatically provides reactive browser state properties that update whe
 - **`containerClientWidth`**: Width of the container
 - **`containerClientHeight`**: Height of the container
 
-### Understanding the Difference
+### Understanding difference between viewport and document
 
 Think of it like looking through a window at a tall building:
 
 ```
 ┌─────────────────────┐ ← browserViewportHeight (800px)
-│   What you can see  │   The "window" - your browser viewport
+│   What you can see  │   The "viewport" - your browser window.
 │   right now         │   Changes when you resize browser window
 │                     │
 │   [Webpage Content] │
