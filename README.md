@@ -93,7 +93,7 @@ Unlike MVC where models and views can talk directly, PAC uses the Control layer 
 
 <!-- Container viewport properties -->
 <p>Container is {{containerVisible ? 'visible' : 'hidden'}} in viewport</p>
-<p>Container bounds: {{containerBounds.left}}, {{containerBounds.top}}</p>
+<p>Container bounds: {{containerClientRect.left}}, {{containerClientRect.top}}</p>
 ```
 
 ### Attribute Binding
@@ -669,7 +669,7 @@ WakaPAC automatically provides reactive browser state properties that update whe
 **Container Viewport Visibility:**
 - **`containerVisible`**: `true` when any part of the component's container is visible in the viewport
 - **`containerFullyVisible`**: `true` when the component's container is completely visible in the viewport
-- **`containerBounds`**: Object containing the container's position and dimensions relative to the viewport
+- **`containerClientRect`**: Object containing the container's position and dimensions relative to the viewport
 
 ### Understanding the Difference
 
@@ -691,10 +691,10 @@ Think of it like looking through a window at a tall building:
 
 ### Container Bounds Object
 
-The `containerBounds` property contains detailed position and size information:
+The `containerClientRect` property contains detailed position and size information:
 
 ```javascript
-// containerBounds contains:
+// containerClientRect contains:
 {
     top: 150,      // Distance from top of viewport
     left: 50,      // Distance from left of viewport  
