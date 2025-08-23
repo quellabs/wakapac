@@ -1503,6 +1503,7 @@
                 // This prevents duplicate event listeners when multiple components exist
                 if (!window._wakaPACViewportComponents) {
                     window._wakaPACViewportComponents = new Set();
+
                     // Only set up global listeners once
                     this.setupViewportVisibilityListener();
                 }
@@ -1517,6 +1518,7 @@
              */
             setupViewportVisibilityListener() {
                 let scrollTimeout;
+                let resizeTimeout;
 
                 // Batch visibility updates for all registered components
                 const checkVisibility = () => {
@@ -1528,18 +1530,18 @@
 
                 // Throttle scroll events to maintain 60fps performance
                 // Scroll events fire very frequently and can cause performance issues
+                // 16ms = ~60fps (1000ms/60frames = 16.67ms)
                 window.addEventListener('scroll', () => {
                     clearTimeout(scrollTimeout);
-                    // 16ms = ~60fps (1000ms/60frames = 16.67ms)
                     scrollTimeout = setTimeout(checkVisibility, 16);
                 });
 
                 // Handle window resize events with slightly longer delay
                 // Resize events are less frequent but can be more expensive to process
+                // 100ms delay gives time for resize to complete
                 window.addEventListener('resize', () => {
-                    clearTimeout(scrollTimeout);
-                    // 100ms delay gives time for resize to complete
-                    scrollTimeout = setTimeout(checkVisibility, 100);
+                    clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(checkVisibility, 100);
                 });
             },
 
