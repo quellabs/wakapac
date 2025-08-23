@@ -1895,35 +1895,47 @@
 
             /**
              * Updates computed properties that depend on a changed property
+             * @param {string} changedProperty - The name of the property that changed
              */
             updateComputedProperties(changedProperty) {
+                // Get all computed properties that depend on the changed property
                 const dependentComputed = this.propertyDeps.get(changedProperty) || [];
 
                 dependentComputed.forEach(computedName => {
+                    // Store the old value before recomputation
                     const oldValue = this.computedCache.get(computedName);
 
-                    // Clear cache to force recomputation
+                    // Clear cache to force recomputation on next access
                     this.computedCache.delete(computedName);
 
-                    // Get new value
+                    // Get new value (this will trigger recomputation since cache is cleared)
                     const newValue = this.abstraction[computedName];
 
                     // Check if any foreach bindings use this computed property
+                    // Array bindings may need updates even if the reference hasn't changed
                     const hasArrayBinding = Array.from(this.bindings.values())
                         .some(b => b.type === 'foreach' && b.collection === computedName);
 
                     // Update if value changed or if array binding needs update
+                    // Array bindings are updated regardless of equality check since
+                    // array contents may have changed without changing the reference
                     if (hasArrayBinding || !Utils.isEqual(oldValue, newValue)) {
+                        // Trigger any watchers registered for this computed property
+                        this.triggerWatcher(computedName, newValue, oldValue);
+
+                        // Schedule DOM updates for elements bound to this property
                         this.scheduleUpdate(computedName, newValue);
 
+                        // Notify parent component about the computed property change
                         this.notifyParent('propertyChange', {
                             property: computedName,
                             oldValue: oldValue,
                             newValue: newValue,
-                            computed: true
+                            computed: true // Flag indicating this is a computed property
                         });
 
-                        // Recursively update dependent computed properties
+                        // Recursively update any computed properties that depend on this one
+                        // This handles chains of computed dependencies (A -> B -> C)
                         this.updateComputedProperties(computedName);
                     }
                 });
