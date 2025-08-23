@@ -618,73 +618,49 @@ WakaPAC automatically provides reactive browser state properties that update whe
 
 ### Available Properties
 
-```javascript
-wakaPAC('#app', {
-    computed: {
-        // Access browser state in your logic
-        shouldLoadMore() {
-            return this.browserVisible && this.nearBottom;
-        },
+**Page Visibility:**
+- **`browserVisible`**: `true` when the browser tab is active/visible, `false` when tab is hidden or minimized
 
-        nearBottom() {
-            const threshold = 1000;
-            return this.browserScrollY + this.browserWindowHeight >=
-                this.browserDocumentHeight - threshold;
-        },
+**Scroll Position:**
+- **`browserScrollX`**: How many pixels the page is scrolled horizontally (left/right)
+- **`browserScrollY`**: How many pixels the page is scrolled vertically (up/down)
 
-        scrollPercentage() {
-            const scrollable = this.browserDocumentHeight - this.browserWindowHeight;
-            return Math.round((this.browserScrollY / scrollable) * 100);
-        }
-    },
+**Page Dimensions:**
+- **`browserWindowWidth`**: Width of the browser's content area (viewport) in pixels
+- **`browserWindowHeight`**: Height of the browser's content area (viewport) in pixels
+- **`browserDocumentWidth`**: Total width of the entire webpage content in pixels
+- **`browserDocumentHeight`**: Total height of the entire webpage content in pixels
 
-    watch: {
-        // React to browser state changes
-        browserVisible(isVisible) {
-            document.title = isVisible ? 'App Active' : 'App Paused';
-        },
+### Understanding the Difference
 
-        browserScrollY(scrollPosition) {
-            // Update scroll-based UI elements
-            this.updateProgressBar(scrollPosition);
-        }
-    }
-});
+Think of it like looking through a window at a tall building:
+
 ```
-
-**Available browser properties:**
-- **`browserVisible`**: `true` when tab/window is visible, `false` when hidden
-- **`browserScrollY`**: Current vertical scroll position in pixels
-- **`browserWindowHeight`**: Current viewport height in pixels
-- **`browserDocumentHeight`**: Total document height in pixels
+┌─────────────────────┐ ← browserWindowHeight (800px)
+│   What you can see  │   The "window" - your browser viewport
+│   right now         │   Changes when you resize browser window
+│                     │
+│   [Webpage Content] │
+├─────────────────────┤ ← You scroll down to see more...
+│   [More Content]    │
+│   [Even More]       │   browserDocumentHeight (2000px) 
+│   [Content Below]   │   The "building" - total webpage height
+│   [Footer]          │   Changes when content is added/removed
+└─────────────────────┘
+```
 
 ### Use Cases
 
 **Pause Operations When Tab Hidden:**
 ```javascript
 wakaPAC('#dashboard', {
-    refreshInterval: 5000,
-
-    computed: {
-        shouldAutoRefresh() {
-            return this.browserVisible && this.refreshInterval > 0;
-        }
-    },
-
     watch: {
         browserVisible(isVisible) {
             if (isVisible) {
-                this.startPolling();
+                this.startDataRefresh();
             } else {
-                this.stopPolling();
+                this.pauseDataRefresh(); // Save battery/bandwidth
             }
-        }
-    },
-
-    startPolling() {
-        if (this.shouldAutoRefresh) {
-            this.fetchData();
-            setTimeout(() => this.startPolling(), this.refreshInterval);
         }
     }
 });
@@ -693,56 +669,56 @@ wakaPAC('#dashboard', {
 **Endless Scrolling:**
 ```javascript
 wakaPAC('#product-feed', {
-    products: [],
-    loading: false,
-
     computed: {
         nearBottom() {
-            const threshold = 1000;
-            return this.browserScrollY + this.browserWindowHeight >=
-                this.browserDocumentHeight - threshold;
-        },
-
-        shouldLoadMore() {
-            return this.browserVisible && !this.loading && this.nearBottom;
+            // Are we close to the bottom of the page?
+            const scrolledDistance = this.browserScrollY;
+            const viewportHeight = this.browserWindowHeight;
+            const totalPageHeight = this.browserDocumentHeight;
+            
+            return scrolledDistance + viewportHeight >= totalPageHeight - 1000;
         }
     },
 
     watch: {
-        shouldLoadMore(should) {
-            if (should) {
-                this.loadMoreProducts();
+        nearBottom(isNear) {
+            if (isNear) {
+                this.loadMoreProducts(); // Load more when user scrolls near bottom
             }
         }
-    },
-
-    loadMoreProducts() {
-        this.loading = true;
-        // ... fetch logic
     }
 });
 ```
 
-**Dynamic Layout Logic:**
+**Scroll Progress Bar:**
+```javascript
+wakaPAC('#app', {
+    computed: {
+        scrollPercentage() {
+            // How much of the page has been scrolled? (0-100%)
+            const scrollableDistance = this.browserDocumentHeight - this.browserWindowHeight;
+            if (scrollableDistance <= 0) return 0;
+            
+            return Math.round((this.browserScrollY / scrollableDistance) * 100);
+        }
+    }
+});
+```
+
+**Responsive Behavior:**
 ```javascript
 wakaPAC('#app', {
     computed: {
         itemsPerPage() {
-            // Adjust pagination based on screen size
+            // Show more items on taller screens
             return this.browserWindowHeight > 800 ? 20 : 10;
-        },
-        
-        shouldShowSidebar() {
-            // Complex logic that CSS can't handle
-            return this.browserWindowHeight > 600 && this.user.preferences.showSidebar;
         }
     },
-    
+
     watch: {
         browserWindowHeight(newHeight) {
-            // Recalculate complex layouts when window resizes
             if (newHeight < 500) {
-                this.switchToMobileMode();
+                this.enableMobileMode();
             }
         }
     }

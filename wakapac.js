@@ -1334,12 +1334,14 @@
                 // Initialize current vertical scroll position in pixels from top of document
                 this.createReactiveProperty(reactive, 'browserScrollY', window.scrollY);
 
-                // Initialize current viewport height - the visible area of the browser window
+                // Initialize current viewport width & height - the visible area of the browser window
                 // Updates automatically when user resizes window or rotates mobile device
                 this.createReactiveProperty(reactive, 'browserWindowHeight', window.innerHeight);
+                this.createReactiveProperty(reactive, 'browserWindowWidth', window.innerWidth);
 
-                // Initialize total document height including content outside the viewport
+                // Initialize total document width/height including content outside the viewport
                 // Useful for calculating scroll percentages or infinite scroll triggers
+                this.createReactiveProperty(reactive, 'browserDocumentWidth', document.documentElement.scrollWidth);
                 this.createReactiveProperty(reactive, 'browserDocumentHeight', document.documentElement.scrollHeight);
 
                 // Set up global event listeners to keep these properties synchronized
@@ -1374,13 +1376,9 @@
                     scrollTimeout = setTimeout(() => {
                         // Iterate through all registered PAC components
                         window.PACRegistry.components.forEach(component => {
-                            // Update scroll position - scrollX gives horizontal scroll distance from left
-                            component.abstraction.browserScrollX = window.scrollX;
-
-                            // Update scroll position - scrollY gives vertical scroll distance from top
-                            component.abstraction.browserScrollY = window.scrollY;
-
-                            // Update total document height - useful for scroll percentage calculations
+                            component.abstraction.browserWindowWidth = window.innerWidth;  // Add this
+                            component.abstraction.browserWindowHeight = window.innerHeight;
+                            component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
                             component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
                         });
                     }, 16);
