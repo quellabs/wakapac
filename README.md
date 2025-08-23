@@ -648,6 +648,8 @@ WakaPAC automatically provides reactive browser state properties that update whe
 - **`containerVisible`**: `true` when any part of the component's container is visible in the viewport
 - **`containerFullyVisible`**: `true` when the component's container is completely visible in the viewport
 - **`containerClientRect`**: Object containing the container's position and dimensions relative to the viewport
+- **`containerClientWidth`**: Width of the container
+- **`containerClientHeight`**: Height of the container
 
 ### Understanding the Difference
 

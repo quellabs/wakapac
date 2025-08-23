@@ -1350,6 +1350,8 @@
                 this.createReactiveProperty(reactive, 'containerVisible', false);
                 this.createReactiveProperty(reactive, 'containerFullyVisible', false);
                 this.createReactiveProperty(reactive, 'containerClientRect', emptyRect);
+                this.createReactiveProperty(reactive, 'containerWidth', 0);
+                this.createReactiveProperty(reactive, 'containerHeight', 0);
 
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
@@ -1465,6 +1467,8 @@
                             // These are reactive properties that trigger UI updates
                             this.abstraction.containerVisible = isVisible;
                             this.abstraction.containerFullyVisible = isFullyVisible;
+                            this.abstraction.containerWidth = rect.width;
+                            this.abstraction.containerHeight = rect.height;
 
                             // Store current position/size data for potential use by other components
                             this.abstraction.containerClientRect = {
@@ -1541,105 +1545,132 @@
 
             /**
              * Manual visibility calculation using getBoundingClientRect().
-             * This is the fallback method used when IntersectionObserver isn't available.
+             * This is the fallback method used when IntersectionObserver isn't available
              */
             updateContainerVisibility() {
-                // Get current position and dimensions of container relative to viewport
-                const rect = this.container.getBoundingClientRect();
-
                 // Get current viewport dimensions
+                // innerHeight/innerWidth exclude scrollbars and give the actual visible area
                 const windowHeight = window.innerHeight;
                 const windowWidth = window.innerWidth;
+                const boundingRect = this.container.getBoundingClientRect();
 
-                // Check if any part of container intersects with viewport
-                // Element is visible if:
-                // - top edge is above bottom of viewport AND
-                // - bottom edge is below top of viewport AND
-                // - left edge is left of right edge of viewport AND
-                // - right edge is right of left edge of viewport
+                // Convert DOMRect to simple object
+                const rect = {
+                    top: boundingRect.top,
+                    left: boundingRect.left,
+                    right: boundingRect.right,
+                    bottom: boundingRect.bottom,
+                    width: boundingRect.width,
+                    height: boundingRect.height,
+                    x: boundingRect.x,               // Same as left, but included for DOMRect compatibility
+                    y: boundingRect.y                // Same as top, but included for DOMRect compatibility
+                };
+
+                // Set dimensions
+                this.abstraction.containerClientRect = rect;
+                this.abstraction.containerWidth = rect.width;
+                this.abstraction.containerHeight = rect.height;
+
+                // Check if any part of container intersects with viewport boundaries
+                // Intersection logic: An element is considered "in viewport" if it overlaps
+                // with the visible area in both horizontal and vertical dimensions.
                 const isInViewport = (
-                    rect.top < windowHeight &&    // Top of element is above bottom of screen
-                    rect.bottom > 0 &&            // Bottom of element is below top of screen
-                    rect.left < windowWidth &&    // Left of element is left of right edge of screen
-                    rect.right > 0                // Right of element is right of left edge of screen
+                    rect.top < windowHeight &&    // Element's top edge hasn't scrolled below viewport bottom
+                    rect.bottom > 0 &&            // Element's bottom edge hasn't scrolled above viewport top
+                    rect.left < windowWidth &&    // Element's left edge hasn't scrolled past viewport right
+                    rect.right > 0                // Element's right edge hasn't scrolled past viewport left
                 );
 
-                // If not in viewport at all, set everything to false and exit early
+                // Early exit optimization: If element is completely out of view,
+                // skip the more expensive fully-visible calculation and update state immediately
                 if (!isInViewport) {
+                    // Set visibility flags to false since element is not in viewport
                     this.abstraction.containerVisible = false;
                     this.abstraction.containerFullyVisible = false;
-                    this.abstraction.containerClientRect = {
-                        top: rect.top,
-                        left: rect.left,
-                        right: rect.right,
-                        bottom: rect.bottom,
-                        width: rect.width,
-                        height: rect.height,
-                        x: rect.x,
-                        y: rect.y
-                    };
-
                     return;
                 }
 
-                // Check if element is completely within viewport bounds
-                // Element is fully visible if all edges are within screen boundaries
+                // Calculate if element is completely within viewport bounds (no clipping)
+                // "Fully visible" means the entire element can be seen without any parts
+                // being cut off by viewport edges. This is stricter than just "visible"
+                // and useful for determining if content can be read/interacted with completely.
                 const isFullyVisible = (
-                    rect.top >= 0 &&                    // Top edge is at or below top of screen
-                    rect.bottom <= windowHeight &&      // Bottom edge is at or above bottom of screen
-                    rect.left >= 0 &&                   // Left edge is at or right of left edge of screen
-                    rect.right <= windowWidth           // Right edge is at or left of right edge of screen
+                    rect.top >= 0 &&                    // Top edge is at or below viewport top (not clipped above)
+                    rect.bottom <= windowHeight &&      // Bottom edge is at or above viewport bottom (not clipped below)
+                    rect.left >= 0 &&                   // Left edge is at or right of viewport left (not clipped on left)
+                    rect.right <= windowWidth           // Right edge is at or left of viewport right (not clipped on right)
                 );
 
-                // Update component reactive state with calculated visibility data
-                // These updates will trigger any dependent UI updates or callbacks
-                this.abstraction.containerVisible = true;
-                this.abstraction.containerFullyVisible = isFullyVisible;
-                this.abstraction.containerClientRect = rect;
+                // Update component's reactive state with calculated visibility data
+                // These property updates will trigger Wakapac's reactivity system
+                // and can be observed by other components or used to conditionally render content,
+                // start/stop animations, lazy load resources, etc.
+                this.abstraction.containerVisible = true;                    // Element has some visible pixels
+                this.abstraction.containerFullyVisible = isFullyVisible;     // Element is completely unclipped
             },
 
             /**
-             * Creates a reactive property with getter/setter
+             * Creates a reactive property with getter/setter on the target object
+             * This enables automatic change detection and propagation throughout the reactive system
+             * @param {Object} obj - The target object to add the reactive property to
+             * @param {string} key - The property name/key
+             * @param {*} initialValue - The initial value for the property
              */
             createReactiveProperty(obj, key, initialValue) {
+                // Store the actual value in closure scope for encapsulation
                 let value = initialValue;
 
+                // Check if the initial value is a complex object/array that needs deep reactivity
                 // Make initial value reactive if needed
                 if (Utils.isReactive(value)) {
+                    // Wrap the initial value in a reactive proxy to track nested changes
                     value = createReactive(value, (path, newVal, type, meta) => {
+                        // Forward deep change notifications up the chain with proper path context
                         this.handleDeepChange(path, newVal, type, meta);
                     }, key);
                 }
 
+                // Define the reactive property using Object.defineProperty for full control
                 Object.defineProperty(obj, key, {
+                    // Getter: Simply return the current value from closure
                     get: () => value,
+
+                    // Setter: Handle value changes with full reactive capabilities
                     set: (newValue) => {
+                        // Capture the previous value for change detection and watchers
                         const oldValue = value;
+
+                        // Determine if we're dealing with objects that might need deep comparison
                         const isObject = Utils.isReactive(value) || Utils.isReactive(newValue);
 
+                        // Only proceed with update if the value actually changed
+                        // For objects, we skip equality check and always update (performance vs accuracy tradeoff)
                         if (isObject || !Utils.isEqual(value, newValue)) {
                             // Make new value reactive if needed
                             if (Utils.isReactive(newValue)) {
+                                // Create reactive wrapper with change handler that forwards to deep change system
                                 newValue = createReactive(newValue, (path, changedVal, type, meta) => {
+                                    // Delegate nested property changes to the deep change handler
                                     this.handleDeepChange(path, changedVal, type, meta);
                                 }, key);
                             }
 
+                            // Update the stored value
                             value = newValue;
 
+                            // Execute any registered watchers for this specific property
                             // Trigger watcher if it exists
                             this.triggerWatcher(key, newValue, oldValue);
 
-                            // Existing update logic...
+                            // Schedule DOM/view updates for this property change
                             this.scheduleUpdate(key, newValue);
+
+                            // Recalculate any computed properties that depend on this property
                             this.updateComputedProperties(key);
-                            this.notifyParent('propertyChange', {
-                                property: key,
-                                oldValue: oldValue,
-                                newValue: newValue
-                            });
                         }
                     },
+
+                    // Make the property enumerable so it shows up in Object.keys(), for...in, etc.
                     enumerable: true
                 });
             },
@@ -2127,14 +2158,6 @@
                         // Schedule DOM updates for elements bound to this property
                         this.scheduleUpdate(computedName, newValue);
 
-                        // Notify parent component about the computed property change
-                        this.notifyParent('propertyChange', {
-                            property: computedName,
-                            oldValue: oldValue,
-                            newValue: newValue,
-                            computed: true // Flag indicating this is a computed property
-                        });
-
                         // Recursively update any computed properties that depend on this one
                         // This handles chains of computed dependencies (A -> B -> C)
                         this.updateComputedProperties(computedName);
@@ -2189,15 +2212,6 @@
                 if (path !== rootProperty) {
                     this.scheduleUpdate(path, value);
                 }
-
-                // Notify parent
-                this.notifyParent('propertyChange', {
-                    property: rootProperty,
-                    path: path,
-                    newValue: value,
-                    changeType: type,
-                    metadata: meta
-                });
             },
 
             /**
