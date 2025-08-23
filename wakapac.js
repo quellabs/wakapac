@@ -1328,10 +1328,8 @@
                 // Useful for pausing animations or reducing CPU usage when user switches tabs
                 this.createReactiveProperty(reactive, 'browserVisible', !document.hidden);
 
-                // Initialize current horizontal scroll position in pixels from left of document
+                // Initialize current horizontal/vertical scroll position in pixels from left/top of document
                 this.createReactiveProperty(reactive, 'browserScrollX', window.scrollX);
-
-                // Initialize current vertical scroll position in pixels from top of document
                 this.createReactiveProperty(reactive, 'browserScrollY', window.scrollY);
 
                 // Initialize current viewport width & height - the visible area of the browser window
@@ -1344,10 +1342,16 @@
                 this.createReactiveProperty(reactive, 'browserDocumentWidth', document.documentElement.scrollWidth);
                 this.createReactiveProperty(reactive, 'browserDocumentHeight', document.documentElement.scrollHeight);
 
+                // Per-container viewport visibility properties
+                this.createReactiveProperty(reactive, 'containerVisible', false);
+                this.createReactiveProperty(reactive, 'containerFullyVisible', false);
+                this.createReactiveProperty(reactive, 'containerBounds', null);
+
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
                 // regardless of how many components use browser properties
                 this.setupGlobalBrowserListeners();
+                this.setupViewportTracking();
             },
 
             /**
@@ -1365,25 +1369,6 @@
                 // Initialize singleton
                 window._wakaPACBrowserListeners = true;
 
-                // Track scroll position changes across the page
-                // Updates all registered components with current scroll position and document height
-                let scrollTimeout;
-
-                window.addEventListener('scroll', () => {
-                    // Debounce event listener
-                    clearTimeout(scrollTimeout);
-
-                    scrollTimeout = setTimeout(() => {
-                        // Iterate through all registered PAC components
-                        window.PACRegistry.components.forEach(component => {
-                            component.abstraction.browserWindowWidth = window.innerWidth;  // Add this
-                            component.abstraction.browserWindowHeight = window.innerHeight;
-                            component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
-                            component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-                        });
-                    }, 16);
-                });
-
                 // Track page visibility changes (tab switching, window minimizing, etc.)
                 // Useful for pausing animations or reducing CPU usage when page is not visible
                 document.addEventListener('visibilitychange', () => {
@@ -1394,17 +1379,196 @@
                     });
                 });
 
+                // Track scroll position changes across the page
+                // Updates all registered components with current scroll position and document height
+                let scrollTimeout;
+
+                window.addEventListener('scroll', () => {
+                    // Debounce scroll events for performance
+                    clearTimeout(scrollTimeout);
+
+                    scrollTimeout = setTimeout(() => {
+                        // Iterate through all registered PAC components
+                        window.PACRegistry.components.forEach(component => {
+                            component.abstraction.browserScrollX = window.scrollX;
+                            component.abstraction.browserScrollY = window.scrollY;
+                        });
+                    }, 16);
+                });
+
                 // Track window resize events to handle responsive behavior
                 // Updates components when user resizes browser window or rotates mobile device
-                window.addEventListener('resize', () => {
-                    window.PACRegistry.components.forEach(component => {
-                        // Update current viewport height - important for responsive layouts
-                        component.abstraction.browserWindowHeight = window.innerHeight;
+                let resizeTimeout;
 
-                        // Update document height in case content reflow changed the total height
-                        component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-                    });
+                window.addEventListener('resize', () => {
+                    // Debounce resize events for performance
+                    clearTimeout(resizeTimeout);
+
+                    resizeTimeout = setTimeout(() => {
+                        window.PACRegistry.components.forEach(component => {
+                            component.abstraction.browserWindowWidth = window.innerWidth;
+                            component.abstraction.browserWindowHeight = window.innerHeight;
+                            component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
+                            component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                        });
+                    }, 100);
                 });
+            },
+
+            /**
+             * Initialize viewport tracking for the container element.
+             * Uses modern IntersectionObserver API when available, falls back to scroll-based detection.
+             */
+            setupViewportTracking() {
+                // Check for modern browser support - IntersectionObserver is more efficient
+                // and provides better performance than manual scroll calculations
+                if ('IntersectionObserver' in window) {
+                    this.setupIntersectionObserver();
+                } else {
+                    // Legacy browsers need manual scroll event handling
+                    this.setupScrollBasedVisibility();
+                }
+
+                // Perform initial visibility calculation on setup
+                // This ensures correct state even before any scroll/intersection events
+                this.updateContainerVisibility();
+            },
+
+            /**
+             * Modern approach using Intersection Observer API.
+             * This is more performant as it runs on the main thread and batches calculations.
+             */
+            setupIntersectionObserver() {
+                // Create observer that tracks when container enters/exits viewport
+                this.intersectionObserver = new IntersectionObserver((entries) => {
+                    // Process each observed element (in this case, just our container)
+                    entries.forEach(entry => {
+                        // Verify we're handling the correct element
+                        if (entry.target === this.container) {
+                            // Basic visibility: any part of element is in viewport
+                            const isVisible = entry.isIntersecting;
+
+                            // Full visibility: element is completely within viewport bounds
+                            // intersectionRatio of 1.0 means 100% of element is visible
+                            // Using 0.99 to account for potential floating point precision issues
+                            const isFullyVisible = entry.intersectionRatio >= 0.99;
+
+                            // Update component state with new visibility data
+                            // These are reactive properties that trigger UI updates
+                            this.abstraction.containerVisible = isVisible;
+                            this.abstraction.containerFullyVisible = isFullyVisible;
+
+                            // Store current position/size data for potential use by other components
+                            this.abstraction.containerBounds = entry.boundingClientRect;
+                        }
+                    });
+                }, {
+                    // Define thresholds for intersection callbacks
+                    // 0 = trigger when element enters/exits viewport
+                    // 1.0 = trigger when element becomes fully visible/hidden
+                    threshold: [0, 1.0]
+                });
+
+                // Start observing our container element
+                this.intersectionObserver.observe(this.container);
+            },
+
+            /**
+             * Fallback approach for older browsers that don't support IntersectionObserver.
+             * Uses traditional scroll event listeners with manual visibility calculations.
+             */
+            setupScrollBasedVisibility() {
+                // Create global registry for components that need viewport tracking
+                // This prevents duplicate event listeners when multiple components exist
+                if (!window._wakaPACViewportComponents) {
+                    window._wakaPACViewportComponents = new Set();
+                    // Only set up global listeners once
+                    this.setupViewportVisibilityListener();
+                }
+
+                // Register this component instance for visibility updates
+                window._wakaPACViewportComponents.add(this);
+            },
+
+            /**
+             * Set up global scroll and resize event listeners.
+             * These are shared across all component instances to improve performance.
+             */
+            setupViewportVisibilityListener() {
+                let scrollTimeout;
+
+                // Batch visibility updates for all registered components
+                const checkVisibility = () => {
+                    // Update visibility for every component that's registered for tracking
+                    window._wakaPACViewportComponents.forEach(component => {
+                        component.updateContainerVisibility();
+                    });
+                };
+
+                // Throttle scroll events to maintain 60fps performance
+                // Scroll events fire very frequently and can cause performance issues
+                window.addEventListener('scroll', () => {
+                    clearTimeout(scrollTimeout);
+                    // 16ms = ~60fps (1000ms/60frames = 16.67ms)
+                    scrollTimeout = setTimeout(checkVisibility, 16);
+                });
+
+                // Handle window resize events with slightly longer delay
+                // Resize events are less frequent but can be more expensive to process
+                window.addEventListener('resize', () => {
+                    clearTimeout(scrollTimeout);
+                    // 100ms delay gives time for resize to complete
+                    scrollTimeout = setTimeout(checkVisibility, 100);
+                });
+            },
+
+            /**
+             * Manual visibility calculation using getBoundingClientRect().
+             * This is the fallback method used when IntersectionObserver isn't available.
+             */
+            updateContainerVisibility() {
+                // Get current position and dimensions of container relative to viewport
+                const rect = this.container.getBoundingClientRect();
+
+                // Get current viewport dimensions
+                const windowHeight = window.innerHeight;
+                const windowWidth = window.innerWidth;
+
+                // Check if any part of container intersects with viewport
+                // Element is visible if:
+                // - top edge is above bottom of viewport AND
+                // - bottom edge is below top of viewport AND
+                // - left edge is left of right edge of viewport AND
+                // - right edge is right of left edge of viewport
+                const isInViewport = (
+                    rect.top < windowHeight &&    // Top of element is above bottom of screen
+                    rect.bottom > 0 &&            // Bottom of element is below top of screen
+                    rect.left < windowWidth &&    // Left of element is left of right edge of screen
+                    rect.right > 0                // Right of element is right of left edge of screen
+                );
+
+                // If not in viewport at all, set everything to false and exit early
+                if (!isInViewport) {
+                    this.abstraction.containerVisible = false;
+                    this.abstraction.containerFullyVisible = false;
+                    this.abstraction.containerBounds = rect;
+                    return;
+                }
+
+                // Check if element is completely within viewport bounds
+                // Element is fully visible if all edges are within screen boundaries
+                const isFullyVisible = (
+                    rect.top >= 0 &&                    // Top edge is at or below top of screen
+                    rect.bottom <= windowHeight &&      // Bottom edge is at or above bottom of screen
+                    rect.left >= 0 &&                   // Left edge is at or right of left edge of screen
+                    rect.right <= windowWidth           // Right edge is at or left of right edge of screen
+                );
+
+                // Update component reactive state with calculated visibility data
+                // These updates will trigger any dependent UI updates or callbacks
+                this.abstraction.containerVisible = true;
+                this.abstraction.containerFullyVisible = isFullyVisible;
+                this.abstraction.containerBounds = rect;
             },
 
             /**
@@ -3161,6 +3325,7 @@
                 this._clearBindings();
                 this._cleanupHierarchy();
                 this._removeEventListeners();
+                this._cleanupViewportTracking();
                 this._nullifyReferences();
             },
 
@@ -3231,6 +3396,20 @@
                 });
 
                 this.eventListeners.clear();
+            },
+
+            // Add to cleanup section
+            _cleanupViewportTracking() {
+                // Clean up intersection observer
+                if (this.intersectionObserver) {
+                    this.intersectionObserver.disconnect();
+                    this.intersectionObserver = null;
+                }
+
+                // Remove from per-instance tracking
+                if (window._wakaPACViewportComponents) {
+                    window._wakaPACViewportComponents.delete(this);
+                }
             },
 
             /**
