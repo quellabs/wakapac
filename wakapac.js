@@ -1118,7 +1118,6 @@
      * @param {Object} [options={}] - Configuration options
      * @param {string} [options.updateMode='immediate'] - Update mode: 'immediate', 'delayed', or 'change'
      * @param {number} [options.delay=300] - Delay for 'delayed' update mode in milliseconds
-     * @param {boolean} [options.deepReactivity=true] - Enable deep object reactivity
      * @returns {Object} Public API for the PAC component
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
@@ -1131,8 +1130,7 @@
         // Merge configuration
         const config = Object.assign({
             updateMode: 'immediate',
-            delay: 300,
-            deepReactivity: true
+            delay: 300
         }, options);
 
         /**
@@ -1406,7 +1404,7 @@
                 let value = initialValue;
 
                 // Make initial value reactive if needed
-                if (this.config.deepReactivity && Utils.isReactive(value)) {
+                if (Utils.isReactive(value)) {
                     value = createReactive(value, (path, newVal, type, meta) => {
                         this.handleDeepChange(path, newVal, type, meta);
                     }, key);
@@ -1420,7 +1418,7 @@
 
                         if (isObject || !Utils.isEqual(value, newValue)) {
                             // Make new value reactive if needed
-                            if (this.config.deepReactivity && Utils.isReactive(newValue)) {
+                            if (Utils.isReactive(newValue)) {
                                 newValue = createReactive(newValue, (path, changedVal, type, meta) => {
                                     this.handleDeepChange(path, changedVal, type, meta);
                                 }, key);

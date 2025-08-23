@@ -783,8 +783,7 @@ component.destroy()
 ```javascript
 wakaPAC('#app', data, {
     updateMode: 'immediate',    // 'immediate', 'delayed', 'change'
-    delay: 300,                 // Delay for 'delayed' mode (ms)
-    deepReactivity: true        // Enable deep object reactivity
+    delay: 300                  // Delay for 'delayed' mode (ms)
 });
 ```
 
@@ -885,7 +884,7 @@ wakaPAC('#app', {
 
 ## When to Choose WakaPAC
 
-**✅ Perfect for:**
+** Perfect for:**
 - Complex single-page applications with clean architecture
 - Dashboard and admin interfaces
 - Data-heavy applications with reactive binding
@@ -895,7 +894,7 @@ wakaPAC('#app', {
 - Endless scrolling and scroll-dependent interfaces
 - Applications that need visibility-aware performance optimization
 
-**⚠️ Consider alternatives for:**
+**️ Consider alternatives for:**
 - Server-side rendering requirements
 - Mobile app development
 - Teams requiring extensive TypeScript tooling
