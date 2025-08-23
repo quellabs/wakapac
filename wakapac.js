@@ -1328,9 +1328,11 @@
                 // Useful for pausing animations or reducing CPU usage when user switches tabs
                 this.createReactiveProperty(reactive, 'browserVisible', !document.hidden);
 
+                // Initialize current horizontal scroll position in pixels from left of document
+                this.createReactiveProperty(reactive, 'browserScrollX', window.scrollX);
+
                 // Initialize current vertical scroll position in pixels from top of document
-                // Note: Using deprecated pageYOffset - should be updated to window.scrollY
-                this.createReactiveProperty(reactive, 'browserScrollY', window.pageYOffset);
+                this.createReactiveProperty(reactive, 'browserScrollY', window.scrollY);
 
                 // Initialize current viewport height - the visible area of the browser window
                 // Updates automatically when user resizes window or rotates mobile device
@@ -1363,15 +1365,25 @@
 
                 // Track scroll position changes across the page
                 // Updates all registered components with current scroll position and document height
-                window.addEventListener('scroll', () => {
-                    // Iterate through all registered PAC components
-                    window.PACRegistry.components.forEach(component => {
-                        // Update scroll position - scrollY gives vertical scroll distance from top
-                        component.abstraction.browserScrollY = window.scrollY;
+                let scrollTimeout;
 
-                        // Update total document height - useful for scroll percentage calculations
-                        component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-                    });
+                window.addEventListener('scroll', () => {
+                    // Debounce event listener
+                    clearTimeout(scrollTimeout);
+
+                    scrollTimeout = setTimeout(() => {
+                        // Iterate through all registered PAC components
+                        window.PACRegistry.components.forEach(component => {
+                            // Update scroll position - scrollX gives horizontal scroll distance from left
+                            component.abstraction.browserScrollX = window.scrollX;
+
+                            // Update scroll position - scrollY gives vertical scroll distance from top
+                            component.abstraction.browserScrollY = window.scrollY;
+
+                            // Update total document height - useful for scroll percentage calculations
+                            component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                        });
+                    }, 16);
                 });
 
                 // Track page visibility changes (tab switching, window minimizing, etc.)
