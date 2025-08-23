@@ -90,6 +90,10 @@ Unlike MVC where models and views can talk directly, PAC uses the Control layer 
 <!-- Browser properties -->
 <p>Scroll: {{scrollPercentage}}%</p>
 <p data-pac-bind="visible:!browserVisible">Tab is hidden - updates paused</p>
+
+<!-- Container viewport properties -->
+<p>Container is {{containerVisible ? 'visible' : 'hidden'}} in viewport</p>
+<p>Container bounds: {{containerBounds.left}}, {{containerBounds.top}}</p>
 ```
 
 ### Attribute Binding
@@ -134,6 +138,10 @@ Unlike MVC where models and views can talk directly, PAC uses the Control layer 
 <!-- Browser state conditions -->
 <div data-pac-bind="visible:browserVisible">Active content</div>
 <div data-pac-bind="if:browserWindowHeight > 600">Large screen content</div>
+
+<!-- Container viewport conditions -->
+<div data-pac-bind="visible:containerVisible">Show when container is in viewport</div>
+<div data-pac-bind="if:containerFullyVisible">Only when fully visible</div>
 ```
 
 **When to use each:**
@@ -308,6 +316,21 @@ wakaPAC('#app', {
             if (newCount % 5 === 0) {
                 this.saveProgress();
             }
+        },
+
+        // Watch container viewport visibility
+        containerVisible(isVisible) {
+            if (isVisible) {
+                this.startAnimation();
+            } else {
+                this.pauseAnimation(); // Save resources when not visible
+            }
+        },
+
+        containerFullyVisible(isFullyVisible) {
+            if (isFullyVisible) {
+                this.trackViewedContent(); // Analytics when fully in view
+            }
         }
     },
 
@@ -318,6 +341,18 @@ wakaPAC('#app', {
 
     saveProgress() {
         // Save logic
+    },
+
+    startAnimation() {
+        // Start animations only when visible
+    },
+
+    pauseAnimation() {
+        // Pause animations to save CPU
+    },
+
+    trackViewedContent() {
+        // Analytics tracking
     }
 });
 ```
@@ -631,6 +666,11 @@ WakaPAC automatically provides reactive browser state properties that update whe
 - **`browserDocumentWidth`**: Total width of the entire webpage content in pixels
 - **`browserDocumentHeight`**: Total height of the entire webpage content in pixels
 
+**Container Viewport Visibility:**
+- **`containerVisible`**: `true` when any part of the component's container is visible in the viewport
+- **`containerFullyVisible`**: `true` when the component's container is completely visible in the viewport
+- **`containerBounds`**: Object containing the container's position and dimensions relative to the viewport
+
 ### Understanding the Difference
 
 Think of it like looking through a window at a tall building:
@@ -649,6 +689,24 @@ Think of it like looking through a window at a tall building:
 └─────────────────────┘
 ```
 
+### Container Bounds Object
+
+The `containerBounds` property contains detailed position and size information:
+
+```javascript
+// containerBounds contains:
+{
+    top: 150,      // Distance from top of viewport
+    left: 50,      // Distance from left of viewport  
+    right: 850,    // Distance from left to right edge
+    bottom: 400,   // Distance from top to bottom edge
+    width: 800,    // Width of the container
+    height: 250,   // Height of the container
+    x: 50,         // Same as left
+    y: 150         // Same as top
+}
+```
+
 ### Use Cases
 
 **Pause Operations When Tab Hidden:**
@@ -662,6 +720,88 @@ wakaPAC('#dashboard', {
                 this.pauseDataRefresh(); // Save battery/bandwidth
             }
         }
+    }
+});
+```
+
+**Lazy Loading Based on Container Visibility:**
+```javascript
+wakaPAC('#image-gallery', {
+    images: [],
+    hasLoaded: false,
+
+    watch: {
+        containerVisible(isVisible) {
+            // Only load images when the gallery becomes visible
+            if (isVisible && !this.hasLoaded) {
+                this.loadImages();
+                this.hasLoaded = true;
+            }
+        }
+    },
+
+    async loadImages() {
+        this.images = await fetch('/api/images').then(r => r.json());
+    }
+});
+```
+
+**Performance Optimization with Container Visibility:**
+```javascript
+wakaPAC('#animation-container', {
+    animationRunning: false,
+
+    watch: {
+        containerVisible(isVisible) {
+            if (isVisible) {
+                this.startAnimation();
+            } else {
+                this.stopAnimation(); // Save CPU when not visible
+            }
+        }
+    },
+
+    startAnimation() {
+        if (!this.animationRunning) {
+            this.animationRunning = true;
+            this.animate();
+        }
+    },
+
+    stopAnimation() {
+        this.animationRunning = false;
+    },
+
+    animate() {
+        if (this.animationRunning && this.containerVisible) {
+            // Perform animation frame
+            requestAnimationFrame(() => this.animate());
+        }
+    }
+});
+```
+
+**Analytics Tracking:**
+```javascript
+wakaPAC('#article-content', {
+    viewTracked: false,
+
+    watch: {
+        containerFullyVisible(isFullyVisible) {
+            // Track when user has fully viewed the content
+            if (isFullyVisible && !this.viewTracked) {
+                this.trackContentView();
+                this.viewTracked = true;
+            }
+        }
+    },
+
+    trackContentView() {
+        // Send analytics event
+        analytics.track('content_viewed', {
+            article_id: this.articleId,
+            timestamp: new Date()
+        });
     }
 });
 ```
@@ -697,7 +837,10 @@ wakaPAC('#app', {
         scrollPercentage() {
             // How much of the page has been scrolled? (0-100%)
             const scrollableDistance = this.browserDocumentHeight - this.browserWindowHeight;
-            if (scrollableDistance <= 0) return 0;
+            
+            if (scrollableDistance <= 0) {
+                return 0;
+            }
             
             return Math.round((this.browserScrollY / scrollableDistance) * 100);
         }
@@ -705,21 +848,20 @@ wakaPAC('#app', {
 });
 ```
 
-**Responsive Behavior:**
-```javascript
-wakaPAC('#app', {
-    computed: {
-        itemsPerPage() {
-            // Show more items on taller screens
-            return this.browserWindowHeight > 800 ? 20 : 10;
-        }
-    },
+**Sticky Element with Container Awareness:**
 
-    watch: {
-        browserWindowHeight(newHeight) {
-            if (newHeight < 500) {
-                this.enableMobileMode();
-            }
+```html
+<div id="sidebar" data-pac-bind="class: sticky">
+    <!-- Sidebar content -->
+</div>
+```
+
+```javascript
+wakaPAC('#sidebar', {
+    computed: {
+        sticky() {
+            // Make sidebar sticky only when partially visible
+            return this.containerVisible && !this.containerFullyVisible;
         }
     }
 });
@@ -861,14 +1003,14 @@ wakaPAC('#app', {
 ## When to Choose WakaPAC
 
 ** Perfect for:**
+- Projects that need zero build complexity
+- Rapid prototyping and legacy modernization
 - Complex single-page applications with clean architecture
 - Dashboard and admin interfaces
 - Data-heavy applications with reactive binding
 - Real-time applications where performance matters
-- Rapid prototyping and legacy modernization
-- Projects that need zero build complexity
-- Endless scrolling and scroll-dependent interfaces
 - Applications that need visibility-aware performance optimization
+- Lazy loading and performance optimization based on viewport visibility
 
 **️ Consider alternatives for:**
 - Server-side rendering requirements
@@ -877,8 +1019,8 @@ wakaPAC('#app', {
 
 ## Browser Support
 
-- **Modern browsers**: Chrome, Firefox, Safari, Edge (with ES6 Proxy)
-- **Legacy browsers**: IE11+ (fallback using Object.defineProperty)
+- **Modern browsers**: Chrome, Firefox, Safari, Edge (with ES6 Proxy and IntersectionObserver)
+- **Legacy browsers**: IE11+ (fallback using Object.defineProperty and scroll-based visibility detection)
 
 ## License
 
