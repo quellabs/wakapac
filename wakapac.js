@@ -1328,16 +1328,20 @@
                 // Useful for pausing animations or reducing CPU usage when user switches tabs
                 this.createReactiveProperty(reactive, 'browserVisible', !document.hidden);
 
-                // Initialize current vertical scroll position in pixels from top of document
-                // Note: Using deprecated pageYOffset - should be updated to window.scrollY
-                this.createReactiveProperty(reactive, 'browserScrollY', window.pageYOffset);
+                // Initialize current horizontal scroll position in pixels from left of document
+                this.createReactiveProperty(reactive, 'browserScrollX', window.scrollX);
 
-                // Initialize current viewport height - the visible area of the browser window
+                // Initialize current vertical scroll position in pixels from top of document
+                this.createReactiveProperty(reactive, 'browserScrollY', window.scrollY);
+
+                // Initialize current viewport width & height - the visible area of the browser window
                 // Updates automatically when user resizes window or rotates mobile device
                 this.createReactiveProperty(reactive, 'browserWindowHeight', window.innerHeight);
+                this.createReactiveProperty(reactive, 'browserWindowWidth', window.innerWidth);
 
-                // Initialize total document height including content outside the viewport
+                // Initialize total document width/height including content outside the viewport
                 // Useful for calculating scroll percentages or infinite scroll triggers
+                this.createReactiveProperty(reactive, 'browserDocumentWidth', document.documentElement.scrollWidth);
                 this.createReactiveProperty(reactive, 'browserDocumentHeight', document.documentElement.scrollHeight);
 
                 // Set up global event listeners to keep these properties synchronized
@@ -1363,15 +1367,21 @@
 
                 // Track scroll position changes across the page
                 // Updates all registered components with current scroll position and document height
-                window.addEventListener('scroll', () => {
-                    // Iterate through all registered PAC components
-                    window.PACRegistry.components.forEach(component => {
-                        // Update scroll position - scrollY gives vertical scroll distance from top
-                        component.abstraction.browserScrollY = window.scrollY;
+                let scrollTimeout;
 
-                        // Update total document height - useful for scroll percentage calculations
-                        component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-                    });
+                window.addEventListener('scroll', () => {
+                    // Debounce event listener
+                    clearTimeout(scrollTimeout);
+
+                    scrollTimeout = setTimeout(() => {
+                        // Iterate through all registered PAC components
+                        window.PACRegistry.components.forEach(component => {
+                            component.abstraction.browserWindowWidth = window.innerWidth;  // Add this
+                            component.abstraction.browserWindowHeight = window.innerHeight;
+                            component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
+                            component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                        });
+                    }, 16);
                 });
 
                 // Track page visibility changes (tab switching, window minimizing, etc.)
