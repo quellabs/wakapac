@@ -410,28 +410,6 @@ watch: {
 | **Usage**        | Use in templates: `{{computed}}`   | Execute code when data changes         |
 | **When to use**  | Need a value based on other values | Need to do something when data changes |
 
-```javascript
-wakaPAC('#app', {
-    firstName: 'John',
-    lastName: 'Doe',
-
-    computed: {
-        // ✅ Good: Returns a value for use in templates
-        fullName() {
-            return `${this.firstName} ${this.lastName}`;
-        }
-    },
-
-    watch: {
-        // ✅ Good: Performs side effects when name changes
-        firstName(newName) {
-            console.log('First name changed');
-            this.saveToLocalStorage();
-        }
-    }
-});
-```
-
 ## Non-Reactive Properties
 
 Use underscore prefix (`_`) for properties that shouldn't be reactive:
