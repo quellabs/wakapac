@@ -41,51 +41,18 @@
 </head>
 <body>
 <div id="my-app">
-    <h1>Hello {{fullName}}!</h1>
-    <p>You clicked {{count}} times (Double: {{doubleCount}})</p>
-
-    <input data-pac-bind="value:firstName" placeholder="First name">
-    <input data-pac-bind="value:lastName" placeholder="Last name">
+    <h1>Hello {{name}}!</h1>
+    <p>Count: {{count}}</p>
     <button data-pac-bind="click:increment">Click me!</button>
-
-    <div data-pac-bind="visible:showMessage">
-        This message is conditionally shown!
-    </div>
-    <div data-pac-bind="if:count > 10">
-        <p>Congratulations! You've clicked more than 10 times!</p>
-        <button data-pac-bind="click:reset">Reset</button>
-    </div>
 </div>
 
 <script>
     wakaPAC('#my-app', {
-        // Data
-        firstName: 'John',
-        lastName: 'Doe',
+        name: 'World',
         count: 0,
-        showMessage: true,
 
-        // Computed properties
-        computed: {
-            fullName() {
-                return this.firstName + ' ' + this.lastName;
-            },
-            doubleCount() {
-                return this.count * 2;
-            }
-        },
-
-        // Methods
         increment() {
             this.count++;
-            if (this.count > 5) {
-                this.showMessage = false;
-            }
-        },
-
-        reset() {
-            this.count = 0;
-            this.showMessage = true;
         }
     });
 </script>
@@ -119,6 +86,10 @@ Unlike MVC where models and views can talk directly, PAC uses the Control layer 
 
 <!-- Computed properties -->
 <p>Total: {{totalPrice}}</p>
+
+<!-- Browser properties -->
+<p>Scroll: {{scrollPercentage}}%</p>
+<p data-pac-bind="visible:!browserVisible">Tab is hidden - updates paused</p>
 ```
 
 ### Attribute Binding
@@ -159,6 +130,10 @@ Unlike MVC where models and views can talk directly, PAC uses the Control layer 
 <!-- if: DOM element control (added/removed from DOM) -->
 <div data-pac-bind="if:user.isAdmin">Admin Panel</div>
 <div data-pac-bind="if:!isLoading">Content loaded</div>
+
+<!-- Browser state conditions -->
+<div data-pac-bind="visible:browserVisible">Active content</div>
+<div data-pac-bind="if:browserWindowHeight > 600">Large screen content</div>
 ```
 
 **When to use each:**
@@ -213,17 +188,17 @@ wakaPAC('#app', {
 <!-- Prevent form submission redirect -->
 <form data-pac-bind="submit:handleSubmit" data-pac-modifiers="prevent">
 
-<!-- Search on Enter key -->
-<input data-pac-bind="keyup:search" data-pac-modifiers="enter">
+    <!-- Search on Enter key -->
+    <input data-pac-bind="keyup:search" data-pac-modifiers="enter">
 
-<!-- Close modal on Escape -->
-<div data-pac-bind="keyup:closeModal" data-pac-modifiers="escape">
+    <!-- Close modal on Escape -->
+    <div data-pac-bind="keyup:closeModal" data-pac-modifiers="escape">
 
-<!-- One-time event -->
-<button data-pac-bind="click:initialize" data-pac-modifiers="once">
+        <!-- One-time event -->
+        <button data-pac-bind="click:initialize" data-pac-modifiers="once">
 
-<!-- Multiple modifiers -->
-<form data-pac-bind="submit:handleForm" data-pac-modifiers="prevent stop">
+            <!-- Multiple modifiers -->
+            <form data-pac-bind="submit:handleForm" data-pac-modifiers="prevent stop">
 ```
 
 **Available modifiers:**
@@ -269,6 +244,8 @@ wakaPAC('#app', {
 
 ## Computed Properties
 
+Computed properties automatically recalculate when their dependencies change. Use them when you need a **derived value** that depends on other reactive properties.
+
 ```javascript
 wakaPAC('#app', {
     firstName: 'John',
@@ -288,7 +265,133 @@ wakaPAC('#app', {
 
         // Dependent on other computed properties
         greeting() {
-            return `Hello, ${this.fullName}! Total: $${this.totalPrice}`;
+            return `Hello, ${this.fullName}! Total: ${this.totalPrice}`;
+        },
+
+        // Complex computed property with conditional logic
+        shippingCost() {
+            return this.totalPrice > 50 ? 0 : 9.99;
+        }
+    }
+});
+```
+
+**Key characteristics:**
+- **Pure functions**: Should not have side effects
+- **Cached**: Only recalculate when dependencies change
+- **Return values**: Used in templates and other expressions
+- **Declarative**: Define what the value should be, not how to calculate it
+
+## Watchers
+
+Watchers execute code when reactive properties change. Use them when you need to **perform side effects** in response to data changes.
+
+```javascript
+wakaPAC('#app', {
+    searchQuery: '',
+    count: 0,
+
+    watch: {
+        // Watch a simple property
+        searchQuery(newValue, oldValue) {
+            if (newValue.length > 2) {
+                this.performSearch(newValue);
+            }
+        },
+
+        // Watch with multiple side effects
+        count(newCount, oldCount) {
+            if (newCount > 10) {
+                this.showWarning = true;
+            }
+
+            if (newCount % 5 === 0) {
+                this.saveProgress();
+            }
+        }
+    },
+
+    // Methods called by watchers
+    performSearch(query) {
+        // API call logic
+    },
+
+    saveProgress() {
+        // Save logic
+    }
+});
+```
+
+### Common Watcher Use Cases
+
+**Form Validation:**
+```javascript
+wakaPAC('#app', {
+    email: '',
+    emailValid: false,
+
+    watch: {
+        email(newEmail) {
+            this.emailValid = this.validateEmail(newEmail);
+        }
+    },
+
+    validateEmail(email) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+});
+```
+
+**External Library Integration:**
+```javascript
+watch: {
+    chartData(newData) {
+        // Update external chart library
+        this._chart.updateData(newData);
+    }
+}
+```
+
+**Performance Optimization:**
+```javascript
+watch: {
+    browserVisible(isVisible) {
+        if (isVisible) {
+            this.startAnimation();
+        } else {
+            this.pauseAnimation();
+        }
+    }
+}
+```
+
+### Watchers vs Computed Properties
+
+| Feature          | Computed Properties                | Watchers                               |
+|------------------|------------------------------------|----------------------------------------|
+| **Purpose**      | Calculate derived values           | Perform side effects                   |
+| **Return value** | Always returns a value             | No return value needed                 |
+| **Side effects** | Should avoid side effects          | Designed for side effects              |
+| **Usage**        | Use in templates: `{{computed}}`   | Execute code when data changes         |
+| **When to use**  | Need a value based on other values | Need to do something when data changes |
+
+```javascript
+wakaPAC('#app', {
+    firstName: 'John',
+    lastName: 'Doe',
+
+    computed: {
+        // ✅ Good: Returns a value for use in templates
+        fullName() {
+            return `${this.firstName} ${this.lastName}`;
+        }
+    },
+
+    watch: {
+        // ✅ Good: Performs side effects when name changes
+        firstName(newName) {
+            console.log('First name changed');
+            this.saveToLocalStorage();
         }
     }
 });
@@ -303,11 +406,11 @@ wakaPAC('#map-app', {
     // ✅ Reactive properties (trigger DOM updates)
     tracking: false,
     currentLocation: null,
-    
+
     // ✅ Non-reactive properties (no DOM updates, no circular references)
     _map: null,
     _markers: [],
-    
+
     startTracking() {
         this.tracking = true; // Updates UI
         this._map = L.map('map'); // Safe for complex objects
@@ -333,14 +436,102 @@ Control when form inputs update your data:
 <input data-pac-bind="value:name" data-pac-update-mode="change">
 
 <!-- Delayed - updates after specified delay (debounced) -->
-<input data-pac-bind="value:searchQuery" 
-       data-pac-update-mode="delayed" data-pac-update-delay="500">
+<input data-pac-bind="value:searchQuery"
+       data-pac-update-mode="delayed"
+       data-pac-update-delay="500">
 ```
 
 **Use cases:**
 - **Immediate**: Real-time validation, character counters
 - **Change**: Server validation, auto-save functionality
 - **Delayed**: Search autocomplete, API queries
+
+## Component Lifecycle
+
+### Initialization Hook
+
+WakaPAC provides an `init()` method that runs automatically after the component is fully initialized and all reactive properties are set up.
+
+```javascript
+wakaPAC('#app', {
+    message: 'Hello',
+    user: null,
+
+    init() {
+        // This runs after component initialization
+        console.log('Component is ready!');
+        console.log('Current message:', this.message);
+
+        // Perfect place for setup that depends on reactive properties
+        document.title = `App - ${this.message}`;
+
+        // Load initial data
+        this.loadUserData();
+    },
+
+    async loadUserData() {
+        this.user = await fetch('/api/user').then(r => r.json());
+    }
+});
+```
+
+**When to use `init()`:**
+- Setting up external libraries that need reactive data
+- Making initial API calls
+- Setting document properties based on component state
+- Any setup that requires fully initialized reactive properties
+
+**Execution order:**
+1. Reactive properties are created
+2. Computed properties are set up
+3. DOM bindings are established
+4. Initial DOM update occurs
+5. **`init()` is called** ← You are here
+6. Component is ready for user interaction
+
+### Common `init()` Patterns
+
+**External Library Integration:**
+```javascript
+wakaPAC('#chart', {
+    chartData: [1, 2, 3, 4],
+
+    init() {
+        // Initialize chart library with reactive data
+        this._chart = new Chart('#canvas', {
+            data: this.chartData
+        });
+    },
+
+    watch: {
+        chartData(newData) {
+            // Update chart when data changes
+            this._chart.updateData(newData);
+        }
+    }
+});
+```
+
+**Initial Setup with Browser Properties:**
+```javascript
+wakaPAC('#app', {
+    init() {
+        // Set initial document title based on visibility
+        document.title = this.browserVisible ? 'App Active' : 'App Paused';
+
+        // Start background processes if visible
+        if (this.browserVisible) {
+            this.startBackgroundSync();
+        }
+    },
+
+    watch: {
+        browserVisible(isVisible) {
+            document.title = isVisible ? 'App Active' : 'App Paused';
+        }
+    }
+});
+```
 
 ## Component Hierarchy
 
@@ -370,7 +561,7 @@ const parent = wakaPAC('#parent-app', {
     broadcastMessage() {
         // Send to all children
         this.sendToChildren('update', {theme: 'dark'});
-        
+
         // Send to specific child
         this.sendToChild('#child-app', 'focus');
     }
@@ -421,6 +612,143 @@ wakaPAC('#app', {
 });
 ```
 
+## Browser Reactive Properties
+
+WakaPAC automatically provides reactive browser state properties that update when the browser environment changes. These are available in all components without any setup:
+
+### Available Properties
+
+```javascript
+wakaPAC('#app', {
+    computed: {
+        // Access browser state in your logic
+        shouldLoadMore() {
+            return this.browserVisible && this.nearBottom;
+        },
+
+        nearBottom() {
+            const threshold = 1000;
+            return this.browserScrollY + this.browserWindowHeight >=
+                this.browserDocumentHeight - threshold;
+        },
+
+        scrollPercentage() {
+            const scrollable = this.browserDocumentHeight - this.browserWindowHeight;
+            return Math.round((this.browserScrollY / scrollable) * 100);
+        }
+    },
+
+    watch: {
+        // React to browser state changes
+        browserVisible(isVisible) {
+            document.title = isVisible ? 'App Active' : 'App Paused';
+        },
+
+        browserScrollY(scrollPosition) {
+            // Update scroll-based UI elements
+            this.updateProgressBar(scrollPosition);
+        }
+    }
+});
+```
+
+**Available browser properties:**
+- **`browserVisible`**: `true` when tab/window is visible, `false` when hidden
+- **`browserScrollY`**: Current vertical scroll position in pixels
+- **`browserWindowHeight`**: Current viewport height in pixels
+- **`browserDocumentHeight`**: Total document height in pixels
+
+### Use Cases
+
+**Pause Operations When Tab Hidden:**
+```javascript
+wakaPAC('#dashboard', {
+    refreshInterval: 5000,
+
+    computed: {
+        shouldAutoRefresh() {
+            return this.browserVisible && this.refreshInterval > 0;
+        }
+    },
+
+    watch: {
+        browserVisible(isVisible) {
+            if (isVisible) {
+                this.startPolling();
+            } else {
+                this.stopPolling();
+            }
+        }
+    },
+
+    startPolling() {
+        if (this.shouldAutoRefresh) {
+            this.fetchData();
+            setTimeout(() => this.startPolling(), this.refreshInterval);
+        }
+    }
+});
+```
+
+**Endless Scrolling:**
+```javascript
+wakaPAC('#product-feed', {
+    products: [],
+    loading: false,
+
+    computed: {
+        nearBottom() {
+            const threshold = 1000;
+            return this.browserScrollY + this.browserWindowHeight >=
+                this.browserDocumentHeight - threshold;
+        },
+
+        shouldLoadMore() {
+            return this.browserVisible && !this.loading && this.nearBottom;
+        }
+    },
+
+    watch: {
+        shouldLoadMore(should) {
+            if (should) {
+                this.loadMoreProducts();
+            }
+        }
+    },
+
+    loadMoreProducts() {
+        this.loading = true;
+        // ... fetch logic
+    }
+});
+```
+
+**Dynamic Layout Logic:**
+```javascript
+wakaPAC('#app', {
+    computed: {
+        itemsPerPage() {
+            // Adjust pagination based on screen size
+            return this.browserWindowHeight > 800 ? 20 : 10;
+        },
+        
+        shouldShowSidebar() {
+            // Complex logic that CSS can't handle
+            return this.browserWindowHeight > 600 && this.user.preferences.showSidebar;
+        }
+    },
+    
+    watch: {
+        browserWindowHeight(newHeight) {
+            // Recalculate complex layouts when window resizes
+            if (newHeight < 500) {
+                this.switchToMobileMode();
+            }
+        }
+    }
+});
+```
+
 ## API Reference
 
 ### Creating Components
@@ -431,7 +759,7 @@ const component = wakaPAC(selector, abstraction, options);
 
 **Parameters:**
 - `selector`: CSS selector for container element
-- `abstraction`: Object with properties, methods, computed properties
+- `abstraction`: Object with properties, methods, computed properties, watchers
 - `options`: Configuration object (optional)
 
 ### Core Methods
@@ -479,15 +807,52 @@ wakaPAC('#app', data, {
 <div data-pac-bind="visible:isVisible">Content</div>
 ```
 
+```javascript
+// Vue
+export default {
+  data() {
+    return { count: 0 }
+  },
+  computed: {
+    doubled() { return this.count * 2 }
+  },
+  watch: {
+    count(newVal) { console.log('Count changed') }
+  }
+}
+
+// WakaPAC
+wakaPAC('#app', {
+  count: 0,
+  computed: {
+    doubled() { return this.count * 2; }
+  },
+  watch: {
+    count(newVal) { console.log('Count changed'); }
+  }
+});
+```
+
 ### From React
 ```javascript
 // React
 const [count, setCount] = useState(0);
 const increment = () => setCount(count + 1);
 
+useEffect(() => {
+    console.log('Count changed');
+}, [count]);
+
 // WakaPAC
 wakaPAC('#app', {
     count: 0,
+
+    watch: {
+        count() {
+            console.log('Count changed');
+        }
+    },
+
     increment() {
         this.count++; // Direct assignment
     }
@@ -509,6 +874,11 @@ wakaPAC('#app', {
         fullName() {
             return this.firstName;
         }
+    },
+    watch: {
+        firstName(newVal) {
+            console.log('Name changed to:', newVal);
+        }
     }
 });
 ```
@@ -522,6 +892,8 @@ wakaPAC('#app', {
 - Real-time applications where performance matters
 - Rapid prototyping and legacy modernization
 - Projects that need zero build complexity
+- Endless scrolling and scroll-dependent interfaces
+- Applications that need visibility-aware performance optimization
 
 **⚠️ Consider alternatives for:**
 - Server-side rendering requirements

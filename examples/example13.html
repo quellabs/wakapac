@@ -1,0 +1,22 @@
+<html>
+<body>
+
+<div id="container">
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const counter = wakaPAC('#container', {
+        init() {
+            document.title = this.browserVisible ? 'Visible' : 'Hidden';
+        },
+
+        watch: {
+            browserVisible(newValue, oldValue) {
+                document.title = newValue ? 'Visible' : 'Hidden';
+            }
+        }
+    });
+</script>
+</body>
+</html>
