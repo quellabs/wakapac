@@ -1118,7 +1118,6 @@
      * @param {Object} [options={}] - Configuration options
      * @param {string} [options.updateMode='immediate'] - Update mode: 'immediate', 'delayed', or 'change'
      * @param {number} [options.delay=300] - Delay for 'delayed' update mode in milliseconds
-     * @param {boolean} [options.deepReactivity=true] - Enable deep object reactivity
      * @returns {Object} Public API for the PAC component
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
@@ -1131,8 +1130,7 @@
         // Merge configuration
         const config = Object.assign({
             updateMode: 'immediate',
-            delay: 300,
-            deepReactivity: true
+            delay: 300
         }, options);
 
         /**
@@ -1189,6 +1187,9 @@
             createReactiveAbstraction() {
                 // Create the base reactive object that will be returned
                 const reactive = {};
+
+                // Set up global browser state properties
+                this.setupBrowserProperties(reactive);
 
                 // Set up computed properties first (these depend on other properties)
                 // Computed properties are processed before regular properties to ensure
@@ -1260,7 +1261,7 @@
 
                     if (typeof computedFn === 'function') {
                         // Analyze dependencies
-                        const dependencies = this.analyzeComputedDependencies(computedFn);
+                        const dependencies = this.analyzeComputedDependencies(computedFn, reactive);
                         this.computedDeps.set(name, dependencies);
 
                         // Build reverse dependency map
@@ -1268,6 +1269,7 @@
                             if (!this.propertyDeps.has(dep)) {
                                 this.propertyDeps.set(dep, []);
                             }
+
                             if (!this.propertyDeps.get(dep).includes(name)) {
                                 this.propertyDeps.get(dep).push(name);
                             }
@@ -1298,7 +1300,7 @@
             /**
              * Analyzes computed function dependencies by parsing the function source
              */
-            analyzeComputedDependencies(fn) {
+            analyzeComputedDependencies(fn, reactive) {
                 const dependencies = [];
                 const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
 
@@ -1306,7 +1308,7 @@
                 while ((match = regex.exec(fn.toString()))) {
                     const property = match[1];
 
-                    if (this.original.hasOwnProperty(property) &&
+                    if ((this.original.hasOwnProperty(property) || reactive.hasOwnProperty(property)) &&
                         (!this.original.computed || !this.original.computed.hasOwnProperty(property)) &&
                         !dependencies.includes(property)) {
                         dependencies.push(property);
@@ -1317,13 +1319,92 @@
             },
 
             /**
+             * Initializes reactive browser state properties for a component
+             * These properties automatically update when browser events occur (scroll, resize, visibility change)
+             * @param {Object} reactive - The reactive object to attach browser properties to
+             */
+            setupBrowserProperties(reactive) {
+                // Initialize page visibility state - tracks if the browser tab/window is currently visible
+                // Useful for pausing animations or reducing CPU usage when user switches tabs
+                this.createReactiveProperty(reactive, 'browserVisible', !document.hidden);
+
+                // Initialize current vertical scroll position in pixels from top of document
+                // Note: Using deprecated pageYOffset - should be updated to window.scrollY
+                this.createReactiveProperty(reactive, 'browserScrollY', window.pageYOffset);
+
+                // Initialize current viewport height - the visible area of the browser window
+                // Updates automatically when user resizes window or rotates mobile device
+                this.createReactiveProperty(reactive, 'browserWindowHeight', window.innerHeight);
+
+                // Initialize total document height including content outside the viewport
+                // Useful for calculating scroll percentages or infinite scroll triggers
+                this.createReactiveProperty(reactive, 'browserDocumentHeight', document.documentElement.scrollHeight);
+
+                // Set up global event listeners to keep these properties synchronized
+                // Uses singleton pattern to ensure listeners are only attached once per page
+                // regardless of how many components use browser properties
+                this.setupGlobalBrowserListeners();
+            },
+
+            /**
+             * Sets up global browser event listeners to track browser state changes
+             * and synchronize them across all registered PAC components
+             */
+            setupGlobalBrowserListeners() {
+                // Use singleton pattern to avoid duplicate listeners
+                // Check if listeners have already been set up to prevent memory leaks
+                // and duplicate event handlers when this method is called multiple times
+                if (window._wakaPACBrowserListeners) {
+                    return;
+                }
+
+                // Initialize singleton
+                window._wakaPACBrowserListeners = true;
+
+                // Track scroll position changes across the page
+                // Updates all registered components with current scroll position and document height
+                window.addEventListener('scroll', () => {
+                    // Iterate through all registered PAC components
+                    window.PACRegistry.components.forEach(component => {
+                        // Update scroll position - scrollY gives vertical scroll distance from top
+                        component.abstraction.browserScrollY = window.scrollY;
+
+                        // Update total document height - useful for scroll percentage calculations
+                        component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                    });
+                });
+
+                // Track page visibility changes (tab switching, window minimizing, etc.)
+                // Useful for pausing animations or reducing CPU usage when page is not visible
+                document.addEventListener('visibilitychange', () => {
+                    window.PACRegistry.components.forEach(component => {
+                        // document.hidden is true when page is not visible, so invert it
+                        // browserVisible will be false when tab is hidden/minimized
+                        component.abstraction.browserVisible = !document.hidden;
+                    });
+                });
+
+                // Track window resize events to handle responsive behavior
+                // Updates components when user resizes browser window or rotates mobile device
+                window.addEventListener('resize', () => {
+                    window.PACRegistry.components.forEach(component => {
+                        // Update current viewport height - important for responsive layouts
+                        component.abstraction.browserWindowHeight = window.innerHeight;
+
+                        // Update document height in case content reflow changed the total height
+                        component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                    });
+                });
+            },
+
+            /**
              * Creates a reactive property with getter/setter
              */
             createReactiveProperty(obj, key, initialValue) {
                 let value = initialValue;
 
                 // Make initial value reactive if needed
-                if (this.config.deepReactivity && Utils.isReactive(value)) {
+                if (Utils.isReactive(value)) {
                     value = createReactive(value, (path, newVal, type, meta) => {
                         this.handleDeepChange(path, newVal, type, meta);
                     }, key);
@@ -1332,13 +1413,12 @@
                 Object.defineProperty(obj, key, {
                     get: () => value,
                     set: (newValue) => {
+                        const oldValue = value;
                         const isObject = Utils.isReactive(value) || Utils.isReactive(newValue);
 
                         if (isObject || !Utils.isEqual(value, newValue)) {
-                            const oldValue = value;
-
                             // Make new value reactive if needed
-                            if (this.config.deepReactivity && Utils.isReactive(newValue)) {
+                            if (Utils.isReactive(newValue)) {
                                 newValue = createReactive(newValue, (path, changedVal, type, meta) => {
                                     this.handleDeepChange(path, changedVal, type, meta);
                                 }, key);
@@ -1346,7 +1426,10 @@
 
                             value = newValue;
 
-                            // Trigger updates
+                            // Trigger watcher if it exists
+                            this.triggerWatcher(key, newValue, oldValue);
+
+                            // Existing update logic...
                             this.scheduleUpdate(key, newValue);
                             this.updateComputedProperties(key);
                             this.notifyParent('propertyChange', {
@@ -1358,6 +1441,16 @@
                     },
                     enumerable: true
                 });
+            },
+
+            triggerWatcher(property, newValue, oldValue) {
+                if (this.original.watch && this.original.watch[property]) {
+                    try {
+                        this.original.watch[property].call(this.abstraction, newValue, oldValue);
+                    } catch (error) {
+                        console.error(`Error in watcher for '${property}':`, error);
+                    }
+                }
             },
 
             // === BINDING SETUP SECTION ===
@@ -1933,6 +2026,15 @@
                         }
                     }
                 });
+
+                // Call init() method if it exists
+                if (this.original.init && typeof this.original.init === 'function') {
+                    try {
+                        this.original.init.call(this.abstraction);
+                    } catch (error) {
+                        console.error('Error in init() method:', error);
+                    }
+                }
             },
 
             // === BINDING UPDATE SECTION ===
