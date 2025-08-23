@@ -1176,6 +1176,7 @@
                 this.setupBindings();
                 this.abstraction = this.createReactiveAbstraction();
                 this.setupEventHandling();
+                this.setupViewportTracking();
                 this.performInitialUpdate();
                 return this;
             },
@@ -1324,6 +1325,9 @@
              * @param {Object} reactive - The reactive object to attach browser properties to
              */
             setupBrowserProperties(reactive) {
+                // Define empty rect for containerBounds
+                const emptyRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
+
                 // Initialize page visibility state - tracks if the browser tab/window is currently visible
                 // Useful for pausing animations or reducing CPU usage when user switches tabs
                 this.createReactiveProperty(reactive, 'browserVisible', !document.hidden);
@@ -1345,13 +1349,12 @@
                 // Per-container viewport visibility properties
                 this.createReactiveProperty(reactive, 'containerVisible', false);
                 this.createReactiveProperty(reactive, 'containerFullyVisible', false);
-                this.createReactiveProperty(reactive, 'containerBounds', null);
+                this.createReactiveProperty(reactive, 'containerBounds', emptyRect);
 
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
                 // regardless of how many components use browser properties
                 this.setupGlobalBrowserListeners();
-                this.setupViewportTracking();
             },
 
             /**
@@ -1445,6 +1448,9 @@
                     entries.forEach(entry => {
                         // Verify we're handling the correct element
                         if (entry.target === this.container) {
+                            // Get the boundingClientRect
+                            const rect = entry.boundingClientRect;
+
                             // Basic visibility: any part of element is in viewport
                             const isVisible = entry.isIntersecting;
 
@@ -1459,7 +1465,16 @@
                             this.abstraction.containerFullyVisible = isFullyVisible;
 
                             // Store current position/size data for potential use by other components
-                            this.abstraction.containerBounds = entry.boundingClientRect;
+                            this.abstraction.containerBounds = {
+                                top: rect.top,
+                                left: rect.left,
+                                right: rect.right,
+                                bottom: rect.bottom,
+                                width: rect.width,
+                                height: rect.height,
+                                x: rect.x,
+                                y: rect.y
+                            };
                         }
                     });
                 }, {
@@ -1551,7 +1566,17 @@
                 if (!isInViewport) {
                     this.abstraction.containerVisible = false;
                     this.abstraction.containerFullyVisible = false;
-                    this.abstraction.containerBounds = rect;
+                    this.abstraction.containerBounds = {
+                        top: rect.top,
+                        left: rect.left,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                        width: rect.width,
+                        height: rect.height,
+                        x: rect.x,
+                        y: rect.y
+                    };
+
                     return;
                 }
 
