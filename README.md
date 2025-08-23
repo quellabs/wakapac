@@ -639,8 +639,8 @@ WakaPAC automatically provides reactive browser state properties that update whe
 - **`browserScrollY`**: How many pixels the page is scrolled vertically (up/down)
 
 **Page Dimensions:**
-- **`browserWindowWidth`**: Width of the browser's content area (viewport) in pixels
-- **`browserWindowHeight`**: Height of the browser's content area (viewport) in pixels
+- **`browserViewportWidth`**: Width of the browser's content area (viewport) in pixels
+- **`browserViewportHeight`**: Height of the browser's content area (viewport) in pixels
 - **`browserDocumentWidth`**: Total width of the entire webpage content in pixels
 - **`browserDocumentHeight`**: Total height of the entire webpage content in pixels
 
@@ -654,7 +654,7 @@ WakaPAC automatically provides reactive browser state properties that update whe
 Think of it like looking through a window at a tall building:
 
 ```
-┌─────────────────────┐ ← browserWindowHeight (800px)
+┌─────────────────────┐ ← browserViewportHeight (800px)
 │   What you can see  │   The "window" - your browser viewport
 │   right now         │   Changes when you resize browser window
 │                     │
@@ -667,7 +667,7 @@ Think of it like looking through a window at a tall building:
 └─────────────────────┘
 ```
 
-### Container Bounds Object
+### Container ClientRect Object
 
 The `containerClientRect` property contains detailed position and size information:
 
@@ -791,7 +791,7 @@ wakaPAC('#product-feed', {
         nearBottom() {
             // Are we close to the bottom of the page?
             const scrolledDistance = this.browserScrollY;
-            const viewportHeight = this.browserWindowHeight;
+            const viewportHeight = this.browserViewportHeight;
             const totalPageHeight = this.browserDocumentHeight;
             
             return scrolledDistance + viewportHeight >= totalPageHeight - 1000;
@@ -814,7 +814,7 @@ wakaPAC('#app', {
     computed: {
         scrollPercentage() {
             // How much of the page has been scrolled? (0-100%)
-            const scrollableDistance = this.browserDocumentHeight - this.browserWindowHeight;
+            const scrollableDistance = this.browserDocumentHeight - this.browserViewportHeight;
             
             if (scrollableDistance <= 0) {
                 return 0;

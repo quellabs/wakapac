@@ -1338,8 +1338,8 @@
 
                 // Initialize current viewport width & height - the visible area of the browser window
                 // Updates automatically when user resizes window or rotates mobile device
-                this.createReactiveProperty(reactive, 'browserWindowHeight', window.innerHeight);
-                this.createReactiveProperty(reactive, 'browserWindowWidth', window.innerWidth);
+                this.createReactiveProperty(reactive, 'browserViewportHeight', window.innerHeight);
+                this.createReactiveProperty(reactive, 'browserViewportWidth', window.innerWidth);
 
                 // Initialize total document width/height including content outside the viewport
                 // Useful for calculating scroll percentages or infinite scroll triggers
@@ -1409,10 +1409,12 @@
 
                     resizeTimeout = setTimeout(() => {
                         window.PACRegistry.components.forEach(component => {
-                            component.abstraction.browserWindowWidth = window.innerWidth;
-                            component.abstraction.browserWindowHeight = window.innerHeight;
+                            component.abstraction.browserViewportWidth = window.innerWidth;
+                            component.abstraction.browserViewportHeight = window.innerHeight;
                             component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
                             component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                            component.abstraction.browserScrollX = window.scrollX;
+                            component.abstraction.browserScrollY = window.scrollY;
                         });
                     }, 100);
                 });
