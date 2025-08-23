@@ -1325,7 +1325,7 @@
              * @param {Object} reactive - The reactive object to attach browser properties to
              */
             setupBrowserProperties(reactive) {
-                // Define empty rect for containerBounds
+                // Define empty rect for containerClientRect
                 const emptyRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
 
                 // Initialize page visibility state - tracks if the browser tab/window is currently visible
@@ -1349,7 +1349,7 @@
                 // Per-container viewport visibility properties
                 this.createReactiveProperty(reactive, 'containerVisible', false);
                 this.createReactiveProperty(reactive, 'containerFullyVisible', false);
-                this.createReactiveProperty(reactive, 'containerBounds', emptyRect);
+                this.createReactiveProperty(reactive, 'containerClientRect', emptyRect);
 
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
@@ -1465,7 +1465,7 @@
                             this.abstraction.containerFullyVisible = isFullyVisible;
 
                             // Store current position/size data for potential use by other components
-                            this.abstraction.containerBounds = {
+                            this.abstraction.containerClientRect = {
                                 top: rect.top,
                                 left: rect.left,
                                 right: rect.right,
@@ -1566,7 +1566,7 @@
                 if (!isInViewport) {
                     this.abstraction.containerVisible = false;
                     this.abstraction.containerFullyVisible = false;
-                    this.abstraction.containerBounds = {
+                    this.abstraction.containerClientRect = {
                         top: rect.top,
                         left: rect.left,
                         right: rect.right,
@@ -1593,7 +1593,7 @@
                 // These updates will trigger any dependent UI updates or callbacks
                 this.abstraction.containerVisible = true;
                 this.abstraction.containerFullyVisible = isFullyVisible;
-                this.abstraction.containerBounds = rect;
+                this.abstraction.containerClientRect = rect;
             },
 
             /**
