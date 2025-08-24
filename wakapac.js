@@ -1458,15 +1458,16 @@
 
                     // Iterate through all registered PAC components
                     window._wakaPACResizeTimeout = setTimeout(() => {
-                        if (!window.PACRegistry || window.PACRegistry.components.size === 0) return;
-                        window.PACRegistry.components.forEach(component => {
-                            component.abstraction.browserViewportWidth = window.innerWidth;
-                            component.abstraction.browserViewportHeight = window.innerHeight;
-                            component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
-                            component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-                            component.abstraction.browserScrollX = window.scrollX;
-                            component.abstraction.browserScrollY = window.scrollY;
-                        });
+                        if (window.PACRegistry && window.PACRegistry.components.size > 0) {
+                            window.PACRegistry.components.forEach(component => {
+                                component.abstraction.browserViewportWidth = window.innerWidth;
+                                component.abstraction.browserViewportHeight = window.innerHeight;
+                                component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
+                                component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                                component.abstraction.browserScrollX = window.scrollX;
+                                component.abstraction.browserScrollY = window.scrollY;
+                            });
+                        }
                     }, 100);
                 };
 
