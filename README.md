@@ -291,25 +291,31 @@ wakaPAC('#app', {
 - **Return values**: Used in templates and other expressions
 - **Declarative**: Define what the value should be, not how to calculate it
 
-## Watchers
+# Watchers
 
 Watchers execute code when reactive properties change. Use them when you need to **perform side effects** in response to data changes.
+
+## Simple Property Watchers
+
+Basic watchers monitor changes to individual properties on your component:
 
 ```javascript
 wakaPAC('#app', {
     searchQuery: '',
     count: 0,
+    username: '',
+    isActive: false,
 
     watch: {
-        // Watch a simple property
-        searchQuery(newValue, oldValue) {
+        // Watch a simple string property
+        searchQuery: function(newValue, oldValue) {
             if (newValue.length > 2) {
                 this.performSearch(newValue);
             }
         },
 
-        // Watch with multiple side effects
-        count(newCount, oldCount) {
+        // Watch a number property with multiple side effects
+        count: function(newCount, oldCount) {
             if (newCount > 10) {
                 this.showWarning = true;
             }
@@ -319,68 +325,107 @@ wakaPAC('#app', {
             }
         },
 
-        // Watch container viewport visibility
-        containerVisible(isVisible) {
-            if (isVisible) {
-                this.startAnimation();
+        // Watch boolean property changes
+        isActive: function(isNowActive) {
+            if (isNowActive) {
+                this.startBackgroundSync();
             } else {
-                this.pauseAnimation(); // Save resources when not visible
-            }
-        },
-
-        containerFullyVisible(isFullyVisible) {
-            if (isFullyVisible) {
-                this.trackViewedContent(); // Analytics when fully in view
+                this.stopBackgroundSync();
             }
         }
-    },
+    }
 });
 ```
 
-### Common Watcher Use Cases
+## Deep Reactivity Watchers
 
-**Form Validation:**
+WakaPAC also supports **deep property watchers** that can observe changes in nested objects and arrays using powerful pattern matching. This lets you watch for changes deep within your data structure without having to set up individual watchers for every nested property.
+
+### Watching Nested Objects
+
 ```javascript
 wakaPAC('#app', {
-    email: '',
-    emailValid: false,
-
-    watch: {
-        email(newEmail) {
-            this.emailValid = this.validateEmail(newEmail);
+    user: {
+        profile: {
+            name: 'John',
+            email: 'john@example.com'
+        },
+        settings: {
+            theme: 'dark',
+            notifications: true
         }
     },
 
-    validateEmail(email) {
-        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    watch: {
+        // Watch specific nested property
+        'user.profile.name': function(newName, oldName, fullPath) {
+            console.log('Name changed from ' + oldName + ' to ' + newName);
+            console.log('Full path: ' + fullPath); // "user.profile.name"
+            this.updateDisplayName();
+        },
+
+        // Watch any change to user.settings using wildcard
+        'user.settings.*': function(newValue, oldValue, fullPath) {
+            console.log('Settings changed at ' + fullPath);
+            this.saveUserSettings();
+        },
+
+        // Watch ANY change anywhere in user object
+        'user.**': function(newValue, oldValue, fullPath) {
+            console.log('User data changed at: ' + fullPath);
+            this.markUserAsModified();
+        }
     }
 });
 ```
 
-**External Library Integration:**
-```javascript
-watch: {
-    chartData(newData) {
-        // Update external chart library
-        this._chart.updateData(newData);
-    }
-}
-```
+### Watching Arrays
 
-**Performance Optimization:**
 ```javascript
-watch: {
-    browserVisible(isVisible) {
-        if (isVisible) {
-            this.startAnimation();
-        } else {
-            this.pauseAnimation();
+wakaPAC('#todo-app', {
+    todos: [
+        {id: 1, text: 'Learn WakaPAC', completed: false},
+        {id: 2, text: 'Build an app', completed: true}
+    ],
+
+    watch: {
+        // Watch when any todo's completed status changes
+        'todos.*.completed': function(newValue, oldValue, fullPath) {
+            console.log('Todo completion changed: ' + fullPath + ' = ' + newValue);
+            // fullPath will be something like "todos.0.completed"
+            
+            this.updateTodoCount();
+            this.saveToLocalStorage();
+        },
+
+        // Watch any change to any todo property
+        'todos.*.*': function(newValue, oldValue, fullPath) {
+            console.log('Todo property changed: ' + fullPath);
+            this.markAsModified();
         }
+    },
+
+    updateTodoCount: function() {
+        const completed = this.todos.filter(function(t) { 
+            return t.completed; 
+        }).length;
+        
+        console.log(completed + ' of ' + this.todos.length + ' todos completed');
     }
-}
+});
 ```
 
-### Watchers vs Computed Properties
+## Pattern Reference
+
+| Pattern        | Matches                       | Example                                                 |
+|----------------|-------------------------------|---------------------------------------------------------|
+| `property`     | Direct property changes       | `'name'` → `obj.name = 'new'`                           |
+| `obj.property` | Specific nested property      | `'user.name'` → `obj.user.name = 'new'`                 |
+| `obj.*`        | Any direct child of obj       | `'user.*'` → `obj.user.anything = 'new'`                |
+| `obj.**`       | Any nested change in obj      | `'user.**'` → `obj.user.deep.nested = 'new'`            |
+| `arr.*.prop`   | Property in any array element | `'todos.*.completed'` → `obj.todos[0].completed = true` |
+
+## Watchers vs Computed Properties
 
 | Feature          | Computed Properties                | Watchers                               |
 |------------------|------------------------------------|----------------------------------------|

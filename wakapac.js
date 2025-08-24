@@ -1767,18 +1767,6 @@
                     return;
                 }
 
-                // Defer watcher execution to avoid interfering with current reactive cycle
-                // This allows watchers to safely modify other reactive properties
-                setTimeout(() => {
-                    this._executeWatchers(property, newValue, oldValue, changePath);
-                }, 0);
-            },
-
-            /**
-             * Executes watchers outside of the reactive update cycle
-             * @private
-             */
-            _executeWatchers(property, newValue, oldValue, changePath) {
                 // 1. Handle existing simple property watchers (backward compatibility)
                 if (this.original.watch[property]) {
                     try {
@@ -1877,12 +1865,12 @@
                 const walker = document.createTreeWalker(
                     this.container,
                     NodeFilter.SHOW_TEXT,
-                    null,
-                    false
+                    null
                 );
 
                 let node;
                 let nodeCount = 0;
+
                 while (node = walker.nextNode()) {
                     nodeCount++;
                     const text = node.textContent;
@@ -2708,26 +2696,48 @@
             // === FOREACH RENDERING SECTION ===
 
             /**
-             * Replace the renderForeachItem method to accept collection name:
+             * Renders a single item from a foreach loop by processing the template with item-specific data.
+             * Handles both single-element and multi-node templates, optimizing DOM structure when possible.
+             * @param {string} template - The HTML template string to render for this item
+             * @param {*} item - The current item data from the collection being iterated
+             * @param {number} index - The zero-based index of the current item in the collection
+             * @param {string} itemName - The variable name used to reference the current item in the template
+             * @param {string} indexName - The variable name used to reference the current index in the template
+             * @param {string} collectionName - The name of the collection being iterated over
+             * @returns {Element} The rendered DOM element(s) for this foreach item
              */
             renderForeachItem(template, item, index, itemName, indexName, collectionName) {
-                // Create a wrapper element to contain the template content
-                const element = document.createElement('span');
-                element.innerHTML = template;
+                // Create a temporary container to parse the HTML template string
+                const div = document.createElement('div');
+                div.innerHTML = template.trim();
 
-                // Handle case where template is empty or invalid
-                if (!element.innerHTML.trim()) {
-                    return document.createTextNode('');
+                // Convert NodeList to Array for easier manipulation
+                const childNodes = Array.from(div.childNodes);
+
+                // If there's exactly one top-level element, use it directly (no wrapper)
+                // This optimizes the DOM structure by avoiding unnecessary wrapper elements
+                if (childNodes.length === 1 && childNodes[0].nodeType === Node.ELEMENT_NODE) {
+                    const element = childNodes[0];
+
+                    // Clone the element to avoid modifying the original template
+                    const clone = element.cloneNode(true);
+
+                    // Process the cloned element with foreach context data (item, index, variable names)
+                    this.processForeachTemplate(clone, item, index, itemName, indexName, collectionName);
+
+                    return clone;
                 }
 
-                // Create a deep copy to avoid modifying the original
-                const clone = element.cloneNode(true);
+                // Multiple top-level nodes or text nodes - need wrapper
+                // This handles cases like: "Text <span>element</span> more text" or multiple sibling elements
+                const wrapper = document.createElement('span');
+                wrapper.innerHTML = template;
 
-                // Process the cloned template, replacing placeholders with actual data
-                this.processForeachTemplate(clone, item, index, itemName, indexName, collectionName);
+                // Process the wrapper and all its children with foreach context data
+                this.processForeachTemplate(wrapper, item, index, itemName, indexName, collectionName);
 
-                // Return the processed element ready for insertion into the DOM
-                return clone;
+                // Return the wrapper
+                return wrapper;
             },
 
             /**
