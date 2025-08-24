@@ -1995,8 +1995,8 @@
              */
             createForeachBinding(element, target) {
                 return this.createBinding('foreach', element, {
-                    target: collection,
-                    collection: collection,
+                    target: target,
+                    collection: target,
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: element.innerHTML,
