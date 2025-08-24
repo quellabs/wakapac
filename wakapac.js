@@ -2555,18 +2555,6 @@
                 // Replace all existing content with new rendered items
                 binding.element.innerHTML = '';
                 binding.element.appendChild(fragment);
-
-                // Call the callback if specified (deferred to next tick)
-                if (binding.callback && typeof this.abstraction[binding.callback] === 'function') {
-                    setTimeout(() => {
-                        this.abstraction[binding.callback].call(this.abstraction, arrayValue, {
-                            element: binding.element,
-                            previous: previous,
-                            current: array,
-                            binding: binding
-                        });
-                    }, 0);
-                }
             },
 
             /**
