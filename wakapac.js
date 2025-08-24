@@ -587,6 +587,18 @@
                 return this.cache.get(expression);
             }
 
+            // Handle object literals first (before other parsing)
+            if (expression.startsWith('{') && expression.endsWith('}')) {
+                const result = {
+                    type: 'object',
+                    value: expression,
+                    dependencies: this.extractDependencies(expression)
+                };
+
+                this.cache.set(expression, result);
+                return result;
+            }
+
             // Parse using operator precedence hierarchy (highest to lowest precedence)
             // Each parser method returns null if it can't handle the expression type
             // The || chain ensures we try progressively simpler parsing approaches
@@ -594,12 +606,42 @@
                 this.parseLogical(expression) ||       // Logical: && (and), || (or)
                 this.parseComparison(expression) ||    // Comparison: ==, !=, <, >, <=, >=
                 this.parseUnary(expression) ||         // Unary: !, -, +
+                this.parseParentheses(expression) ||   // Add parentheses parsing here
                 this.parseProperty(expression);        // Property access, literals, identifiers
 
             // Cache the parsed result for future use
             // Even null results are cached to avoid repeated failed parsing attempts
             this.cache.set(expression, result);
             return result;
+        },
+
+        /**
+         * Attempts to parse a parenthesized expression like "(count > 0 && enabled)"
+         * @param {string} expression - Expression to parse
+         * @returns {Object|null} Parsed parentheses object or null if not a parenthesized expression
+         */
+        parseParentheses(expression) {
+            // Check if expression is wrapped in parentheses
+            if (!expression.startsWith('(') || !expression.endsWith(')')) {
+                return null;
+            }
+
+            // Extract the inner expression (remove outer parentheses)
+            const innerExpression = expression.slice(1, -1).trim();
+
+            // Recursively parse the inner expression
+            const innerParsed = this.parseExpression(innerExpression);
+
+            if (!innerParsed) {
+                return null;
+            }
+
+            // Return a parentheses node that wraps the inner expression
+            return {
+                type: 'parentheses',
+                inner: innerParsed,
+                dependencies: innerParsed.dependencies || this.extractDependencies(innerExpression)
+            };
         },
 
         /**
@@ -615,11 +657,14 @@
                 return this.bindingCache.get(bindingString);
             }
 
-            const pairs = []; // Will store the final parsed key-value pairs
-            let current = ''; // Accumulates characters for the current binding pair
-            let inQuotes = false; // Tracks if we're currently inside a quoted string
-            let quoteChar = ''; // Stores the quote character that opened the current string (' or ")
-            let parenDepth = 0; // Tracks nesting level of parentheses to avoid splitting on commas inside function calls
+            // Initialize array to store the final parsed key-value pairs
+            const pairs = [];
+
+            let current = ''; // Current token being built character by character
+            let inQuotes = false; // Flag indicating if we're currently inside quotes
+            let quoteChar = ''; // The specific quote character being used (single or double)
+            let parenDepth = 0; // Track parentheses depth for expression grouping: (a && b), !(c || d)
+            let braceDepth = 0; // Track curly brace depth for object literals: { class: condition }
 
             // Parse character by character to handle complex nested structures
             for (let i = 0; i < bindingString.length; i++) {
@@ -627,45 +672,43 @@
                 const isEscaped = i > 0 && bindingString[i - 1] === '\\';
 
                 // Handle quote characters to track string boundaries
-                // This prevents splitting on commas that appear inside quoted strings
                 if ((char === '"' || char === "'") && !isEscaped) {
                     if (!inQuotes) {
-                        // Starting a new quoted string
                         inQuotes = true;
                         quoteChar = char;
                     } else if (char === quoteChar) {
-                        // Ending the current quoted string (matching quote type)
                         inQuotes = false;
                         quoteChar = '';
                     }
                 }
 
-                // Track parentheses depth when not inside quotes
-                // This prevents splitting on commas inside function calls like method(arg1, arg2)
+                // Track parentheses and braces depth when not inside quotes
                 if (!inQuotes) {
                     if (char === '(') {
                         parenDepth++;
                     } else if (char === ')') {
                         parenDepth--;
+                    } else if (char === '{') {
+                        braceDepth++;
+                    } else if (char === '}') {
+                        braceDepth--;
                     }
                 }
 
                 // Split on commas only when they're at the top level
-                // (not inside quotes and not inside parentheses)
-                if (char === ',' && !inQuotes && parenDepth === 0) {
-                    // Found a top-level comma - process the current accumulated binding pair
+                // (not inside quotes, parentheses, or braces)
+                if (char === ',' && !inQuotes && parenDepth === 0 && braceDepth === 0) {
                     this.addBindingPairIfValid(current, pairs);
-                    current = ''; // Reset for the next pair
+                    current = '';
                 } else {
-                    // Add character to current pair (including the comma if it's nested)
                     current += char;
                 }
             }
 
-            // Process the final binding pair (there's no trailing comma to trigger processing)
+            // Process the final binding pair
             this.addBindingPairIfValid(current, pairs);
 
-            // Cache the result to improve performance on subsequent calls with the same input
+            // Cache the result
             this.bindingCache.set(bindingString, pairs);
             return pairs;
         },
@@ -810,12 +853,6 @@
          */
         parseComparison(expression) {
             // Use regex to match comparison expressions with operators
-            // Pattern breakdown:
-            // - ^(.+?) - Capture group 1: left operand (non-greedy to avoid capturing operator)
-            // - \s* - Optional whitespace before operator
-            // - (===|!==|==|!=|>=|<=|>|<) - Capture group 2: comparison operator (ordered by precedence)
-            // - \s* - Optional whitespace after operator
-            // - (.+?)$ - Capture group 3: right operand (non-greedy, matches to end of string)
             const comparisonMatch = expression.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+?)$/);
 
             // If no comparison operator pattern is found, this isn't a comparison expression
@@ -844,12 +881,6 @@
          */
         parseLogical(expression) {
             // Use regex to match logical expressions with && or || operators
-            // Pattern breakdown: ^(.+?)\s*(&&|\|\|)\s*(.+?)$
-            // - ^(.+?) : Capture group 1 - left operand (non-greedy match from start)
-            // - \s* : Optional whitespace
-            // - (&&|\|\|) : Capture group 2 - logical operator (AND or OR)
-            // - \s* : Optional whitespace
-            // - (.+?)$ : Capture group 3 - right operand (non-greedy match to end)
             const logicalMatch = expression.match(/^(.+?)\s*(&&|\|\|)\s*(.+?)$/);
 
             // If no logical operator found, this isn't a logical expression
@@ -939,7 +970,7 @@
         },
 
         /**
-         * Parses a value (string literal, number, boolean, or property reference)
+         * Parses a value (string literal, number, boolean, object literal, or property reference)
          * @param {string} value - Value to parse
          * @returns {Object} Parsed value object
          */
@@ -954,21 +985,22 @@
                 return {type: 'literal', value: value.slice(1, -1)};
             }
 
+            // Check if value is an object literal (enclosed in curly braces)
+            if (value.startsWith('{') && value.endsWith('}')) {
+                return {type: 'object', value: value};
+            }
+
             // Check if value is a numeric literal (integer or decimal)
-            // Regex matches: digits, optionally followed by decimal point and more digits
             if (/^\d+(\.\d+)?$/.test(value)) {
-                // Convert string to number and return as literal
                 return {type: 'literal', value: parseFloat(value)};
             }
 
             // Check if value is a boolean literal
             if (value === 'true' || value === 'false') {
-                // Convert string to actual boolean value
                 return {type: 'literal', value: value === 'true'};
             }
 
             // If none of the above patterns match, treat as property reference
-            // This assumes the value is a path to a property (e.g., "user.name", "config.timeout")
             return {type: 'property', path: value};
         },
 
@@ -981,16 +1013,31 @@
             const dependencies = [];
             const jsLiterals = ['true', 'false', 'null', 'undefined', 'NaN', 'Infinity'];
 
+            // Handle object literals specially
+            if (expression.trim().startsWith('{') && expression.trim().endsWith('}')) {
+                const content = expression.trim().slice(1, -1);
+                const pairs = this.parseObjectPairs(content);
+
+                pairs.forEach(({value}) => {
+                    const valueDeps = this.extractDependencies(value);
+                    valueDeps.forEach(dep => {
+                        if (!dependencies.includes(dep)) {
+                            dependencies.push(dep);
+                        }
+                    });
+                });
+
+                return dependencies;
+            }
+
             // Enhanced regex to find property access patterns (including complex paths)
             const propertyRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*|\[[^\]]+\])*/g;
 
             let match;
             while ((match = propertyRegex.exec(expression))) {
-                const fullPath = match[0];    // e.g., "items[0].name"
-                const rootProperty = match[1]; // e.g., "items"
+                const fullPath = match[0];
+                const rootProperty = match[1];
 
-                // Only track the root property for reactivity
-                // When "items" changes, we need to update "items[0].name"
                 if (!jsLiterals.includes(rootProperty) && !dependencies.includes(rootProperty)) {
                     dependencies.push(rootProperty);
                 }
@@ -1007,6 +1054,12 @@
          */
         evaluate(parsedExpr, context) {
             switch (parsedExpr.type) {
+                case 'object':
+                    return this.evaluateObjectLiteral(parsedExpr.value, context);
+
+                case 'parentheses':
+                    return this.evaluate(parsedExpr.inner, context);
+
                 case 'ternary':
                     const condition = this.evaluateCondition(parsedExpr.condition, context);
 
@@ -1100,7 +1153,145 @@
                 return Utils.getNestedValue(context, valueObj.path);
             }
 
+            if (valueObj.type === 'object') {
+                // Parse and evaluate object literal
+                return this.evaluateObjectLiteral(valueObj.value, context);
+            }
+
             return undefined;
+        },
+
+        /**
+         * Evaluates an object literal string like "{ active: isActive, disabled: !enabled }"
+         * @param {string} objectStr - Object literal string
+         * @param {Object} context - Evaluation context
+         * @returns {Object} Evaluated object
+         */
+        evaluateObjectLiteral(objectStr, context) {
+            // Remove outer braces
+            const content = objectStr.slice(1, -1).trim();
+
+            if (!content) {
+                return {};
+            }
+
+            const result = {};
+            const pairs = this.parseObjectPairs(content);
+
+            pairs.forEach(({key, value}) => {
+                // Evaluate the value expression
+                const parsed = this.parseExpression(value);
+                result[key] = this.evaluate(parsed, context);
+            });
+
+            return result;
+        },
+
+        /**
+         * Parses object pairs from string like "active: isActive, disabled: !enabled"
+         * @param {string} content - Object content without braces
+         * @returns {Array} Array of {key, value} pairs
+         */
+        parseObjectPairs(content) {
+            const pairs = [];
+            let current = '';
+            let inQuotes = false;
+            let quoteChar = '';
+            let parenDepth = 0;
+
+            for (let i = 0; i < content.length; i++) {
+                const char = content[i];
+                const isEscaped = i > 0 && content[i - 1] === '\\';
+
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                if (!inQuotes) {
+                    if (char === '(') {
+                        parenDepth++;
+                    } else if (char === ')') {
+                        parenDepth--;
+                    } else if (char === ',' && parenDepth === 0) {
+                        // Found a top-level comma - process current pair
+                        this.addObjectPair(current.trim(), pairs);
+                        current = '';
+                        continue;
+                    }
+                }
+
+                current += char;
+            }
+
+            // Process final pair
+            if (current.trim()) {
+                this.addObjectPair(current.trim(), pairs);
+            }
+
+            return pairs;
+        },
+
+        /**
+         * Adds a key-value pair to the pairs array
+         * @param {string} pairStr - String like "active: isActive" or "'test': count > 0"
+         * @param {Array} pairs - Array to add pair to
+         */
+        addObjectPair(pairStr, pairs) {
+            const colonIndex = this.findObjectColon(pairStr);
+
+            if (colonIndex === -1) {
+                console.warn(`Invalid object pair: ${pairStr}`);
+                return;
+            }
+
+            // Remove quotes from key if present (handles both single and double quotes)
+            let key = pairStr.substring(0, colonIndex).trim();
+            const value = pairStr.substring(colonIndex + 1).trim();
+
+            if ((key.startsWith("'") && key.endsWith("'")) ||
+                (key.startsWith('"') && key.endsWith('"'))) {
+                key = key.slice(1, -1);
+            }
+
+            pairs.push({key: key, value: value});
+        },
+
+        /**
+         * Finds the colon that separates key from value in an object pair
+         * Handles quoted keys properly
+         * @param {string} pairStr - The pair string to search
+         * @returns {number} Index of the colon, or -1 if not found
+         */
+        findObjectColon(pairStr) {
+            let inQuotes = false;
+            let quoteChar = '';
+
+            for (let i = 0; i < pairStr.length; i++) {
+                const char = pairStr[i];
+                const isEscaped = i > 0 && pairStr[i - 1] === '\\';
+
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                if (!inQuotes && char === ':') {
+                    return i;
+                }
+            }
+
+            return -1;
         },
 
         /**
@@ -2069,6 +2260,12 @@
                     case 'class':
                         return this.createClassBinding(element, target);
 
+                    case 'style':
+                        return this.createStyleBinding(element, target);
+
+                    case 'attr':
+                        return this.createAttributeBinding(element, 'attr', target);
+
                     case 'if':
                         return this.createConditionalBinding(element, target);
 
@@ -2479,6 +2676,14 @@
                             this.updateClassBinding(binding, property, foreachVars);
                             break;
 
+                        case 'style':
+                            this.updateStyleBinding(binding, property, foreachVars);
+                            break;
+
+                        case 'attr':
+                            this.updateAttrBinding(binding, property, foreachVars);
+                            break;
+
                         case 'event':
                             // Events are already handled in processForeachBinding
                             break;
@@ -2523,7 +2728,10 @@
             },
 
             /**
-             * Updates element attributes
+             * Updates element attributes based on data binding
+             * @param {Object} binding - The binding object containing element, attribute, and expression information
+             * @param {string} property - The property name being bound
+             * @param {Object|null} foreachVars - Additional variables from foreach context, defaults to null
              */
             updateAttributeBinding(binding, property, foreachVars = null) {
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
@@ -2534,11 +2742,19 @@
             },
 
             /**
-             * Updates input element values
+             * Updates input element values based on data binding
+             * @param {Object} binding - The binding object containing element and expression information
+             * @param {string} property - The property name being bound
+             * @param {Object|null} foreachVars - Additional variables from foreach context, defaults to null
              */
             updateInputBinding(binding, property, foreachVars = null) {
+                // Fetch element
                 const element = binding.element;
+
+                // Create evaluation context by merging abstraction data with foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Parse the binding expression into an evaluatable format
                 const parsed = this.getParsedExpression(binding);
 
                 // Special handling for radio buttons
@@ -2558,24 +2774,46 @@
             },
 
             /**
-             * Updates checkbox/radio checked state
+             * Updates checkbox/radio checked state based on a data binding expression
+             * @param {Object} binding - The binding object containing element and expression
+             * @param {string} property - The property name being bound (for debugging/logging)
+             * @param {Object|null} foreachVars - Additional variables from foreach loops, if any
              */
             updateCheckedBinding(binding, property, foreachVars = null) {
+                // Create evaluation context by merging abstraction data with foreach variables
+                // foreach variables take precedence over abstraction properties
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Parse the binding expression into an evaluatable format
                 const parsed = this.getParsedExpression(binding);
+
+                // Evaluate the expression to get the raw value that determines checked state
                 const actualValue = ExpressionParser.evaluate(parsed, context);
+
+                // Convert to boolean and apply to the form element's checked property
+                // Handles truthy/falsy conversion for consistent checkbox/radio behavior
                 this.applyCheckedBinding(binding.element, Boolean(actualValue));
             },
 
             /**
-             * Updates element visibility
+             * Updates element visibility based on a data binding expression
+             * @param {Object} binding - The binding object containing element and expression
+             * @param {string} property - The property name being bound (for debugging/logging)
+             * @param {Object|null} foreachVars - Additional variables from foreach loops, if any
              */
             updateVisibilityBinding(binding, property, foreachVars = null) {
+                // Create evaluation context by merging abstraction data with foreach variables
+                // foreach variables take precedence over abstraction properties
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Parse the binding expression into an evaluatable format
                 const parsed = this.getParsedExpression(binding);
 
                 // Use expression parser to evaluate the visibility condition
+                // Returns boolean indicating whether element should be visible
                 const shouldShow = ExpressionParser.evaluate(parsed, context);
+
+                // Apply the visibility state to the DOM element
                 this.applyVisibilityBinding(binding.element, shouldShow);
             },
 
@@ -2696,6 +2934,113 @@
                 // This calls applyClassBinding which extracts the class name from the target
                 // and adds/removes it from the element's classList
                 this.applyClassBinding(binding.element, binding.target, actualValue);
+            },
+
+            /**
+             * Creates a style binding for dynamic CSS styling
+             * @param {HTMLElement} element - The DOM element to bind styles to
+             * @param {string} target - The style expression or property name to bind
+             * @returns {Object} The created binding object with element reference and metadata
+             */
+            createStyleBinding(element, target) {
+                return this.createBinding('style', element, {
+                    target: target,                // The style expression to evaluate
+                    parsedExpression: null,        // Will be populated when first parsed
+                    dependencies: null             // Will track what data this binding depends on
+                });
+            },
+
+            /**
+             * Updates style bindings with current data context
+             * @param {Object} binding - The style binding object to update
+             * @param {string} property - The property name that triggered this update
+             * @param {Object|null} [foreachVars=null] - Additional variables from foreach loops
+             */
+            updateStyleBinding(binding, property, foreachVars = null) {
+                // Merge abstraction data with any foreach loop variables
+                // This creates the complete context for expression evaluation
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Get or create parsed version of the expression for efficiency
+                const parsed = this.getParsedExpression(binding);
+
+                // Evaluate the expression with current context to get actual style value
+                const actualValue = ExpressionParser.evaluate(parsed, context);
+
+                // Apply the computed value to the element's styles
+                this.applyStyleBinding(binding.element, binding.target, actualValue);
+            },
+
+            /**
+             * Updates attribute bindings with object syntax support
+             * @param {Object} binding - The attribute binding object to update
+             * @param {string} property - The property name that triggered this update
+             * @param {Object|null} [foreachVars=null] - Additional variables from foreach loops
+             */
+            updateAttrBinding(binding, property, foreachVars = null) {
+                // Create evaluation context by merging base data with loop variables
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Parse the expression if not already cached
+                const parsed = this.getParsedExpression(binding);
+
+                // Evaluate to get the attribute values object
+                const actualValue = ExpressionParser.evaluate(parsed, context);
+
+                // Apply the evaluated attributes to the DOM element
+                this.applyAttrBinding(binding.element, binding.target, actualValue);
+            },
+
+            /**
+             * Applies style binding to a DOM element
+             * @param {HTMLElement} element - The target DOM element
+             * @param {string} target - The original target expression (for debugging)
+             * @param {Object|string} value - The style value(s) to apply
+             */
+            applyStyleBinding(element, target, value) {
+                // Check if value is an object (preferred object syntax)
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Object syntax: { color: 'red', fontSize: '16px' }
+                    // Iterate through each style property in the object
+                    Object.keys(value).forEach(styleProp => {
+                        // Only set non-null/undefined values to avoid clearing styles accidentally
+                        if (value[styleProp] != null) {
+                            // Set individual CSS property on the element's style object
+                            // This allows for granular control and better performance
+                            element.style[styleProp] = value[styleProp];
+                        }
+                    });
+                } else if (typeof value === 'string') {
+                    // String syntax: "color: red; font-size: 16px;"
+                    // Set the entire CSS text at once (less efficient but backwards compatible)
+                    element.style.cssText = value;
+                }
+            },
+
+            /**
+             * Applies attribute binding to a DOM element
+             * @param {HTMLElement} element - The target DOM element
+             * @param {string} target - The original target expression (for debugging)
+             * @param {Object} value - Object mapping attribute names to values
+             */
+            applyAttrBinding(element, target, value) {
+                // Verify we have an object with attribute mappings
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Object syntax: { placeholder: 'Enter text', title: 'Tooltip' }
+                    // Iterate through each attribute name/value pair
+                    Object.keys(value).forEach(attrName => {
+                        // Only set non-null/undefined values to avoid unwanted attribute removal
+                        if (value[attrName] != null) {
+                            // Use helper method to properly set the attribute
+                            // This handles special cases like boolean attributes, data attributes, etc.
+                            this.setElementAttribute(element, attrName, value[attrName]);
+                        }
+                    });
+                } else {
+                    // Log warning for incorrect usage - attr: binding requires object syntax
+                    // This helps developers identify binding syntax errors
+                    console.warn('attr: binding expects object syntax: { attrName: value }');
+                }
             },
 
             // === FOREACH RENDERING SECTION ===
@@ -3272,27 +3617,63 @@
             },
 
             /**
-             * Enhanced applyClassBinding that handles both conditional classes and boolean-based classes
+             * Enhanced applyClassBinding that handles conditional classes, boolean-based classes, and multiple classes
              * @param {HTMLElement} element - The target DOM element
-             * @param {string} target - The class expression (e.g., "todo.completed", "item.active")
+             * @param {string} target - The class expression (e.g., "todo.completed", "item.active", or object syntax)
              * @param {*} value - The evaluated expression value
              */
             applyClassBinding(element, target, value) {
-                // Fetch previous class
-                const previousClass = element.dataset.pacPreviousClass;
+                // Get previous classes that were applied by this binding
+                const previousClasses = element.dataset.pacPreviousClasses || '';
 
-                // Remove the previously applied class
-                if (previousClass && previousClass.trim() !== '') {
-                    element.classList.remove(previousClass);
+                // Remove all previously applied classes
+                if (previousClasses) {
+                    previousClasses.split(' ').forEach(cls => {
+                        if (cls.trim()) {
+                            element.classList.remove(cls.trim());
+                        }
+                    });
                 }
 
-                // Add the new class
-                if (value && value.trim() !== '') {
-                    element.classList.add(value);
-                    element.dataset.pacPreviousClass = value;
-                } else {
-                    element.dataset.pacPreviousClass = '';
+                let newClasses = '';
+
+                // Handle different value types
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Object syntax: { className: boolean, className2: boolean }
+                    Object.keys(value).forEach(className => {
+                        if (value[className] && className.trim()) {
+                            element.classList.add(className.trim());
+                            newClasses += (newClasses ? ' ' : '') + className.trim();
+                        }
+                    });
+                } else if (Array.isArray(value) && value !== null) {
+                    // Array of class names
+                    value.forEach(className => {
+                        if (className && typeof className === 'string' && className.trim()) {
+                            element.classList.add(className.trim());
+                            newClasses += (newClasses ? ' ' : '') + className.trim();
+                        }
+                    });
+                } else if (typeof value === 'string') {
+                    // String value - could be single class or space-separated classes
+                    const classNames = value.trim().split(/\s+/);
+                    classNames.forEach(className => {
+                        if (className.trim()) {
+                            element.classList.add(className.trim());
+                            newClasses += (newClasses ? ' ' : '') + className.trim();
+                        }
+                    });
+                } else if (value) {
+                    // Truthy non-string value - convert to string and treat as class name
+                    const className = String(value).trim();
+                    if (className) {
+                        element.classList.add(className);
+                        newClasses = className;
+                    }
                 }
+
+                // Store the new classes for next time
+                element.dataset.pacPreviousClasses = newClasses;
             },
 
             /**
