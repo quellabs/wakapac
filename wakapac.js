@@ -2690,7 +2690,6 @@
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
 
                 // Get the parsed expression object (uses caching to avoid re-parsing)
-                // This converts "todo.completed" into a structured expression object with dependencies
                 const parsed = this.getParsedExpression(binding);
 
                 // Evaluate the expression in the current context to get the boolean result
@@ -3154,10 +3153,6 @@
              */
             setElementAttribute(element, name, value) {
                 switch (name) {
-                    case 'class':
-                        element.className = value || '';
-                        break;
-
                     case 'style':
                         if (typeof value === 'object' && value) {
                             Object.assign(element.style, value);
