@@ -2717,11 +2717,11 @@
              */
             renderForeachItem(template, item, index, itemName, indexName, collectionName) {
                 // Create a temporary container to parse the HTML template string
-                const div = document.createElement('div');
-                div.innerHTML = template.trim();
+                const tempTbody = document.createElement('tbody');
+                tempTbody.innerHTML = template.trim();
 
                 // Convert NodeList to Array for easier manipulation
-                const childNodes = Array.from(div.childNodes);
+                const childNodes = Array.from(tempTbody.childNodes);
 
                 // If there's exactly one top-level element, use it directly (no wrapper)
                 // This optimizes the DOM structure by avoiding unnecessary wrapper elements
@@ -2734,13 +2734,18 @@
                     // Process the cloned element with foreach context data (item, index, variable names)
                     this.processForeachTemplate(clone, item, index, itemName, indexName, collectionName);
 
+                    // Return the clode
                     return clone;
                 }
 
                 // Multiple top-level nodes or text nodes - need wrapper
                 // This handles cases like: "Text <span>element</span> more text" or multiple sibling elements
                 const wrapper = document.createElement('span');
-                wrapper.innerHTML = template;
+
+                // Copy childnodes in the wrapper
+                childNodes.forEach(node => {
+                    wrapper.appendChild(node.cloneNode(true));
+                });
 
                 // Process the wrapper and all its children with foreach context data
                 this.processForeachTemplate(wrapper, item, index, itemName, indexName, collectionName);
