@@ -76,6 +76,263 @@ Unlike MVC where models and views can talk directly, PAC uses the Control layer 
 
 This results in more predictable data flow and easier debugging than traditional MVC patterns.
 
+## Complete Binding Reference
+
+WakaPAC provides comprehensive data binding capabilities through the `data-pac-bind` attribute. Here's the complete list of supported binding types:
+
+### Form Input Bindings
+
+**`value`** - Two-way binding for form inputs
+```html
+<input data-pac-bind="value: name" type="text">
+<textarea data-pac-bind="value: description"></textarea>
+<select data-pac-bind="value: selectedOption">
+    <option value="A">Option A</option>
+    <option value="B">Option B</option>
+</select>
+```
+
+**`checked`** - Boolean state for checkboxes
+```html
+<input type="checkbox" data-pac-bind="checked: isActive">
+
+<!-- For radio buttons, use value binding instead -->
+<input type="radio" name="theme" value="light" data-pac-bind="value: selectedTheme">
+<input type="radio" name="theme" value="dark" data-pac-bind="value: selectedTheme">
+```
+
+### Display Control Bindings
+
+**`visible`** - Show/hide with CSS display (element stays in DOM)
+```html
+<div data-pac-bind="visible: shouldShow">Content</div>
+<div data-pac-bind="visible: !hideContent">Always shown unless hideContent is true</div>
+```
+
+**`if`** - Conditional rendering (element added/removed from DOM)
+```html
+<div data-pac-bind="if: user.isAdmin">Admin Panel</div>
+<div data-pac-bind="if: !isLoading">Content loaded</div>
+```
+
+**When to use each:**
+- **`visible`**: Fast toggling, preserving form values, CSS transitions
+- **`if`**: Better performance for large DOM trees, security-sensitive content
+
+### Attribute Bindings
+
+**`enable`** - Enable/disable form controls (reverse of disabled)
+```html
+<button data-pac-bind="enable: isFormValid">Submit</button>
+<input data-pac-bind="enable: !isReadonly">
+```
+
+### Style and Appearance Bindings
+
+**`class`** - CSS class manipulation (supports object syntax)
+```html
+<!-- Simple class binding -->
+<div data-pac-bind="class: statusClass">
+
+<!-- Object syntax: conditional classes -->
+<div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
+
+<!-- Array of classes -->
+<div data-pac-bind="class: [baseClass, conditionalClass]">
+```
+
+**`style`** - CSS style manipulation (supports object syntax)
+```html
+<!-- Simple style binding -->
+<div data-pac-bind="style: dynamicStyleString">
+
+<!-- Object syntax: multiple CSS properties -->
+<div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
+
+<!-- CSS custom properties -->
+<div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
+```
+
+**Custom attributes** - Any HTML attribute can be bound directly
+```html
+<!-- Standard attributes -->
+<input data-pac-bind="placeholder: hintText, title: tooltipText">
+<img data-pac-bind="src: imageUrl, alt: altText">
+<div data-pac-bind="id: dynamicId, role: userRole">
+
+<!-- Data attributes -->
+<div data-pac-bind="data-id: userId, data-category: itemCategory">
+
+<!-- ARIA attributes -->
+<button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
+
+<!-- Multiple custom attributes -->
+<div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
+```
+
+### List Rendering Binding
+
+**`foreach`** - Render lists with templates
+```html
+<div data-pac-bind="foreach: items" data-pac-item="item" data-pac-index="index">
+    <div class="item">
+        <span>{{index}}. {{item.name}}</span>
+        <button data-pac-bind="click: removeItem">Remove</button>
+    </div>
+</div>
+```
+
+### Event Bindings
+
+All standard DOM events are supported:
+
+**`click`** - Mouse click events
+```html
+<button data-pac-bind="click: handleClick">Click me</button>
+```
+
+**`change`** - Form change events
+```html
+<select data-pac-bind="change: handleChange">
+```
+
+**`input`** - Form input events (as user types)
+```html
+<input data-pac-bind="input: handleInput">
+```
+
+**`submit`** - Form submission
+```html
+<form data-pac-bind="submit: handleSubmit">
+```
+
+**`focus`** / **`blur`** - Focus events
+```html
+<input data-pac-bind="focus: handleFocus, blur: handleBlur">
+```
+
+**`keyup`** / **`keydown`** - Keyboard events
+```html
+<input data-pac-bind="keyup: handleKey" data-pac-modifiers="enter">
+<input data-pac-bind="keydown: handleKeyDown" data-pac-modifiers="escape">
+```
+
+### Advanced Binding Syntax
+
+WakaPAC supports **object syntax** for certain binding types, allowing you to bind multiple values or create conditional bindings in a single expression.
+
+#### Supported Object Syntax Bindings
+
+| Binding Type | Object Syntax | Example                                                         |
+|--------------|---------------|-----------------------------------------------------------------|
+| **`class`**  | ✅ Yes         | `class: { active: isActive, disabled: !enabled }`               |
+| **`style`**  | ✅ Yes         | `style: { color: 'red', backgroundColor: 'blue' }`              |
+| All others   | ❌ No          | Use direct binding: `title: tooltipText, placeholder: hintText` |
+
+#### Class Binding Examples
+
+```html
+<!-- Object syntax: multiple conditional classes -->
+<div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
+
+<!-- Simple string class binding -->
+<div data-pac-bind="class: dynamicClassName">
+
+<!-- Multiple class bindings -->
+<div data-pac-bind="class: baseClass, class: conditionalClass">
+```
+
+```javascript
+wakaPAC('#app', {
+    isActive: true,
+    enabled: false,
+    hasError: false,
+    baseClass: 'btn',
+    conditionalClass: 'btn-primary',
+
+    // Result: class="btn active disabled"
+    // The 'active' class is applied because isActive is true
+    // The 'disabled' class is applied because !enabled is true 
+    // The 'error' class is NOT applied because hasError is false
+});
+```
+
+#### Style Binding Examples
+
+```html
+<!-- Object syntax: multiple CSS properties -->
+<div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
+
+<!-- CSS custom properties -->
+<div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize }">
+
+<!-- Simple string style binding -->
+<div data-pac-bind="style: inlineStyleString">
+
+<!-- Computed styles -->
+<div data-pac-bind="style: computedStyles">
+```
+
+```javascript
+wakaPAC('#app', {
+    textColor: 'red',
+    bgColor: 'lightblue',
+    primaryColor: '#007bff',
+    borderSize: '3px',
+    showElement: true,
+    inlineStyleString: 'font-weight: bold; margin: 10px;',
+
+    computed: {
+        computedStyles() {
+            return {
+                backgroundColor: this.isActive ? '#f0f0f0' : 'white',
+                opacity: this.loading ? 0.5 : 1,
+                transform: this.zoom > 1 ? 'scale(' + this.zoom + ')' : 'none',
+                // CSS custom properties work in computed styles too
+                '--dynamic-size': this.itemSize + 'px'
+            };
+        }
+    }
+});
+```
+
+#### Attribute Binding Examples
+
+Since WakaPAC supports direct attribute binding, you can bind any HTML attribute directly without needing a special `attr:` syntax:
+
+```html
+<!-- Standard HTML attributes -->
+<input data-pac-bind="placeholder: dynamicPlaceholder, title: helpText, maxlength: fieldLimit">
+<img data-pac-bind="src: imageSource, alt: imageDescription, width: imageWidth">
+<a data-pac-bind="href: linkUrl, target: linkTarget">
+
+<!-- Data attributes -->
+<div data-pac-bind="data-user-id: userId, data-role: userRole, data-category: itemType">
+
+<!-- ARIA accessibility attributes -->
+<button data-pac-bind="aria-label: buttonLabel, aria-expanded: menuOpen, aria-disabled: !isEnabled">
+
+<!-- Form attributes -->
+<input data-pac-bind="required: isRequired, readonly: !canEdit, min: minValue, max: maxValue">
+```
+
+```javascript
+wakaPAC('#form', {
+    dynamicPlaceholder: 'Enter your name here',
+    helpText: 'This field is required for registration',
+    fieldLimit: 50,
+    imageSource: '/uploads/profile.jpg',
+    imageDescription: 'User profile photo',
+    linkUrl: 'https://example.com',
+    linkTarget: '_blank',
+    userId: 'user-12345',
+    userRole: 'admin',
+    isEnabled: true,
+    isRequired: true,
+    canEdit: false
+});
+```
+
 ## Data Binding
 
 ### Text Interpolation
@@ -101,58 +358,6 @@ This results in more predictable data flow and easier debugging than traditional
 <p>Container is {{containerVisible ? 'visible' : 'hidden'}} in viewport</p>
 <p>Container bounds: {{containerClientRect.left}}, {{containerClientRect.top}}</p>
 ```
-
-### Attribute Binding
-
-```html
-<!-- Basic attributes -->
-<div data-pac-bind="class: statusClass, title: statusText"></div>
-
-<!-- Two-way data binding -->
-<input data-pac-bind="value: name" type="text">
-<textarea data-pac-bind="value: description"></textarea>
-<select data-pac-bind="value: category">
-    <option value="A">Category A</option>
-    <option value="B">Category B</option>
-</select>
-
-<!-- Checkboxes (boolean values) -->
-<input type="checkbox" data-pac-bind="checked: isActive">
-
-<!-- Radio buttons (use value binding) -->
-<input type="radio" name="theme" value="light" data-pac-bind="value: selectedTheme">
-<input type="radio" name="theme" value="dark" data-pac-bind="value: selectedTheme">
-
-<!-- Enable/Disable controls -->
-<button data-pac-bind="enable: isFormValid">Submit</button>
-
-<!-- Multiple bindings -->
-<div data-pac-bind="class: statusClass,style: dynamicStyle,click: handleClick"></div>
-```
-
-### Conditional Rendering
-
-```html
-<!-- visible: CSS display control (stays in DOM) -->
-<div data-pac-bind="visible: showDetails">Details here</div>
-<div data-pac-bind="visible: !hideContent">Content</div>
-
-<!-- if: DOM element control (added/removed from DOM) -->
-<div data-pac-bind="if: user.isAdmin">Admin Panel</div>
-<div data-pac-bind="if: !isLoading">Content loaded</div>
-
-<!-- Browser state conditions -->
-<div data-pac-bind="visible: browserVisible">Active content</div>
-<div data-pac-bind="if: browserWindowHeight > 600">Large screen content</div>
-
-<!-- Container viewport conditions -->
-<div data-pac-bind="visible: containerVisible">Show when container is in viewport</div>
-<div data-pac-bind="if: containerFullyVisible">Only when fully visible</div>
-```
-
-**When to use each:**
-- **`visible`**: Fast toggling, preserving form values, CSS transitions
-- **`if`**: Better performance for large DOM trees, security-sensitive content
 
 ### Deep Reactivity
 
@@ -912,8 +1117,8 @@ WakaPAC automatically provides reactive browser state properties that update whe
 - **`containerVisible`**: `true` when any part of the component's container is visible in the viewport
 - **`containerFullyVisible`**: `true` when the component's container is completely visible in the viewport
 - **`containerClientRect`**: Object containing the container's position and dimensions relative to the viewport
-- **`containerClientWidth`**: Width of the container
-- **`containerClientHeight`**: Height of the container
+- **`containerWidth`**: Width of the container element in pixels
+- **`containerHeight`**: Height of the container element in pixels
 
 ### Understanding difference between viewport and document
 
@@ -949,6 +1154,92 @@ The `containerClientRect` property contains detailed position and size informati
     x: 50,         // Same as left
     y: 150         // Same as top
 }
+```
+
+### Practical Browser Property Examples
+
+```html
+<div id="scroll-app">
+    <!-- Scroll-based navigation -->
+    <nav data-pac-bind="class: { fixed: browserScrollY > 100 }">
+        <span>Scroll position: {{browserScrollY}}px</span>
+    </nav>
+    
+    <!-- Responsive design without CSS media queries -->
+    <div data-pac-bind="class: { mobile: browserViewportWidth < 768, desktop: browserViewportWidth >= 1200 }">
+        <p data-pac-bind="if: browserViewportWidth < 480">Mobile view</p>
+        <p data-pac-bind="if: browserViewportWidth >= 480 && browserViewportWidth < 1024">Tablet view</p>
+        <p data-pac-bind="if: browserViewportWidth >= 1024">Desktop view</p>
+    </div>
+    
+    <!-- Visibility-aware performance -->
+    <div data-pac-bind="visible: browserVisible">
+        <p>Active content that only updates when tab is visible</p>
+        <span>Last updated: {{lastUpdateTime}}</span>
+    </div>
+    
+    <!-- Viewport intersection -->
+    <div data-pac-bind="class: { highlight: containerVisible, pulse: containerFullyVisible }">
+        <p>This element knows when it's in the viewport!</p>
+        <p data-pac-bind="if: containerVisible">I'm visible in viewport</p>
+        <p data-pac-bind="if: containerFullyVisible">I'm completely visible!</p>
+    </div>
+    
+    <!-- Scroll progress indicator -->
+    <div class="progress-bar" data-pac-bind="style: { width: scrollProgress + '%' }"></div>
+</div>
+```
+
+```javascript
+wakaPAC('#scroll-app', {
+    lastUpdateTime: new Date().toLocaleTimeString(),
+    updateTimer: null,
+
+    computed: {
+        scrollProgress() {
+            // Calculate scroll percentage
+            const maxScroll = this.browserDocumentHeight - this.browserViewportHeight;
+            return maxScroll > 0 ? (this.browserScrollY / maxScroll) * 100 : 0;
+        }
+    },
+
+    watch: {
+        browserVisible(isVisible) {
+            if (isVisible) {
+                // Start updates when tab becomes visible
+                this.startUpdates();
+            } else {
+                // Pause updates when tab is hidden
+                this.stopUpdates();
+            }
+        },
+
+        containerVisible(isVisible) {
+            if (isVisible) {
+                console.log('Component entered viewport');
+                // Start lazy loading, animations, etc.
+            }
+        }
+    },
+
+    init() {
+        if (this.browserVisible) {
+            this.startUpdates();
+        }
+    },
+
+    startUpdates() {
+        this.updateTimer = setInterval(() => {
+            this.lastUpdateTime = new Date().toLocaleTimeString();
+        }, 1000);
+    },
+
+    stopUpdates() {
+        if (this.updateTimer) {
+            clearInterval(this.updateTimer);
+        }
+    }
+});
 ```
 
 ## API Reference
@@ -1016,26 +1307,26 @@ wakaPAC('#app', data, {
 ```javascript
 // Vue
 export default {
-  data() {
-    return { count: 0 }
-  },
-  computed: {
-    doubled() { return this.count * 2 }
-  },
-  watch: {
-    count(newVal) { console.log('Count changed') }
-  }
+    data() {
+        return { count: 0 }
+    },
+    computed: {
+        doubled() { return this.count * 2 }
+    },
+    watch: {
+        count(newVal) { console.log('Count changed') }
+    }
 }
 
 // WakaPAC
 wakaPAC('#app', {
-  count: 0,
-  computed: {
-    doubled() { return this.count * 2; }
-  },
-  watch: {
-    count(newVal) { console.log('Count changed'); }
-  }
+    count: 0,
+    computed: {
+        doubled() { return this.count * 2; }
+    },
+    watch: {
+        count(newVal) { console.log('Count changed'); }
+    }
 });
 ```
 
@@ -1091,7 +1382,7 @@ wakaPAC('#app', {
 
 ## When to Choose WakaPAC
 
-** Perfect for:**
+**✅ Perfect for:**
 - Projects that need zero build complexity
 - Rapid prototyping and legacy modernization
 - Complex single-page applications with clean architecture
@@ -1101,7 +1392,7 @@ wakaPAC('#app', {
 - Applications that need visibility-aware performance optimization
 - Lazy loading and performance optimization based on viewport visibility
 
-**️ Consider alternatives for:**
+**⚠️ Consider alternatives for:**
 - Server-side rendering requirements
 - Mobile app development
 - Teams requiring extensive TypeScript tooling

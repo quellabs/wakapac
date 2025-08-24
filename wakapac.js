@@ -1124,7 +1124,7 @@
             if (comparisonMatch) {
                 const [, left, operator, right] = comparisonMatch;
                 const leftValue = Utils.getNestedValue(context, left.trim());
-                const rightValue = this.parseAndEvaluateValue(right.trim(), context);
+                const rightValue = this.evaluateValue(this.parseValue(right.trim()), context);
                 return this.performComparison(leftValue, operator, rightValue);
             }
 
@@ -1292,17 +1292,6 @@
             }
 
             return -1;
-        },
-
-        /**
-         * Parses and evaluates a value in context (for dynamic right-hand sides)
-         * @param {string} valueStr - Value string to parse and evaluate
-         * @param {Object} context - Evaluation context
-         * @returns {*} Evaluated value
-         */
-        parseAndEvaluateValue(valueStr, context) {
-            const parsed = this.parseValue(valueStr);
-            return this.evaluateValue(parsed, context);
         },
 
         /**
@@ -2263,9 +2252,6 @@
                     case 'style':
                         return this.createStyleBinding(element, target);
 
-                    case 'attr':
-                        return this.createAttributeBinding(element, 'attr', target);
-
                     case 'if':
                         return this.createConditionalBinding(element, target);
 
@@ -2680,10 +2666,6 @@
                             this.updateStyleBinding(binding, property, foreachVars);
                             break;
 
-                        case 'attr':
-                            this.updateAttrBinding(binding, property, foreachVars);
-                            break;
-
                         case 'event':
                             // Events are already handled in processForeachBinding
                             break;
@@ -2734,10 +2716,16 @@
              * @param {Object|null} foreachVars - Additional variables from foreach context, defaults to null
              */
             updateAttributeBinding(binding, property, foreachVars = null) {
+                // Create evaluation context by merging abstraction data with foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Parse the binding expression into an evaluatable format
                 const parsed = this.getParsedExpression(binding);
 
+                // Regular input handling (text, number, etc.)
                 const actualValue = ExpressionParser.evaluate(parsed, context);
+
+                // Set new value
                 this.setElementAttribute(binding.element, binding.attribute, actualValue);
             },
 
@@ -2972,26 +2960,6 @@
             },
 
             /**
-             * Updates attribute bindings with object syntax support
-             * @param {Object} binding - The attribute binding object to update
-             * @param {string} property - The property name that triggered this update
-             * @param {Object|null} [foreachVars=null] - Additional variables from foreach loops
-             */
-            updateAttrBinding(binding, property, foreachVars = null) {
-                // Create evaluation context by merging base data with loop variables
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
-
-                // Parse the expression if not already cached
-                const parsed = this.getParsedExpression(binding);
-
-                // Evaluate to get the attribute values object
-                const actualValue = ExpressionParser.evaluate(parsed, context);
-
-                // Apply the evaluated attributes to the DOM element
-                this.applyAttrBinding(binding.element, binding.target, actualValue);
-            },
-
-            /**
              * Applies style binding to a DOM element
              * @param {HTMLElement} element - The target DOM element
              * @param {string} target - The original target expression (for debugging)
@@ -3005,9 +2973,14 @@
                     Object.keys(value).forEach(styleProp => {
                         // Only set non-null/undefined values to avoid clearing styles accidentally
                         if (value[styleProp] != null) {
-                            // Set individual CSS property on the element's style object
-                            // This allows for granular control and better performance
-                            element.style[styleProp] = value[styleProp];
+                            // Check if this is a CSS custom property (starts with --)
+                            if (styleProp.startsWith('--')) {
+                                // Use setProperty for CSS custom properties
+                                element.style.setProperty(styleProp, value[styleProp]);
+                            } else {
+                                // Use direct assignment for regular CSS properties
+                                element.style[styleProp] = value[styleProp];
+                            }
                         }
                     });
                 } else if (typeof value === 'string') {
