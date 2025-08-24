@@ -229,11 +229,6 @@ wakaPAC('#app', {
         <button data-pac-bind="click: removeTodo">Remove</button>
     </div>
 </div>
-
-<!-- With callback -->
-<ul data-pac-bind="foreach: items then onItemsUpdated" data-pac-item="item">
-    <li>{{item.name}}</li>
-</ul>
 ```
 
 ```javascript

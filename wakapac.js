@@ -1994,14 +1994,9 @@
              * Creates a foreach binding for rendering lists
              */
             createForeachBinding(element, target) {
-                const parts = target.split(' then ');
-                const collection = parts[0].trim();
-                const callback = parts[1] ? parts[1].trim() : null;
-
                 return this.createBinding('foreach', element, {
                     target: collection,
                     collection: collection,
-                    callback: callback,
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: element.innerHTML,
