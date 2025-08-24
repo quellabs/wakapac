@@ -62,13 +62,19 @@
 
 ## PAC Architecture
 
-**PAC (Presentation-Abstraction-Control)** creates clean separation between:
+**PAC (Presentation-Abstraction-Control)** is a hierarchical architectural pattern that creates a clean separation between:
 
-- **Presentation**: Your HTML templates and DOM elements (what the user sees)
-- **Abstraction**: Your data model and business logic (what your app knows)
-- **Control**: The reactive layer that automatically syncs data changes to the DOM (how they stay synchronized)
+1. **Presentation**: Your HTML templates and DOM elements - what the user sees
+2. **Abstraction**: Your data model and business logic - what your app knows
+3. **Control**: The reactive layer that mediates between presentation and abstraction - how they stay in sync
 
-Unlike MVC where models and views can talk directly, PAC uses the Control layer as a smart mediator that handles reactivity, events, and component communication.
+Unlike MVC where models and views can talk directly, PAC uses the Control layer as a smart mediator that:
+- **Automatically syncs** data changes to the DOM
+- **Handles events** from the presentation layer
+- **Manages reactivity** and computed properties
+- **Coordinates communication** between components
+
+This results in more predictable data flow and easier debugging than traditional MVC patterns.
 
 ## Data Binding
 
@@ -88,7 +94,7 @@ Unlike MVC where models and views can talk directly, PAC uses the Control layer 
 <p>Total: {{totalPrice}}</p>
 
 <!-- Browser properties -->
-<p>Scroll: {{scrollPercentage}}%</p>
+<p>Viewport: {{browserViewportWidth}} x {{browserViewportHeight}}</p>
 <p data-pac-bind="visible:!browserVisible">Tab is hidden - updates paused</p>
 
 <!-- Container viewport properties -->
@@ -100,48 +106,48 @@ Unlike MVC where models and views can talk directly, PAC uses the Control layer 
 
 ```html
 <!-- Basic attributes -->
-<div data-pac-bind="class:statusClass, title:statusText"></div>
+<div data-pac-bind="class: statusClass, title: statusText"></div>
 
 <!-- Two-way data binding -->
-<input data-pac-bind="value:name" type="text">
-<textarea data-pac-bind="value:description"></textarea>
-<select data-pac-bind="value:category">
+<input data-pac-bind="value: name" type="text">
+<textarea data-pac-bind="value: description"></textarea>
+<select data-pac-bind="value: category">
     <option value="A">Category A</option>
     <option value="B">Category B</option>
 </select>
 
 <!-- Checkboxes (boolean values) -->
-<input type="checkbox" data-pac-bind="checked:isActive">
+<input type="checkbox" data-pac-bind="checked: isActive">
 
 <!-- Radio buttons (use value binding) -->
-<input type="radio" name="theme" value="light" data-pac-bind="value:selectedTheme">
-<input type="radio" name="theme" value="dark" data-pac-bind="value:selectedTheme">
+<input type="radio" name="theme" value="light" data-pac-bind="value: selectedTheme">
+<input type="radio" name="theme" value="dark" data-pac-bind="value: selectedTheme">
 
 <!-- Enable/Disable controls -->
-<button data-pac-bind="enable:isFormValid">Submit</button>
+<button data-pac-bind="enable: isFormValid">Submit</button>
 
 <!-- Multiple bindings -->
-<div data-pac-bind="class:statusClass,style:dynamicStyle,click:handleClick"></div>
+<div data-pac-bind="class: statusClass,style: dynamicStyle,click: handleClick"></div>
 ```
 
 ### Conditional Rendering
 
 ```html
 <!-- visible: CSS display control (stays in DOM) -->
-<div data-pac-bind="visible:showDetails">Details here</div>
-<div data-pac-bind="visible:!hideContent">Content</div>
+<div data-pac-bind="visible: showDetails">Details here</div>
+<div data-pac-bind="visible: !hideContent">Content</div>
 
 <!-- if: DOM element control (added/removed from DOM) -->
-<div data-pac-bind="if:user.isAdmin">Admin Panel</div>
-<div data-pac-bind="if:!isLoading">Content loaded</div>
+<div data-pac-bind="if: user.isAdmin">Admin Panel</div>
+<div data-pac-bind="if: !isLoading">Content loaded</div>
 
 <!-- Browser state conditions -->
-<div data-pac-bind="visible:browserVisible">Active content</div>
-<div data-pac-bind="if:browserWindowHeight > 600">Large screen content</div>
+<div data-pac-bind="visible: browserVisible">Active content</div>
+<div data-pac-bind="if: browserWindowHeight > 600">Large screen content</div>
 
 <!-- Container viewport conditions -->
-<div data-pac-bind="visible:containerVisible">Show when container is in viewport</div>
-<div data-pac-bind="if:containerFullyVisible">Only when fully visible</div>
+<div data-pac-bind="visible: containerVisible">Show when container is in viewport</div>
+<div data-pac-bind="if: containerFullyVisible">Only when fully visible</div>
 ```
 
 **When to use each:**
@@ -182,31 +188,31 @@ wakaPAC('#app', {
 ### Basic Events
 
 ```html
-<button data-pac-bind="click:handleClick">Click me</button>
-<form data-pac-bind="submit:handleSubmit">
-    <input data-pac-bind="value:searchQuery">
+<button data-pac-bind="click: handleClick">Click me</button>
+<form data-pac-bind="submit: handleSubmit">
+    <input data-pac-bind="value: searchQuery">
     <button type="submit">Search</button>
 </form>
-<input data-pac-bind="input:handleInput,focus:handleFocus">
+<input data-pac-bind="input: handleInput,focus: handleFocus">
 ```
 
 ### Event Modifiers
 
 ```html
 <!-- Prevent form submission redirect -->
-<form data-pac-bind="submit:handleSubmit" data-pac-modifiers="prevent">
+<form data-pac-bind="submit: handleSubmit" data-pac-modifiers="prevent">
 
     <!-- Search on Enter key -->
-    <input data-pac-bind="keyup:search" data-pac-modifiers="enter">
+    <input data-pac-bind="keyup: search" data-pac-modifiers="enter">
 
     <!-- Close modal on Escape -->
-    <div data-pac-bind="keyup:closeModal" data-pac-modifiers="escape">
+    <div data-pac-bind="keyup: closeModal" data-pac-modifiers="escape">
 
         <!-- One-time event -->
-        <button data-pac-bind="click:initialize" data-pac-modifiers="once">
+        <button data-pac-bind="click: initialize" data-pac-modifiers="once">
 
             <!-- Multiple modifiers -->
-            <form data-pac-bind="submit:handleForm" data-pac-modifiers="prevent stop">
+            <form data-pac-bind="submit: handleForm" data-pac-modifiers="prevent stop">
 ```
 
 **Available modifiers:**
@@ -216,16 +222,16 @@ wakaPAC('#app', {
 ## Lists and For-Each
 
 ```html
-<div data-pac-bind="foreach:todos" data-pac-item="todo" data-pac-index="index">
+<div data-pac-bind="foreach: todos" data-pac-item="todo" data-pac-index="index">
     <div class="todo-item">
         <span>{{index}}. {{todo.text}}</span>
-        <input type="checkbox" data-pac-bind="checked:todo.completed">
-        <button data-pac-bind="click:removeTodo">Remove</button>
+        <input type="checkbox" data-pac-bind="checked: todo.completed">
+        <button data-pac-bind="click: removeTodo">Remove</button>
     </div>
 </div>
 
 <!-- With callback -->
-<ul data-pac-bind="foreach:items then onItemsUpdated" data-pac-item="item">
+<ul data-pac-bind="foreach: items then onItemsUpdated" data-pac-item="item">
     <li>{{item.name}}</li>
 </ul>
 ```
@@ -333,27 +339,6 @@ wakaPAC('#app', {
             }
         }
     },
-
-    // Methods called by watchers
-    performSearch(query) {
-        // API call logic
-    },
-
-    saveProgress() {
-        // Save logic
-    },
-
-    startAnimation() {
-        // Start animations only when visible
-    },
-
-    pauseAnimation() {
-        // Pause animations to save CPU
-    },
-
-    trackViewedContent() {
-        // Analytics tracking
-    }
 });
 ```
 
@@ -410,6 +395,245 @@ watch: {
 | **Usage**        | Use in templates: `{{computed}}`   | Execute code when data changes         |
 | **When to use**  | Need a value based on other values | Need to do something when data changes |
 
+## Data Safety and Display Utilities
+
+WakaPAC provides built-in utility functions to help you safely handle and display data. These functions are available on all component instances and help prevent XSS attacks while providing consistent data formatting.
+
+### HTML Security Functions
+
+#### `escapeHTML(str)`
+Converts HTML special characters to their safe HTML entity equivalents to prevent XSS attacks.
+
+```javascript
+wakaPAC('#app', {
+    userInput: '<script>alert("hack")</script>',
+    safeComment: '',
+
+    saveComment() {
+        // Escape user input before storing or displaying
+        this.safeComment = this.escapeHTML(this.userInput);
+        // Result: "&lt;script&gt;alert(&quot;hack&quot;)&lt;/script&gt;"
+    },
+
+    computed: {
+        safeTitle() {
+            // Use in computed properties for safe dynamic content
+            return this.escapeHTML(this.user.title);
+        }
+    }
+});
+```
+
+**What gets escaped:**
+- `<` becomes `&lt;`
+- `>` becomes `&gt;`
+- `&` becomes `&amp;`
+- `"` becomes `&quot;`
+- `'` becomes `&#39;`
+
+**When to use:**
+- Before displaying user-generated content in HTML
+- When building dynamic HTML strings
+- Before setting innerHTML with user data
+- In computed properties that generate safe HTML
+
+#### `sanitizeUserInput(html)`
+Strips all HTML tags from user input and returns escaped plain text.
+
+```javascript
+wakaPAC('#app', {
+    userBio: '<p>Hello <strong>world</strong>!</p><script>alert("xss")</script>',
+    cleanBio: '',
+
+    cleanUserBio() {
+        // Strip all HTML tags and get safe plain text
+        this.cleanBio = this.sanitizeUserInput(this.userBio);
+        // Result: "Hello world!"
+    },
+
+    processComment(comment) {
+        // Clean user comments before storage
+        const cleaned = this.sanitizeUserInput(comment);
+        
+        this.comments.push({
+            text: cleaned,
+            timestamp: new Date()
+        });
+    }
+});
+```
+
+**What it does:**
+1. Removes all HTML tags (`<p>`, `<script>`, `<div>`, etc.)
+2. Extracts plain text content only
+3. Escapes any remaining special characters
+4. Returns safe text suitable for display
+
+**When to use:**
+- Processing user comments or posts
+- Cleaning pasted content from rich text editors
+- Before saving user input to databases
+- When you want plain text only, no HTML formatting
+
+### Data Display Function
+
+#### `formatValue(value)`
+Intelligently formats any value for display in templates or UI components.
+
+```javascript
+wakaPAC('#app', {
+    data: {
+        name: 'John',
+        age: null,
+        scores: [95, 87, 92],
+        profile: { city: 'New York', country: 'USA' },
+        isActive: true
+    },
+
+    showData() {
+        // Format different types of values
+        console.log(this.formatValue(this.data.name));    // "John"
+        console.log(this.formatValue(this.data.age));     // ""
+        console.log(this.formatValue(this.data.scores));  // "[3 items]"
+        console.log(this.formatValue(this.data.profile)); // JSON formatted object
+        console.log(this.formatValue(this.data.isActive)); // "true"
+    },
+
+    computed: {
+        displayItems() {
+            return this.items.map(item => ({
+                ...item,
+                // Format complex values for display
+                formattedData: this.formatValue(item.complexData)
+            }));
+        }
+    }
+});
+```
+
+**Formatting rules:**
+- **`null`/`undefined`**: Returns empty string `""`
+- **Strings/Numbers/Booleans**: Converts to string representation
+- **Arrays**: Returns `"[X items]"` format for easy scanning
+- **Objects**: Returns formatted JSON for debugging/display
+- **Functions**: Returns function name or `"[Function]"`
+
+**When to use:**
+- In templates when you're not sure of the data type: `{{formatValue(dynamicData)}}`
+- For debugging output in development
+- When displaying API responses of unknown structure
+- In admin interfaces showing database records
+
+### Practical Examples
+
+#### Safe User Profile Display
+```html
+<div id="profile">
+    <h2>{{safeDisplayName}}</h2>
+    <p class="bio">{{safeBio}}</p>
+    <div class="debug">Raw data: {{formattedRawData}}</div>
+</div>
+```
+
+```javascript
+wakaPAC('#profile', {
+    displayName: 'John "The Rock" <strong>Doe</strong>',
+    bio: '<p>I love <script>coding</script> and hiking!</p>',
+    rawData: { preferences: ['hiking', 'coding'], score: 95 },
+
+    computed: {
+        safeDisplayName() {
+            return this.escapeHTML(this.displayName);
+        },
+
+        safeBio() {
+            return this.sanitizeUserInput(this.bio);
+        },
+
+        formattedRawData() {
+            return this.formatValue(this.rawData);
+        }
+    }
+});
+```
+
+#### Comment System with Safety
+```javascript
+wakaPAC('#comments', {
+    comments: [],
+    newComment: '',
+
+    addComment() {
+        if (this.newComment.trim()) {
+            this.comments.push({
+                id: Date.now(),
+                text: this.sanitizeUserInput(this.newComment), // Strip HTML, keep text
+                author: this.escapeHTML(this.currentUser.name), // Escape for display
+                timestamp: new Date(),
+                raw: this.formatValue(this.newComment) // For debugging
+            });
+            
+            this.newComment = '';
+        }
+    }
+});
+```
+
+#### API Response Display
+```javascript
+wakaPAC('#api-explorer', {
+    response: null,
+    loading: false,
+
+    async callAPI(endpoint) {
+        this.loading = true;
+        
+        try {
+            this.response = await fetch(endpoint).then(r => r.json());
+        } catch (error) {
+            this.response = { error: error.message };
+        } finally {
+            this.loading = false;
+        }
+    },
+
+    computed: {
+        formattedResponse() {
+            // Use formatValue to display any type of API response
+            return this.formatValue(this.response);
+        }
+    }
+});
+```
+
+#### Form Validation with Safe Display
+```javascript
+wakaPAC('#registration', {
+    form: {
+        username: '',
+        bio: ''
+    },
+    errors: [],
+
+    validateForm() {
+        this.errors = [];
+        
+        // Validate username (escape for safe error display)
+        if (!this.form.username.trim()) {
+            this.errors.push('Username is required');
+        } else if (this.form.username.includes('<')) {
+            this.errors.push(`Invalid character in username: ${this.escapeHTML(this.form.username)}`);
+        }
+        
+        // Clean bio input
+        this.form.bio = this.sanitizeUserInput(this.form.bio);
+        
+        // Debug output
+        console.log('Form data:', this.formatValue(this.form));
+    }
+});
+```
+
 ## Non-Reactive Properties
 
 Use underscore prefix (`_`) for properties that shouldn't be reactive:
@@ -443,13 +667,13 @@ Control when form inputs update your data:
 
 ```html
 <!-- Immediate (default) - updates on every keystroke -->
-<input data-pac-bind="value:name">
+<input data-pac-bind="value: name">
 
 <!-- Change - updates when input loses focus -->
-<input data-pac-bind="value:name" data-pac-update-mode="change">
+<input data-pac-bind="value: name" data-pac-update-mode="change">
 
 <!-- Delayed - updates after specified delay (debounced) -->
-<input data-pac-bind="value:searchQuery"
+<input data-pac-bind="value: searchQuery"
        data-pac-update-mode="delayed"
        data-pac-update-delay="500">
 ```
@@ -499,7 +723,7 @@ wakaPAC('#app', {
 2. Computed properties are set up
 3. DOM bindings are established
 4. Initial DOM update occurs
-5. **`init()` is called** ← You are here
+5. **`init()` is called**
 6. Component is ready for user interaction
 
 ### Common `init()` Patterns
@@ -687,166 +911,6 @@ The `containerClientRect` property contains detailed position and size informati
 }
 ```
 
-### Use Cases
-
-**Pause Operations When Tab Hidden:**
-```javascript
-wakaPAC('#dashboard', {
-    watch: {
-        browserVisible(isVisible) {
-            if (isVisible) {
-                this.startDataRefresh();
-            } else {
-                this.pauseDataRefresh(); // Save battery/bandwidth
-            }
-        }
-    }
-});
-```
-
-**Lazy Loading Based on Container Visibility:**
-```javascript
-wakaPAC('#image-gallery', {
-    images: [],
-    hasLoaded: false,
-
-    watch: {
-        containerVisible(isVisible) {
-            // Only load images when the gallery becomes visible
-            if (isVisible && !this.hasLoaded) {
-                this.loadImages();
-                this.hasLoaded = true;
-            }
-        }
-    },
-
-    async loadImages() {
-        this.images = await fetch('/api/images').then(r => r.json());
-    }
-});
-```
-
-**Performance Optimization with Container Visibility:**
-```javascript
-wakaPAC('#animation-container', {
-    animationRunning: false,
-
-    watch: {
-        containerVisible(isVisible) {
-            if (isVisible) {
-                this.startAnimation();
-            } else {
-                this.stopAnimation(); // Save CPU when not visible
-            }
-        }
-    },
-
-    startAnimation() {
-        if (!this.animationRunning) {
-            this.animationRunning = true;
-            this.animate();
-        }
-    },
-
-    stopAnimation() {
-        this.animationRunning = false;
-    },
-
-    animate() {
-        if (this.animationRunning && this.containerVisible) {
-            // Perform animation frame
-            requestAnimationFrame(() => this.animate());
-        }
-    }
-});
-```
-
-**Analytics Tracking:**
-```javascript
-wakaPAC('#article-content', {
-    viewTracked: false,
-
-    watch: {
-        containerFullyVisible(isFullyVisible) {
-            // Track when user has fully viewed the content
-            if (isFullyVisible && !this.viewTracked) {
-                this.trackContentView();
-                this.viewTracked = true;
-            }
-        }
-    },
-
-    trackContentView() {
-        // Send analytics event
-        analytics.track('content_viewed', {
-            article_id: this.articleId,
-            timestamp: new Date()
-        });
-    }
-});
-```
-
-**Endless Scrolling:**
-```javascript
-wakaPAC('#product-feed', {
-    computed: {
-        nearBottom() {
-            // Are we close to the bottom of the page?
-            const scrolledDistance = this.browserScrollY;
-            const viewportHeight = this.browserViewportHeight;
-            const totalPageHeight = this.browserDocumentHeight;
-            
-            return scrolledDistance + viewportHeight >= totalPageHeight - 1000;
-        }
-    },
-
-    watch: {
-        nearBottom(isNear) {
-            if (isNear) {
-                this.loadMoreProducts(); // Load more when user scrolls near bottom
-            }
-        }
-    }
-});
-```
-
-**Scroll Progress Bar:**
-```javascript
-wakaPAC('#app', {
-    computed: {
-        scrollPercentage() {
-            // How much of the page has been scrolled? (0-100%)
-            const scrollableDistance = this.browserDocumentHeight - this.browserViewportHeight;
-            
-            if (scrollableDistance <= 0) {
-                return 0;
-            }
-            
-            return Math.round((this.browserScrollY / scrollableDistance) * 100);
-        }
-    }
-});
-```
-
-**Sticky Element with Container Awareness:**
-
-```html
-<div id="sidebar" data-pac-bind="class: sticky">
-    <!-- Sidebar content -->
-</div>
-```
-
-```javascript
-wakaPAC('#sidebar', {
-    computed: {
-        sticky() {
-            // Make sidebar sticky only when partially visible
-            return this.containerVisible && !this.containerFullyVisible;
-        }
-    }
-});
-```
-
 ## API Reference
 
 ### Creating Components
@@ -871,6 +935,11 @@ component.sendToChild(selector, command, data)
 // DOM interaction
 component.readDOMValue(selector)
 component.control(url, options)
+
+// Data safety and display utilities
+component.escapeHTML(str)
+component.sanitizeUserInput(html)
+component.formatValue(value)
 
 // Lifecycle
 component.destroy()
@@ -898,10 +967,10 @@ wakaPAC('#app', data, {
 
 <!-- WakaPAC -->
 <div>{{message}}</div>
-<input data-pac-bind="value:name">
-<button data-pac-bind="click:handleClick">Click</button>
-<div data-pac-bind="if:isVisible">Content</div>
-<div data-pac-bind="visible:isVisible">Content</div>
+<input data-pac-bind="value: name">
+<button data-pac-bind="click: handleClick">Click</button>
+<div data-pac-bind="if: isVisible">Content</div>
+<div data-pac-bind="visible: isVisible">Content</div>
 ```
 
 ```javascript
