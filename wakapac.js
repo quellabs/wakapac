@@ -2048,50 +2048,47 @@
              * @returns {Object|null} The created binding object, or null if invalid
              */
             createBindingByType(element, type, target) {
-                if (type === 'foreach') {
-                    const binding = this.createForeachBinding(element, target);
-                    element.innerHTML = '';
-                    return binding;
-                }
-
-                if (type === 'if') {
-                    return this.createConditionalBinding(element, target);
-                }
-
-                if (type === 'visible') {
-                    return this.createVisibilityBinding(element, target);
-                }
-
-                if (type === 'value') {
-                    this.setupInputElement(element, target);
-                    return this.createInputBinding(element, target);
-                }
-
-                if (type === 'checked') {
-                    if (element.type === 'radio') {
-                        console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
+                switch (type) {
+                    case 'value':
                         this.setupInputElement(element, target);
                         return this.createInputBinding(element, target);
+
+                    case 'visible':
+                        return this.createVisibilityBinding(element, target);
+
+                    case 'checked':
+                        if (element.type === 'radio') {
+                            console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
+                            this.setupInputElement(element, target);
+                            return this.createInputBinding(element, target);
+                        }
+
+                        this.setupInputElement(element, target, 'checked');
+                        return this.createCheckedBinding(element, target);
+
+                    case 'class':
+                        return this.createClassBinding(element, target);
+
+                    case 'if':
+                        return this.createConditionalBinding(element, target);
+
+                    case 'foreach': {
+                        const binding = this.createForeachBinding(element, target);
+                        element.innerHTML = '';
+                        return binding;
                     }
 
-                    this.setupInputElement(element, target, 'checked');
-                    return this.createCheckedBinding(element, target);
+                    default:
+                        if (Utils.isEventType(type)) {
+                            return this.createEventBinding(element, type, target);
+                        } else if (target) {
+                            return this.createAttributeBinding(element, type, target);
+                        } else {
+                            return null;
+                        }
                 }
-
-                if (type === 'class') {
-                    return this.createClassBinding(element, target);
-                }
-
-                if (Utils.isEventType(type)) {
-                    return this.createEventBinding(element, type, target);
-                }
-
-                if (target) {
-                    return this.createAttributeBinding(element, type, target);
-                }
-
-                return null;
             },
+
 
             /**
              * Creates a foreach binding for rendering lists
