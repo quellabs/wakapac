@@ -1347,22 +1347,38 @@
 
             /**
              * Analyzes computed function dependencies by parsing the function source
+             * @param {Function} fn - The computed function to analyze
+             * @param {Object} reactive - The reactive object containing reactive properties
+             * @returns {Array<string>} Array of property names that the function depends on
              */
             analyzeComputedDependencies(fn, reactive) {
+                // Array to store the discovered dependencies
                 const dependencies = [];
+
+                // Regex pattern to match property access on 'this' object
+                // Matches: this.propertyName (where propertyName follows JS identifier rules)
                 const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
 
+                // Iterate through all regex matches in the function's string representation
                 let match;
+
                 while ((match = regex.exec(fn.toString()))) {
+                    // Extract the property name from the regex capture group
                     const property = match[1];
 
+                    // Check if this property should be considered a dependency:
+                    // 1. Property exists in either the original object or reactive object
+                    // 2. Property is NOT a computed property (to avoid circular dependencies)
+                    // 3. Property hasn't already been added to dependencies (avoid duplicates)
                     if ((this.original.hasOwnProperty(property) || reactive.hasOwnProperty(property)) &&
                         (!this.original.computed || !this.original.computed.hasOwnProperty(property)) &&
                         !dependencies.includes(property)) {
+                        // Add the valid dependency to our list
                         dependencies.push(property);
                     }
                 }
 
+                // Return the complete list of dependencies
                 return dependencies;
             },
 
@@ -1494,7 +1510,6 @@
                 if ('IntersectionObserver' in window) {
                     this.setupIntersectionObserver();
                 } else {
-                    // Legacy browsers need manual scroll event handling
                     this.setupScrollBasedVisibility();
                 }
 
@@ -1724,7 +1739,7 @@
 
                             // Execute any registered watchers for this specific property
                             // Trigger watcher if it exists
-                            this.triggerWatcher(key, newValue, oldValue);
+                            this.triggerWatcher(key, newValue, oldValue, key);
 
                             // Schedule DOM/view updates for this property change
                             this.scheduleUpdate(key, newValue);
@@ -1739,14 +1754,109 @@
                 });
             },
 
-            triggerWatcher(property, newValue, oldValue) {
-                if (this.original.watch && this.original.watch[property]) {
+            /**
+             * Enhanced triggerWatcher method that supports both simple property watchers
+             * and deep path pattern watchers with wildcards
+             * @param {string} property - The property that changed
+             * @param {*} newValue - The new value
+             * @param {*} oldValue - The old value
+             * @param {string} [changePath] - Full path of the change (for deep watchers)
+             */
+            triggerWatcher(property, newValue, oldValue, changePath = null) {
+                if (!this.original.watch) {
+                    return;
+                }
+
+                // Defer watcher execution to avoid interfering with current reactive cycle
+                // This allows watchers to safely modify other reactive properties
+                setTimeout(() => {
+                    this._executeWatchers(property, newValue, oldValue, changePath);
+                }, 0);
+            },
+
+            /**
+             * Executes watchers outside of the reactive update cycle
+             * @private
+             */
+            _executeWatchers(property, newValue, oldValue, changePath) {
+                // 1. Handle existing simple property watchers (backward compatibility)
+                if (this.original.watch[property]) {
                     try {
                         this.original.watch[property].call(this.abstraction, newValue, oldValue);
                     } catch (error) {
                         console.error(`Error in watcher for '${property}':`, error);
                     }
                 }
+
+                // 2. Handle deep path pattern watchers
+                if (changePath) {
+                    Object.keys(this.original.watch).forEach(watchKey => {
+                        // Skip simple property watchers (already handled above)
+                        if (!watchKey.includes('.') && !watchKey.includes('*')) {
+                            return;
+                        }
+
+                        // Check if this watcher pattern matches the change path
+                        if (this.matchesWatchPattern(watchKey, changePath)) {
+                            const watcher = this.original.watch[watchKey];
+
+                            if (typeof watcher === 'function') {
+                                try {
+                                    watcher.call(this.abstraction, newValue, oldValue, changePath);
+                                } catch (error) {
+                                    console.error(`Error in deep watcher for '${watchKey}':`, error);
+                                }
+                            }
+                        }
+                    });
+                }
+            },
+
+            /**
+             * Checks if a change path matches a watch pattern
+             * Supports exact paths, single wildcards (*), and deep wildcards (**)
+             * @param {string} pattern - Watch pattern (e.g., "user.profile.name", "todos.*.completed", "todos.**")
+             * @param {string} changePath - Actual change path (e.g., "todos.0.completed")
+             * @returns {boolean} True if pattern matches the change path
+             */
+            matchesWatchPattern(pattern, changePath) {
+                // Handle deep wildcard pattern first (**) - matches any nested path
+                if (pattern.includes('**')) {
+                    const basePattern = pattern.replace('.**', '');
+
+                    // Deep wildcard matches if changePath starts with the base pattern
+                    return changePath === basePattern || changePath.startsWith(basePattern + '.');
+                }
+
+                // Handle single wildcard pattern (*) - matches one level
+                if (pattern.includes('*')) {
+                    return this.matchesSingleWildcard(pattern, changePath);
+                }
+
+                // Handle exact path matching
+                return pattern === changePath;
+            },
+
+            /**
+             * Handles single wildcard pattern matching
+             * @param {string} pattern - Pattern with single wildcards (e.g., "todos.*.completed")
+             * @param {string} changePath - Actual change path (e.g., "todos.0.completed")
+             * @returns {boolean} True if pattern matches
+             */
+            matchesSingleWildcard(pattern, changePath) {
+                // Split both pattern and path into segments
+                const patternParts = pattern.split('.');
+                const pathParts = changePath.split('.');
+
+                // Must have same number of segments
+                if (patternParts.length !== pathParts.length) {
+                    return false;
+                }
+
+                // Check each segment - either exact match or wildcard
+                return patternParts.every((patternPart, index) => {
+                    return patternPart === '*' || patternPart === pathParts[index];
+                });
             },
 
             // === BINDING SETUP SECTION ===
@@ -2231,7 +2341,7 @@
                 const rootProperty = Utils.splitPath(path)[0];
 
                 // Handle nested property changes - force updates for computed properties
-                if (type === 'nested-change' || type === 'set') {
+                if (type === 'set' || type === 'nested-change') {
                     // Clear computed cache for properties that might depend on this change
                     const dependentComputed = this.propertyDeps.get(rootProperty) || [];
 
@@ -2252,6 +2362,15 @@
                             }
                         }
                     });
+                }
+
+                // Trigger watchers with full path context
+                if ((type === 'set' || type === 'array-mutation') && path !== rootProperty) {
+                    // For deep changes, trigger watchers with the actual changed value and path
+                    // meta.oldValue contains the previous value from the Proxy set trap
+                    const actualNewValue = Utils.getNestedValue(this.abstraction, path);
+                    const actualOldValue = meta?.oldValue;
+                    this.triggerWatcher(rootProperty, actualNewValue, actualOldValue, path);
                 }
 
                 // Update computed properties that depend on this root property
@@ -2592,19 +2711,16 @@
              * Replace the renderForeachItem method to accept collection name:
              */
             renderForeachItem(template, item, index, itemName, indexName, collectionName) {
-                // Create a temporary container div to parse the HTML template string
-                const div = document.createElement('div');
-                div.innerHTML = template;
-
-                // Extract the first element or node from the parsed template
-                const element = div.firstElementChild || div.firstChild;
+                // Create a wrapper element to contain the template content
+                const element = document.createElement('span');
+                element.innerHTML = template;
 
                 // Handle case where template is empty or invalid
-                if (!element) {
+                if (!element.innerHTML.trim()) {
                     return document.createTextNode('');
                 }
 
-                // Create a deep copy of the template element to avoid modifying the original
+                // Create a deep copy to avoid modifying the original
                 const clone = element.cloneNode(true);
 
                 // Process the cloned template, replacing placeholders with actual data
