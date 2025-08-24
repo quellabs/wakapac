@@ -3286,10 +3286,20 @@
              * @param {*} value - The evaluated expression value
              */
             applyClassBinding(element, target, value) {
-                if (value) {
+                // Fetch previous class
+                const previousClass = element.dataset.pacPreviousClass;
+
+                // Remove the previously applied class
+                if (previousClass && previousClass.trim() !== '') {
+                    element.classList.remove(previousClass);
+                }
+
+                // Add the new class
+                if (value && value.trim() !== '') {
                     element.classList.add(value);
+                    element.dataset.pacPreviousClass = value;
                 } else {
-                    element.classList.remove(value);
+                    element.dataset.pacPreviousClass = '';
                 }
             },
 
