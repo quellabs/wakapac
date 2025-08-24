@@ -250,11 +250,49 @@
                 return '';
             }
 
-            if (typeof value === 'object') {
-                return Array.isArray(value) ? `[${value.length} items]` : JSON.stringify(value, null, 2);
+            if (typeof value !== 'object') {
+                return String(value);
             }
 
-            return String(value);
+            if (Array.isArray(value)) {
+                return `[${value.length} items]`;
+            }
+
+            return JSON.stringify(value, null, 2);
+        },
+
+        /**
+         * Sanitizes user input by stripping HTML tags and returning escaped HTML
+         * Uses the browser's built-in text content handling to safely process untrusted input
+         * @param {string} html - The potentially unsafe HTML string to sanitize
+         * @returns {string} The sanitized string with HTML tags stripped and special characters escaped
+         */
+        sanitizeUserInput(html) {
+            // Create a temporary div element to leverage browser's text content handling
+            const div = document.createElement('div');
+
+            // Set textContent (not innerHTML) to automatically strip all HTML tags
+            // The browser treats the input as plain text, removing any markup
+            div.textContent = html;
+
+            // Return the innerHTML, which gives us the text with HTML entities properly escaped
+            // This converts characters like < > & " ' into their HTML entity equivalents
+            return div.innerHTML;
+        },
+
+        /**
+         * Manually escapes HTML special characters to prevent XSS attacks
+         * Converts potentially dangerous characters into their HTML entity equivalents
+         * @param {string} str - The string containing characters that need to be escaped
+         * @returns {string} The escaped string safe for insertion into HTML
+         */
+        escapeHTML(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')    // Replace & first (must be done before other entities)
+                .replace(/</g, '&lt;')     // Replace < with less-than entity
+                .replace(/>/g, '&gt;')     // Replace > with greater-than entity
+                .replace(/"/g, '&quot;')   // Replace double quotes with quote entity
+                .replace(/'/g, '&#39;');   // Replace single quotes with apostrophe entity
         }
     };
 
@@ -293,6 +331,13 @@
             if (component) {
                 this.components.delete(selector);
                 this.hierarchyCache = new WeakMap(); // Clear cache
+
+                // If this was the last component, clean up global state
+                if (this.components.size === 0) {
+                    if (window._wakaPACViewportComponents) {
+                        window._wakaPACViewportComponents.clear();
+                    }
+                }
             }
 
             return component;
@@ -319,6 +364,7 @@
                         parent = component;
                     }
                 });
+
                 element = element.parentElement;
             }
 
@@ -1139,6 +1185,7 @@
          */
         const control = {
             // Core state
+            selector: selector,
             container: container,
             config: config,
             original: abstraction,
@@ -1176,6 +1223,7 @@
                 this.setupBindings();
                 this.abstraction = this.createReactiveAbstraction();
                 this.setupEventHandling();
+                this.setupViewportTracking();
                 this.performInitialUpdate();
                 return this;
             },
@@ -1324,25 +1372,33 @@
              * @param {Object} reactive - The reactive object to attach browser properties to
              */
             setupBrowserProperties(reactive) {
+                // Define empty rect for containerClientRect
+                const emptyRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
+
                 // Initialize page visibility state - tracks if the browser tab/window is currently visible
                 // Useful for pausing animations or reducing CPU usage when user switches tabs
                 this.createReactiveProperty(reactive, 'browserVisible', !document.hidden);
 
-                // Initialize current horizontal scroll position in pixels from left of document
+                // Initialize current horizontal/vertical scroll position in pixels from left/top of document
                 this.createReactiveProperty(reactive, 'browserScrollX', window.scrollX);
-
-                // Initialize current vertical scroll position in pixels from top of document
                 this.createReactiveProperty(reactive, 'browserScrollY', window.scrollY);
 
                 // Initialize current viewport width & height - the visible area of the browser window
                 // Updates automatically when user resizes window or rotates mobile device
-                this.createReactiveProperty(reactive, 'browserWindowHeight', window.innerHeight);
-                this.createReactiveProperty(reactive, 'browserWindowWidth', window.innerWidth);
+                this.createReactiveProperty(reactive, 'browserViewportHeight', window.innerHeight);
+                this.createReactiveProperty(reactive, 'browserViewportWidth', window.innerWidth);
 
                 // Initialize total document width/height including content outside the viewport
                 // Useful for calculating scroll percentages or infinite scroll triggers
                 this.createReactiveProperty(reactive, 'browserDocumentWidth', document.documentElement.scrollWidth);
                 this.createReactiveProperty(reactive, 'browserDocumentHeight', document.documentElement.scrollHeight);
+
+                // Per-container viewport visibility properties
+                this.createReactiveProperty(reactive, 'containerVisible', false);
+                this.createReactiveProperty(reactive, 'containerFullyVisible', false);
+                this.createReactiveProperty(reactive, 'containerClientRect', emptyRect);
+                this.createReactiveProperty(reactive, 'containerWidth', 0);
+                this.createReactiveProperty(reactive, 'containerHeight', 0);
 
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
@@ -1365,90 +1421,319 @@
                 // Initialize singleton
                 window._wakaPACBrowserListeners = true;
 
-                // Track scroll position changes across the page
-                // Updates all registered components with current scroll position and document height
-                let scrollTimeout;
-
-                window.addEventListener('scroll', () => {
-                    // Debounce event listener
-                    clearTimeout(scrollTimeout);
-
-                    scrollTimeout = setTimeout(() => {
-                        // Iterate through all registered PAC components
-                        window.PACRegistry.components.forEach(component => {
-                            component.abstraction.browserWindowWidth = window.innerWidth;  // Add this
-                            component.abstraction.browserWindowHeight = window.innerHeight;
-                            component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
-                            component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-                        });
-                    }, 16);
-                });
-
                 // Track page visibility changes (tab switching, window minimizing, etc.)
                 // Useful for pausing animations or reducing CPU usage when page is not visible
-                document.addEventListener('visibilitychange', () => {
-                    window.PACRegistry.components.forEach(component => {
-                        // document.hidden is true when page is not visible, so invert it
-                        // browserVisible will be false when tab is hidden/minimized
-                        component.abstraction.browserVisible = !document.hidden;
-                    });
-                });
+                const visibilityHandler = () => {
+                    if (window.PACRegistry && window.PACRegistry.components.size > 0) {
+                        window.PACRegistry.components.forEach(component => {
+                            // document.hidden is true when page is not visible, so invert it
+                            // browserVisible will be false when tab is hidden/minimized
+                            component.abstraction.browserVisible = !document.hidden;
+                        });
+                    }
+                };
+
+                // Track scroll position changes across the page
+                // Updates all registered components with current scroll position and document height
+                const scrollHandler = () => {
+                    // Debounce scroll events for performance
+                    clearTimeout(window._wakaPACScrollTimeout);
+
+                    // Iterate through all registered PAC components
+                    window._wakaPACScrollTimeout = setTimeout(() => {
+                        if (window.PACRegistry && window.PACRegistry.components.size > 0) {
+                            window.PACRegistry.components.forEach(component => {
+                                component.abstraction.browserScrollX = window.scrollX;
+                                component.abstraction.browserScrollY = window.scrollY;
+                            });
+                        }
+                    }, 16);
+                };
 
                 // Track window resize events to handle responsive behavior
                 // Updates components when user resizes browser window or rotates mobile device
-                window.addEventListener('resize', () => {
-                    window.PACRegistry.components.forEach(component => {
-                        // Update current viewport height - important for responsive layouts
-                        component.abstraction.browserWindowHeight = window.innerHeight;
+                const resizeHandler = () => {
+                    // Debounce resize events for performance
+                    clearTimeout(window._wakaPACResizeTimeout);
 
-                        // Update document height in case content reflow changed the total height
-                        component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                    // Iterate through all registered PAC components
+                    window._wakaPACResizeTimeout = setTimeout(() => {
+                        if (!window.PACRegistry || window.PACRegistry.components.size === 0) return;
+                        window.PACRegistry.components.forEach(component => {
+                            component.abstraction.browserViewportWidth = window.innerWidth;
+                            component.abstraction.browserViewportHeight = window.innerHeight;
+                            component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
+                            component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+                            component.abstraction.browserScrollX = window.scrollX;
+                            component.abstraction.browserScrollY = window.scrollY;
+                        });
+                    }, 100);
+                };
+
+                // Store handlers globally for cleanup
+                window._wakaPACGlobalHandlers = {
+                    visibility: visibilityHandler,
+                    scroll: scrollHandler,
+                    resize: resizeHandler
+                };
+
+                // Add event listeners
+                document.addEventListener('visibilitychange', visibilityHandler);
+                window.addEventListener('scroll', scrollHandler);
+                window.addEventListener('resize', resizeHandler);
+            },
+
+            /**
+             * Initialize viewport tracking for the container element.
+             * Uses modern IntersectionObserver API when available, falls back to scroll-based detection.
+             */
+            setupViewportTracking() {
+                // Check for modern browser support - IntersectionObserver is more efficient
+                // and provides better performance than manual scroll calculations
+                if ('IntersectionObserver' in window) {
+                    this.setupIntersectionObserver();
+                } else {
+                    // Legacy browsers need manual scroll event handling
+                    this.setupScrollBasedVisibility();
+                }
+
+                // Perform initial visibility calculation on setup
+                // This ensures correct state even before any scroll/intersection events
+                this.updateContainerVisibility();
+            },
+
+            /**
+             * Modern approach using Intersection Observer API.
+             * This is more performant as it runs on the main thread and batches calculations.
+             */
+            setupIntersectionObserver() {
+                // Create observer that tracks when container enters/exits viewport
+                this.intersectionObserver = new IntersectionObserver((entries) => {
+                    // Process each observed element (in this case, just our container)
+                    entries.forEach(entry => {
+                        // Verify we're handling the correct element
+                        if (entry.target === this.container) {
+                            // Get the boundingClientRect
+                            const rect = entry.boundingClientRect;
+
+                            // Basic visibility: any part of element is in viewport
+                            const isVisible = entry.isIntersecting;
+
+                            // Full visibility: element is completely within viewport bounds
+                            // intersectionRatio of 1.0 means 100% of element is visible
+                            // Using 0.99 to account for potential floating point precision issues
+                            const isFullyVisible = entry.intersectionRatio >= 0.99;
+
+                            // Update component state with new visibility data
+                            // These are reactive properties that trigger UI updates
+                            this.abstraction.containerVisible = isVisible;
+                            this.abstraction.containerFullyVisible = isFullyVisible;
+                            this.abstraction.containerWidth = rect.width;
+                            this.abstraction.containerHeight = rect.height;
+
+                            // Store current position/size data for potential use by other components
+                            this.abstraction.containerClientRect = {
+                                top: rect.top,
+                                left: rect.left,
+                                right: rect.right,
+                                bottom: rect.bottom,
+                                width: rect.width,
+                                height: rect.height,
+                                x: rect.x,
+                                y: rect.y
+                            };
+                        }
                     });
+                }, {
+                    // Define thresholds for intersection callbacks
+                    // 0 = trigger when element enters/exits viewport
+                    // 1.0 = trigger when element becomes fully visible/hidden
+                    threshold: [0, 1.0]
+                });
+
+                // Start observing our container element
+                this.intersectionObserver.observe(this.container);
+            },
+
+            /**
+             * Fallback approach for older browsers that don't support IntersectionObserver.
+             * Uses traditional scroll event listeners with manual visibility calculations.
+             */
+            setupScrollBasedVisibility() {
+                // Create global registry for components that need viewport tracking
+                // This prevents duplicate event listeners when multiple components exist
+                if (!window._wakaPACViewportComponents) {
+                    window._wakaPACViewportComponents = new Set();
+
+                    // Only set up global listeners once
+                    this.setupViewportVisibilityListener();
+                }
+
+                // Register this component instance for visibility updates
+                window._wakaPACViewportComponents.add(this);
+            },
+
+            /**
+             * Set up global scroll and resize event listeners.
+             * These are shared across all component instances to improve performance.
+             */
+            setupViewportVisibilityListener() {
+                let scrollTimeout;
+                let resizeTimeout;
+
+                // Batch visibility updates for all registered components
+                const checkVisibility = () => {
+                    // Update visibility for every component that's registered for tracking
+                    window._wakaPACViewportComponents.forEach(component => {
+                        component.updateContainerVisibility();
+                    });
+                };
+
+                // Throttle scroll events to maintain 60fps performance
+                // Scroll events fire very frequently and can cause performance issues
+                // 16ms = ~60fps (1000ms/60frames = 16.67ms)
+                window.addEventListener('scroll', () => {
+                    clearTimeout(scrollTimeout);
+                    scrollTimeout = setTimeout(checkVisibility, 16);
+                });
+
+                // Handle window resize events with slightly longer delay
+                // Resize events are less frequent but can be more expensive to process
+                // 100ms delay gives time for resize to complete
+                window.addEventListener('resize', () => {
+                    clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(checkVisibility, 100);
                 });
             },
 
             /**
-             * Creates a reactive property with getter/setter
+             * Manual visibility calculation using getBoundingClientRect().
+             * This is the fallback method used when IntersectionObserver isn't available
+             */
+            updateContainerVisibility() {
+                // Get current viewport dimensions
+                // innerHeight/innerWidth exclude scrollbars and give the actual visible area
+                const windowHeight = window.innerHeight;
+                const windowWidth = window.innerWidth;
+                const boundingRect = this.container.getBoundingClientRect();
+
+                // Convert DOMRect to simple object
+                const rect = {
+                    top: boundingRect.top,
+                    left: boundingRect.left,
+                    right: boundingRect.right,
+                    bottom: boundingRect.bottom,
+                    width: boundingRect.width,
+                    height: boundingRect.height,
+                    x: boundingRect.x,               // Same as left, but included for DOMRect compatibility
+                    y: boundingRect.y                // Same as top, but included for DOMRect compatibility
+                };
+
+                // Set dimensions
+                this.abstraction.containerClientRect = rect;
+                this.abstraction.containerWidth = rect.width;
+                this.abstraction.containerHeight = rect.height;
+
+                // Check if any part of container intersects with viewport boundaries
+                // Intersection logic: An element is considered "in viewport" if it overlaps
+                // with the visible area in both horizontal and vertical dimensions.
+                const isInViewport = (
+                    rect.top < windowHeight &&    // Element's top edge hasn't scrolled below viewport bottom
+                    rect.bottom > 0 &&            // Element's bottom edge hasn't scrolled above viewport top
+                    rect.left < windowWidth &&    // Element's left edge hasn't scrolled past viewport right
+                    rect.right > 0                // Element's right edge hasn't scrolled past viewport left
+                );
+
+                // Early exit optimization: If element is completely out of view,
+                // skip the more expensive fully-visible calculation and update state immediately
+                if (!isInViewport) {
+                    // Set visibility flags to false since element is not in viewport
+                    this.abstraction.containerVisible = false;
+                    this.abstraction.containerFullyVisible = false;
+                    return;
+                }
+
+                // Calculate if element is completely within viewport bounds (no clipping)
+                // "Fully visible" means the entire element can be seen without any parts
+                // being cut off by viewport edges. This is stricter than just "visible"
+                // and useful for determining if content can be read/interacted with completely.
+                const isFullyVisible = (
+                    rect.top >= 0 &&                    // Top edge is at or below viewport top (not clipped above)
+                    rect.bottom <= windowHeight &&      // Bottom edge is at or above viewport bottom (not clipped below)
+                    rect.left >= 0 &&                   // Left edge is at or right of viewport left (not clipped on left)
+                    rect.right <= windowWidth           // Right edge is at or left of viewport right (not clipped on right)
+                );
+
+                // Update component's reactive state with calculated visibility data
+                // These property updates will trigger Wakapac's reactivity system
+                // and can be observed by other components or used to conditionally render content,
+                // start/stop animations, lazy load resources, etc.
+                this.abstraction.containerVisible = true;                    // Element has some visible pixels
+                this.abstraction.containerFullyVisible = isFullyVisible;     // Element is completely unclipped
+            },
+
+            /**
+             * Creates a reactive property with getter/setter on the target object
+             * This enables automatic change detection and propagation throughout the reactive system
+             * @param {Object} obj - The target object to add the reactive property to
+             * @param {string} key - The property name/key
+             * @param {*} initialValue - The initial value for the property
              */
             createReactiveProperty(obj, key, initialValue) {
+                // Store the actual value in closure scope for encapsulation
                 let value = initialValue;
 
+                // Check if the initial value is a complex object/array that needs deep reactivity
                 // Make initial value reactive if needed
                 if (Utils.isReactive(value)) {
+                    // Wrap the initial value in a reactive proxy to track nested changes
                     value = createReactive(value, (path, newVal, type, meta) => {
+                        // Forward deep change notifications up the chain with proper path context
                         this.handleDeepChange(path, newVal, type, meta);
                     }, key);
                 }
 
+                // Define the reactive property using Object.defineProperty for full control
                 Object.defineProperty(obj, key, {
+                    // Getter: Simply return the current value from closure
                     get: () => value,
+
+                    // Setter: Handle value changes with full reactive capabilities
                     set: (newValue) => {
+                        // Capture the previous value for change detection and watchers
                         const oldValue = value;
+
+                        // Determine if we're dealing with objects that might need deep comparison
                         const isObject = Utils.isReactive(value) || Utils.isReactive(newValue);
 
+                        // Only proceed with update if the value actually changed
+                        // For objects, we skip equality check and always update (performance vs accuracy tradeoff)
                         if (isObject || !Utils.isEqual(value, newValue)) {
                             // Make new value reactive if needed
                             if (Utils.isReactive(newValue)) {
+                                // Create reactive wrapper with change handler that forwards to deep change system
                                 newValue = createReactive(newValue, (path, changedVal, type, meta) => {
+                                    // Delegate nested property changes to the deep change handler
                                     this.handleDeepChange(path, changedVal, type, meta);
                                 }, key);
                             }
 
+                            // Update the stored value
                             value = newValue;
 
+                            // Execute any registered watchers for this specific property
                             // Trigger watcher if it exists
                             this.triggerWatcher(key, newValue, oldValue);
 
-                            // Existing update logic...
+                            // Schedule DOM/view updates for this property change
                             this.scheduleUpdate(key, newValue);
+
+                            // Recalculate any computed properties that depend on this property
                             this.updateComputedProperties(key);
-                            this.notifyParent('propertyChange', {
-                                property: key,
-                                oldValue: oldValue,
-                                newValue: newValue
-                            });
                         }
                     },
+
+                    // Make the property enumerable so it shows up in Object.keys(), for...in, etc.
                     enumerable: true
                 });
             },
@@ -1709,14 +1994,9 @@
              * Creates a foreach binding for rendering lists
              */
             createForeachBinding(element, target) {
-                const parts = target.split(' then ');
-                const collection = parts[0].trim();
-                const callback = parts[1] ? parts[1].trim() : null;
-
                 return this.createBinding('foreach', element, {
-                    target: collection,
-                    collection: collection,
-                    callback: callback,
+                    target: target,
+                    collection: target,
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: element.innerHTML,
@@ -1936,14 +2216,6 @@
                         // Schedule DOM updates for elements bound to this property
                         this.scheduleUpdate(computedName, newValue);
 
-                        // Notify parent component about the computed property change
-                        this.notifyParent('propertyChange', {
-                            property: computedName,
-                            oldValue: oldValue,
-                            newValue: newValue,
-                            computed: true // Flag indicating this is a computed property
-                        });
-
                         // Recursively update any computed properties that depend on this one
                         // This handles chains of computed dependencies (A -> B -> C)
                         this.updateComputedProperties(computedName);
@@ -1998,15 +2270,6 @@
                 if (path !== rootProperty) {
                     this.scheduleUpdate(path, value);
                 }
-
-                // Notify parent
-                this.notifyParent('propertyChange', {
-                    property: rootProperty,
-                    path: path,
-                    newValue: value,
-                    changeType: type,
-                    metadata: meta
-                });
             },
 
             /**
@@ -3155,12 +3418,31 @@
              * proper resource deallocation and prevent memory leaks
              */
             destroy() {
+                // Clear timeouts first (might trigger other operations)
                 this._clearTimeouts();
-                this._clearCaches();
+
+                // Remove from registry (this also handles global cleanup)
                 this._unregisterFromGlobalRegistry();
-                this._clearBindings();
+
+                // Clean up hierarchy (break circular references)
                 this._cleanupHierarchy();
+
+                // Clean up reactive references
+                this._cleanupReactiveReferences();
+
+                // Remove event listeners
                 this._removeEventListeners();
+
+                // Clean up viewport tracking
+                this._cleanupViewportTracking();
+
+                // Clear caches
+                this._clearCaches();
+
+                // Clear bindings
+                this._clearBindings();
+
+                // Final nullification (MOVED TO END)
                 this._nullifyReferences();
             },
 
@@ -3189,8 +3471,32 @@
              * referenced by the global registry system
              */
             _unregisterFromGlobalRegistry() {
-                // Note: 'selector' should be 'this.selector' if it's an instance property
-                window.PACRegistry.unregister(selector);
+                // Unregister this component instance from the global PAC registry
+                window.PACRegistry.unregister(this.selector);
+
+                // Check if this was the last component and clean up global resources
+                // Clean up global listeners if this was the last component
+                if (window._wakaPACGlobalHandlers && window.PACRegistry.components.size === 0) {
+                    // Remove document-level event listeners that were shared across all components
+                    document.removeEventListener('visibilitychange', window._wakaPACGlobalHandlers.visibility);
+                    window.removeEventListener('scroll', window._wakaPACGlobalHandlers.scroll);
+                    window.removeEventListener('resize', window._wakaPACGlobalHandlers.resize);
+
+                    // Clean up global handler references to prevent memory leaks
+                    delete window._wakaPACGlobalHandlers;
+                    delete window._wakaPACBrowserListeners;
+
+                    // Clear any pending timeouts to prevent them from firing after cleanup
+                    // Clear scroll debounce timeout if it exists
+                    if (window._wakaPACScrollTimeout) {
+                        clearTimeout(window._wakaPACScrollTimeout);
+                    }
+
+                    // Clear resize debounce timeout if it exists
+                    if (window._wakaPACResizeTimeout) {
+                        clearTimeout(window._wakaPACResizeTimeout);
+                    }
+                }
             },
 
             /**
@@ -3210,27 +3516,87 @@
                 // Remove this component from parent's children set
                 if (this.parent) {
                     this.parent.children.delete(this);
-                    this.parent = null;
                 }
 
                 // Orphan all child components by removing parent reference
                 this.children.forEach(child => {
-                    child.parent = null;
+                    if (child.parent === this) {
+                        child.parent = null;
+                    }
                 });
 
+                // Clear all references
+                this.parent = null;
                 this.children.clear();
             },
 
             /**
-             * Removes all registered event listeners from the container element
-             * Prevents memory leaks and unwanted event handling after destruction
+             * Cleans up reactive references to prevent memory leaks and circular references
+             * This method is typically called during component destruction or cleanup phases
+             */
+            _cleanupReactiveReferences() {
+                // Check if the abstraction object exists before attempting cleanup
+                if (this.abstraction) {
+                    // Iterate through all properties of the abstraction object
+                    // Clear method references that might create cycles
+                    Object.keys(this.abstraction).forEach(key => {
+                        // Get the current property value
+                        const value = this.abstraction[key];
+
+                        // Check if the value is a function and appears to be a bound method
+                        // Bound methods often contain references to their original context,
+                        // which can create circular references and prevent garbage collection
+                        if (typeof value === 'function' && value.name.includes('bound')) {
+                            // These are bound methods, clear them to break potential circular references
+                            // Setting to null allows the garbage collector to reclaim the memory
+                            this.abstraction[key] = null;
+                        }
+                    });
+                }
+            },
+
+            /**
+             * Removes all event listeners that were registered by this component
+             * This method prevents memory leaks by ensuring event handlers are properly cleaned up
              */
             _removeEventListeners() {
+                // Iterate through all stored event listeners
                 this.eventListeners.forEach((handler, type) => {
+                    // Remove the event listener from the container element
+                    // The 'true' parameter indicates this was registered with capture=true
+                    // It's important to use the same parameters (capture flag) that were used when adding the listener
                     this.container.removeEventListener(type, handler, true);
                 });
 
+                // Clear the Map to remove all stored references
                 this.eventListeners.clear();
+            },
+
+            /**
+             * Cleans up viewport tracking resources to prevent memory leaks
+             * This method should be called when the component is being destroyed or no longer needs viewport tracking
+             */
+            _cleanupViewportTracking() {
+                // Clean up intersection observer
+                // The IntersectionObserver API is used to track when elements enter/exit the viewport
+                if (this.intersectionObserver) {
+                    // Disconnect the observer to stop monitoring all target elements
+                    // This prevents the observer from continuing to fire callbacks after cleanup
+                    this.intersectionObserver.disconnect();
+
+                    // Set reference to null to allow garbage collection
+                    // Without this, the observer and its associated DOM references might remain in memory
+                    this.intersectionObserver = null;
+                }
+
+                // Remove from per-instance tracking
+                // Check if the global viewport components registry exists
+                if (window._wakaPACViewportComponents) {
+                    // Remove this component instance from the global Set/Map
+                    // This prevents the global registry from holding a reference to this component
+                    // which could prevent proper garbage collection of the component
+                    window._wakaPACViewportComponents.delete(this);
+                }
             },
 
             /**
@@ -3240,7 +3606,7 @@
             _nullifyReferences() {
                 this.abstraction = null;
                 this.container = null;
-            }
+            },
         };
 
         // Initialize the control object
@@ -3371,6 +3737,30 @@
                  * @returns {boolean|boolean|*|string|string}
                  */
                 readDOMValue: (elementSelector) => control.readDOMValue(elementSelector),
+
+                /**
+                 * Formats a value for display in text content or UI elements
+                 * Handles null/undefined, objects, arrays, and primitives appropriately
+                 * @param {*} value - Value to format for display
+                 * @returns {string} Human-readable formatted string
+                 */
+                formatValue: (value) => Utils.formatValue(value),
+
+                /**
+                 * Escapes HTML entities to prevent XSS when displaying user input
+                 * Converts <, >, &, quotes to their HTML entity equivalents
+                 * @param {string} str - String to escape HTML entities in
+                 * @returns {string} HTML-safe escaped string
+                 */
+                escapeHTML: (str) => Utils.escapeHTML(str),
+
+                /**
+                 * Strips all HTML tags from user input to get plain text
+                 * Use this for user-generated content that should not contain HTML
+                 * @param {string} html - HTML string to sanitize
+                 * @returns {string} Plain text with all HTML tags removed
+                 */
+                sanitizeUserInput: (html) => Utils.sanitizeUserInput(html),
 
                 /**
                  * Destroys the component and cleans up resources

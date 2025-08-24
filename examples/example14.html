@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakaPAC Lazy Loading Images</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .content {
+            padding: 20px;
+        }
+
+        .spacer {
+            height: 800px;
+            background: linear-gradient(to bottom, #f8f9fa, #e9ecef);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: #6c757d;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+
+        .image-container {
+            margin: 40px 0;
+            padding: 20px;
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            text-align: center;
+            height: 300px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .image-container.containerVisible {
+            border-color: #28a745;
+            background: #f8fff9;
+        }
+
+        .image-content {
+            width: 100%;
+            height: 240px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .lazy-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            transition: opacity 0.5s ease-in-out;
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0;
+        }
+
+        .lazy-image.imageLoaded {
+            opacity: 1;
+        }
+
+        .loading-placeholder {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
+                        linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
+                        linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
+                        linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-size: 16px;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .error-placeholder {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #fee 0%, #fdd 100%);
+            border: 2px dashed #f5c6cb;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #721c24;
+            font-size: 16px;
+            position: absolute;
+            top: 0;
+            left: 0;
+            text-align: center;
+            gap: 10px;
+        }
+
+        .error-icon {
+            font-size: 32px;
+            opacity: 0.7;
+        }
+
+        .retry-button {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+
+        .retry-button:hover {
+            background: #c82333;
+        }
+
+        .retry-button:active {
+            transform: translateY(1px);
+        }
+
+        .status {
+            margin: 10px 0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .status.containerVisible {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .debug {
+            margin: 5px 0;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .info {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 20px 0;
+            color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🖼️ WakaPAC Lazy Loading Images</h1>
+        <p>Scroll down to see images load when they become visible!</p>
+    </div>
+
+    <div class="content">
+        <div class="info">
+            <strong>How it works:</strong> WakaPAC automatically tracks viewport visibility.
+            When <code>containerVisible</code> becomes true, the image loads.
+            The framework uses IntersectionObserver when available, falling back to scroll events.
+        </div>
+
+        <div class="spacer">
+            Scroll down to see lazy loading in action! ⬇️
+        </div>
+
+        <div id="image1" data-pac-bind="class:containerVisible">
+            <div class="image-container">
+                <div class="status"
+                     data-pac-bind="class:containerVisible,text:containerVisible ? 'Image is VISIBLE in viewport' : 'Image is HIDDEN from viewport'"></div>
+                <div class="debug"
+                     data-pac-bind="text:'Loading state: ' + loadingState + ' (attempts: ' + retryAttempts + ')'"></div>
+                <div class="image-content">
+                    <img class="lazy-image"
+                         data-pac-bind="src: containerVisible ? imageUrl : '', class: imageLoaded ? 'imageLoaded' : ''"
+                         alt="Beautiful landscape">
+                    <div class="loading-placeholder" data-pac-bind="visible: loadingState === 'loading'">
+                        {{containerVisible ? 'Loading image...' : 'Image will load when visible'}}
+                    </div>
+                    <div class="error-placeholder" data-pac-bind="visible: loadingState === 'error'">
+                        <div class="error-icon">⚠️</div>
+                        <div>Failed to load image</div>
+                        <button class="retry-button" data-pac-bind="click: retryLoad">Retry</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="spacer">Keep scrolling for more images! ⬇️</div>
+
+        <div id="image2" data-pac-bind="class:containerVisible">
+            <div class="image-container">
+                <div class="status"
+                     data-pac-bind="class:containerVisible,text:containerVisible ? 'Image is VISIBLE in viewport' : 'Image is HIDDEN from viewport'"></div>
+                <div class="debug"
+                     data-pac-bind="text:'Loading state: ' + loadingState + ' (attempts: ' + retryAttempts + ')'"></div>
+                <div class="image-content">
+                    <img class="lazy-image"
+                         data-pac-bind="src: containerVisible ? imageUrl : '', class: imageLoaded ? 'imageLoaded' : ''"
+                         alt="City skyline">
+                    <div class="loading-placeholder" data-pac-bind="visible: loadingState === 'loading'">
+                        {{containerVisible ? 'Loading image...' : 'Image will load when visible'}}
+                    </div>
+                    <div class="error-placeholder" data-pac-bind="visible: loadingState === 'error'">
+                        <div class="error-icon">⚠️</div>
+                        <div>Failed to load image</div>
+                        <button class="retry-button" data-pac-bind="click: retryLoad">Retry</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="spacer">One more! ⬇️</div>
+
+        <div id="image3" data-pac-bind="class:containerVisible">
+            <div class="image-container">
+                <div class="status"
+                     data-pac-bind="class:containerVisible,text:containerVisible ? 'Image is VISIBLE in viewport' : 'Image is HIDDEN from viewport'"></div>
+                <div class="debug"
+                     data-pac-bind="text:'Loading state: ' + loadingState + ' (attempts: ' + retryAttempts + ')'"></div>
+                <div class="image-content">
+                    <img class="lazy-image"
+                         data-pac-bind="src: containerVisible ? imageUrl : '', class: imageLoaded ? 'imageLoaded' : ''"
+                         alt="Ocean waves">
+                    <div class="loading-placeholder" data-pac-bind="visible: loadingState === 'loading'">
+                        {{containerVisible ? 'Loading image...' : 'Image will load when visible'}}
+                    </div>
+                    <div class="error-placeholder" data-pac-bind="visible: loadingState === 'error'">
+                        <div class="error-icon">⚠️</div>
+                        <div>Failed to load image</div>
+                        <button class="retry-button" data-pac-bind="click: retryLoad">Retry</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="spacer">🎉 All images loaded!</div>
+    </div>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    // Sample high-quality images from Unsplash
+    const imageUrls = [
+        'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&h=400&fit=crop',
+        'https://images.unsplash.com/photo-1514924013411-cbf25faa35bb?w=800&h=400&fit=crop',
+        'https://images.unsplash.com/photo-1505142468610-359e7d316be0?w=800&h=400&fit=crop'
+    ];
+
+    // Create lazy loading components for each image
+    imageUrls.forEach((url, index) => {
+        wakaPAC(`#image${index + 1}`, {
+            imageUrl: url,
+            imageLoaded: false,
+            loadingState: 'idle', // 'idle', 'loading', 'loaded', 'error'
+            retryAttempts: 0,
+            maxRetries: 3,
+
+            // Method to load image with error handling
+            loadImage() {
+                // Prevent multiple loads
+                if (this.loadingState === 'loading') {
+                    return;
+                }
+
+                this.loadingState = 'loading';
+                console.log(`Image ${index + 1} loading attempt ${this.retryAttempts + 1}...`);
+
+                const img = new Image();
+
+                img.onload = () => {
+                    console.log(`Image ${index + 1} loaded successfully!`);
+                    this.loadingState = 'loaded';
+                    this.imageLoaded = true;
+                    this.retryAttempts = 0; // Reset on success
+                };
+
+                img.onerror = () => {
+                    this.retryAttempts++;
+                    console.error(`Image ${index + 1} failed to load (attempt ${this.retryAttempts})`);
+
+                    if (this.retryAttempts >= this.maxRetries) {
+                        console.error(`Image ${index + 1} failed after ${this.maxRetries} attempts`);
+                        this.loadingState = 'error';
+                        this.imageLoaded = false;
+                    } else {
+                        // Auto-retry with exponential backoff
+                        const delay = Math.min(1000 * Math.pow(2, this.retryAttempts - 1), 10000);
+                        console.log(`Retrying image ${index + 1} in ${delay}ms...`);
+
+                        setTimeout(() => {
+                            this.loadImage();
+                        }, delay);
+                    }
+                };
+
+                // Start loading
+                img.src = this.imageUrl;
+            },
+
+            // Manual retry method for button clicks
+            retryLoad() {
+                console.log(`Manual retry for image ${index + 1}`);
+                this.retryAttempts = 0; // Reset attempts on manual retry
+                this.loadImage();
+            },
+
+            watch: {
+                containerVisible(isVisible, wasVisible) {
+                    if (isVisible && !wasVisible && this.loadingState === 'idle') {
+                        console.log(`Image ${index + 1} became visible, starting load...`);
+                        this.loadImage();
+                    }
+                }
+            }
+        });
+    });
+</script>
+</body>
+</html>
