@@ -250,11 +250,49 @@
                 return '';
             }
 
-            if (typeof value === 'object') {
-                return Array.isArray(value) ? `[${value.length} items]` : JSON.stringify(value, null, 2);
+            if (typeof value !== 'object') {
+                return String(value);
             }
 
-            return String(value);
+            if (Array.isArray(value)) {
+                return `[${value.length} items]`;
+            }
+
+            return JSON.stringify(value, null, 2);
+        },
+
+        /**
+         * Sanitizes user input by stripping HTML tags and returning escaped HTML
+         * Uses the browser's built-in text content handling to safely process untrusted input
+         * @param {string} html - The potentially unsafe HTML string to sanitize
+         * @returns {string} The sanitized string with HTML tags stripped and special characters escaped
+         */
+        sanitizeUserInput(html) {
+            // Create a temporary div element to leverage browser's text content handling
+            const div = document.createElement('div');
+
+            // Set textContent (not innerHTML) to automatically strip all HTML tags
+            // The browser treats the input as plain text, removing any markup
+            div.textContent = html;
+
+            // Return the innerHTML, which gives us the text with HTML entities properly escaped
+            // This converts characters like < > & " ' into their HTML entity equivalents
+            return div.innerHTML;
+        },
+
+        /**
+         * Manually escapes HTML special characters to prevent XSS attacks
+         * Converts potentially dangerous characters into their HTML entity equivalents
+         * @param {string} str - The string containing characters that need to be escaped
+         * @returns {string} The escaped string safe for insertion into HTML
+         */
+        escapeHTML(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')    // Replace & first (must be done before other entities)
+                .replace(/</g, '&lt;')     // Replace < with less-than entity
+                .replace(/>/g, '&gt;')     // Replace > with greater-than entity
+                .replace(/"/g, '&quot;')   // Replace double quotes with quote entity
+                .replace(/'/g, '&#39;');   // Replace single quotes with apostrophe entity
         }
     };
 
@@ -293,6 +331,13 @@
             if (component) {
                 this.components.delete(selector);
                 this.hierarchyCache = new WeakMap(); // Clear cache
+
+                // If this was the last component, clean up global state
+                if (this.components.size === 0) {
+                    if (window._wakaPACViewportComponents) {
+                        window._wakaPACViewportComponents.clear();
+                    }
+                }
             }
 
             return component;
@@ -319,6 +364,7 @@
                         parent = component;
                     }
                 });
+
                 element = element.parentElement;
             }
 
@@ -1139,6 +1185,7 @@
          */
         const control = {
             // Core state
+            selector: selector,
             container: container,
             config: config,
             original: abstraction,
@@ -1376,40 +1423,42 @@
 
                 // Track page visibility changes (tab switching, window minimizing, etc.)
                 // Useful for pausing animations or reducing CPU usage when page is not visible
-                document.addEventListener('visibilitychange', () => {
-                    window.PACRegistry.components.forEach(component => {
-                        // document.hidden is true when page is not visible, so invert it
-                        // browserVisible will be false when tab is hidden/minimized
-                        component.abstraction.browserVisible = !document.hidden;
-                    });
-                });
+                const visibilityHandler = () => {
+                    if (window.PACRegistry && window.PACRegistry.components.size > 0) {
+                        window.PACRegistry.components.forEach(component => {
+                            // document.hidden is true when page is not visible, so invert it
+                            // browserVisible will be false when tab is hidden/minimized
+                            component.abstraction.browserVisible = !document.hidden;
+                        });
+                    }
+                };
 
                 // Track scroll position changes across the page
                 // Updates all registered components with current scroll position and document height
-                let scrollTimeout;
-
-                window.addEventListener('scroll', () => {
+                const scrollHandler = () => {
                     // Debounce scroll events for performance
-                    clearTimeout(scrollTimeout);
+                    clearTimeout(window._wakaPACScrollTimeout);
 
-                    scrollTimeout = setTimeout(() => {
-                        // Iterate through all registered PAC components
-                        window.PACRegistry.components.forEach(component => {
-                            component.abstraction.browserScrollX = window.scrollX;
-                            component.abstraction.browserScrollY = window.scrollY;
-                        });
+                    // Iterate through all registered PAC components
+                    window._wakaPACScrollTimeout = setTimeout(() => {
+                        if (window.PACRegistry && window.PACRegistry.components.size > 0) {
+                            window.PACRegistry.components.forEach(component => {
+                                component.abstraction.browserScrollX = window.scrollX;
+                                component.abstraction.browserScrollY = window.scrollY;
+                            });
+                        }
                     }, 16);
-                });
+                };
 
                 // Track window resize events to handle responsive behavior
                 // Updates components when user resizes browser window or rotates mobile device
-                let resizeTimeout;
-
-                window.addEventListener('resize', () => {
+                const resizeHandler = () => {
                     // Debounce resize events for performance
-                    clearTimeout(resizeTimeout);
+                    clearTimeout(window._wakaPACResizeTimeout);
 
-                    resizeTimeout = setTimeout(() => {
+                    // Iterate through all registered PAC components
+                    window._wakaPACResizeTimeout = setTimeout(() => {
+                        if (!window.PACRegistry || window.PACRegistry.components.size === 0) return;
                         window.PACRegistry.components.forEach(component => {
                             component.abstraction.browserViewportWidth = window.innerWidth;
                             component.abstraction.browserViewportHeight = window.innerHeight;
@@ -1419,7 +1468,19 @@
                             component.abstraction.browserScrollY = window.scrollY;
                         });
                     }, 100);
-                });
+                };
+
+                // Store handlers globally for cleanup
+                window._wakaPACGlobalHandlers = {
+                    visibility: visibilityHandler,
+                    scroll: scrollHandler,
+                    resize: resizeHandler
+                };
+
+                // Add event listeners
+                document.addEventListener('visibilitychange', visibilityHandler);
+                window.addEventListener('scroll', scrollHandler);
+                window.addEventListener('resize', resizeHandler);
             },
 
             /**
@@ -3362,13 +3423,31 @@
              * proper resource deallocation and prevent memory leaks
              */
             destroy() {
+                // Clear timeouts first (might trigger other operations)
                 this._clearTimeouts();
-                this._clearCaches();
+
+                // Remove from registry (this also handles global cleanup)
                 this._unregisterFromGlobalRegistry();
-                this._clearBindings();
+
+                // Clean up hierarchy (break circular references)
                 this._cleanupHierarchy();
+
+                // Clean up reactive references
+                this._cleanupReactiveReferences();
+
+                // Remove event listeners
                 this._removeEventListeners();
+
+                // Clean up viewport tracking
                 this._cleanupViewportTracking();
+
+                // Clear caches
+                this._clearCaches();
+
+                // Clear bindings
+                this._clearBindings();
+
+                // Final nullification (MOVED TO END)
                 this._nullifyReferences();
             },
 
@@ -3397,8 +3476,32 @@
              * referenced by the global registry system
              */
             _unregisterFromGlobalRegistry() {
-                // Note: 'selector' should be 'this.selector' if it's an instance property
-                window.PACRegistry.unregister(selector);
+                // Unregister this component instance from the global PAC registry
+                window.PACRegistry.unregister(this.selector);
+
+                // Check if this was the last component and clean up global resources
+                // Clean up global listeners if this was the last component
+                if (window._wakaPACGlobalHandlers && window.PACRegistry.components.size === 0) {
+                    // Remove document-level event listeners that were shared across all components
+                    document.removeEventListener('visibilitychange', window._wakaPACGlobalHandlers.visibility);
+                    window.removeEventListener('scroll', window._wakaPACGlobalHandlers.scroll);
+                    window.removeEventListener('resize', window._wakaPACGlobalHandlers.resize);
+
+                    // Clean up global handler references to prevent memory leaks
+                    delete window._wakaPACGlobalHandlers;
+                    delete window._wakaPACBrowserListeners;
+
+                    // Clear any pending timeouts to prevent them from firing after cleanup
+                    // Clear scroll debounce timeout if it exists
+                    if (window._wakaPACScrollTimeout) {
+                        clearTimeout(window._wakaPACScrollTimeout);
+                    }
+
+                    // Clear resize debounce timeout if it exists
+                    if (window._wakaPACResizeTimeout) {
+                        clearTimeout(window._wakaPACResizeTimeout);
+                    }
+                }
             },
 
             /**
@@ -3418,39 +3521,85 @@
                 // Remove this component from parent's children set
                 if (this.parent) {
                     this.parent.children.delete(this);
-                    this.parent = null;
                 }
 
                 // Orphan all child components by removing parent reference
                 this.children.forEach(child => {
-                    child.parent = null;
+                    if (child.parent === this) {
+                        child.parent = null;
+                    }
                 });
 
+                // Clear all references
+                this.parent = null;
                 this.children.clear();
             },
 
             /**
-             * Removes all registered event listeners from the container element
-             * Prevents memory leaks and unwanted event handling after destruction
+             * Cleans up reactive references to prevent memory leaks and circular references
+             * This method is typically called during component destruction or cleanup phases
+             */
+            _cleanupReactiveReferences() {
+                // Check if the abstraction object exists before attempting cleanup
+                if (this.abstraction) {
+                    // Iterate through all properties of the abstraction object
+                    // Clear method references that might create cycles
+                    Object.keys(this.abstraction).forEach(key => {
+                        // Get the current property value
+                        const value = this.abstraction[key];
+
+                        // Check if the value is a function and appears to be a bound method
+                        // Bound methods often contain references to their original context,
+                        // which can create circular references and prevent garbage collection
+                        if (typeof value === 'function' && value.name.includes('bound')) {
+                            // These are bound methods, clear them to break potential circular references
+                            // Setting to null allows the garbage collector to reclaim the memory
+                            this.abstraction[key] = null;
+                        }
+                    });
+                }
+            },
+
+            /**
+             * Removes all event listeners that were registered by this component
+             * This method prevents memory leaks by ensuring event handlers are properly cleaned up
              */
             _removeEventListeners() {
+                // Iterate through all stored event listeners
                 this.eventListeners.forEach((handler, type) => {
+                    // Remove the event listener from the container element
+                    // The 'true' parameter indicates this was registered with capture=true
+                    // It's important to use the same parameters (capture flag) that were used when adding the listener
                     this.container.removeEventListener(type, handler, true);
                 });
 
+                // Clear the Map to remove all stored references
                 this.eventListeners.clear();
             },
 
-            // Add to cleanup section
+            /**
+             * Cleans up viewport tracking resources to prevent memory leaks
+             * This method should be called when the component is being destroyed or no longer needs viewport tracking
+             */
             _cleanupViewportTracking() {
                 // Clean up intersection observer
+                // The IntersectionObserver API is used to track when elements enter/exit the viewport
                 if (this.intersectionObserver) {
+                    // Disconnect the observer to stop monitoring all target elements
+                    // This prevents the observer from continuing to fire callbacks after cleanup
                     this.intersectionObserver.disconnect();
+
+                    // Set reference to null to allow garbage collection
+                    // Without this, the observer and its associated DOM references might remain in memory
                     this.intersectionObserver = null;
                 }
 
                 // Remove from per-instance tracking
+                // Check if the global viewport components registry exists
                 if (window._wakaPACViewportComponents) {
+                    // Remove this component instance from the global Set/Map
+                    // This prevents the global registry from holding a reference to this component
+                    // which could prevent proper garbage collection of the component
                     window._wakaPACViewportComponents.delete(this);
                 }
             },
@@ -3462,7 +3611,7 @@
             _nullifyReferences() {
                 this.abstraction = null;
                 this.container = null;
-            }
+            },
         };
 
         // Initialize the control object
@@ -3593,6 +3742,30 @@
                  * @returns {boolean|boolean|*|string|string}
                  */
                 readDOMValue: (elementSelector) => control.readDOMValue(elementSelector),
+
+                /**
+                 * Formats a value for display in text content or UI elements
+                 * Handles null/undefined, objects, arrays, and primitives appropriately
+                 * @param {*} value - Value to format for display
+                 * @returns {string} Human-readable formatted string
+                 */
+                formatValue: (value) => Utils.formatValue(value),
+
+                /**
+                 * Escapes HTML entities to prevent XSS when displaying user input
+                 * Converts <, >, &, quotes to their HTML entity equivalents
+                 * @param {string} str - String to escape HTML entities in
+                 * @returns {string} HTML-safe escaped string
+                 */
+                escapeHTML: (str) => Utils.escapeHTML(str),
+
+                /**
+                 * Strips all HTML tags from user input to get plain text
+                 * Use this for user-generated content that should not contain HTML
+                 * @param {string} html - HTML string to sanitize
+                 * @returns {string} Plain text with all HTML tags removed
+                 */
+                sanitizeUserInput: (html) => Utils.sanitizeUserInput(html),
 
                 /**
                  * Destroys the component and cleans up resources
