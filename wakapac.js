@@ -2078,6 +2078,10 @@
                     return this.createCheckedBinding(element, target);
                 }
 
+                if (type === 'class') {
+                    return this.createClassBinding(element, target);
+                }
+
                 if (Utils.isEventType(type)) {
                     return this.createEventBinding(element, type, target);
                 }
@@ -2151,6 +2155,14 @@
                     target: target,
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
+                });
+            },
+
+            createClassBinding: function(element, target) {
+                return this.createBinding('class', element, {
+                    target: target,
+                    parsedExpression: null,
+                    dependencies: null
                 });
             },
 
@@ -2682,9 +2694,6 @@
                 const parsed = this.getParsedExpression(binding);
 
                 // Evaluate the expression in the current context to get the boolean result
-                // Examples:
-                // - "isActive" with context {isActive: true} → true
-                // - "todo.completed" with context {todo: {completed: false}} → false
                 const actualValue = ExpressionParser.evaluate(parsed, context);
 
                 // Apply the class binding by adding/removing the CSS class based on the boolean value
@@ -2998,7 +3007,8 @@
                     // Check if this binding matches the current event criteria
                     if (binding.type === 'event' &&
                         binding.eventType === eventType &&
-                        binding.element === target) {
+                        (binding.element === target || binding.element.contains(target))
+                    ) {
 
                         // Get the method reference from the abstraction object
                         const method = this.abstraction[binding.method];
@@ -3271,17 +3281,10 @@
              * @param {*} value - The evaluated expression value
              */
             applyClassBinding(element, target, value) {
-                // Extract the class name from the target expression
-                // For "todo.completed" -> "completed"
-                // For "item.active" -> "active"
-                // For "myClass" -> "myClass"
-                const className = target.includes('.') ? target.split('.').pop() : target;
-
-                // Apply or remove the class based on the boolean value
                 if (value) {
-                    element.classList.add(className);
+                    element.classList.add(value);
                 } else {
-                    element.classList.remove(className);
+                    element.classList.remove(value);
                 }
             },
 
