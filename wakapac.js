@@ -2395,7 +2395,7 @@
              * Creates a foreach binding for rendering lists
              */
             createForeachBinding(element, target) {
-                const bindingElement = this.createBinding('foreach', element, {
+                return this.createBinding('foreach', element, {
                     target: target,
                     collection: target,
                     itemName: element.getAttribute('data-pac-item') || 'item',
@@ -2403,10 +2403,6 @@
                     template: element.innerHTML,
                     previous: []
                 });
-
-                element.innerHTML = '';
-
-                return bindingElement;
             },
 
             /**
@@ -2893,6 +2889,9 @@
                 const parsed = this.getParsedExpression(binding);
                 const arrayValue = ExpressionParser.evaluate(parsed, context);
 
+                console.log('Foreach binding - array:', JSON.stringify(arrayValue));
+                console.log('Element before clear:', binding.element.innerHTML);
+
                 // Ensure we have a valid array to work with
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
                 const previous = binding.previous || [];
@@ -2927,6 +2926,8 @@
                 // Replace all existing content with new rendered items
                 binding.element.innerHTML = '';
                 binding.element.appendChild(fragment);
+
+                console.log('Element after render:', binding.element.innerHTML);
             },
 
             /**
@@ -3014,19 +3015,23 @@
 
             /**
              * Processes a template element for foreach loops, handling text interpolation and data bindings
-             * @param {Element} element - The DOM element to process
-             * @param {*} item - The current item from the collection being iterated
-             * @param {number} index - The current index in the iteration
-             * @param {string} itemName - The variable name for the current item (e.g., 'user')
-             * @param {string} indexName - The variable name for the current index (e.g., 'i')
-             * @param {string} collectionName - The name of the collection being iterated
+             * with proper support for nested foreach loops by maintaining a scope chain of variables.
+             * @param {Element} element - The DOM element to process (template container)
+             * @param {*} item - The current item from the collection being iterated over
+             * @param {number} index - The zero-based index of the current item in the iteration
+             * @param {string} itemName - The variable name for the current item (e.g., 'user', 'product')
+             * @param {string} indexName - The variable name for the current index (e.g., 'i', 'index')
+             * @param {string} collectionName - The name of the collection being iterated over
+             * @param {Object} [parentVars={}] - Variables inherited from parent foreach scopes for nesting support
              */
-            processForeachTemplate(element, item, index, itemName, indexName, collectionName) {
-                // Create foreach variables for this iteration
-                const foreachVars = {
+            processForeachTemplate(element, item, index, itemName, indexName, collectionName, parentVars = {}) {
+                console.log('Processing template for item:', JSON.stringify(item));
+
+                // Create foreach variables for this iteration, inheriting from parent scopes
+                const foreachVars = Object.assign({}, parentVars, {
                     [itemName]: item,
                     [indexName]: index
-                };
+                });
 
                 // Create a tree walker to traverse all text nodes in the element
                 const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -3040,60 +3045,271 @@
 
                 // Process each text node for template interpolation
                 textNodes.forEach(textNode => {
-                    // Replace template expressions in the format {{expression}}
+                    // Replace template expressions with improved variable resolution
                     textNode.textContent = textNode.textContent.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, expr) => {
                         expr = expr.trim();
 
-                        // Handle index variable (e.g., {{i}} -> current index)
-                        if (expr === indexName) {
-                            return index;
-                        }
-
-                        // Handle item variable (e.g., {{item}} -> formatted item value)
-                        if (expr === itemName) {
-                            return Utils.formatValue(item);
-                        }
-
-                        // Handle item property access (e.g., {{item.name}} -> item's name property)
-                        if (expr.startsWith(`${itemName}.`)) {
-                            // Extract the property path after the item name
-                            return Utils.formatValue(Utils.getNestedValue(item, expr.substring(itemName.length + 1)));
-                        }
-
-                        // If no pattern matches, return the original expression unchanged
-                        return match;
+                        // Try to resolve the expression using the current scope chain
+                        const resolved = this.resolveTemplateExpression(expr, foreachVars);
+                        return resolved !== undefined ? Utils.formatValue(resolved) : match;
                     });
                 });
 
-                // Process data binding attributes on the current element and all its descendants
-                [element, ...element.querySelectorAll('[data-pac-bind]')].forEach(el => {
+                // Find immediate child foreach elements to handle nested loops separately
+                const childForeachElements = this.findDirectChildForeachElements(element);
+
+                // Process non-foreach binding elements first
+                let bindingElements = Array.from(element.querySelectorAll('[data-pac-bind]'))
+                    .filter(el => !childForeachElements.includes(el));
+
+                // Also check if the current element itself has bindings
+                // Also check if the current element itself has bindings
+                if (element.hasAttribute('data-pac-bind')) {
+                    bindingElements.push(element);
+                }
+
+                bindingElements.forEach(el => {
                     const bindings = el.getAttribute('data-pac-bind');
+                    if (!bindings) return;
 
-                    // Skip elements without binding attributes
-                    if (!bindings) {
-                        return;
-                    }
-
-                    // Parse multiple bindings separated by commas
+                    // Parse and process each binding
                     this.parseBindingString(bindings).forEach(({ type, target }) => {
-                        // Set up two-way binding for form inputs
-                        if ((type === 'value' || type === 'checked') && target.startsWith(`${itemName}.`)) {
-                            // Extract the property path from the target
-                            const propertyPath = target.substring(itemName.length + 1);
+                        // Skip nested foreach bindings - they'll be handled separately
+                        if (type === 'foreach') return;
 
-                            // Create a full path including collection and index for proper data binding
-                            this.setupInputElement(el, `${collectionName}.${index}.${propertyPath}`, type);
+                        // Set up two-way binding for form inputs
+                        if ((type === 'value' || type === 'checked') && this.isNestedProperty(target, foreachVars)) {
+                            const propertyPath = this.buildNestedPropertyPath(target, foreachVars, collectionName, index);
+                            this.setupInputElement(el, propertyPath, type);
                         }
 
-                        // Process other types of bindings using unified expression evaluation
+                        // Process other types of bindings
                         this.processForeachBinding(el, type, target, foreachVars);
                     });
                 });
+
+                // Now handle nested foreach loops with proper scope inheritance
+                childForeachElements.forEach(childElement => {
+                    const bindingAttr = childElement.getAttribute('data-pac-bind');
+                    const foreachMatch = bindingAttr.match(/foreach:\s*([^,}]+)/);
+
+                    if (foreachMatch) {
+                        const nestedTarget = foreachMatch[1].trim();
+                        const nestedItemName = childElement.getAttribute('data-pac-item') || 'item';
+                        const nestedIndexName = childElement.getAttribute('data-pac-index') || 'index';
+
+                        // Create nested foreach binding with proper scope inheritance
+                        this.processNestedForeachBinding(
+                            childElement,
+                            nestedTarget,
+                            nestedItemName,
+                            nestedIndexName,
+                            foreachVars
+                        );
+                    }
+                });
+
+                console.log('Element after text processing:', element.innerHTML);
             },
 
             /**
-             * Processes individual bindings within foreach templates by creating lightweight
-             * binding objects and using the unified updateBinding system
+             * Resolves template expressions using a hierarchical variable scope chain.
+             * @param {string} expr - The expression to resolve (e.g., 'item', 'item.name', 'user.profile.email')
+             * @param {Object} foreachVars - Object containing all foreach variables from current and parent scopes
+             * @returns {*} The resolved value, or undefined if the expression cannot be resolved
+             */
+            resolveTemplateExpression(expr, foreachVars) {
+                // Try foreach variables first (most specific scope)
+                if (foreachVars.hasOwnProperty(expr)) {
+                    return foreachVars[expr];
+                }
+
+                // Check for property access on foreach variables
+                for (const [varName, varValue] of Object.entries(foreachVars)) {
+                    if (expr.startsWith(`${varName}.`)) {
+                        const propertyPath = expr.substring(varName.length + 1);
+                        return Utils.getNestedValue(varValue, propertyPath);
+                    }
+                }
+
+                // Fall back to component abstraction
+                return Utils.getNestedValue(this.abstraction, expr);
+            },
+
+            /**
+             * Finds direct child elements that have foreach bindings to prevent improper nesting processing.
+             * @param {Element} element - The parent element to search within
+             * @returns {Element[]} Array of direct child elements that have foreach bindings
+             */
+            findDirectChildForeachElements(element) {
+                const result = [];
+                const children = Array.from(element.children);
+
+                children.forEach(child => {
+                    const bindings = child.getAttribute('data-pac-bind');
+
+                    if (bindings && bindings.includes('foreach:')) {
+                        result.push(child);
+                    }
+                });
+
+                return result;
+            },
+
+            /**
+             * Processes a nested foreach binding by evaluating the target expression
+             * and rendering each item in the resulting array
+             * @param {HTMLElement} element - The DOM element containing the foreach template
+             * @param {string} target - The expression to evaluate (e.g., "items.children")
+             * @param {string} itemName - Variable name for each item (e.g., "child")
+             * @param {string} indexName - Variable name for the index (e.g., "childIndex")
+             * @param {Object} parentVars - Variables from parent scope (outer foreach loops)
+             */
+            processNestedForeachBinding(element, target, itemName, indexName, parentVars) {
+                // Create evaluation context by merging abstraction data with foreach variables
+                // This allows access to both component data and parent loop variables
+                const context = Object.assign({}, this.abstraction, parentVars);
+
+                // Parse the binding expression into an evaluatable format
+                // Converts string like "items.children" into an Abstract Syntax Tree
+                const parsed = ExpressionParser.parseExpression(target);
+
+                // Evaluate the AST against the current context to get the actual array
+                // This resolves the expression to its concrete value
+                const nestedArray = ExpressionParser.evaluate(parsed, context);
+
+                // Safety check: ensure we have a valid array to iterate over
+                // If the expression doesn't resolve to an array, exit early
+                if (!Array.isArray(nestedArray)) {
+                    return;
+                }
+
+                // Store original template HTML before clearing the element
+                // This template will be cloned for each array item
+                const template = element.innerHTML;
+
+                // Clear the element to prepare for new content
+                element.innerHTML = '';
+
+                // Create document fragment for efficient DOM manipulation
+                // Fragments allow batch DOM updates, improving performance
+                const fragment = document.createDocumentFragment();
+
+                // Iterate through each item in the nested array
+                nestedArray.forEach((nestedItem, nestedIndex) => {
+                    // Render individual item using the stored template
+                    // Pass all necessary context including parent variables
+                    const itemElement = this.renderNestedForeachItem(
+                        template,           // Original template HTML
+                        nestedItem,         // Current array item data
+                        nestedIndex,        // Current item index
+                        itemName,           // Variable name for the item
+                        indexName,          // Variable name for the index
+                        target,             // Original target expression
+                        parentVars          // Variables from parent scope for nested access
+                    );
+
+                    // Add the rendered item to the document fragment
+                    fragment.appendChild(itemElement);
+                });
+
+                // Append all rendered items to the DOM in a single operation
+                // This minimizes DOM reflows and improves performance
+                element.appendChild(fragment);
+            },
+
+            /**
+             * Renders a single item from a nested foreach loop by cloning the template
+             * and processing it with the current item's data and scope variables
+             * @param {string} template - HTML template string to clone for this item
+             * @param {*} item - The current array item data
+             * @param {number} index - The current item's index in the array
+             * @param {string} itemName - Variable name for the current item (e.g., "child")
+             * @param {string} indexName - Variable name for the current index (e.g., "childIndex")
+             * @param {string} collectionName - Name of the collection being iterated
+             * @param {Object} parentVars - Variables inherited from parent foreach scopes
+             * @returns {HTMLElement} Processed DOM element ready for insertion
+             */
+            renderNestedForeachItem(template, item, index, itemName, indexName, collectionName, parentVars) {
+                // Create a temporary container to parse the template HTML
+                // This allows us to work with actual DOM nodes rather than raw HTML strings
+                const tempContainer = document.createElement('div');
+                tempContainer.innerHTML = template.trim(); // Remove whitespace to avoid text nodes
+
+                // Convert NodeList to Array for easier manipulation
+                // This gives us access to array methods and ensures consistent behavior
+                const childNodes = Array.from(tempContainer.childNodes);
+
+                // Check if template contains a single element node
+                // Single elements are preferred as they don't need wrapper containers
+                if (childNodes.length === 1 && childNodes[0].nodeType === Node.ELEMENT_NODE) {
+                    // Extract the single element from the temporary container
+                    const element = childNodes[0];
+
+                    // Create a deep clone to avoid modifying the original template
+                    // Deep cloning ensures all child elements and attributes are copied
+                    const clone = element.cloneNode(true);
+
+                    // Process the cloned element with current item data and parent scope
+                    // This handles binding resolution, nested loops, and variable substitution
+                    this.processForeachTemplate(clone, item, index, itemName, indexName, collectionName, parentVars);
+
+                    // Return the processed single element
+                    return clone;
+                }
+
+                // Handle multiple nodes or text nodes in template
+                // When template has multiple root elements, we need a wrapper container
+                const wrapper = document.createElement('span'); // Use span as lightweight wrapper
+
+                // Clone each child node and add to wrapper
+                // This preserves the original template structure while creating an isolated copy
+                childNodes.forEach(node => {
+                    // Clone each node (element, text, comment, etc.) and append to wrapper
+                    wrapper.appendChild(node.cloneNode(true));
+                });
+
+                // Process the entire wrapper with all child nodes
+                // The wrapper acts as a single root element for processing
+                this.processForeachTemplate(wrapper, item, index, itemName, indexName, collectionName, parentVars);
+
+                // Return the wrapper containing all processed template nodes
+                return wrapper;
+            },
+
+            /**
+             * Checks if a target expression represents a nested property that should use foreach variables.
+             * @param {string} target - The binding target expression to check (e.g., "item.completed", "user.name")
+             * @param {Object} foreachVars - Object containing all available foreach variables from current and parent scopes
+             * @returns {boolean} True if the target starts with a foreach variable name, false otherwise
+             */
+            isNestedProperty(target, foreachVars) {
+                return Object.keys(foreachVars).some(varName =>
+                    target.startsWith(`${varName}.`)
+                );
+            },
+
+            /**
+             * Builds the proper property path for nested bindings in foreach contexts.
+             * @param {string} target - The original binding target expression (e.g., "item.completed")
+             * @param {Object} foreachVars - Object containing all foreach variables with their current values
+             * @param {string} collectionName - The name of the collection in the data model (e.g., "todos")
+             * @param {number} index - The current index in the foreach iteration
+             * @returns {string} The absolute property path for data binding, or original target if no match
+             */
+            buildNestedPropertyPath(target, foreachVars, collectionName, index) {
+                for (const [varName, varValue] of Object.entries(foreachVars)) {
+                    if (target.startsWith(`${varName}.`)) {
+                        const propertyPath = target.substring(varName.length + 1);
+                        return `${collectionName}.${index}.${propertyPath}`;
+                    }
+                }
+
+                return target;
+            },
+
+            /**
+             * Processes individual bindings within foreach templates by using the existing binding system
              * @param {HTMLElement} element - The DOM element to apply the binding to
              * @param {string} type - The type of binding (class, checked, event name, or attribute name)
              * @param {string} target - The expression or property path to evaluate
@@ -3102,16 +3318,19 @@
             processForeachBinding(element, type, target, foreachVars) {
                 // For event bindings, handle them specially since they need item/index passed
                 if (Utils.isEventType(type)) {
-                    this.handleEventBinding(element, type, target, foreachVars[Object.keys(foreachVars)[0]], foreachVars[Object.keys(foreachVars)[1]]);
+                    this.handleEventBinding(
+                        element, type, target,
+                        foreachVars[Object.keys(foreachVars)[0]],
+                        foreachVars[Object.keys(foreachVars)[1]]
+                    );
                     return;
                 }
 
-                // Create a lightweight binding object specifically for foreach evaluation
-                // This avoids the two-way data binding setup that createBindingByType does
+                // Create a temporary binding object for updateBindingGeneric
                 const tempBinding = this.createForeachEvaluationBinding(element, type, target);
 
-                // Use the unified updateBinding method with foreach context
-                this.updateBinding(tempBinding, null, foreachVars);
+                // Use the existing generic binding update system
+                this.updateBindingGeneric(tempBinding, null, foreachVars);
             },
 
             /**
@@ -3124,24 +3343,46 @@
              * @returns {Object} Lightweight binding object
              */
             createForeachEvaluationBinding(element, type, target) {
-                // Map foreach types to updateBinding types
+                // Map foreach-specific binding types to standard updateBinding types
+                // This translation layer allows foreach bindings to work with the existing binding system
                 const bindingTypeMap = {
-                    'visible': 'visible',
-                    'checked': 'checked',
-                    'value': 'input',
-                    'class': 'class'
+                    'visible': 'visible',    // Controls element visibility (display: none/block)
+                    'checked': 'checked',    // For checkbox/radio input checked state
+                    'value': 'input',        // For input element values (maps to 'input' type)
+                    'class': 'class'         // For CSS class manipulation
                 };
 
+                // Determine the actual binding type to use
+                // Falls back to 'attribute' for any unmapped types (custom attributes)
                 const bindingType = bindingTypeMap[type] || 'attribute';
 
+                // Return a standardized binding configuration object
+                // This object is compatible with the main updateBinding processing system
                 return {
+                    // Generate unique identifier for this binding instance
+                    // Helps with debugging and binding lifecycle management
                     id: `foreach_eval_${Utils.generateId()}`,
+
+                    // The resolved binding type for the updateBinding system
                     type: bindingType,
+
+                    // Reference to the DOM element this binding affects
                     element: element,
+
+                    // The expression string to evaluate (e.g., "item.isVisible", "user.name")
                     target: target,
+
+                    // For attribute bindings, store which attribute to update
+                    // Null for non-attribute bindings (visible, checked, input, class)
                     attribute: bindingType === 'attribute' ? type : null,
-                    parsedExpression: null, // Will be set by getParsedExpression
-                    dependencies: null // Will be set by getParsedExpression
+
+                    // Placeholder for parsed expression AST
+                    // Will be populated later by getParsedExpression() for performance
+                    parsedExpression: null,
+
+                    // Placeholder for expression dependencies
+                    // Will be populated later by getParsedExpression() for change detection
+                    dependencies: null
                 };
             },
 
