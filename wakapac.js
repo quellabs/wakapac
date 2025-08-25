@@ -1051,10 +1051,11 @@
                 return {type: 'object', value: value};
             }
 
-            // Enhanced numeric literal detection
+            // Numeric literal detection
             // Handles: integers (10), decimals (10.5), negative numbers (-10), scientific notation (1e5)
             if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value)) {
                 const numValue = parseFloat(value);
+
                 // Ensure the parsed number is valid (not NaN)
                 if (!isNaN(numValue)) {
                     return {type: 'literal', value: numValue};
@@ -1187,7 +1188,7 @@
             const pairs = this.parseObjectPairs(content);
             const dependencies = [];
 
-            pairs.forEach(({ value }) => {
+            pairs.forEach(({value}) => {
                 const valueDeps = this.extractDependencies(value);
                 valueDeps.forEach(dep => {
                     if (!dependencies.includes(dep)) {
@@ -1212,6 +1213,7 @@
 
             let match;
             while ((match = propertyRegex.exec(expression))) {
+                const fullPath = match[0];
                 const rootProperty = match[1];
 
                 if (!jsLiterals.includes(rootProperty) && !dependencies.includes(rootProperty)) {
@@ -1459,7 +1461,7 @@
 
         /**
          * Adds a key-value pair to the pairs array
-         * @param {string} pairStr - String like "active: isActive" or "'test': 10"
+         * @param {string} pairStr - String like "active: isActive" or "'test': count > 0"
          * @param {Array} pairs - Array to add pair to
          */
         addObjectPair(pairStr, pairs) {
@@ -2847,13 +2849,22 @@
                 // Initialize foreach bindings and process no-dependency bindings
                 this.bindings.forEach(binding => {
                     if (binding.type === 'foreach') {
+                        // Initialize the previous state as empty array for change detection
                         binding.previous = [];
+
+                        // Get the current collection value from the abstraction
                         const value = this.abstraction[binding.collection];
 
+                        // Only update if the collection has a defined value
                         if (value !== undefined) {
+                            // Perform initial rendering of the foreach binding
                             this.updateForeachBinding(binding, binding.collection);
                         }
-                    } else if (binding.target && (!binding.dependencies || binding.dependencies.length === 0)) {
+                    } else if (
+                        binding.target &&
+                        (binding.type === 'class' || binding.type === 'style') &&
+                        (!binding.dependencies || binding.dependencies.length === 0)
+                    ) {
                         this.updateBinding(binding, null, null);
                     }
                 });
