@@ -1025,6 +1025,20 @@
             // Convert to string and remove leading and trailing whitespace
             value = String(value).trim();
 
+            // Check for arithmetic expressions first
+            const arithmeticOperator = this.findArithmeticOperator(value);
+
+            if (arithmeticOperator) {
+                const { left, operator, right, index } = arithmeticOperator;
+
+                return {
+                    type: 'arithmetic',
+                    left: this.parseValue(left.trim()),
+                    operator: operator.trim(),
+                    right: this.parseValue(right.trim())
+                };
+            }
+
             // Check if value is a string literal (enclosed in single or double quotes)
             if ((value.startsWith("'") && value.endsWith("'")) ||
                 (value.startsWith('"') && value.endsWith('"'))) {
@@ -1063,6 +1077,52 @@
 
             // If none of the above patterns match, treat as property reference
             return {type: 'property', path: value};
+        },
+
+        /**
+         * Finds arithmetic operator outside of quotes
+         * @param {string} value - Value to search
+         * @returns {Object|null} {left, operator, right, index} or null
+         */
+        findArithmeticOperator(value) {
+            let inQuotes = false;
+            let quoteChar = '';
+            let parenDepth = 0;
+
+            for (let i = 0; i < value.length; i++) {
+                const char = value[i];
+                const isEscaped = i > 0 && value[i - 1] === '\\';
+
+                // Handle quotes
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                // Track parentheses when not in quotes
+                if (!inQuotes) {
+                    if (char === '(') {
+                        parenDepth++;
+                    } else if (char === ')') {
+                        parenDepth--;
+                    } else if (parenDepth === 0 && /[+\-*/]/.test(char)) {
+                        // Found operator at top level (not in quotes or parentheses)
+                        return {
+                            left: value.substring(0, i),
+                            operator: char,
+                            right: value.substring(i + 1),
+                            index: i
+                        };
+                    }
+                }
+            }
+
+            return null;
         },
 
         /**
@@ -1194,7 +1254,7 @@
                         this.evaluateValue(parsedExpr.falseValue, context);
 
                 case 'arithmetic':
-                    const leftArith = Utils.getNestedValue(context, parsedExpr.left);
+                    const leftArith = this.evaluateValue(parsedExpr.left, context);
                     const rightArith = this.evaluateValue(parsedExpr.right, context);
                     return this.performArithmetic(leftArith, parsedExpr.operator, rightArith);
 
@@ -1290,6 +1350,12 @@
 
             if (valueObj.type === 'object') {
                 return this.evaluateObjectLiteral(valueObj.value, context);
+            }
+
+            if (valueObj.type === 'arithmetic') {
+                const left = this.evaluateValue(valueObj.left, context);
+                const right = this.evaluateValue(valueObj.right, context);
+                return this.performArithmetic(left, valueObj.operator, right);
             }
 
             // Handle direct string evaluation for object values
@@ -2766,43 +2832,28 @@
             performInitialUpdate() {
                 // Update all regular properties
                 Object.keys(this.abstraction).forEach(key => {
-                    // Only process non-function properties that belong to the object itself
                     if (this.abstraction.hasOwnProperty(key) && typeof this.abstraction[key] !== 'function') {
-                        // Schedule an update for each property with its current value
                         this.scheduleUpdate(key, this.abstraction[key]);
                     }
                 });
 
                 // Update computed properties
                 if (this.original.computed) {
-                    // Iterate through all defined computed properties
                     Object.keys(this.original.computed).forEach(name => {
-                        // Schedule update for computed property using its calculated value
                         this.scheduleUpdate(name, this.abstraction[name]);
                     });
                 }
 
-                // Initialize foreach bindings
+                // Initialize foreach bindings and process no-dependency bindings
                 this.bindings.forEach(binding => {
-                    // Only process foreach-type bindings
                     if (binding.type === 'foreach') {
-                        // Initialize the previous state as empty array for change detection
                         binding.previous = [];
-
-                        // Get the current collection value from the abstraction
                         const value = this.abstraction[binding.collection];
 
-                        // Only update if the collection has a defined value
                         if (value !== undefined) {
-                            // Perform initial rendering of the foreach binding
                             this.updateForeachBinding(binding, binding.collection);
                         }
-                    }
-                });
-
-                // Process bindings with no dependencies (literal expressions)
-                this.bindings.forEach(binding => {
-                    if (binding.target && (!binding.dependencies || binding.dependencies.length === 0)) {
+                    } else if (binding.target && (!binding.dependencies || binding.dependencies.length === 0)) {
                         this.updateBinding(binding, null, null);
                     }
                 });
