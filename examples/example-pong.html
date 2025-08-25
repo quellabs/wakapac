@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pong Game - wakaPAC Framework</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .game-container {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            border: 2px solid #fff;
+            background: #000;
+            margin: 20px;
+        }
+
+        .ball {
+            position: absolute;
+            width: 15px;
+            height: 15px;
+            background: #fff;
+            border-radius: 50%;
+            z-index: 10;
+        }
+
+        .paddle {
+            position: absolute;
+            width: 10px;
+            height: 80px;
+            background: #fff;
+            z-index: 5;
+        }
+
+        .paddle-left {
+            left: 20px;
+        }
+
+        .paddle-right {
+            right: 20px;
+        }
+
+        .center-line {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background: #fff;
+            opacity: 0.3;
+            transform: translateX(-50%);
+        }
+
+        .score {
+            position: absolute;
+            top: 20px;
+            font-size: 48px;
+            font-weight: bold;
+            z-index: 15;
+        }
+
+        .score-left {
+            left: 30%;
+        }
+
+        .score-right {
+            right: 30%;
+        }
+
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            font-size: 32px;
+            z-index: 20;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: -60px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .pause-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 25;
+        }
+    </style>
+</head>
+<body>
+<!-- Load the wakaPAC framework -->
+<script src="../wakapac.js"></script>
+
+<div id="pong-game" class="game-container" tabindex="0">
+    <!-- Center line -->
+    <div class="center-line"></div>
+
+    <!-- Scores -->
+    <div class="score score-left" data-pac-bind="text:player1Score"></div>
+    <div class="score score-right" data-pac-bind="text:player2Score"></div>
+
+    <!-- Ball -->
+    <div class="ball" data-pac-bind="style:ballStyle"></div>
+
+    <!-- Paddles -->
+    <div class="paddle paddle-left" data-pac-bind="style:paddle1Style"></div>
+    <div class="paddle paddle-right" data-pac-bind="style:paddle2Style"></div>
+
+    <!-- Game Over Screen -->
+    <div data-pac-bind="visible:gameOver" class="game-over">
+        <h2>Game Over!</h2>
+        <div data-pac-bind="text:gameOverMessage"></div>
+        <br>
+        <button data-pac-bind="click:resetGame">Play Again</button>
+    </div>
+
+    <!-- Pause Screen -->
+    <div data-pac-bind="visible:paused" class="pause-overlay">
+        <h2>Game Paused</h2>
+        <p>Press SPACE to resume</p>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        Player 1: A/Z | Player 2: ↑/↓ | SPACE: Pause | R: Reset
+    </div>
+</div>
+
+<script>
+    // Initialize the Pong game with wakaPAC
+    const pongGame = wakaPAC('#pong-game', {
+        // Game state
+        ballX: 400,
+        ballY: 200,
+        ballSpeedX: 4,
+        ballSpeedY: 3,
+        paddle1Y: 160,
+        paddle2Y: 160,
+        player1Score: 0,
+        player2Score: 0,
+        gameOver: false,
+        paused: false,
+        gameStarted: false,
+
+        // Input state
+        keys: {},
+
+        // Game constants
+        PADDLE_SPEED: 6,
+        WINNING_SCORE: 5,
+        GAME_WIDTH: 800,
+        GAME_HEIGHT: 400,
+        PADDLE_HEIGHT: 80,
+        BALL_SIZE: 15,
+
+        computed: {
+            ballStyle() {
+                return {
+                    left: (this.ballX - this.BALL_SIZE/2) + 'px',
+                    top: (this.ballY - this.BALL_SIZE/2) + 'px'
+                };
+            },
+
+            paddle1Style() {
+                return {
+                    top: this.paddle1Y + 'px'
+                };
+            },
+
+            paddle2Style() {
+                return {
+                    top: this.paddle2Y + 'px'
+                };
+            },
+
+            gameOverMessage() {
+                if (this.player1Score >= this.WINNING_SCORE) {
+                    return 'Player 1 Wins!';
+                } else if (this.player2Score >= this.WINNING_SCORE) {
+                    return 'Player 2 Wins!';
+                } else {
+                    return '';
+                }
+            }
+        },
+
+        init() {
+            // Focus the container so it can receive keyboard events
+            const container = document.getElementById('pong-game');
+            container.focus();
+
+            // Set up event listeners directly on the container
+            container.addEventListener('keydown', (e) => this.handleKeyDown(e));
+            container.addEventListener('keyup', (e) => this.handleKeyUp(e));
+
+            // Start the game loop
+            this.gameLoop();
+        },
+
+        gameLoop() {
+            if (!this.paused && !this.gameOver) {
+                this.updatePaddles();
+                this.updateBall();
+                this.checkCollisions();
+                this.checkWinCondition();
+            }
+
+            // Continue the game loop
+            requestAnimationFrame(() => this.gameLoop());
+        },
+
+        updatePaddles() {
+            // Player 1 controls (A/Z keys)
+            if (this.keys['KeyA'] && this.paddle1Y > 0) {
+                this.paddle1Y -= this.PADDLE_SPEED;
+            }
+            if (this.keys['KeyZ'] && this.paddle1Y < this.GAME_HEIGHT - this.PADDLE_HEIGHT) {
+                this.paddle1Y += this.PADDLE_SPEED;
+            }
+
+            // Player 2 controls (Arrow keys)
+            if (this.keys['ArrowUp'] && this.paddle2Y > 0) {
+                this.paddle2Y -= this.PADDLE_SPEED;
+            }
+            if (this.keys['ArrowDown'] && this.paddle2Y < this.GAME_HEIGHT - this.PADDLE_HEIGHT) {
+                this.paddle2Y += this.PADDLE_SPEED;
+            }
+        },
+
+        updateBall() {
+            if (!this.gameStarted) return;
+
+            this.ballX += this.ballSpeedX;
+            this.ballY += this.ballSpeedY;
+
+            // Bounce off top and bottom walls
+            if (this.ballY <= this.BALL_SIZE/2 || this.ballY >= this.GAME_HEIGHT - this.BALL_SIZE/2) {
+                this.ballSpeedY = -this.ballSpeedY;
+            }
+        },
+
+        checkCollisions() {
+            // Ball hits left paddle
+            if (this.ballX <= 40 &&
+                this.ballY >= this.paddle1Y &&
+                this.ballY <= this.paddle1Y + this.PADDLE_HEIGHT &&
+                this.ballSpeedX < 0) {
+
+                this.ballSpeedX = -this.ballSpeedX;
+                // Add some spin based on where it hits the paddle
+                const hitPos = (this.ballY - this.paddle1Y) / this.PADDLE_HEIGHT - 0.5;
+                this.ballSpeedY += hitPos * 2;
+            }
+
+            // Ball hits right paddle
+            if (this.ballX >= this.GAME_WIDTH - 40 &&
+                this.ballY >= this.paddle2Y &&
+                this.ballY <= this.paddle2Y + this.PADDLE_HEIGHT &&
+                this.ballSpeedX > 0) {
+
+                this.ballSpeedX = -this.ballSpeedX;
+                // Add some spin based on where it hits the paddle
+                const hitPos = (this.ballY - this.paddle2Y) / this.PADDLE_HEIGHT - 0.5;
+                this.ballSpeedY += hitPos * 2;
+            }
+
+            // Ball goes off left side (Player 2 scores)
+            if (this.ballX < 0) {
+                this.player2Score++;
+                this.resetBall();
+            }
+
+            // Ball goes off right side (Player 1 scores)
+            if (this.ballX > this.GAME_WIDTH) {
+                this.player1Score++;
+                this.resetBall();
+            }
+        },
+
+        checkWinCondition() {
+            if (this.player1Score >= this.WINNING_SCORE || this.player2Score >= this.WINNING_SCORE) {
+                this.gameOver = true;
+                this.gameStarted = false;
+            }
+        },
+
+        resetBall() {
+            this.ballX = this.GAME_WIDTH / 2;
+            this.ballY = this.GAME_HEIGHT / 2;
+
+            // Random direction
+            this.ballSpeedX = Math.random() > 0.5 ? 4 : -4;
+            this.ballSpeedY = (Math.random() - 0.5) * 4;
+
+            // Brief pause before starting
+            this.gameStarted = false;
+            setTimeout(() => {
+                if (!this.gameOver) {
+                    this.gameStarted = true;
+                }
+            }, 1000);
+        },
+
+        resetGame() {
+            this.ballX = this.GAME_WIDTH / 2;
+            this.ballY = this.GAME_HEIGHT / 2;
+            this.ballSpeedX = 4;
+            this.ballSpeedY = 3;
+            this.paddle1Y = 160;
+            this.paddle2Y = 160;
+            this.player1Score = 0;
+            this.player2Score = 0;
+            this.gameOver = false;
+            this.paused = false;
+            this.gameStarted = true;
+
+            // Refocus the game container
+            setTimeout(() => {
+                document.getElementById('pong-game').focus();
+            }, 100);
+        },
+
+        handleKeyDown(event) {
+            // Prevent browser default behavior for game keys
+            const gameKeys = ['KeyA', 'KeyZ', 'ArrowUp', 'ArrowDown', 'Space', 'KeyR'];
+            if (gameKeys.includes(event.code)) {
+                event.preventDefault();
+            }
+
+            this.keys[event.code] = true;
+
+            // Handle special keys
+            switch(event.code) {
+                case 'Space':
+                    if (this.gameOver) {
+                        this.resetGame();
+                    } else {
+                        this.paused = !this.paused;
+                        if (!this.gameStarted && !this.paused) {
+                            this.gameStarted = true;
+                        }
+                    }
+                    break;
+                case 'KeyR':
+                    this.resetGame();
+                    break;
+            }
+        },
+
+        handleKeyUp(event) {
+            // Prevent browser default behavior for game keys
+            const gameKeys = ['KeyA', 'KeyZ', 'ArrowUp', 'ArrowDown', 'Space', 'KeyR'];
+            if (gameKeys.includes(event.code)) {
+                event.preventDefault();
+            }
+
+            this.keys[event.code] = false;
+        }
+    });
+
+    // Auto-start the game after a short delay
+    setTimeout(() => {
+        if (!pongGame.gameStarted) {
+            pongGame.gameStarted = true;
+        }
+    }, 1500);
+</script>
+</body>
+</html>
