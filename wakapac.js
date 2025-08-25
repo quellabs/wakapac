@@ -659,19 +659,12 @@
                 }
 
                 // Multi-character operators
-                const twoChar = expression.substr(i, 2);
-                const threeChar = expression.substr(i, 3);
+                const multiChar = /^(===|!==|==|!=|>=|<=|&&|\|\|)/.exec(expression.slice(i));
 
-                if (['===', '!=='].includes(threeChar)) {
-                    tokens.push({ type: 'OPERATOR', value: threeChar, precedence: 6 });
-                    i += 3;
-                    continue;
-                }
-
-                if (['==', '!=', '>=', '<=', '&&', '||'].includes(twoChar)) {
-                    const precedence = this.getOperatorPrecedence(twoChar);
-                    tokens.push({ type: 'OPERATOR', value: twoChar, precedence });
-                    i += 2;
+                if (multiChar) {
+                    const op = multiChar[1];
+                    tokens.push({ type: 'OPERATOR', value: op, precedence: this.getOperatorPrecedence(op) });
+                    i += op.length;
                     continue;
                 }
 
@@ -781,31 +774,14 @@
          * @returns {Object} {token, nextIndex}
          */
         tokenizeNumber(expression, start) {
-            let i = start;
-            let value = '';
+            const numberMatch = /^(\d*\.?\d+(?:[eE][+-]?\d+)?)/.exec(expression.slice(i));
 
-            while (i < expression.length) {
-                const char = expression[i];
-
-                if (/[\d.]/.test(char) ||
-                    (char.toLowerCase() === 'e' && /[+-]/.test(expression[i + 1]))) {
-                    value += char;
-                    i++;
-                } else {
-                    break;
-                }
+            if (numberMatch) {
+                return {
+                    token: { type: 'NUMBER', value: parseFloat(numberMatch[1]) },
+                    nextIndex: i + numberMatch[1].length
+                };
             }
-
-            const numValue = parseFloat(value);
-
-            return {
-                token: {
-                    type: 'NUMBER',
-                    value: isNaN(numValue) ? 0 : numValue
-                },
-
-                nextIndex: i
-            };
         },
 
         /**
@@ -815,40 +791,17 @@
          * @returns {Object} {token, nextIndex}
          */
         tokenizeIdentifier(expression, start) {
-            let i = start;
-            let value = '';
+            const identMatch = /^([a-zA-Z_$][a-zA-Z0-9_$]*)/.exec(expression.slice(start));
 
-            while (i < expression.length) {
-                const char = expression[i];
+            if (identMatch) {
+                const value = identMatch[1];
+                const type = ['true', 'false', 'null', 'undefined'].includes(value) ? 'KEYWORD' : 'IDENTIFIER';
 
-                if (/[a-zA-Z0-9_$]/.test(char)) {
-                    value += char;
-                    i++;
-                } else {
-                    break;
-                }
+                return {
+                    token: { type, value },
+                    nextIndex: start + value.length
+                };
             }
-
-            // Check for keywords
-            let type;
-
-            switch (value) {
-                case 'true':
-                case 'false':
-                case 'null':
-                case 'undefined':
-                    type = 'KEYWORD';
-                    break;
-
-                default:
-                    type = 'IDENTIFIER';
-                    break;
-            }
-
-            return {
-                token: {type, value},
-                nextIndex: i
-            };
         },
 
         /**
@@ -2415,13 +2368,6 @@
                         return this.createVisibilityBinding(element, target);
 
                     case 'checked':
-                        if (element.type === 'radio') {
-                            console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
-                            this.setupInputElement(element, target);
-                            return this.createInputBinding(element, target);
-                        }
-
-                        this.setupInputElement(element, target, 'checked');
                         return this.createCheckedBinding(element, target);
 
                     case 'class':
@@ -2433,11 +2379,8 @@
                     case 'if':
                         return this.createConditionalBinding(element, target);
 
-                    case 'foreach': {
-                        const binding = this.createForeachBinding(element, target);
-                        element.innerHTML = '';
-                        return binding;
-                    }
+                    case 'foreach':
+                        return this.createForeachBinding(element, target);
 
                     default:
                         if (Utils.isEventType(type)) {
@@ -2450,12 +2393,11 @@
                 }
             },
 
-
             /**
              * Creates a foreach binding for rendering lists
              */
             createForeachBinding(element, target) {
-                return this.createBinding('foreach', element, {
+                const bindingElement = this.createBinding('foreach', element, {
                     target: target,
                     collection: target,
                     itemName: element.getAttribute('data-pac-item') || 'item',
@@ -2463,6 +2405,10 @@
                     template: element.innerHTML,
                     previous: []
                 });
+
+                element.innerHTML = '';
+
+                return bindingElement;
             },
 
             /**
@@ -2509,6 +2455,14 @@
              * Creates a checkbox/radio checked binding
              */
             createCheckedBinding(element, target) {
+                if (element.type === 'radio') {
+                    console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
+                    this.setupInputElement(element, target);
+                    return this.createInputBinding(element, target);
+                }
+
+                this.setupInputElement(element, target, 'checked');
+
                 return this.createBinding('checked', element, {
                     target: target,
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
@@ -2544,6 +2498,20 @@
                     attribute: attributeName,
                     parsedExpression: null,
                     dependencies: null
+                });
+            },
+
+            /**
+             * Creates a style binding for dynamic CSS styling
+             * @param {HTMLElement} element - The DOM element to bind styles to
+             * @param {string} target - The style expression or property name to bind
+             * @returns {Object} The created binding object with element reference and metadata
+             */
+            createStyleBinding(element, target) {
+                return this.createBinding('style', element, {
+                    target: target,                // The style expression to evaluate
+                    parsedExpression: null,        // Will be populated when first parsed
+                    dependencies: null             // Will track what data this binding depends on
                 });
             },
 
@@ -2814,41 +2782,16 @@
                             this.updateTextBinding(binding, property, foreachVars);
                             break;
 
-                        case 'attribute':
-                            this.updateAttributeBinding(binding, property, foreachVars);
-                            break;
-
-                        case 'input':
-                            this.updateInputBinding(binding, property, foreachVars);
-                            break;
-
-                        case 'checked':
-                            this.updateCheckedBinding(binding, property, foreachVars);
-                            break;
-
-                        case 'visible':
-                            this.updateVisibilityBinding(binding, property, foreachVars);
-                            break;
-
-                        case 'conditional':
-                            this.updateConditionalBinding(binding, property, foreachVars);
-                            break;
-
                         case 'foreach':
                             this.updateForeachBinding(binding, property, foreachVars);
-                            break;
-
-                        case 'class':
-                            this.updateClassBinding(binding, property, foreachVars);
-                            break;
-
-                        case 'style':
-                            this.updateStyleBinding(binding, property, foreachVars);
                             break;
 
                         case 'event':
                             // Events are already handled in processForeachBinding
                             break;
+
+                        default:
+                            this.updateBindingGeneric(binding, property, foreachVars);
                     }
                 } catch (error) {
                     console.error(`Error updating ${binding.type} binding:`, error);
@@ -2890,12 +2833,12 @@
             },
 
             /**
-             * Updates element attributes based on data binding
+             * Generic binding applicator
              * @param {Object} binding - The binding object containing element, attribute, and expression information
              * @param {string} property - The property name being bound
              * @param {Object|null} foreachVars - Additional variables from foreach context, defaults to null
              */
-            updateAttributeBinding(binding, property, foreachVars = null) {
+            updateBindingGeneric(binding, property, foreachVars = null) {
                 // Create evaluation context by merging abstraction data with foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
 
@@ -2905,126 +2848,35 @@
                 // Regular input handling (text, number, etc.)
                 const actualValue = ExpressionParser.evaluate(parsed, context);
 
-                // Set new value
-                this.setElementAttribute(binding.element, binding.attribute, actualValue);
-            },
+                // Call the correct apply method
+                switch (binding.type) {
+                    case 'attribute':
+                        this.applyAttributeBinding(binding.element, binding.attribute, actualValue);
+                        break;
 
-            /**
-             * Updates input element values based on data binding
-             * @param {Object} binding - The binding object containing element and expression information
-             * @param {string} property - The property name being bound
-             * @param {Object|null} foreachVars - Additional variables from foreach context, defaults to null
-             */
-            updateInputBinding(binding, property, foreachVars = null) {
-                // Fetch element
-                const element = binding.element;
+                    case 'input':
+                        this.applyInputBinding(binding.element, actualValue);
+                        break;
 
-                // Create evaluation context by merging abstraction data with foreach variables
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
+                    case 'checked':
+                        this.applyCheckedBinding(binding.element, actualValue);
+                        break;
 
-                // Parse the binding expression into an evaluatable format
-                const parsed = this.getParsedExpression(binding);
+                    case 'visible':
+                        this.applyVisibilityBinding(binding.element, actualValue);
+                        break;
 
-                // Special handling for radio buttons
-                if (element.type === 'radio') {
-                    // For radio buttons, we check if the element's value matches the property value
-                    const actualValue = ExpressionParser.evaluate(parsed, context);
-                    this.applyCheckedBinding(element, element.value === actualValue)
-                    return;
-                }
+                    case 'conditional':
+                        this.applyConditionalBinding(binding.element, actualValue, binding);
+                        break;
 
-                // Regular input handling (text, number, etc.)
-                const actualValue = ExpressionParser.evaluate(parsed, context);
+                    case 'class':
+                        this.applyClassBinding(binding.element, binding.target, actualValue);
+                        break;
 
-                if (element.value !== String(actualValue || '')) {
-                    element.value = actualValue || '';
-                }
-            },
-
-            /**
-             * Updates checkbox/radio checked state based on a data binding expression
-             * @param {Object} binding - The binding object containing element and expression
-             * @param {string} property - The property name being bound (for debugging/logging)
-             * @param {Object|null} foreachVars - Additional variables from foreach loops, if any
-             */
-            updateCheckedBinding(binding, property, foreachVars = null) {
-                // Create evaluation context by merging abstraction data with foreach variables
-                // foreach variables take precedence over abstraction properties
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
-
-                // Parse the binding expression into an evaluatable format
-                const parsed = this.getParsedExpression(binding);
-
-                // Evaluate the expression to get the raw value that determines checked state
-                const actualValue = ExpressionParser.evaluate(parsed, context);
-
-                // Convert to boolean and apply to the form element's checked property
-                // Handles truthy/falsy conversion for consistent checkbox/radio behavior
-                this.applyCheckedBinding(binding.element, Boolean(actualValue));
-            },
-
-            /**
-             * Updates element visibility based on a data binding expression
-             * @param {Object} binding - The binding object containing element and expression
-             * @param {string} property - The property name being bound (for debugging/logging)
-             * @param {Object|null} foreachVars - Additional variables from foreach loops, if any
-             */
-            updateVisibilityBinding(binding, property, foreachVars = null) {
-                // Create evaluation context by merging abstraction data with foreach variables
-                // foreach variables take precedence over abstraction properties
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
-
-                // Parse the binding expression into an evaluatable format
-                const parsed = this.getParsedExpression(binding);
-
-                // Use expression parser to evaluate the visibility condition
-                // Returns boolean indicating whether element should be visible
-                const shouldShow = ExpressionParser.evaluate(parsed, context);
-
-                // Apply the visibility state to the DOM element
-                this.applyVisibilityBinding(binding.element, shouldShow);
-            },
-
-            /**
-             * Updates the conditional binding by adding/removing DOM elements based on expression evaluation
-             * @param {Object} binding - The binding object containing element, placeholder, and parsed expression
-             * @param {string} property - The property name that changed (used for change detection)
-             * @param {Object|null} foreachVars - Optional foreach variables to merge into evaluation context
-             */
-            updateConditionalBinding(binding, property, foreachVars = null) {
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
-                const parsed = this.getParsedExpression(binding);
-
-                // Determine if element should be rendered based on the expression evaluation
-                const shouldRender = ExpressionParser.evaluate(parsed, context);
-
-                // Early exit if the rendering state hasn't changed
-                if (binding.isRendered === shouldRender) {
-                    return;
-                }
-
-                if (shouldRender) {
-                    // Add element to DOM: Replace the placeholder comment with the actual DOM element
-                    if (binding.placeholder && binding.placeholder.parentNode) {
-                        binding.placeholder.parentNode.replaceChild(binding.element, binding.placeholder);
-                    }
-
-                    // Update the binding state to reflect that element is now in the DOM
-                    binding.isRendered = true;
-                } else {
-                    // Remove element from DOM: Replace the DOM element with a placeholder comment
-                    // Create placeholder comment if it doesn't exist yet
-                    if (!binding.placeholder) {
-                        binding.placeholder = document.createComment(`pac-if: ${binding.target}`);
-                    }
-
-                    // Replace the element with the invisible placeholder comment (removes from DOM)
-                    if (binding.element.parentNode) {
-                        binding.element.parentNode.replaceChild(binding.placeholder, binding.element);
-                    }
-
-                    // Update the binding state to reflect that element is now removed from DOM
-                    binding.isRendered = false;
+                    case 'style':
+                        this.applyStyleBinding(binding.element, binding.target, actualValue);
+                        break;
                 }
             },
 
@@ -3080,66 +2932,6 @@
             },
 
             /**
-             * Updates CSS class bindings by evaluating expressions and applying/removing classes
-             * Handles both regular property bindings (e.g., "isActive") and foreach context bindings (e.g., "todo.completed")
-             * @param {Object} binding - The binding object containing element, target expression, and parsed data
-             * @param {string} property - The property name that changed (used for change detection, can be null for full evaluation)
-             * @param {Object|null} foreachVars - Optional foreach variables (item, index, etc.) to merge into evaluation context
-             */
-            updateClassBinding(binding, property, foreachVars = null) {
-                // Create evaluation context by merging the component's abstraction with foreach variables
-                // For regular bindings: context = this.abstraction
-                // For foreach bindings: context = this.abstraction + {item: todoItem, index: 0, ...}
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
-
-                // Get the parsed expression object (uses caching to avoid re-parsing)
-                const parsed = this.getParsedExpression(binding);
-
-                // Evaluate the expression in the current context to get the boolean result
-                const actualValue = ExpressionParser.evaluate(parsed, context);
-
-                // Apply the class binding by adding/removing the CSS class based on the boolean value
-                // This calls applyClassBinding which extracts the class name from the target
-                // and adds/removes it from the element's classList
-                this.applyClassBinding(binding.element, binding.target, actualValue);
-            },
-
-            /**
-             * Creates a style binding for dynamic CSS styling
-             * @param {HTMLElement} element - The DOM element to bind styles to
-             * @param {string} target - The style expression or property name to bind
-             * @returns {Object} The created binding object with element reference and metadata
-             */
-            createStyleBinding(element, target) {
-                return this.createBinding('style', element, {
-                    target: target,                // The style expression to evaluate
-                    parsedExpression: null,        // Will be populated when first parsed
-                    dependencies: null             // Will track what data this binding depends on
-                });
-            },
-
-            /**
-             * Updates style bindings with current data context
-             * @param {Object} binding - The style binding object to update
-             * @param {string} property - The property name that triggered this update
-             * @param {Object|null} [foreachVars=null] - Additional variables from foreach loops
-             */
-            updateStyleBinding(binding, property, foreachVars = null) {
-                // Merge abstraction data with any foreach loop variables
-                // This creates the complete context for expression evaluation
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
-
-                // Get or create parsed version of the expression for efficiency
-                const parsed = this.getParsedExpression(binding);
-
-                // Evaluate the expression with current context to get actual style value
-                const actualValue = ExpressionParser.evaluate(parsed, context);
-
-                // Apply the computed value to the element's styles
-                this.applyStyleBinding(binding.element, binding.target, actualValue);
-            },
-
-            /**
              * Applies style binding to a DOM element
              * @param {HTMLElement} element - The target DOM element
              * @param {string} target - The original target expression (for debugging)
@@ -3167,32 +2959,6 @@
                     // String syntax: "color: red; font-size: 16px;"
                     // Set the entire CSS text at once (less efficient but backwards compatible)
                     element.style.cssText = value;
-                }
-            },
-
-            /**
-             * Applies attribute binding to a DOM element
-             * @param {HTMLElement} element - The target DOM element
-             * @param {string} target - The original target expression (for debugging)
-             * @param {Object} value - Object mapping attribute names to values
-             */
-            applyAttrBinding(element, target, value) {
-                // Verify we have an object with attribute mappings
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    // Object syntax: { placeholder: 'Enter text', title: 'Tooltip' }
-                    // Iterate through each attribute name/value pair
-                    Object.keys(value).forEach(attrName => {
-                        // Only set non-null/undefined values to avoid unwanted attribute removal
-                        if (value[attrName] != null) {
-                            // Use helper method to properly set the attribute
-                            // This handles special cases like boolean attributes, data attributes, etc.
-                            this.setElementAttribute(element, attrName, value[attrName]);
-                        }
-                    });
-                } else {
-                    // Log warning for incorrect usage - attr: binding requires object syntax
-                    // This helps developers identify binding syntax errors
-                    console.warn('attr: binding expects object syntax: { attrName: value }');
                 }
             },
 
@@ -3761,6 +3527,74 @@
             },
 
             /**
+             * Apply the condition binding
+             * @param element
+             * @param actualValue
+             * @param binding
+             */
+            applyConditionalBinding(element, actualValue, binding) {
+                // Early return if the value did not change
+                if (binding.isRendered === actualValue) {
+                    return;
+                }
+
+                // If true, add the element to the DOM
+                if (actualValue) {
+                    // Add element to DOM: Replace the placeholder comment with the actual DOM element
+                    if (binding.placeholder && binding.placeholder.parentNode) {
+                        binding.placeholder.parentNode.replaceChild(element, binding.placeholder);
+                    }
+
+                    // Update the binding state to reflect that element is now in the DOM
+                    binding.isRendered = true;
+                    return;
+                }
+
+                // Otherwise remove element from DOM
+                // Replace the DOM element with a placeholder comment
+                // Create placeholder comment if it doesn't exist yet
+                if (!binding.placeholder) {
+                    binding.placeholder = document.createComment(`pac-if: ${binding.target}`);
+                }
+
+                // Replace the element with the invisible placeholder comment (removes from DOM)
+                if (element.parentNode) {
+                    element.parentNode.replaceChild(binding.placeholder, element);
+                }
+
+                // Update the binding state to reflect that element is now removed from DOM
+                binding.isRendered = false;
+            },
+
+            /**
+             * Apply attribute binding
+             * @param element
+             * @param attribute
+             * @param value
+             */
+            applyAttributeBinding(element, attribute, value) {
+                this.setElementAttribute(element, attribute, value);
+            },
+
+            /**
+             * Apply input binding to element
+             * @param {HTMLElement} element - The target DOM element
+             * @param actualValue - The value to set
+             */
+            applyInputBinding(element, actualValue) {
+                // For radio buttons, we check if the element's value matches the property value
+                if (element.type === 'radio') {
+                    this.applyCheckedBinding(element, actualValue);
+                    return;
+                }
+
+                // For everything else directly set the value
+                if (element.value !== String(actualValue || '')) {
+                    element.value = actualValue || '';
+                }
+            },
+
+            /**
              * Applies checked state to an element
              * @param {HTMLElement} element - The target DOM element
              * @param {boolean} checked - Whether the element should be checked
@@ -3810,6 +3644,7 @@
                 } else if (typeof value === 'string') {
                     // String value - could be single class or space-separated classes
                     const classNames = value.trim().split(/\s+/);
+
                     classNames.forEach(className => {
                         if (className.trim()) {
                             element.classList.add(className.trim());
@@ -3819,6 +3654,7 @@
                 } else if (value) {
                     // Truthy non-string value - convert to string and treat as class name
                     const className = String(value).trim();
+
                     if (className) {
                         element.classList.add(className);
                         newClasses = className;
