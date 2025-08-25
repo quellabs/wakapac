@@ -1505,9 +1505,7 @@
             bindingIndex: new Map(),
 
             // Reactivity and caching
-            computedCache: new Map(),
-            computedDeps: new Map(),
-            propertyDeps: new Map(),
+            deps: new Map(),
             expressionCache: new Map(),
             lastValues: new Map(),
 
@@ -1606,51 +1604,42 @@
             },
 
             /**
-             * Sets up computed properties with automatic dependency tracking
+             * Sets up computed properties with consolidated dependency tracking
              */
             setupComputedProperties(reactive) {
-                if (!this.original.computed) {
-                    return;
-                }
+                if (!this.original.computed) return;
 
                 Object.keys(this.original.computed).forEach(name => {
                     const computedFn = this.original.computed[name];
+                    const dependencies = this.analyzeComputedDependencies(computedFn, reactive);
 
-                    if (typeof computedFn === 'function') {
-                        // Analyze dependencies
-                        const dependencies = this.analyzeComputedDependencies(computedFn, reactive);
-                        this.computedDeps.set(name, dependencies);
+                    // Store computed info
+                    this.deps.set(name, {
+                        fn: computedFn,
+                        value: undefined,
+                        isDirty: true
+                    });
 
-                        // Build reverse dependency map
-                        dependencies.forEach(dep => {
-                            if (!this.propertyDeps.has(dep)) {
-                                this.propertyDeps.set(dep, []);
+                    // Build reverse lookup - don't overwrite existing entries
+                    dependencies.forEach(dep => {
+                        if (!this.deps.has(dep)) {
+                            this.deps.set(dep, { dependents: [] });
+                        }
+                        this.deps.get(dep).dependents = this.deps.get(dep).dependents || [];
+                        this.deps.get(dep).dependents.push(name);
+                    });
+
+                    Object.defineProperty(reactive, name, {
+                        get: () => {
+                            const entry = this.deps.get(name);
+                            if (entry.isDirty || entry.value === undefined) {
+                                entry.value = entry.fn.call(reactive);
+                                entry.isDirty = false;
                             }
-
-                            if (!this.propertyDeps.get(dep).includes(name)) {
-                                this.propertyDeps.get(dep).push(name);
-                            }
-                        });
-
-                        // Define computed property
-                        Object.defineProperty(reactive, name, {
-                            get: () => {
-                                if (this.computedCache.has(name)) {
-                                    return this.computedCache.get(name);
-                                }
-
-                                try {
-                                    const result = computedFn.call(reactive);
-                                    this.computedCache.set(name, result);
-                                    return result;
-                                } catch (error) {
-                                    console.error(`Error computing property '${name}':`, error);
-                                    return undefined;
-                                }
-                            },
-                            enumerable: true
-                        });
-                    }
+                            return entry.value;
+                        },
+                        enumerable: true
+                    });
                 });
             },
 
@@ -2620,40 +2609,28 @@
             },
 
             /**
-             * Updates computed properties that depend on a changed property
-             * @param {string} changedProperty - The name of the property that changed
+             * Marks computed properties as dirty and schedules updates
+             * @param {string} changedProperty - The property that changed
              */
             updateComputedProperties(changedProperty) {
-                // Get all computed properties that depend on the changed property
-                const dependentComputed = this.propertyDeps.get(changedProperty) || [];
+                const entry = this.deps.get(changedProperty);
+                const dependentComputed = (entry && entry.dependents) ? entry.dependents : [];
 
                 dependentComputed.forEach(computedName => {
-                    // Store the old value before recomputation
-                    const oldValue = this.computedCache.get(computedName);
+                    const computedEntry = this.deps.get(computedName);
+                    const oldValue = computedEntry ? computedEntry.value : undefined;
 
-                    // Clear cache to force recomputation on next access
-                    this.computedCache.delete(computedName);
+                    if (computedEntry) {
+                        computedEntry.isDirty = true;
+                    }
 
-                    // Get new value (this will trigger recomputation since cache is cleared)
                     const newValue = this.abstraction[computedName];
-
-                    // Check if any foreach bindings use this computed property
-                    // Array bindings may need updates even if the reference hasn't changed
                     const hasArrayBinding = Array.from(this.bindings.values())
                         .some(b => b.type === 'foreach' && b.collection === computedName);
 
-                    // Update if value changed or if array binding needs update
-                    // Array bindings are updated regardless of equality check since
-                    // array contents may have changed without changing the reference
                     if (hasArrayBinding || !Utils.isEqual(oldValue, newValue)) {
-                        // Trigger any watchers registered for this computed property
                         this.triggerWatcher(computedName, newValue, oldValue);
-
-                        // Schedule DOM updates for elements bound to this property
                         this.scheduleUpdate(computedName, newValue);
-
-                        // Recursively update any computed properties that depend on this one
-                        // This handles chains of computed dependencies (A -> B -> C)
                         this.updateComputedProperties(computedName);
                     }
                 });
@@ -2668,11 +2645,16 @@
                 // Handle nested property changes - force updates for computed properties
                 if (type === 'set' || type === 'nested-change') {
                     // Clear computed cache for properties that might depend on this change
-                    const dependentComputed = this.propertyDeps.get(rootProperty) || [];
+                    const entry = this.deps.get(rootProperty);
 
-                    dependentComputed.forEach(computedName => {
-                        this.computedCache.delete(computedName);
-                    });
+                    if (entry && entry.dependents) {
+                        entry.dependents.forEach(computedName => {
+                            const computedEntry = this.deps.get(computedName);
+                            if (computedEntry) {
+                                computedEntry.isDirty = true;
+                            }
+                        });
+                    }
 
                     // Force update of any foreach bindings that use this root property OR computed properties that depend on it
                     this.bindings.forEach(binding => {
@@ -2681,8 +2663,9 @@
                             if (binding.collection === rootProperty) {
                                 binding.previous = null;
                             }
+
                             // Check if binding uses a computed property that depends on the changed root property
-                            else if (dependentComputed.includes(binding.collection)) {
+                            else if (entry && entry.dependents && entry.dependents.includes(binding.collection)) {
                                 binding.previous = null;
                             }
                         }
@@ -2705,11 +2688,13 @@
                 this.scheduleUpdate(rootProperty, this.abstraction[rootProperty]);
 
                 // Also schedule updates for computed properties that depend on this root property
-                const dependentComputed = this.propertyDeps.get(rootProperty) || [];
+                const entry = this.deps.get(rootProperty);
 
-                dependentComputed.forEach(computedName => {
-                    this.scheduleUpdate(computedName, this.abstraction[computedName]);
-                });
+                if (entry && entry.dependents) {
+                    entry.dependents.forEach(computedName => {
+                        this.scheduleUpdate(computedName, this.abstraction[computedName]);
+                    });
+                }
 
                 // Also schedule update for the specific nested path if it's different
                 if (path !== rootProperty) {
@@ -2857,7 +2842,7 @@
                         break;
 
                     case 'checked':
-                        this.applyCheckedBinding(binding.element, actualValue);
+                        this.applyCheckedBinding(binding.element, !!actualValue);
                         break;
 
                     case 'visible':
@@ -3819,7 +3804,7 @@
             applyInputBinding(element, actualValue) {
                 // For radio buttons, we check if the element's value matches the property value
                 if (element.type === 'radio') {
-                    this.applyCheckedBinding(element, actualValue);
+                    this.applyRadioBinding(element, actualValue);
                     return;
                 }
 
@@ -3830,7 +3815,16 @@
             },
 
             /**
-             * Applies checked state to an element
+             * Applies checked state to a radio element
+             * @param {HTMLElement} element - The target DOM element
+             * @param {boolean} value
+             */
+            applyRadioBinding(element, value) {
+                element.checked = (element.value === String(value || ''));
+            },
+
+            /**
+             * Applies checked state to any element except radio
              * @param {HTMLElement} element - The target DOM element
              * @param {boolean} checked - Whether the element should be checked
              */
@@ -3857,9 +3851,9 @@
                     });
                 }
 
+                // Handle different value types
                 let newClasses = '';
 
-                // Handle different value types
                 if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
                     // Object syntax: { className: boolean, className2: boolean }
                     Object.keys(value).forEach(className => {
@@ -4190,7 +4184,7 @@
              * Releases memory held by computed values and expression caches
              */
             _clearCaches() {
-                this.computedCache.clear();
+                this.deps.clear();
                 this.expressionCache.clear();
                 this.lastValues.clear();
             },
