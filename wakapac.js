@@ -564,12 +564,23 @@
          */
         cache: new Map(),
         bindingCache: new Map(),
-
-        /**
-         * Tokenizer state for the current parsing operation
-         */
         tokens: [],
         currentToken: 0,
+
+        OPERATOR_PRECEDENCE: {
+            '||': 1, '&&': 2,
+            '===': 6, '!==': 6, '==': 6, '!=': 6,
+            '<': 7, '>': 7, '<=': 7, '>=': 7,
+            '+': 8, '-': 8, '*': 9, '/': 9,
+            '!': 10, 'unary-': 10, 'unary+': 10
+        },
+
+        OPERATOR_TYPES: {
+            '||': 'logical', '&&': 'logical',
+            '===': 'comparison', '!==': 'comparison', '==': 'comparison', '!=': 'comparison',
+            '>=': 'comparison', '<=': 'comparison', '>': 'comparison', '<': 'comparison',
+            '+': 'arithmetic', '-': 'arithmetic', '*': 'arithmetic', '/': 'arithmetic'
+        },
 
         /**
          * Main entry point for parsing JavaScript-like expressions into an AST
@@ -601,7 +612,7 @@
                 return null;
             }
 
-            const result = this.parseExpressionInternal();
+            const result = this.parseTernary();
 
             // Add dependencies to the result
             if (result) {
@@ -759,11 +770,8 @@
                 }
             }
 
-            // Unterminated string - treat as identifier
-            return {
-                token: { type: 'IDENTIFIER', value: expression.substring(start) },
-                nextIndex: expression.length
-            };
+            // Unterminated string - throw error
+            throw new Error(`Unterminated string literal starting at position ${start}: expected closing ${quote}`);
         },
 
         /**
@@ -795,6 +803,7 @@
                     type: 'NUMBER',
                     value: isNaN(numValue) ? 0 : numValue
                 },
+
                 nextIndex: i
             };
         },
@@ -811,6 +820,7 @@
 
             while (i < expression.length) {
                 const char = expression[i];
+
                 if (/[a-zA-Z0-9_$]/.test(char)) {
                     value += char;
                     i++;
@@ -829,6 +839,7 @@
                 case 'undefined':
                     type = 'KEYWORD';
                     break;
+
                 default:
                     type = 'IDENTIFIER';
                     break;
@@ -846,57 +857,7 @@
          * @returns {number} Precedence level (0 if operator not found)
          */
         getOperatorPrecedence(operator) {
-            switch (operator) {
-                // Logical OR - lowest precedence
-                case '||':
-                    return 1;
-
-                // Logical AND
-                case '&&':
-                    return 2;
-
-                // Equality operators
-                case '===':  // Strict equality
-                case '!==':  // Strict inequality
-                case '==':   // Loose equality
-                case '!=':   // Loose inequality
-                    return 6;
-
-                // Relational operators
-                case '<':    // Less than
-                case '>':    // Greater than
-                case '<=':   // Less than or equal
-                case '>=':   // Greater than or equal
-                    return 7;
-
-                // Additive operators
-                case '+':    // Addition
-                case '-':    // Subtraction
-                    return 8;
-
-                // Multiplicative operators
-                case '*':    // Multiplication
-                case '/':    // Division
-                    return 9;
-
-                // Unary operators - highest precedence
-                case '!':        // Logical NOT
-                case 'unary-':   // Unary minus
-                case 'unary+':   // Unary plus
-                    return 10;
-
-                // Unknown operator
-                default:
-                    return 0;
-            }
-        },
-
-        /**
-         * Internal expression parser - starts the recursive descent
-         * @returns {Object|null} Parsed AST node
-         */
-        parseExpressionInternal() {
-            return this.parseTernary();
+            return this.OPERATOR_PRECEDENCE[operator] || 0;
         },
 
         /**
@@ -904,7 +865,7 @@
          * @returns {Object|null} Ternary AST node or lower precedence expression
          */
         parseTernary() {
-            let expr = this.parseLogicalOr();
+            let expr = this.parseBinaryExpression();
 
             if (this.match('QUESTION')) {
                 const trueExpr = this.parseTernary();
@@ -923,91 +884,55 @@
         },
 
         /**
-         * Parses logical OR expressions (||)
-         * @returns {Object|null} Logical OR AST node or lower precedence expression
+         * Parse a binary expression using precedence climbing algorithm.
+         * Entry point that starts parsing with minimum precedence level.
+         * @returns {Object} AST node representing the parsed binary expression
          */
-        parseLogicalOr() {
-            let expr = this.parseLogicalAnd();
-
-            while (this.matchOperator('||')) {
-                const operator = this.previous().value;
-                const right = this.parseLogicalAnd();
-
-                expr = {
-                    type: 'logical',
-                    left: expr,
-                    operator,
-                    right
-                };
-            }
-
-            return expr;
+        parseBinaryExpression() {
+            return this.parseBinaryWithPrecedence(1);
         },
 
         /**
-         * Parses logical AND expressions (&&)
-         * @returns {Object|null} Logical AND AST node or lower precedence expression
+         * Parse binary expressions with operator precedence using the precedence climbing method.
+         * This recursive algorithm handles operator precedence and associativity correctly.
+         * @param {number} minPrec - Minimum precedence level for operators to be parsed at this level
+         * @returns {Object} AST node representing the parsed expression tree
          */
-        parseLogicalAnd() {
-            let expr = this.parseComparison();
+        parseBinaryWithPrecedence(minPrec) {
+            // Start by parsing the left operand (could be a unary expression, literal, etc.)
+            let left = this.parseUnary();
 
-            while (this.matchOperator('&&')) {
-                const operator = this.previous().value;
-                const right = this.parseComparison();
+            // Continue parsing while we encounter operators
+            while (this.peek().type === 'OPERATOR') {
+                // Get the precedence of the current operator
+                const opPrec = this.getOperatorPrecedence(this.peek().value);
 
-                expr = {
-                    type: 'logical',
-                    left: expr,
-                    operator,
-                    right
-                };
+                // If this operator's precedence is lower than our minimum threshold,
+                // we should stop parsing at this level and let a higher level handle it
+                if (opPrec < minPrec) {
+                    break;
+                }
+
+                // Consume the operator token
+                const op = this.advance().value;
+
+                // Parse the right operand with higher precedence (opPrec + 1)
+                // This ensures left-associativity by requiring higher precedence for right side
+                // For right-associative operators, you would use opPrec instead of opPrec + 1
+                const right = this.parseBinaryWithPrecedence(opPrec + 1);
+
+                // Determine the AST node type based on the operator
+                // Falls back to 'arithmetic' if operator type is not defined
+                const type = this.OPERATOR_TYPES[op] || 'arithmetic';
+
+                // Create a new binary expression node with the parsed components
+                // This becomes the new left operand for potential further parsing
+                left = { type, left, operator: op, right };
             }
 
-            return expr;
-        },
-
-        /**
-         * Parses comparison expressions (==, !=, <, >, etc.)
-         * @returns {Object|null} Comparison AST node or lower precedence expression
-         */
-        parseComparison() {
-            let expr = this.parseArithmetic();
-
-            if (this.matchOperator('===', '!==', '==', '!=', '>=', '<=', '>', '<')) {
-                const operator = this.previous().value;
-                const right = this.parseArithmetic();
-
-                return {
-                    type: 'comparison',
-                    left: expr,
-                    operator,
-                    right
-                };
-            }
-
-            return expr;
-        },
-
-        /**
-         * Parses arithmetic expressions (+, -, *, /)
-         * @returns {Object|null} Arithmetic AST node or lower precedence expression
-         */
-        parseArithmetic() {
-            let expr = this.parseUnary();
-
-            while (this.matchOperator('+', '-', '*', '/')) {
-                const operator = this.previous().value;
-                const right = this.parseUnary();
-
-                expr = {
-                    type: 'arithmetic',
-                    left: expr,
-                    operator,
-                    right
-                };
-            }
-
-            return expr;
+            // Return the final parsed expression (could be the original left operand
+            // if no operators were processed, or a complex binary expression tree)
+            return left;
         },
 
         /**
@@ -1036,7 +961,7 @@
         parsePrimary() {
             // Parentheses
             if (this.match('LPAREN')) {
-                const expr = this.parseExpressionInternal();
+                const expr = this.parseTernary();
                 this.consume('RPAREN', 'Expected closing parenthesis');
 
                 return {
@@ -1125,7 +1050,7 @@
                     this.consume('COLON', 'Expected ":" after object key');
 
                     // Parse value
-                    const value = this.parseExpressionInternal();
+                    const value = this.parseTernary();
 
                     pairs.push({ key, value });
 
@@ -1155,7 +1080,7 @@
                         throw new Error('Expected property name after "."');
                     }
                 } else if (this.match('LBRACKET')) {
-                    const index = this.parseExpressionInternal();
+                    const index = this.parseTernary();
                     this.consume('RBRACKET', 'Expected closing bracket');
 
                     // For simplicity, convert bracket notation to string
@@ -1337,14 +1262,10 @@
                     }
 
                 case 'comparison':
-                    const leftComp = this.evaluate(parsedExpr.left, context);
-                    const rightComp = this.evaluate(parsedExpr.right, context);
-                    return this.performComparison(leftComp, parsedExpr.operator, rightComp);
-
                 case 'arithmetic':
-                    const leftArith = this.evaluate(parsedExpr.left, context);
-                    const rightArith = this.evaluate(parsedExpr.right, context);
-                    return this.performArithmetic(leftArith, parsedExpr.operator, rightArith);
+                    const leftVal = this.evaluate(parsedExpr.left, context);
+                    const rightVal = this.evaluate(parsedExpr.right, context);
+                    return this.performOperation(leftVal, parsedExpr.operator, rightVal);
 
                 case 'unary':
                     const operandValue = this.evaluate(parsedExpr.operand, context);
@@ -1386,66 +1307,21 @@
             return result;
         },
 
-        /**
-         * Performs arithmetic operations
-         * @param {*} left - Left operand
-         * @param {string} operator - Operator
-         * @param {*} right - Right operand
-         * @returns {*} Result
-         */
-        performArithmetic(left, operator, right) {
+        performOperation(left, operator, right) {
             switch (operator) {
-                case '+':
-                    return left + right;
-
-                case '-':
-                    return Number(left) - Number(right);
-
-                case '*':
-                    return Number(left) * Number(right);
-
-                case '/':
-                    return Number(left) / Number(right);
-
-                default:
-                    return left;
-            }
-        },
-
-        /**
-         * Performs comparison operations
-         * @param {*} left - Left operand
-         * @param {string} operator - Operator
-         * @param {*} right - Right operand
-         * @returns {boolean} Comparison result
-         */
-        performComparison(left, operator, right) {
-            switch (operator) {
-                case '===':
-                    return left === right;
-
-                case '!==':
-                    return left !== right;
-
-                case '==':
-                    return left == right;
-
-                case '!=':
-                    return left != right;
-
-                case '>=':
-                    return left >= right;
-
-                case '<=':
-                    return left <= right;
-
-                case '>':
-                    return left > right;
-
-                case '<':
-                    return left < right;
-                default:
-                    return false;
+                case '+': return left + right;
+                case '-': return Number(left) - Number(right);
+                case '*': return Number(left) * Number(right);
+                case '/': return Number(left) / Number(right);
+                case '===': return left === right;
+                case '!==': return left !== right;
+                case '==': return left == right;
+                case '!=': return left != right;
+                case '>=': return left >= right;
+                case '<=': return left <= right;
+                case '>': return left > right;
+                case '<': return left < right;
+                default: return false;
             }
         },
 
