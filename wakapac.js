@@ -578,8 +578,20 @@
          * @returns {Object|null} Parsed AST node representing the expression structure, or null if unparseable
          */
         parseExpression(expression) {
+            // Handle case where expression is already a parsed object
+            if (typeof expression === 'object' && expression !== null) {
+                // If it already has dependencies, just return it
+                if (expression.dependencies) {
+                    return expression;
+                }
+
+                // Create a completely new object to avoid any mutation issues
+                const dependencies = this.extractDependencies(expression);
+                return Object.assign({}, expression, {dependencies: dependencies});
+            }
+
             // Remove leading/trailing whitespace to normalize input
-            expression = expression.trim();
+            expression = String(expression).trim();
 
             // Check cache first to avoid redundant parsing of the same expression
             // This is especially beneficial for repeated evaluations in loops or frequent re-renders
@@ -605,6 +617,7 @@
             const result = this.parseTernary(expression) ||      // Conditional: condition ? ifTrue : ifFalse
                 this.parseLogical(expression) ||       // Logical: && (and), || (or)
                 this.parseComparison(expression) ||    // Comparison: ==, !=, <, >, <=, >=
+                this.parseArithmetic(expression) ||
                 this.parseUnary(expression) ||         // Unary: !, -, +
                 this.parseParentheses(expression) ||   // Add parentheses parsing here
                 this.parseProperty(expression);        // Property access, literals, identifiers
@@ -875,6 +888,35 @@
         },
 
         /**
+         * Parses arithmetic expressions in CSS-like format.
+         * @param {string} expression - The arithmetic expression to parse
+         * @returns {Object|null} Returns an object with arithmetic expression details, or null if no match
+         * @returns {string} returns.type - Always 'arithmetic' for valid arithmetic expressions
+         * @returns {string} returns.left - The left operand (trimmed)
+         * @returns {string} returns.operator - The arithmetic operator (+, -, *, /)
+         * @returns {*} returns.right - The right operand, parsed using parseValue()
+         * @returns {Array} returns.dependencies - Array of dependencies extracted from the left operand
+         */
+        parseArithmetic(expression) {
+            // Match expressions like "pixels + 'px'" or "width - 10"
+            const arithmeticMatch = expression.match(/^(.+?)\s*([+\-*/])\s*(.+?)$/);
+
+            if (!arithmeticMatch) {
+                return null;
+            }
+
+            const [, left, operator, right] = arithmeticMatch;
+
+            return {
+                type: 'arithmetic',
+                left: left.trim(),
+                operator: operator.trim(),
+                right: this.parseValue(right.trim()),
+                dependencies: this.extractDependencies(left.trim())
+            };
+        },
+
+        /**
          * Attempts to parse a logical expression (&&, ||)
          * @param {string} expression - Expression to parse
          * @returns {Object|null} Parsed logical object or null if not a logical expression
@@ -975,14 +1017,19 @@
          * @returns {Object} Parsed value object
          */
         parseValue(value) {
-            // Remove leading and trailing whitespace from the input
-            value = value.trim();
+            // Handle case where value is already parsed (from addObjectPair)
+            if (typeof value === 'object' && value !== null && value.type) {
+                return value;
+            }
+
+            // Convert to string and remove leading and trailing whitespace
+            value = String(value).trim();
 
             // Check if value is a string literal (enclosed in single or double quotes)
             if ((value.startsWith("'") && value.endsWith("'")) ||
                 (value.startsWith('"') && value.endsWith('"'))) {
-                // Return literal object with the string content (quotes removed)
-                return {type: 'literal', value: value.slice(1, -1)};
+                const literalValue = value.slice(1, -1);
+                return {type: 'literal', value: literalValue};
             }
 
             // Check if value is an object literal (enclosed in curly braces)
@@ -990,14 +1037,28 @@
                 return {type: 'object', value: value};
             }
 
-            // Check if value is a numeric literal (integer or decimal)
-            if (/^\d+(\.\d+)?$/.test(value)) {
-                return {type: 'literal', value: parseFloat(value)};
+            // Enhanced numeric literal detection
+            // Handles: integers (10), decimals (10.5), negative numbers (-10), scientific notation (1e5)
+            if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value)) {
+                const numValue = parseFloat(value);
+                // Ensure the parsed number is valid (not NaN)
+                if (!isNaN(numValue)) {
+                    return {type: 'literal', value: numValue};
+                }
             }
 
             // Check if value is a boolean literal
             if (value === 'true' || value === 'false') {
                 return {type: 'literal', value: value === 'true'};
+            }
+
+            // Check for null and undefined literals
+            if (value === 'null') {
+                return {type: 'literal', value: null};
+            }
+
+            if (value === 'undefined') {
+                return {type: 'literal', value: undefined};
             }
 
             // If none of the above patterns match, treat as property reference
@@ -1006,36 +1067,91 @@
 
         /**
          * Extracts property dependencies from an expression
-         * @param {string} expression - Expression to analyze
+         * @param {string|Object} expression - Expression to analyze
          * @returns {string[]} Array of property names
          */
         extractDependencies(expression) {
-            const dependencies = [];
-            const jsLiterals = ['true', 'false', 'null', 'undefined', 'NaN', 'Infinity'];
-
-            // Handle object literals specially
-            if (expression.trim().startsWith('{') && expression.trim().endsWith('}')) {
-                const content = expression.trim().slice(1, -1);
-                const pairs = this.parseObjectPairs(content);
-
-                pairs.forEach(({value}) => {
-                    const valueDeps = this.extractDependencies(value);
-                    valueDeps.forEach(dep => {
-                        if (!dependencies.includes(dep)) {
-                            dependencies.push(dep);
-                        }
-                    });
-                });
-
-                return dependencies;
+            // Handle non-string expressions
+            if (typeof expression !== 'string') {
+                return this.extractFromObject(expression);
             }
 
-            // Enhanced regex to find property access patterns (including complex paths)
+            // Ensure we have a clean string to work with (handles nulls/undefined)
+            expression = String(expression).trim();
+
+            // Handle object literals
+            if (this.isObjectLiteral(expression)) {
+                return this.extractFromObjectLiteral(expression);
+            }
+
+            // Extract from regular expressions
+            return this.extractFromExpression(expression);
+        },
+
+        /**
+         * Extract dependencies from parsed object expressions
+         * Handles structured objects with type, path, and value properties
+         * @param {Object} expression - Parsed expression object
+         * @returns {string[]} Array of property dependencies
+         */
+        extractFromObject(expression) {
+            if (!expression || typeof expression !== 'object') {
+                return [];
+            }
+
+            // Extract common properties from parsed expression object
+            const { type, path, value } = expression;
+
+            // Property references contain dependencies in their path
+            if (type === 'property' && path) {
+                return this.extractDependencies(path);
+            }
+
+            // Object types may have nested dependencies
+            if (type === 'object' && value) {
+                return this.extractDependencies(value);
+            }
+
+            // Literals have no dependencies
+            return [];
+        },
+
+        /**
+         * Extract dependencies from object literal strings
+         * Parses object syntax like "{key: value}" and extracts dependencies from values
+         * @param {string} expression - Object literal string (already trimmed, with braces)
+         * @returns {string[]} Array of unique property dependencies from all values
+         */
+        extractFromObjectLiteral(expression) {
+            const content = expression.slice(1, -1);
+            const pairs = this.parseObjectPairs(content);
+            const dependencies = [];
+
+            pairs.forEach(({ value }) => {
+                const valueDeps = this.extractDependencies(value);
+                valueDeps.forEach(dep => {
+                    if (!dependencies.includes(dep)) {
+                        dependencies.push(dep);
+                    }
+                });
+            });
+
+            return dependencies;
+        },
+
+        /**
+         * Extract dependencies from regular expressions using regex
+         * Finds property access patterns like "obj.prop" or "obj[key]" and returns root properties
+         * @param {string} expression - String expression to analyze
+         * @returns {string[]} Array of root property names (excludes JS literals)
+         */
+        extractFromExpression(expression) {
+            const dependencies = [];
+            const jsLiterals = ['true', 'false', 'null', 'undefined', 'NaN', 'Infinity'];
             const propertyRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*|\[[^\]]+\])*/g;
 
             let match;
             while ((match = propertyRegex.exec(expression))) {
-                const fullPath = match[0];
                 const rootProperty = match[1];
 
                 if (!jsLiterals.includes(rootProperty) && !dependencies.includes(rootProperty)) {
@@ -1044,6 +1160,16 @@
             }
 
             return dependencies;
+        },
+
+        /**
+         * Check if expression is an object literal
+         * Simple check for strings that start with "{" and end with "}"
+         * @param {string} expression - Trimmed string expression
+         * @returns {boolean} True if the expression appears to be an object literal
+         */
+        isObjectLiteral(expression) {
+            return expression.startsWith('{') && expression.endsWith('}');
         },
 
         /**
@@ -1066,6 +1192,11 @@
                     return condition ?
                         this.evaluateValue(parsedExpr.trueValue, context) :
                         this.evaluateValue(parsedExpr.falseValue, context);
+
+                case 'arithmetic':
+                    const leftArith = Utils.getNestedValue(context, parsedExpr.left);
+                    const rightArith = this.evaluateValue(parsedExpr.right, context);
+                    return this.performArithmetic(leftArith, parsedExpr.operator, rightArith);
 
                 case 'logical':
                     const leftLogical = this.evaluateCondition(parsedExpr.left, context);
@@ -1145,6 +1276,10 @@
          * @returns {*} Evaluated value
          */
         evaluateValue(valueObj, context) {
+            if (!valueObj) {
+                return undefined;
+            }
+
             if (valueObj.type === 'literal') {
                 return valueObj.value;
             }
@@ -1154,15 +1289,26 @@
             }
 
             if (valueObj.type === 'object') {
-                // Parse and evaluate object literal
                 return this.evaluateObjectLiteral(valueObj.value, context);
+            }
+
+            // Handle direct string evaluation for object values
+            if (typeof valueObj === 'string') {
+                // Check if it's a quoted string literal
+                if ((valueObj.startsWith("'") && valueObj.endsWith("'")) ||
+                    (valueObj.startsWith('"') && valueObj.endsWith('"'))) {
+                    return valueObj.slice(1, -1);
+                }
+
+                // Otherwise treat as property path
+                return Utils.getNestedValue(context, valueObj);
             }
 
             return undefined;
         },
 
         /**
-         * Evaluates an object literal string like "{ active: isActive, disabled: !enabled }"
+         * Evaluates an object literal string like "{ active: isActive, width: 100, color: 'red' }"
          * @param {string} objectStr - Object literal string
          * @param {Object} context - Evaluation context
          * @returns {Object} Evaluated object
@@ -1171,17 +1317,20 @@
             // Remove outer braces
             const content = objectStr.slice(1, -1).trim();
 
+            // If nothing is left after this removal, return empty object
             if (!content) {
                 return {};
             }
 
+            // Parse and use the object pairs
             const result = {};
             const pairs = this.parseObjectPairs(content);
 
             pairs.forEach(({key, value}) => {
-                // Evaluate the value expression
-                const parsed = this.parseExpression(value);
-                result[key] = this.evaluate(parsed, context);
+                // Parse the value first to determine its type
+                // Then evaluate the parsed value
+                const parsedValue = this.parseValue(value);
+                result[key] = this.evaluateValue(parsedValue, context);
             });
 
             return result;
@@ -1198,6 +1347,7 @@
             let inQuotes = false;
             let quoteChar = '';
             let parenDepth = 0;
+            let braceDepth = 0; // Add brace tracking
 
             for (let i = 0; i < content.length; i++) {
                 const char = content[i];
@@ -1218,7 +1368,11 @@
                         parenDepth++;
                     } else if (char === ')') {
                         parenDepth--;
-                    } else if (char === ',' && parenDepth === 0) {
+                    } else if (char === '{') {
+                        braceDepth++;
+                    } else if (char === '}') {
+                        braceDepth--;
+                    } else if (char === ',' && parenDepth === 0 && braceDepth === 0) {
                         // Found a top-level comma - process current pair
                         this.addObjectPair(current.trim(), pairs);
                         current = '';
@@ -1239,7 +1393,7 @@
 
         /**
          * Adds a key-value pair to the pairs array
-         * @param {string} pairStr - String like "active: isActive" or "'test': count > 0"
+         * @param {string} pairStr - String like "active: isActive" or "'test': 10"
          * @param {Array} pairs - Array to add pair to
          */
         addObjectPair(pairStr, pairs) {
@@ -1252,14 +1406,20 @@
 
             // Remove quotes from key if present (handles both single and double quotes)
             let key = pairStr.substring(0, colonIndex).trim();
-            const value = pairStr.substring(colonIndex + 1).trim();
+            let value = pairStr.substring(colonIndex + 1).trim();
 
+            // Clean up key quotes
             if ((key.startsWith("'") && key.endsWith("'")) ||
                 (key.startsWith('"') && key.endsWith('"'))) {
                 key = key.slice(1, -1);
             }
 
-            pairs.push({key: key, value: value});
+            // Parse the value using the enhanced parseValue method
+            // This will properly handle strings, numbers, booleans, etc.
+            const parsedValue = this.parseValue(value);
+
+            // Add the parsed value to the list
+            pairs.push({key: key, value: parsedValue});
         },
 
         /**
@@ -1329,6 +1489,33 @@
 
                 default:
                     return false;
+            }
+        },
+
+        /**
+         * Performs arithmetic operations on two operands.
+         * @param {number|string} left - The left operand. For addition, can be string or number.
+         * @param {string} operator - The arithmetic operator ('+', '-', '*', '/').
+         * @param {number|string} right - The right operand. For addition, can be string or number.
+         * @returns {number|string} The result of the arithmetic operation. Returns a string for string concatenation with '+', otherwise returns a number. Returns the left operand unchanged for unsupported operators.
+         */
+        performArithmetic(left, operator, right) {
+            switch (operator) {
+                case '+':
+                    // Handle both numeric addition and string concatenation
+                    return left + right;
+
+                case '-':
+                    return Number(left) - Number(right);
+
+                case '*':
+                    return Number(left) * Number(right);
+
+                case '/':
+                    return Number(left) / Number(right);
+
+                default:
+                    return left;
             }
         }
     };
@@ -2453,6 +2640,7 @@
                         if (!binding.parsedExpression) {
                             // Lazy parse: only when we need to check dependencies
                             this.getParsedExpression(binding);
+
                             // Remove from unparsed set since it's now parsed and indexed
                             this.unparsedBindings.delete(binding);
                         }
@@ -2609,6 +2797,13 @@
                             // Perform initial rendering of the foreach binding
                             this.updateForeachBinding(binding, binding.collection);
                         }
+                    }
+                });
+
+                // Process bindings with no dependencies (literal expressions)
+                this.bindings.forEach(binding => {
+                    if (binding.target && (!binding.dependencies || binding.dependencies.length === 0)) {
+                        this.updateBinding(binding, null, null);
                     }
                 });
 
