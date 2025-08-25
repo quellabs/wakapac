@@ -2395,7 +2395,7 @@
              * Creates a foreach binding for rendering lists
              */
             createForeachBinding(element, target) {
-                return this.createBinding('foreach', element, {
+                const bindingElement = this.createBinding('foreach', element, {
                     target: target,
                     collection: target,
                     itemName: element.getAttribute('data-pac-item') || 'item',
@@ -2403,6 +2403,10 @@
                     template: element.innerHTML,
                     previous: []
                 });
+
+                element.innerHTML = '';
+
+                return bindingElement;
             },
 
             /**
@@ -2889,9 +2893,6 @@
                 const parsed = this.getParsedExpression(binding);
                 const arrayValue = ExpressionParser.evaluate(parsed, context);
 
-                console.log('Foreach binding - array:', JSON.stringify(arrayValue));
-                console.log('Element before clear:', binding.element.innerHTML);
-
                 // Ensure we have a valid array to work with
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
                 const previous = binding.previous || [];
@@ -2926,8 +2927,6 @@
                 // Replace all existing content with new rendered items
                 binding.element.innerHTML = '';
                 binding.element.appendChild(fragment);
-
-                console.log('Element after render:', binding.element.innerHTML);
             },
 
             /**
@@ -3025,8 +3024,6 @@
              * @param {Object} [parentVars={}] - Variables inherited from parent foreach scopes for nesting support
              */
             processForeachTemplate(element, item, index, itemName, indexName, collectionName, parentVars = {}) {
-                console.log('Processing template for item:', JSON.stringify(item));
-
                 // Create foreach variables for this iteration, inheriting from parent scopes
                 const foreachVars = Object.assign({}, parentVars, {
                     [itemName]: item,
@@ -3108,8 +3105,6 @@
                         );
                     }
                 });
-
-                console.log('Element after text processing:', element.innerHTML);
             },
 
             /**
@@ -3323,6 +3318,7 @@
                         foreachVars[Object.keys(foreachVars)[0]],
                         foreachVars[Object.keys(foreachVars)[1]]
                     );
+
                     return;
                 }
 
