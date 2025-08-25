@@ -578,6 +578,30 @@
         },
 
         /**
+         * Creates helpful error messages for common expression parsing mistakes
+         */
+        createHelpfulError(expression, originalError) {
+            let message = `Expression parsing failed: "${expression}"\n`;
+            message += `Original error: ${originalError.message}\n`;
+
+            // Add specific suggestions based on common patterns
+            if (originalError.message.includes('Expected ":" after object key')) {
+                if (expression.includes('?') && expression.includes('{')) {
+                    message += '\nSuggestion: Ternary operators cannot be used as object keys in class bindings.\n';
+                    message += `Try removing the braces: ${expression.replace(/^\{|\}$/g, '').trim()}\n`;
+                    message += 'Or use object syntax: { className: condition, otherClass: !condition }';
+                }
+            }
+
+            // ... other error patterns ...
+
+            const enhancedError = new Error(message);
+            enhancedError.originalError = originalError;
+            enhancedError.expression = expression;
+            return enhancedError;
+        },
+
+        /**
          * Main entry point for parsing JavaScript-like expressions into an AST
          * @param {string|Object} expression - The expression string to parse
          * @returns {Object|null} Parsed AST node or null if unparseable
@@ -601,23 +625,28 @@
             }
 
             // Tokenize and parse
-            this.tokens = this.tokenize(expression);
-            this.currentToken = 0;
+            try {
+                this.tokens = this.tokenize(expression);
+                this.currentToken = 0;
 
-            if (this.tokens.length === 0) {
-                return null;
+                if (this.tokens.length === 0) {
+                    return null;
+                }
+
+                // Add dependencies to the result
+                const result = this.parseTernary();
+
+                if (result) {
+                    result.dependencies = this.extractDependencies(result);
+                }
+
+                // Cache the result
+                this.cache.set(expression, result);
+                return result;
+            } catch (error) {
+                // Use the parser's own error enhancement method
+                throw this.createHelpfulError(expression, error);
             }
-
-            // Add dependencies to the result
-            const result = this.parseTernary();
-
-            if (result) {
-                result.dependencies = this.extractDependencies(result);
-            }
-
-            // Cache the result
-            this.cache.set(expression, result);
-            return result;
         },
 
         /**
@@ -3839,10 +3868,24 @@
              * @param {*} value - The evaluated expression value
              */
             applyClassBinding(element, target, value) {
-                // Get previous classes that were applied by this binding
-                const previousClasses = element.dataset.pacPreviousClasses || '';
+                // Remove previously applied classes
+                this.clearPreviousClasses(element);
 
-                // Remove all previously applied classes
+                // Determine new classes to apply
+                const newClasses = this.parseClassValue(value);
+
+                // Apply new classes and store for next time
+                newClasses.forEach(cls => element.classList.add(cls));
+                element.dataset.pacPreviousClasses = newClasses.join(' ');
+            },
+
+            /**
+             * Remove all previously applied classes from the element
+             * @param {HTMLElement} element - The target DOM element
+             */
+            clearPreviousClasses(element) {
+                const previousClasses = element.dataset.pacPreviousClasses;
+
                 if (previousClasses) {
                     previousClasses.split(' ').forEach(cls => {
                         if (cls.trim()) {
@@ -3850,48 +3893,40 @@
                         }
                     });
                 }
+            },
 
-                // Handle different value types
-                let newClasses = '';
-
+            /**
+             * Parse different value types and return array of class names to apply
+             * @param {*} value - The evaluated expression value
+             * @returns {string[]} Array of valid class names
+             */
+            parseClassValue(value) {
+                // Object syntax: { className: boolean, className2: boolean }
                 if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    // Object syntax: { className: boolean, className2: boolean }
-                    Object.keys(value).forEach(className => {
-                        if (value[className] && className.trim()) {
-                            element.classList.add(className.trim());
-                            newClasses += (newClasses ? ' ' : '') + className.trim();
-                        }
-                    });
-                } else if (Array.isArray(value) && value !== null) {
-                    // Array of class names
-                    value.forEach(className => {
-                        if (className && typeof className === 'string' && className.trim()) {
-                            element.classList.add(className.trim());
-                            newClasses += (newClasses ? ' ' : '') + className.trim();
-                        }
-                    });
-                } else if (typeof value === 'string') {
-                    // String value - could be single class or space-separated classes
-                    const classNames = value.trim().split(/\s+/);
-
-                    classNames.forEach(className => {
-                        if (className.trim()) {
-                            element.classList.add(className.trim());
-                            newClasses += (newClasses ? ' ' : '') + className.trim();
-                        }
-                    });
-                } else if (value) {
-                    // Truthy non-string value - convert to string and treat as class name
-                    const className = String(value).trim();
-
-                    if (className) {
-                        element.classList.add(className);
-                        newClasses = className;
-                    }
+                    return Object.entries(value)
+                        .filter(([className, isActive]) => isActive && className.trim())
+                        .map(([className]) => className.trim());
                 }
 
-                // Store the new classes for next time
-                element.dataset.pacPreviousClasses = newClasses;
+                // Array of class names
+                if (Array.isArray(value)) {
+                    return value
+                        .filter(cls => cls && typeof cls === 'string' && cls.trim())
+                        .map(cls => cls.trim());
+                }
+
+                // String value - single class or space-separated classes
+                if (typeof value === 'string') {
+                    return value.trim().split(/\s+/).filter(cls => cls.trim());
+                }
+
+                // Truthy non-string value - convert to string
+                if (value) {
+                    const className = String(value).trim();
+                    return className ? [className] : [];
+                }
+
+                return [];
             },
 
             /**
