@@ -88,11 +88,6 @@
                 return false;
             }
 
-            // Null check
-            if (value === null) {
-                return false;
-            }
-
             // Plain objects (created with {} or new Object() or Object.create(null))
             if (this.isPlainObject(value)) {
                 return true;
@@ -593,6 +588,7 @@
                 if (expression.dependencies) {
                     return expression;
                 }
+
                 const dependencies = this.extractDependencies(expression);
                 return Object.assign({}, expression, { dependencies });
             }
@@ -612,9 +608,9 @@
                 return null;
             }
 
+            // Add dependencies to the result
             const result = this.parseTernary();
 
-            // Add dependencies to the result
             if (result) {
                 result.dependencies = this.extractDependencies(result);
             }
@@ -691,7 +687,6 @@
                     const precedence = this.getOperatorPrecedence(char);
 
                     let type;
-
                     switch (char) {
                         case '?':
                             type = 'QUESTION';
@@ -1059,7 +1054,9 @@
          * @returns {string} Reconstructed expression string
          */
         reconstructExpression(node) {
-            if (!node) return '';
+            if (!node) {
+                return '';
+            }
 
             switch (node.type) {
                 case 'literal':
@@ -1088,6 +1085,7 @@
                     return true;
                 }
             }
+
             return false;
         },
 
