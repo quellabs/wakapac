@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+   <head>
+      <meta charset="UTF-8">
+      <title>Dashboard</title>
+      <script src="../wakapac.js"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+      <style>
+         body { font-family: Arial, sans-serif; margin: 0; background: #667eea; }
+         .dashboard { max-width: 1200px; margin: 0 auto; padding: 20px; }
+         .header { background: white; padding: 30px; border-radius: 10px; margin-bottom: 20px; }
+         .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+         .metric { background: white; padding: 20px; border-radius: 10px; text-align: center; }
+         .metric-title { font-size: 14px; color: #666; margin-bottom: 10px; }
+         .metric-value { font-size: 28px; font-weight: bold; margin-bottom: 5px; }
+         .metric-change { font-size: 12px; padding: 4px 8px; border-radius: 4px; }
+         .positive { background: #e6f7e6; color: #2d8f2d; }
+         .negative { background: #ffe6e6; color: #cc0000; }
+         .charts { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+         .chart-box { background: white; padding: 20px; border-radius: 10px; }
+         .activity-item { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #eee; }
+         .activity-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 10px; }
+         .user { background: #3b82f6; }
+         .sale { background: #10b981; }
+         .error { background: #ef4444; }
+         .activity-text { flex: 1; font-size: 14px; }
+         .activity-time { font-size: 12px; color: #999; }
+      </style>
+   </head>
+   <body>
+      <div id="dashboard" class="dashboard">
+         <div class="header">
+            <h1>Analytics Dashboard</h1>
+            <p>Real-time business metrics</p>
+         </div>
+         <div class="metrics">
+            <div class="metric">
+               <div class="metric-title">Total Revenue</div>
+               <div class="metric-value">{{formattedRevenue}}</div>
+               <div class="metric-change positive">{{revenueChange}}</div>
+            </div>
+            <div class="metric">
+               <div class="metric-title">Active Users</div>
+               <div class="metric-value">{{formattedUsers}}</div>
+               <div class="metric-change positive">{{userChange}}</div>
+            </div>
+            <div class="metric">
+               <div class="metric-title">Conversion Rate</div>
+               <div class="metric-value">{{conversionRate}}</div>
+               <div class="metric-change positive">{{conversionChange}}</div>
+            </div>
+            <div class="metric">
+               <div class="metric-title">Bounce Rate</div>
+               <div class="metric-value">{{bounceRate}}</div>
+               <div class="metric-change negative">{{bounceChange}}</div>
+            </div>
+         </div>
+         <div class="charts">
+            <div class="chart-box">
+               <h3>Revenue Over Time</h3>
+               <canvas id="chart" width="400" height="200"></canvas>
+            </div>
+            <div class="chart-box">
+               <h3>Recent Activity</h3>
+               <div data-pac-bind="foreach: activities" data-pac-item="activity">
+                  <div class="activity-item">
+                     <div class="activity-dot" data-pac-bind="class: activity.type"></div>
+                     <div class="activity-text">{{activity.message}}</div>
+                     <div class="activity-time">{{activity.time}}</div>
+                  </div>
+               </div>
+            </div>
+         </div>
+      </div>
+      <script>
+         const dashboard = wakaPAC('#dashboard', {
+             revenue: 125000,
+             revenueChange: '+12%',
+             activeUsers: 8500,
+             userChange: '+8%',
+             conversionRate: '3.2%',
+             conversionChange: '+0.8%',
+             bounceRate: '42%',
+             bounceChange: '-2%',
+             chartData: [65, 75, 85, 95, 115, 125],
+             chartLabels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+             activities: [{
+                 type: 'user',
+                 message: 'New user registered',
+                 time: '2 min'
+             }, {
+                 type: 'sale',
+                 message: 'Sale completed',
+                 time: '5 min'
+             }, {
+                 type: 'user',
+                 message: 'User upgraded',
+                 time: '8 min'
+             }],
+             computed: {
+                 formattedRevenue: function() {
+                     return '$' + Math.round(this.revenue / 1000) + 'k';
+                 },
+                 formattedUsers: function() {
+                     return this.activeUsers.toLocaleString();
+                 }
+             },
+             updateChart: function() {
+                 let newVal = this.chartData[this.chartData.length - 1] + Math.floor(Math.random() * 20) - 10;
+				 newVal = Math.max(60, Math.min(140, newVal));
+				 
+                 if (this.chartData.length >= 6) {
+                     this.chartData.shift();
+                     this.chartLabels.shift();
+                 }
+				 
+                 this.chartData.push(newVal);
+                 this.chartLabels.push(new Date().toLocaleTimeString().slice(0, 5));
+				 
+                 myChart.data.datasets[0].data = this.chartData;
+                 myChart.data.labels = this.chartLabels;
+                 myChart.update();
+             },
+             init: function() {
+                 const self = this;
+				 
+                 setInterval(function() {
+                     self.revenue += Math.floor(Math.random() * 2000) - 1000;
+                     self.activeUsers += Math.floor(Math.random() * 40) - 20;
+                     self.updateChart();
+                 }, 3000);
+             }
+         });
+		 
+         const ctx = document.getElementById('chart').getContext('2d');
+         const myChart = new Chart(ctx, {
+             type: 'line',
+             data: {
+                 labels: dashboard.chartLabels,
+                 datasets: [{
+                     data: dashboard.chartData,
+                     borderColor: '#667eea',
+                     fill: false,
+                     tension: 0.1
+                 }]
+             },
+             options: {
+                 responsive: true,
+                 plugins: {
+                     legend: {
+                         display: false
+                     }
+                 },
+                 scales: {
+                     y: {
+                         min: 50,
+                         max: 150
+                     }
+                 }
+             }
+         });
+	 </script>
+   </body>
+</html>

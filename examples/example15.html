@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Foreach</title>
+    <style>
+        body { font-family: Arial,serif; padding: 20px; }
+        .test { border: 1px solid #ccc; margin: 10px 0; padding: 10px; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="test">
+        <h3>Test 1: Direct array modification</h3>
+        <button data-pac-bind="click: addItem">Add Item</button>
+        <button data-pac-bind="click: removeItem">Remove Item</button>
+        <p>Array length: {{items.length}}</p>
+        <div data-pac-bind="foreach: items" data-pac-item="item">
+            - {{item}}<br>
+        </div>
+    </div>
+
+    <div class="test">
+        <h3>Test 2: Array modification in watcher</h3>
+        <input type="text" data-pac-bind="value: triggerValue">
+        <p>Trigger value: {{triggerValue}}</p>
+        <p>Watch log length: {{watchLog.length}}</p>
+        <div data-pac-bind="foreach: watchLog" data-pac-item="entry">
+            - {{entry}}<br>
+        </div>
+    </div>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const app = wakaPAC('#app', {
+        items: ['Initial item'],
+        triggerValue: 'test',
+        watchLog: ['Initial watch log'],
+
+        watch: {
+            triggerValue: function(newVal, oldVal) {
+                console.log('Watcher triggered, adding to watchLog');
+                console.log('watchLog before:', [...this.watchLog]);
+
+                this.watchLog.unshift(`Changed: ${oldVal} → ${newVal}`);
+
+                console.log('watchLog after:', [...this.watchLog]);
+            }
+        },
+
+        addItem() {
+            console.log('Adding item directly');
+            this.items.push('New item ' + Date.now());
+            console.log('items now:', [...this.items]);
+        },
+
+        removeItem() {
+            if (this.items.length > 1) {
+                this.items.pop();
+            }
+        }
+    });
+
+    console.log('Initial items:', app.items);
+    console.log('Initial watchLog:', app.watchLog);
+</script>
+</body>
+</html>

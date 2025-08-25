@@ -293,22 +293,22 @@
             </form>
 
             <div style="margin: 10px 0;">
-                <button class="btn-info" data-pac-bind="click:showAll">All</button>
-                <button class="btn-warning" data-pac-bind="click:showActive">Active</button>
-                <button class="btn-secondary" data-pac-bind="click:showCompleted">Completed</button>
+                <button class="btn-info" data-pac-bind="click: showAll">All</button>
+                <button class="btn-warning" data-pac-bind="click: showActive">Active</button>
+                <button class="btn-secondary" data-pac-bind="click: showCompleted">Completed</button>
             </div>
 
             <div data-pac-bind="foreach:filteredTodos" data-pac-item="todo" data-pac-index="index" style="margin-top: 10px;">
-                <div style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; margin: 5px 0; border-radius: 4px;" data-pac-bind="class:todo.completed">
-                    <input type="checkbox" data-pac-bind="checked:todo.completed" style="margin-right: 10px;">
-                    <span style="flex: 1;" data-pac-bind="class:todo.completed">{{todo.text}}</span>
-                    <button class="btn-danger" data-pac-bind="click:removeTodoById" style="padding: 4px 8px; font-size: 12px;">✕</button>
+                <div style="display: flex; align-items: center; padding: 8px; border: 1px solid #ddd; margin: 5px 0; border-radius: 4px;" data-pac-bind="class: { completed: todo.completed }">
+                    <input type="checkbox" data-pac-bind="checked: todo.completed" style="margin-right: 10px;">
+                    <span style="flex: 1;" data-pac-bind="class: { completed: todo.completed }">{{todo.text}}</span>
+                    <button class="btn-danger" data-pac-bind="click: removeTodoById" style="padding: 4px 8px; font-size: 12px;">✕</button>
                 </div>
             </div>
 
             <div data-pac-bind="visible:todoCount" style="margin-top: 10px;">
-                <button class="btn-danger" data-pac-bind="click:clearCompleted">🗑️ Clear Completed</button>
-                <button class="btn-warning" data-pac-bind="click:toggleAllTodos">
+                <button class="btn-danger" data-pac-bind="click: clearCompleted">🗑️ Clear Completed</button>
+                <button class="btn-warning" data-pac-bind="click: toggleAllTodos">
                     {{toggleAllButtonText}}
                 </button>
             </div>
