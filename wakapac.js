@@ -2862,7 +2862,7 @@
                         }
                     } else if (
                         binding.target &&
-                        (binding.type === 'class' || binding.type === 'style') &&
+                        binding.type !== 'text' &&
                         (!binding.dependencies || binding.dependencies.length === 0)
                     ) {
                         this.updateBinding(binding, null, null);
