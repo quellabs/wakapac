@@ -557,11 +557,6 @@
     // EXPRESSION PARSER
     // ============================================================================
 
-    /**
-     * Sophisticated expression parser for template bindings
-     * Supports ternary operators, logical operators (&&, ||), comparisons, and property access
-     * @namespace ExpressionParser
-     */
     const ExpressionParser = {
         /**
          * Cache for parsed expressions to avoid re-parsing
@@ -571,718 +566,802 @@
         bindingCache: new Map(),
 
         /**
-         * Main entry point for parsing JavaScript-like expressions into an abstract syntax tree (AST).
-         * Uses a hierarchical parsing approach, attempting to match operators in order of precedence.
-         * Results are cached to improve performance on repeated parsing of the same expressions.
-         * @param {string} expression - The expression string to parse (e.g., "user.name", "a > b ? 'yes' : 'no'", "!isActive")
-         * @returns {Object|null} Parsed AST node representing the expression structure, or null if unparseable
+         * Tokenizer state for the current parsing operation
+         */
+        tokens: [],
+        currentToken: 0,
+
+        /**
+         * Main entry point for parsing JavaScript-like expressions into an AST
+         * @param {string|Object} expression - The expression string to parse
+         * @returns {Object|null} Parsed AST node or null if unparseable
          */
         parseExpression(expression) {
-            // Handle case where expression is already a parsed object
+            // Handle already parsed objects
             if (typeof expression === 'object' && expression !== null) {
-                // If it already has dependencies, just return it
                 if (expression.dependencies) {
                     return expression;
                 }
-
-                // Create a completely new object to avoid any mutation issues
                 const dependencies = this.extractDependencies(expression);
-                return Object.assign({}, expression, {dependencies: dependencies});
+                return Object.assign({}, expression, { dependencies });
             }
 
-            // Remove leading/trailing whitespace to normalize input
             expression = String(expression).trim();
 
-            // Check cache first to avoid redundant parsing of the same expression
-            // This is especially beneficial for repeated evaluations in loops or frequent re-renders
+            // Check cache first
             if (this.cache.has(expression)) {
                 return this.cache.get(expression);
             }
 
-            // Handle object literals first (before other parsing)
-            if (expression.startsWith('{') && expression.endsWith('}')) {
-                const result = {
-                    type: 'object',
-                    value: expression,
-                    dependencies: this.extractDependencies(expression)
-                };
+            // Tokenize and parse
+            this.tokens = this.tokenize(expression);
+            this.currentToken = 0;
 
-                this.cache.set(expression, result);
-                return result;
+            if (this.tokens.length === 0) {
+                return null;
             }
 
-            // Parse using operator precedence hierarchy (highest to lowest precedence)
-            // Each parser method returns null if it can't handle the expression type
-            // The || chain ensures we try progressively simpler parsing approaches
-            const result = this.parseTernary(expression) ||      // Conditional: condition ? ifTrue : ifFalse
-                this.parseLogical(expression) ||       // Logical: && (and), || (or)
-                this.parseComparison(expression) ||    // Comparison: ==, !=, <, >, <=, >=
-                this.parseArithmetic(expression) ||
-                this.parseUnary(expression) ||         // Unary: !, -, +
-                this.parseParentheses(expression) ||   // Add parentheses parsing here
-                this.parseProperty(expression);        // Property access, literals, identifiers
+            const result = this.parseExpressionInternal();
 
-            // Cache the parsed result for future use
-            // Even null results are cached to avoid repeated failed parsing attempts
+            // Add dependencies to the result
+            if (result) {
+                result.dependencies = this.extractDependencies(result);
+            }
+
+            // Cache the result
             this.cache.set(expression, result);
             return result;
         },
 
         /**
-         * Attempts to parse a parenthesized expression like "(count > 0 && enabled)"
-         * @param {string} expression - Expression to parse
-         * @returns {Object|null} Parsed parentheses object or null if not a parenthesized expression
+         * Tokenizes the input expression into an array of tokens
+         * @param {string} expression - Expression to tokenize
+         * @returns {Array} Array of token objects
          */
-        parseParentheses(expression) {
-            // Check if expression is wrapped in parentheses
-            if (!expression.startsWith('(') || !expression.endsWith(')')) {
-                return null;
+        tokenize(expression) {
+            const tokens = [];
+            let i = 0;
+
+            while (i < expression.length) {
+                const char = expression[i];
+
+                // Skip whitespace
+                if (/\s/.test(char)) {
+                    i++;
+                    continue;
+                }
+
+                // String literals
+                if (char === '"' || char === "'") {
+                    const result = this.tokenizeString(expression, i);
+                    tokens.push(result.token);
+                    i = result.nextIndex;
+                    continue;
+                }
+
+                // Numbers
+                if (/\d/.test(char) || (char === '.' && /\d/.test(expression[i + 1]))) {
+                    const result = this.tokenizeNumber(expression, i);
+                    tokens.push(result.token);
+                    i = result.nextIndex;
+                    continue;
+                }
+
+                // Multi-character operators
+                const twoChar = expression.substr(i, 2);
+                const threeChar = expression.substr(i, 3);
+
+                if (['===', '!=='].includes(threeChar)) {
+                    tokens.push({ type: 'OPERATOR', value: threeChar, precedence: 6 });
+                    i += 3;
+                    continue;
+                }
+
+                if (['==', '!=', '>=', '<=', '&&', '||'].includes(twoChar)) {
+                    const precedence = this.getOperatorPrecedence(twoChar);
+                    tokens.push({ type: 'OPERATOR', value: twoChar, precedence });
+                    i += 2;
+                    continue;
+                }
+
+                // Single character tokens
+                const singleCharTokens = {
+                    '(': 'LPAREN',
+                    ')': 'RPAREN',
+                    '{': 'LBRACE',
+                    '}': 'RBRACE',
+                    '[': 'LBRACKET',
+                    ']': 'RBRACKET',
+                    ',': 'COMMA',
+                    '.': 'DOT'
+                };
+
+                if (singleCharTokens[char]) {
+                    tokens.push({ type: singleCharTokens[char], value: char });
+                    i++;
+                    continue;
+                }
+
+                // Single character operators
+                if ('+-*/<>!?:'.includes(char)) {
+                    const precedence = this.getOperatorPrecedence(char);
+
+                    let type;
+
+                    switch (char) {
+                        case '?':
+                            type = 'QUESTION';
+                            break;
+
+                        case ':':
+                            type = 'COLON';
+                            break;
+
+                        default:
+                            type = 'OPERATOR';
+                            break;
+                    }
+
+                    tokens.push({ type, value: char, precedence });
+                    i++;
+                    continue;
+                }
+
+                // Identifiers and keywords
+                if (/[a-zA-Z_$]/.test(char)) {
+                    const result = this.tokenizeIdentifier(expression, i);
+                    tokens.push(result.token);
+                    i = result.nextIndex;
+                    continue;
+                }
+
+                // Unknown character - skip it
+                i++;
             }
 
-            // Extract the inner expression (remove outer parentheses)
-            const innerExpression = expression.slice(1, -1).trim();
-
-            // Recursively parse the inner expression
-            const innerParsed = this.parseExpression(innerExpression);
-
-            if (!innerParsed) {
-                return null;
-            }
-
-            // Return a parentheses node that wraps the inner expression
-            return {
-                type: 'parentheses',
-                inner: innerParsed,
-                dependencies: innerParsed.dependencies || this.extractDependencies(innerExpression)
-            };
+            return tokens;
         },
 
         /**
-         * Parses a binding string into an array of key-value pairs.
-         * Handles nested parentheses, quoted strings, and comma separation while respecting context.
-         * Results are cached to improve performance on repeated parsing of the same binding string.
-         * @param {string} bindingString - The binding string to parse (e.g., "prop1: value1, prop2: method(arg1, arg2)")
-         * @returns {Array} Array of parsed binding pairs
+         * Tokenizes a string literal
+         * @param {string} expression - Full expression
+         * @param {number} start - Starting index
+         * @returns {Object} {token, nextIndex}
          */
-        parseBindingString(bindingString) {
-            // Check cache first to avoid redundant parsing
-            if (this.bindingCache.has(bindingString)) {
-                return this.bindingCache.get(bindingString);
-            }
+        tokenizeString(expression, start) {
+            const quote = expression[start];
+            let i = start + 1;
+            let value = '';
 
-            // Initialize array to store the final parsed key-value pairs
-            const pairs = [];
+            while (i < expression.length) {
+                const char = expression[i];
 
-            let current = ''; // Current token being built character by character
-            let inQuotes = false; // Flag indicating if we're currently inside quotes
-            let quoteChar = ''; // The specific quote character being used (single or double)
-            let parenDepth = 0; // Track parentheses depth for expression grouping: (a && b), !(c || d)
-            let braceDepth = 0; // Track curly brace depth for object literals: { class: condition }
+                if (char === '\\' && i + 1 < expression.length) {
+                    // Handle escaped characters
+                    const nextChar = expression[i + 1];
 
-            // Parse character by character to handle complex nested structures
-            for (let i = 0; i < bindingString.length; i++) {
-                const char = bindingString[i];
-                const isEscaped = i > 0 && bindingString[i - 1] === '\\';
-
-                // Handle quote characters to track string boundaries
-                if ((char === '"' || char === "'") && !isEscaped) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = '';
+                    if (nextChar === quote || nextChar === '\\') {
+                        value += nextChar;
+                        i += 2;
+                    } else {
+                        value += char;
+                        i++;
                     }
-                }
-
-                // Track parentheses and braces depth when not inside quotes
-                if (!inQuotes) {
-                    if (char === '(') {
-                        parenDepth++;
-                    } else if (char === ')') {
-                        parenDepth--;
-                    } else if (char === '{') {
-                        braceDepth++;
-                    } else if (char === '}') {
-                        braceDepth--;
-                    }
-                }
-
-                // Split on commas only when they're at the top level
-                // (not inside quotes, parentheses, or braces)
-                if (char === ',' && !inQuotes && parenDepth === 0 && braceDepth === 0) {
-                    this.addBindingPairIfValid(current, pairs);
-                    current = '';
+                } else if (char === quote) {
+                    // End of string
+                    return {
+                        token: { type: 'STRING', value },
+                        nextIndex: i + 1
+                    };
                 } else {
-                    current += char;
+                    value += char;
+                    i++;
                 }
             }
 
-            // Process the final binding pair
-            this.addBindingPairIfValid(current, pairs);
-
-            // Cache the result
-            this.bindingCache.set(bindingString, pairs);
-            return pairs;
+            // Unterminated string - treat as identifier
+            return {
+                token: { type: 'IDENTIFIER', value: expression.substring(start) },
+                nextIndex: expression.length
+            };
         },
 
         /**
-         * Validates and processes a single binding pair string, then adds it to the pairs array.
-         * Handles both simple bindings (just a type) and key-value bindings (type: target).
-         * Uses context-aware colon detection to avoid splitting on colons inside nested expressions.
-         * @param {string} pairString - Raw binding pair string (e.g., "onClick: handleClick()" or "disabled")
-         * @param {Array} pairs - Array to add the processed binding pair to (modified in place)
+         * Tokenizes a number literal
+         * @param {string} expression - Full expression
+         * @param {number} start - Starting index
+         * @returns {Object} {token, nextIndex}
          */
-        addBindingPairIfValid(pairString, pairs) {
-            // Remove leading/trailing whitespace and validate the input
-            const trimmed = pairString.trim();
+        tokenizeNumber(expression, start) {
+            let i = start;
+            let value = '';
 
-            // Skip empty strings (e.g., from trailing commas or extra spaces)
-            if (!trimmed) {
-                return;
-            }
+            while (i < expression.length) {
+                const char = expression[i];
 
-            // Locate the binding colon that separates type from target
-            // Uses expression parsing logic to avoid splitting on colons inside quoted strings,
-            // function calls, or other nested structures (e.g., "style: { color: 'red' }")
-            const colonIndex = this.findBindingColon(trimmed);
-
-            if (colonIndex === -1) {
-                // No colon found - this is a simple binding with just a type
-                // Common for boolean attributes or event handlers without parameters
-                // Examples: "disabled", "required", "click" (shorthand for click: click)
-                pairs.push({
-                    type: trimmed,    // The binding type/attribute name
-                    target: ''        // Empty target indicates a simple binding
-                });
-            } else {
-                // Colon found - this is a key-value binding pair
-                // Split on the colon and trim both parts to handle spacing variations
-                // Examples: "onClick: handleClick", "class : getClassName()", " value: user.name "
-                pairs.push({
-                    type: trimmed.substring(0, colonIndex).trim(),      // Everything before colon (attribute/event name)
-                    target: trimmed.substring(colonIndex + 1).trim()    // Everything after colon (expression/value)
-                });
-            }
-        },
-
-        /**
-         * Finds the binding colon (not expression colons like in ternaries)
-         */
-        /**
-         * Locates the binding colon that separates the binding type from its target expression.
-         * Uses a two-phase approach: fast path for common binding types, then comprehensive parsing
-         * for complex cases with nested quotes, parentheses, or object literals.
-         *
-         * @param {string} str - The binding string to search (e.g., "onClick: handleClick()" or "style: { color: 'red' }")
-         * @returns {number} Index of the binding colon, or -1 if no valid colon is found
-         */
-        findBindingColon(str) {
-            // Phase 1: Fast path optimization for common binding types
-            // This avoids expensive character-by-character parsing for the majority of cases
-            // TODO: Consider moving this to a class constant or configuration
-            const knownBindingTypes = [
-                'value', 'checked', 'visible', 'if', 'foreach', 'class', 'style',      // Data bindings
-                'click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'  // Event bindings
-            ];
-
-            // Quick pattern matching: if the string starts with "knownType:", return the colon position
-            // This handles 90%+ of typical binding cases with minimal processing overhead
-            for (const type of knownBindingTypes) {
-                if (str.startsWith(type + ':')) {
-                    return type.length; // Return index of the colon (length of the binding type)
+                if (/[\d.]/.test(char) ||
+                    (char.toLowerCase() === 'e' && /[+-]/.test(expression[i + 1]))) {
+                    value += char;
+                    i++;
+                } else {
+                    break;
                 }
             }
 
-            // Phase 2: Comprehensive parsing fallback for complex or custom binding types
-            // Handles cases like custom bindings, complex expressions, or nested structures
-            let inQuotes = false;      // Track if we're inside a quoted string
-            let quoteChar = '';        // Remember which quote character opened the current string (' or ")
-            let parenDepth = 0;        // Track nesting level of parentheses
+            const numValue = parseFloat(value);
 
-            // Parse character by character to find the first "top-level" colon
-            for (let i = 0; i < str.length; i++) {
-                const char = str[i];
-                const isEscaped = i > 0 && str[i - 1] === '\\';
+            return {
+                token: {
+                    type: 'NUMBER',
+                    value: isNaN(numValue) ? 0 : numValue
+                },
+                nextIndex: i
+            };
+        },
 
-                // Handle quote boundaries to track string literals
-                // Prevents finding colons inside strings like: title: "Hello: World"
-                if ((char === '"' || char === "'") && !isEscaped) {
-                    if (!inQuotes) {
-                        // Starting a new quoted section
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        // Ending current quoted section (matching quote type)
-                        inQuotes = false;
-                        quoteChar = '';
-                    }
-                }
+        /**
+         * Tokenizes an identifier or keyword
+         * @param {string} expression - Full expression
+         * @param {number} start - Starting index
+         * @returns {Object} {token, nextIndex}
+         */
+        tokenizeIdentifier(expression, start) {
+            let i = start;
+            let value = '';
 
-                // Track parentheses depth when not inside quotes
-                // Prevents finding colons inside function calls or object literals
-                // Examples: onClick: method(arg1, arg2) or style: { color: 'red', margin: '10px' }
-                if (!inQuotes) {
-                    if (char === '(') {
-                        parenDepth++;
-                    } else if (char === ')') {
-                        parenDepth--;
-                    } else if (char === ':' && parenDepth === 0) {
-                        // Found a colon at the top level (not inside quotes or parentheses)
-                        // This is our binding separator
-                        return i;
-                    }
+            while (i < expression.length) {
+                const char = expression[i];
+                if (/[a-zA-Z0-9_$]/.test(char)) {
+                    value += char;
+                    i++;
+                } else {
+                    break;
                 }
             }
 
-            // No valid binding colon found - this might be a simple binding without a value
-            // or a malformed binding string
-            return -1;
-        },
+            // Check for keywords
+            let type;
 
-        /**
-         * Parses a simple property access expression (fallback for non-operator expressions)
-         * @param {string} expression - The property access expression to parse (e.g., "user.name", "items[0].value")
-         * @returns {Object} Parsed property object
-         */
-        parseProperty(expression) {
+            switch (value) {
+                case 'true':
+                case 'false':
+                case 'null':
+                case 'undefined':
+                    type = 'KEYWORD';
+                    break;
+                default:
+                    type = 'IDENTIFIER';
+                    break;
+            }
+
             return {
-                // Mark this as a property access type for the evaluation engine
-                type: 'property',
-
-                // Store the original expression path for runtime evaluation
-                path: expression,
-
-                // Extract all variable dependencies from this expression
-                // This helps with change detection and reactive updates
-                dependencies: this.extractDependencies(expression)
+                token: {type, value},
+                nextIndex: i
             };
         },
 
         /**
-         * Attempts to parse a comparison expression (===, !==, ==, !=, >=, <=, >, <)
-         * @param {string} expression - Expression to parse
-         * @returns {Object|null} Parsed comparison object or null if not a comparison expression
+         * Gets operator precedence (higher number = higher precedence)
+         * @param {string} operator - Operator to check
+         * @returns {number} Precedence level (0 if operator not found)
          */
-        parseComparison(expression) {
-            // Use regex to match comparison expressions with operators
-            const comparisonMatch = expression.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+?)$/);
+        getOperatorPrecedence(operator) {
+            switch (operator) {
+                // Logical OR - lowest precedence
+                case '||':
+                    return 1;
 
-            // If no comparison operator pattern is found, this isn't a comparison expression
-            if (!comparisonMatch) {
-                return null;
+                // Logical AND
+                case '&&':
+                    return 2;
+
+                // Equality operators
+                case '===':  // Strict equality
+                case '!==':  // Strict inequality
+                case '==':   // Loose equality
+                case '!=':   // Loose inequality
+                    return 6;
+
+                // Relational operators
+                case '<':    // Less than
+                case '>':    // Greater than
+                case '<=':   // Less than or equal
+                case '>=':   // Greater than or equal
+                    return 7;
+
+                // Additive operators
+                case '+':    // Addition
+                case '-':    // Subtraction
+                    return 8;
+
+                // Multiplicative operators
+                case '*':    // Multiplication
+                case '/':    // Division
+                    return 9;
+
+                // Unary operators - highest precedence
+                case '!':        // Logical NOT
+                case 'unary-':   // Unary minus
+                case 'unary+':   // Unary plus
+                    return 10;
+
+                // Unknown operator
+                default:
+                    return 0;
             }
-
-            // Destructure the regex match results
-            // Skip index 0 (full match) and extract the three capture groups
-            const [, left, operator, right] = comparisonMatch;
-
-            // Return structured comparison object
-            return {
-                type: 'comparison',                                 // Identifies this as a comparison expression
-                left: left.trim(),                                  // Left operand with whitespace removed
-                operator: operator.trim(),                          // Comparison operator with whitespace removed
-                right: this.parseValue(right.trim()),               // Right operand parsed as a value (could be literal, variable, etc.)
-                dependencies: this.extractDependencies(left.trim()) // Extract any variable dependencies from left operand
-            };
         },
 
         /**
-         * Parses arithmetic expressions in CSS-like format.
-         * @param {string} expression - The arithmetic expression to parse
-         * @returns {Object|null} Returns an object with arithmetic expression details, or null if no match
-         * @returns {string} returns.type - Always 'arithmetic' for valid arithmetic expressions
-         * @returns {string} returns.left - The left operand (trimmed)
-         * @returns {string} returns.operator - The arithmetic operator (+, -, *, /)
-         * @returns {*} returns.right - The right operand, parsed using parseValue()
-         * @returns {Array} returns.dependencies - Array of dependencies extracted from the left operand
+         * Internal expression parser - starts the recursive descent
+         * @returns {Object|null} Parsed AST node
          */
-        parseArithmetic(expression) {
-            // Match expressions like "pixels + 'px'" or "width - 10"
-            const arithmeticMatch = expression.match(/^(.+?)\s*([+\-*/])\s*(.+?)$/);
-
-            if (!arithmeticMatch) {
-                return null;
-            }
-
-            const [, left, operator, right] = arithmeticMatch;
-
-            return {
-                type: 'arithmetic',
-                left: left.trim(),
-                operator: operator.trim(),
-                right: this.parseValue(right.trim()),
-                dependencies: this.extractDependencies(left.trim())
-            };
+        parseExpressionInternal() {
+            return this.parseTernary();
         },
 
         /**
-         * Attempts to parse a logical expression (&&, ||)
-         * @param {string} expression - Expression to parse
-         * @returns {Object|null} Parsed logical object or null if not a logical expression
+         * Parses ternary conditional expressions (condition ? true : false)
+         * @returns {Object|null} Ternary AST node or lower precedence expression
          */
-        parseLogical(expression) {
-            // Use regex to match logical expressions with && or || operators
-            const logicalMatch = expression.match(/^(.+?)\s*(&&|\|\|)\s*(.+?)$/);
+        parseTernary() {
+            let expr = this.parseLogicalOr();
 
-            // If no logical operator found, this isn't a logical expression
-            if (!logicalMatch) {
-                return null;
-            }
-
-            // Destructure the regex capture groups
-            // logicalMatch[0] is the full match, so we skip it with the empty comma
-            const [, left, operator, right] = logicalMatch;
-
-            // Return structured object representing the parsed logical expression
-            return {
-                type: 'logical',                                // Mark this as a logical expression type
-                left: left.trim(),                              // Left operand with whitespace removed
-                operator: operator.trim(),                      // Logical operator (&&, ||)
-                right: right.trim(),                            // Right operand with whitespace removed
-                dependencies: [                                 // Collect all dependencies from both sides
-                    ...this.extractDependencies(left.trim()),   // Dependencies from left operand
-                    ...this.extractDependencies(right.trim())   // Dependencies from right operand
-                ]
-            };
-        },
-
-        /**
-         * Parses unary expressions, specifically the logical NOT operator (!).
-         * Creates an AST node for unary operations and extracts dependencies from the operand.
-         * This handles expressions like "!isActive", "! user.valid", or "!someMethod()".
-         * @param {string} expression - The expression string to attempt parsing as a unary operation
-         * @returns {Object|null} AST node for unary expression, or null if expression doesn't match unary pattern
-         */
-        parseUnary(expression) {
-            // Use regex to match unary NOT pattern: ! followed by optional whitespace and an operand
-            // Pattern breakdown:
-            // ^!       - Must start with exclamation mark
-            // \s*      - Zero or more whitespace characters (allows "!" or "! " or "!   ")
-            // (.+)     - Capture group for the operand (everything after the !)
-            // $        - Must match to end of string (ensures we capture the full operand)
-            const unaryMatch = expression.match(/^!\s*(.+)$/);
-
-            // If the regex doesn't match, this isn't a unary expression
-            if (!unaryMatch) {
-                return null;
-            }
-
-            // Destructure the regex match results
-            // unaryMatch[0] would be the full match, unaryMatch[1] is the first capture group (operand)
-            const [, operand] = unaryMatch;
-
-            // Return AST node representing the unary operation
-            return {
-                type: 'unary',                                          // Node type for AST traversal
-                operator: '!',                                          // The unary operator (currently only ! is supported)
-                operand: operand.trim(),                                // The expression being negated (whitespace normalized)
-                dependencies: this.extractDependencies(operand.trim())  // Variables/properties this expression depends on
-            };
-        },
-
-        /**
-         * Attempts to parse a ternary conditional expression (condition ? trueValue : falseValue)
-         * @param {string} expression - Expression to parse
-         * @returns {Object|null} Parsed ternary object or null if not a ternary expression
-         */
-        parseTernary(expression) {
-            // Use regex to match the ternary pattern: condition ? trueValue : falseValue
-            // The regex captures three groups: condition, trueValue, and falseValue
-            // Uses non-greedy matching (.+?) to handle nested expressions correctly
-            const ternaryMatch = expression.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+?)$/);
-
-            // If the expression doesn't match the ternary pattern, return null
-            if (!ternaryMatch) {
-                return null;
-            }
-
-            // Destructure the regex match results
-            // Index 0 is the full match, indices 1-3 are the captured groups
-            const [, condition, trueValue, falseValue] = ternaryMatch;
-
-            // Return a structured object representing the parsed ternary expression
-            return {
-                type: 'ternary',                                         // Identifies this as a ternary expression
-                condition: condition.trim(),                             // The boolean condition (whitespace removed)
-                trueValue: this.parseValue(trueValue.trim()),            // Recursively parse the true branch value
-                falseValue: this.parseValue(falseValue.trim()),          // Recursively parse the false branch value
-                dependencies: this.extractDependencies(condition.trim()) // Extract variable dependencies from condition
-            };
-        },
-
-        /**
-         * Parses a value (string literal, number, boolean, object literal, or property reference)
-         * @param {string} value - Value to parse
-         * @returns {Object} Parsed value object
-         */
-        parseValue(value) {
-            // Handle case where value is already parsed (from addObjectPair)
-            if (typeof value === 'object' && value !== null && value.type) {
-                return value;
-            }
-
-            // Convert to string and remove leading and trailing whitespace
-            value = String(value).trim();
-
-            // Check for arithmetic expressions first
-            const arithmeticOperator = this.findArithmeticOperator(value);
-
-            if (arithmeticOperator) {
-                const { left, operator, right, index } = arithmeticOperator;
+            if (this.match('QUESTION')) {
+                const trueExpr = this.parseTernary();
+                this.consume('COLON', 'Expected ":" in ternary expression');
+                const falseExpr = this.parseTernary();
 
                 return {
-                    type: 'arithmetic',
-                    left: this.parseValue(left.trim()),
-                    operator: operator.trim(),
-                    right: this.parseValue(right.trim())
+                    type: 'ternary',
+                    condition: expr,
+                    trueValue: trueExpr,
+                    falseValue: falseExpr
                 };
             }
 
-            // Check if value is a string literal (enclosed in single or double quotes)
-            if ((value.startsWith("'") && value.endsWith("'")) ||
-                (value.startsWith('"') && value.endsWith('"'))) {
-                const literalValue = value.slice(1, -1);
-                return {type: 'literal', value: literalValue};
-            }
-
-            // Check if value is an object literal (enclosed in curly braces)
-            if (value.startsWith('{') && value.endsWith('}')) {
-                return {type: 'object', value: value};
-            }
-
-            // Numeric literal detection
-            // Handles: integers (10), decimals (10.5), negative numbers (-10), scientific notation (1e5)
-            if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value)) {
-                const numValue = parseFloat(value);
-
-                // Ensure the parsed number is valid (not NaN)
-                if (!isNaN(numValue)) {
-                    return {type: 'literal', value: numValue};
-                }
-            }
-
-            // Check if value is a boolean literal
-            if (value === 'true' || value === 'false') {
-                return {type: 'literal', value: value === 'true'};
-            }
-
-            // Check for null and undefined literals
-            if (value === 'null') {
-                return {type: 'literal', value: null};
-            }
-
-            if (value === 'undefined') {
-                return {type: 'literal', value: undefined};
-            }
-
-            // If none of the above patterns match, treat as property reference
-            return {type: 'property', path: value};
+            return expr;
         },
 
         /**
-         * Finds arithmetic operator outside of quotes
-         * @param {string} value - Value to search
-         * @returns {Object|null} {left, operator, right, index} or null
+         * Parses logical OR expressions (||)
+         * @returns {Object|null} Logical OR AST node or lower precedence expression
          */
-        findArithmeticOperator(value) {
-            let inQuotes = false;
-            let quoteChar = '';
-            let parenDepth = 0;
+        parseLogicalOr() {
+            let expr = this.parseLogicalAnd();
 
-            for (let i = 0; i < value.length; i++) {
-                const char = value[i];
-                const isEscaped = i > 0 && value[i - 1] === '\\';
+            while (this.matchOperator('||')) {
+                const operator = this.previous().value;
+                const right = this.parseLogicalAnd();
 
-                // Handle quotes
-                if ((char === '"' || char === "'") && !isEscaped) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = '';
-                    }
+                expr = {
+                    type: 'logical',
+                    left: expr,
+                    operator,
+                    right
+                };
+            }
+
+            return expr;
+        },
+
+        /**
+         * Parses logical AND expressions (&&)
+         * @returns {Object|null} Logical AND AST node or lower precedence expression
+         */
+        parseLogicalAnd() {
+            let expr = this.parseComparison();
+
+            while (this.matchOperator('&&')) {
+                const operator = this.previous().value;
+                const right = this.parseComparison();
+
+                expr = {
+                    type: 'logical',
+                    left: expr,
+                    operator,
+                    right
+                };
+            }
+
+            return expr;
+        },
+
+        /**
+         * Parses comparison expressions (==, !=, <, >, etc.)
+         * @returns {Object|null} Comparison AST node or lower precedence expression
+         */
+        parseComparison() {
+            let expr = this.parseArithmetic();
+
+            if (this.matchOperator('===', '!==', '==', '!=', '>=', '<=', '>', '<')) {
+                const operator = this.previous().value;
+                const right = this.parseArithmetic();
+
+                return {
+                    type: 'comparison',
+                    left: expr,
+                    operator,
+                    right
+                };
+            }
+
+            return expr;
+        },
+
+        /**
+         * Parses arithmetic expressions (+, -, *, /)
+         * @returns {Object|null} Arithmetic AST node or lower precedence expression
+         */
+        parseArithmetic() {
+            let expr = this.parseUnary();
+
+            while (this.matchOperator('+', '-', '*', '/')) {
+                const operator = this.previous().value;
+                const right = this.parseUnary();
+
+                expr = {
+                    type: 'arithmetic',
+                    left: expr,
+                    operator,
+                    right
+                };
+            }
+
+            return expr;
+        },
+
+        /**
+         * Parses unary expressions (!, -, +)
+         * @returns {Object|null} Unary AST node or primary expression
+         */
+        parseUnary() {
+            if (this.matchOperator('!', '-', '+')) {
+                const operator = this.previous().value;
+                const operand = this.parseUnary();
+
+                return {
+                    type: 'unary',
+                    operator,
+                    operand
+                };
+            }
+
+            return this.parsePrimary();
+        },
+
+        /**
+         * Parses primary expressions (parentheses, properties, literals)
+         * @returns {Object|null} Primary expression AST node
+         */
+        parsePrimary() {
+            // Parentheses
+            if (this.match('LPAREN')) {
+                const expr = this.parseExpressionInternal();
+                this.consume('RPAREN', 'Expected closing parenthesis');
+
+                return {
+                    type: 'parentheses',
+                    inner: expr
+                };
+            }
+
+            // Object literals
+            if (this.match('LBRACE')) {
+                return this.parseObjectLiteral();
+            }
+
+            // String literals
+            if (this.check('STRING')) {
+                return {
+                    type: 'literal',
+                    value: this.advance().value
+                };
+            }
+
+            // Number literals
+            if (this.check('NUMBER')) {
+                return {
+                    type: 'literal',
+                    value: this.advance().value
+                };
+            }
+
+            // Keywords (true, false, null, undefined)
+            if (this.check('KEYWORD')) {
+                const token = this.advance();
+
+                let value;
+                switch (token.value) {
+                    case 'true':
+                        value = true;
+                        break;
+
+                    case 'false':
+                        value = false;
+                        break;
+
+                    case 'null':
+                        value = null;
+                        break;
+
+                    case 'undefined':
+                        value = undefined;
+                        break;
                 }
 
-                // Track parentheses when not in quotes
-                if (!inQuotes) {
-                    if (char === '(') {
-                        parenDepth++;
-                    } else if (char === ')') {
-                        parenDepth--;
-                    } else if (parenDepth === 0 && /[+\-*/]/.test(char)) {
-                        // Found operator at top level (not in quotes or parentheses)
-                        return {
-                            left: value.substring(0, i),
-                            operator: char,
-                            right: value.substring(i + 1),
-                            index: i
-                        };
-                    }
-                }
+                return {
+                    type: 'literal',
+                    value: value
+                };
+            }
+
+            // Property access
+            if (this.check('IDENTIFIER')) {
+                return this.parsePropertyAccess();
             }
 
             return null;
         },
 
         /**
-         * Extracts property dependencies from an expression
-         * @param {string|Object} expression - Expression to analyze
-         * @returns {string[]} Array of property names
+         * Parses object literals { key: value, ... }
+         * @returns {Object} Object literal AST node
          */
-        extractDependencies(expression) {
-            // Handle non-string expressions
-            if (typeof expression !== 'string') {
-                return this.extractFromObject(expression);
-            }
+        parseObjectLiteral() {
+            const pairs = [];
 
-            // Ensure we have a clean string to work with (handles nulls/undefined)
-            expression = String(expression).trim();
-
-            // Handle object literals
-            if (this.isObjectLiteral(expression)) {
-                return this.extractFromObjectLiteral(expression);
-            }
-
-            // Extract from regular expressions
-            return this.extractFromExpression(expression);
-        },
-
-        /**
-         * Extract dependencies from parsed object expressions
-         * Handles structured objects with type, path, and value properties
-         * @param {Object} expression - Parsed expression object
-         * @returns {string[]} Array of property dependencies
-         */
-        extractFromObject(expression) {
-            if (!expression || typeof expression !== 'object') {
-                return [];
-            }
-
-            // Extract common properties from parsed expression object
-            const { type, path, value } = expression;
-
-            // Property references contain dependencies in their path
-            if (type === 'property' && path) {
-                return this.extractDependencies(path);
-            }
-
-            // Object types may have nested dependencies
-            if (type === 'object' && value) {
-                return this.extractDependencies(value);
-            }
-
-            // Literals have no dependencies
-            return [];
-        },
-
-        /**
-         * Extract dependencies from object literal strings
-         * Parses object syntax like "{key: value}" and extracts dependencies from values
-         * @param {string} expression - Object literal string (already trimmed, with braces)
-         * @returns {string[]} Array of unique property dependencies from all values
-         */
-        extractFromObjectLiteral(expression) {
-            const content = expression.slice(1, -1);
-            const pairs = this.parseObjectPairs(content);
-            const dependencies = [];
-
-            pairs.forEach(({value}) => {
-                const valueDeps = this.extractDependencies(value);
-                valueDeps.forEach(dep => {
-                    if (!dependencies.includes(dep)) {
-                        dependencies.push(dep);
+            if (!this.check('RBRACE')) {
+                do {
+                    // Parse key
+                    let key;
+                    if (this.check('STRING')) {
+                        key = this.advance().value;
+                    } else if (this.check('IDENTIFIER')) {
+                        key = this.advance().value;
+                    } else {
+                        throw new Error('Expected property name');
                     }
-                });
-            });
 
-            return dependencies;
+                    this.consume('COLON', 'Expected ":" after object key');
+
+                    // Parse value
+                    const value = this.parseExpressionInternal();
+
+                    pairs.push({ key, value });
+
+                } while (this.match('COMMA') && !this.check('RBRACE'));
+            }
+
+            this.consume('RBRACE', 'Expected closing brace');
+
+            return {
+                type: 'object',
+                pairs
+            };
         },
 
         /**
-         * Extract dependencies from regular expressions using regex
-         * Finds property access patterns like "obj.prop" or "obj[key]" and returns root properties
-         * @param {string} expression - String expression to analyze
-         * @returns {string[]} Array of root property names (excludes JS literals)
+         * Parses property access expressions (obj.prop, obj[key], etc.)
+         * @returns {Object} Property access AST node
          */
-        extractFromExpression(expression) {
-            const dependencies = [];
-            const jsLiterals = ['true', 'false', 'null', 'undefined', 'NaN', 'Infinity'];
-            const propertyRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*|\[[^\]]+\])*/g;
+        parsePropertyAccess() {
+            let path = this.advance().value;
 
-            let match;
-            while ((match = propertyRegex.exec(expression))) {
-                const fullPath = match[0];
-                const rootProperty = match[1];
+            while (true) {
+                if (this.match('DOT')) {
+                    if (this.check('IDENTIFIER')) {
+                        path += '.' + this.advance().value;
+                    } else {
+                        throw new Error('Expected property name after "."');
+                    }
+                } else if (this.match('LBRACKET')) {
+                    const index = this.parseExpressionInternal();
+                    this.consume('RBRACKET', 'Expected closing bracket');
 
-                if (!jsLiterals.includes(rootProperty) && !dependencies.includes(rootProperty)) {
-                    dependencies.push(rootProperty);
+                    // For simplicity, convert bracket notation to string
+                    if (index.type === 'literal') {
+                        path += `[${JSON.stringify(index.value)}]`;
+                    } else {
+                        path += `[${this.reconstructExpression(index)}]`;
+                    }
+                } else {
+                    break;
                 }
             }
 
-            return dependencies;
+            return {
+                type: 'property',
+                path
+            };
         },
 
         /**
-         * Check if expression is an object literal
-         * Simple check for strings that start with "{" and end with "}"
-         * @param {string} expression - Trimmed string expression
-         * @returns {boolean} True if the expression appears to be an object literal
+         * Helper method to reconstruct expression from AST (for bracket notation)
+         * @param {Object} node - AST node to reconstruct
+         * @returns {string} Reconstructed expression string
          */
-        isObjectLiteral(expression) {
-            return expression.startsWith('{') && expression.endsWith('}');
+        reconstructExpression(node) {
+            if (!node) return '';
+
+            switch (node.type) {
+                case 'literal':
+                    return typeof node.value === 'string' ? `"${node.value}"` : String(node.value);
+
+                case 'property':
+                    return node.path;
+
+                case 'arithmetic':
+                    return `${this.reconstructExpression(node.left)} ${node.operator} ${this.reconstructExpression(node.right)}`;
+
+                default:
+                    return 'unknown';
+            }
+        },
+
+        /**
+         * Checks if current token matches any of the given types
+         * @param {...string} types - Token types to match
+         * @returns {boolean} True if current token matches any type
+         */
+        match(...types) {
+            for (const type of types) {
+                if (this.check(type)) {
+                    this.advance();
+                    return true;
+                }
+            }
+            return false;
+        },
+
+        /**
+         * Checks if current token is an operator with given value(s)
+         * @param {...string} operators - Operator values to match
+         * @returns {boolean} True if current token is a matching operator
+         */
+        matchOperator(...operators) {
+            if (this.check('OPERATOR')) {
+                const current = this.peek();
+
+                if (operators.includes(current.value)) {
+                    this.advance();
+                    return true;
+                }
+            }
+
+            return false;
+        },
+
+        /**
+         * Checks if current token is of given type
+         * @param {string} type - Token type to check
+         * @returns {boolean} True if current token matches type
+         */
+        check(type) {
+            if (this.isAtEnd()) {
+                return false;
+            }
+
+            return this.peek().type === type;
+        },
+
+        /**
+         * Advances to next token and returns previous
+         * @returns {Object} Previous token
+         */
+        advance() {
+            if (!this.isAtEnd()) {
+                this.currentToken++;
+            }
+
+            return this.previous();
+        },
+
+        /**
+         * Checks if we're at end of tokens
+         * @returns {boolean} True if at end
+         */
+        isAtEnd() {
+            return this.currentToken >= this.tokens.length;
+        },
+
+        /**
+         * Returns current token without advancing
+         * @returns {Object} Current token
+         */
+        peek() {
+            return this.tokens[this.currentToken] || { type: 'EOF', value: null };
+        },
+
+        /**
+         * Returns previous token
+         * @returns {Object} Previous token
+         */
+        previous() {
+            return this.tokens[this.currentToken - 1];
+        },
+
+        /**
+         * Consumes token of given type or throws error
+         * @param {string} type - Expected token type
+         * @param {string} message - Error message if not found
+         * @returns {Object} Consumed token
+         */
+        consume(type, message) {
+            if (this.check(type)) {
+                return this.advance();
+            }
+
+            throw new Error(message + ` at token: ${JSON.stringify(this.peek())}`);
         },
 
         /**
          * Evaluates a parsed expression in the given context
          * @param {Object} parsedExpr - Parsed expression object
-         * @param {Object} context - Evaluation context (abstraction object)
+         * @param {Object} context - Evaluation context
          * @returns {*} Evaluated result
          */
         evaluate(parsedExpr, context) {
+            if (!parsedExpr) {
+                return undefined;
+            }
+
             switch (parsedExpr.type) {
-                case 'object':
-                    return this.evaluateObjectLiteral(parsedExpr.value, context);
+                case 'literal':
+                    return parsedExpr.value;
+
+                case 'property':
+                    return Utils.getNestedValue(context, parsedExpr.path);
 
                 case 'parentheses':
                     return this.evaluate(parsedExpr.inner, context);
 
+                case 'object':
+                    return this.evaluateObjectLiteral(parsedExpr, context);
+
                 case 'ternary':
-                    const condition = this.evaluateCondition(parsedExpr.condition, context);
+                    const condition = this.evaluate(parsedExpr.condition, context);
 
                     return condition ?
-                        this.evaluateValue(parsedExpr.trueValue, context) :
-                        this.evaluateValue(parsedExpr.falseValue, context);
-
-                case 'arithmetic':
-                    const leftArith = this.evaluateValue(parsedExpr.left, context);
-                    const rightArith = this.evaluateValue(parsedExpr.right, context);
-                    return this.performArithmetic(leftArith, parsedExpr.operator, rightArith);
+                        this.evaluate(parsedExpr.trueValue, context) :
+                        this.evaluate(parsedExpr.falseValue, context);
 
                 case 'logical':
-                    const leftLogical = this.evaluateCondition(parsedExpr.left, context);
+                    const leftLogical = this.evaluate(parsedExpr.left, context);
 
-                    // Short-circuit evaluation for logical operators
                     if (parsedExpr.operator === '&&') {
-                        return leftLogical ? this.evaluateCondition(parsedExpr.right, context) : false;
+                        return leftLogical ? this.evaluate(parsedExpr.right, context) : false;
                     } else if (parsedExpr.operator === '||') {
-                        return leftLogical ? true : this.evaluateCondition(parsedExpr.right, context);
+                        return leftLogical ? true : this.evaluate(parsedExpr.right, context);
                     } else {
                         return false;
                     }
 
-                case 'unary':
-                    const operandValue = this.evaluateCondition(parsedExpr.operand, context);
-                    return parsedExpr.operator === '!' ? !operandValue : operandValue;
-
                 case 'comparison':
-                    const leftValue = Utils.getNestedValue(context, parsedExpr.left);
-                    const rightValue = this.evaluateValue(parsedExpr.right, context);
-                    return this.performComparison(leftValue, parsedExpr.operator, rightValue);
+                    const leftComp = this.evaluate(parsedExpr.left, context);
+                    const rightComp = this.evaluate(parsedExpr.right, context);
+                    return this.performComparison(leftComp, parsedExpr.operator, rightComp);
 
-                case 'property':
-                    return Utils.getNestedValue(context, parsedExpr.path);
+                case 'arithmetic':
+                    const leftArith = this.evaluate(parsedExpr.left, context);
+                    const rightArith = this.evaluate(parsedExpr.right, context);
+                    return this.performArithmetic(leftArith, parsedExpr.operator, rightArith);
+
+                case 'unary':
+                    const operandValue = this.evaluate(parsedExpr.operand, context);
+
+                    switch (parsedExpr.operator) {
+                        case '!':
+                            return !operandValue;
+
+                        case '-':
+                            return -operandValue;
+
+                        case '+':
+                            return +operandValue;
+
+                        default:
+                            return operandValue;
+                    }
 
                 default:
                     return undefined;
@@ -1290,242 +1369,53 @@
         },
 
         /**
-         * Evaluates a condition expression to boolean
-         * @param {string} condition - Condition string
-         * @param {Object} context - Evaluation context
-         * @returns {boolean} Boolean result
-         */
-        evaluateCondition(condition, context) {
-            // Handle logical operators in conditions
-            const logicalMatch = condition.match(/^(.+?)\s*(&&|\|\|)\s*(.+?)$/);
-
-            if (logicalMatch) {
-                const [, left, operator, right] = logicalMatch;
-                const leftResult = this.evaluateCondition(left.trim(), context);
-
-                // Short-circuit evaluation
-                if (operator === '&&') {
-                    return leftResult ? this.evaluateCondition(right.trim(), context) : false;
-                } else {
-                    return leftResult ? true : this.evaluateCondition(right.trim(), context);
-                }
-            }
-
-            // Handle comparison operators in conditions
-            const comparisonMatch = condition.match(/^(.+?)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+?)$/);
-
-            if (comparisonMatch) {
-                const [, left, operator, right] = comparisonMatch;
-                const leftValue = Utils.getNestedValue(context, left.trim());
-                const rightValue = this.evaluateValue(this.parseValue(right.trim()), context);
-                return this.performComparison(leftValue, operator, rightValue);
-            }
-
-            // Simple property check (truthiness)
-            if (/^[a-zA-Z_$][a-zA-Z0-9_$]*(\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$/.test(condition)) {
-                return Boolean(Utils.getNestedValue(context, condition));
-            }
-
-            // Parse and evaluate as expression
-            const parsed = this.parseExpression(condition);
-            return Boolean(this.evaluate(parsed, context));
-        },
-
-        /**
-         * Evaluates a value object
-         * @param {Object} valueObj - Value object to evaluate
-         * @param {Object} context - Evaluation context
-         * @returns {*} Evaluated value
-         */
-        evaluateValue(valueObj, context) {
-            if (!valueObj) {
-                return undefined;
-            }
-
-            if (valueObj.type === 'literal') {
-                return valueObj.value;
-            }
-
-            if (valueObj.type === 'property') {
-                return Utils.getNestedValue(context, valueObj.path);
-            }
-
-            if (valueObj.type === 'object') {
-                return this.evaluateObjectLiteral(valueObj.value, context);
-            }
-
-            if (valueObj.type === 'arithmetic') {
-                const left = this.evaluateValue(valueObj.left, context);
-                const right = this.evaluateValue(valueObj.right, context);
-                return this.performArithmetic(left, valueObj.operator, right);
-            }
-
-            // Handle direct string evaluation for object values
-            if (typeof valueObj === 'string') {
-                // Check if it's a quoted string literal
-                if ((valueObj.startsWith("'") && valueObj.endsWith("'")) ||
-                    (valueObj.startsWith('"') && valueObj.endsWith('"'))) {
-                    return valueObj.slice(1, -1);
-                }
-
-                // Otherwise treat as property path
-                return Utils.getNestedValue(context, valueObj);
-            }
-
-            return undefined;
-        },
-
-        /**
-         * Evaluates an object literal string like "{ active: isActive, width: 100, color: 'red' }"
-         * @param {string} objectStr - Object literal string
+         * Evaluates object literal from AST
+         * @param {Object} objectExpr - Object expression AST
          * @param {Object} context - Evaluation context
          * @returns {Object} Evaluated object
          */
-        evaluateObjectLiteral(objectStr, context) {
-            // Remove outer braces
-            const content = objectStr.slice(1, -1).trim();
-
-            // If nothing is left after this removal, return empty object
-            if (!content) {
-                return {};
-            }
-
-            // Parse and use the object pairs
+        evaluateObjectLiteral(objectExpr, context) {
             const result = {};
-            const pairs = this.parseObjectPairs(content);
 
-            pairs.forEach(({key, value}) => {
-                // Parse the value first to determine its type
-                // Then evaluate the parsed value
-                const parsedValue = this.parseValue(value);
-                result[key] = this.evaluateValue(parsedValue, context);
-            });
+            if (objectExpr.pairs) {
+                objectExpr.pairs.forEach(({ key, value }) => {
+                    result[key] = this.evaluate(value, context);
+                });
+            }
 
             return result;
         },
 
         /**
-         * Parses object pairs from string like "active: isActive, disabled: !enabled"
-         * @param {string} content - Object content without braces
-         * @returns {Array} Array of {key, value} pairs
-         */
-        parseObjectPairs(content) {
-            const pairs = [];
-            let current = '';
-            let inQuotes = false;
-            let quoteChar = '';
-            let parenDepth = 0;
-            let braceDepth = 0; // Add brace tracking
-
-            for (let i = 0; i < content.length; i++) {
-                const char = content[i];
-                const isEscaped = i > 0 && content[i - 1] === '\\';
-
-                if ((char === '"' || char === "'") && !isEscaped) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = '';
-                    }
-                }
-
-                if (!inQuotes) {
-                    if (char === '(') {
-                        parenDepth++;
-                    } else if (char === ')') {
-                        parenDepth--;
-                    } else if (char === '{') {
-                        braceDepth++;
-                    } else if (char === '}') {
-                        braceDepth--;
-                    } else if (char === ',' && parenDepth === 0 && braceDepth === 0) {
-                        // Found a top-level comma - process current pair
-                        this.addObjectPair(current.trim(), pairs);
-                        current = '';
-                        continue;
-                    }
-                }
-
-                current += char;
-            }
-
-            // Process final pair
-            if (current.trim()) {
-                this.addObjectPair(current.trim(), pairs);
-            }
-
-            return pairs;
-        },
-
-        /**
-         * Adds a key-value pair to the pairs array
-         * @param {string} pairStr - String like "active: isActive" or "'test': count > 0"
-         * @param {Array} pairs - Array to add pair to
-         */
-        addObjectPair(pairStr, pairs) {
-            const colonIndex = this.findObjectColon(pairStr);
-
-            if (colonIndex === -1) {
-                console.warn(`Invalid object pair: ${pairStr}`);
-                return;
-            }
-
-            // Remove quotes from key if present (handles both single and double quotes)
-            let key = pairStr.substring(0, colonIndex).trim();
-            let value = pairStr.substring(colonIndex + 1).trim();
-
-            // Clean up key quotes
-            if ((key.startsWith("'") && key.endsWith("'")) ||
-                (key.startsWith('"') && key.endsWith('"'))) {
-                key = key.slice(1, -1);
-            }
-
-            // Parse the value using the enhanced parseValue method
-            // This will properly handle strings, numbers, booleans, etc.
-            const parsedValue = this.parseValue(value);
-
-            // Add the parsed value to the list
-            pairs.push({key: key, value: parsedValue});
-        },
-
-        /**
-         * Finds the colon that separates key from value in an object pair
-         * Handles quoted keys properly
-         * @param {string} pairStr - The pair string to search
-         * @returns {number} Index of the colon, or -1 if not found
-         */
-        findObjectColon(pairStr) {
-            let inQuotes = false;
-            let quoteChar = '';
-
-            for (let i = 0; i < pairStr.length; i++) {
-                const char = pairStr[i];
-                const isEscaped = i > 0 && pairStr[i - 1] === '\\';
-
-                if ((char === '"' || char === "'") && !isEscaped) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = '';
-                    }
-                }
-
-                if (!inQuotes && char === ':') {
-                    return i;
-                }
-            }
-
-            return -1;
-        },
-
-        /**
-         * Performs a comparison operation
+         * Performs arithmetic operations
          * @param {*} left - Left operand
-         * @param {string} operator - Comparison operator
+         * @param {string} operator - Operator
+         * @param {*} right - Right operand
+         * @returns {*} Result
+         */
+        performArithmetic(left, operator, right) {
+            switch (operator) {
+                case '+':
+                    return left + right;
+
+                case '-':
+                    return Number(left) - Number(right);
+
+                case '*':
+                    return Number(left) * Number(right);
+
+                case '/':
+                    return Number(left) / Number(right);
+
+                default:
+                    return left;
+            }
+        },
+
+        /**
+         * Performs comparison operations
+         * @param {*} left - Left operand
+         * @param {string} operator - Operator
          * @param {*} right - Right operand
          * @returns {boolean} Comparison result
          */
@@ -1554,37 +1444,194 @@
 
                 case '<':
                     return left < right;
-
                 default:
                     return false;
             }
         },
 
         /**
-         * Performs arithmetic operations on two operands.
-         * @param {number|string} left - The left operand. For addition, can be string or number.
-         * @param {string} operator - The arithmetic operator ('+', '-', '*', '/').
-         * @param {number|string} right - The right operand. For addition, can be string or number.
-         * @returns {number|string} The result of the arithmetic operation. Returns a string for string concatenation with '+', otherwise returns a number. Returns the left operand unchanged for unsupported operators.
+         * Extracts dependencies from parsed AST
+         * @param {Object} node - AST node
+         * @returns {string[]} Array of property dependencies
          */
-        performArithmetic(left, operator, right) {
-            switch (operator) {
-                case '+':
-                    // Handle both numeric addition and string concatenation
-                    return left + right;
-
-                case '-':
-                    return Number(left) - Number(right);
-
-                case '*':
-                    return Number(left) * Number(right);
-
-                case '/':
-                    return Number(left) / Number(right);
-
-                default:
-                    return left;
+        extractDependencies(node) {
+            if (!node) {
+                return [];
             }
+
+            const dependencies = new Set();
+
+            const traverse = (n) => {
+                if (!n) return;
+
+                switch (n.type) {
+                    case 'property':
+                        const rootProp = n.path.split(/[.\[]/, 1)[0];
+                        if (rootProp && !['true', 'false', 'null', 'undefined'].includes(rootProp)) {
+                            dependencies.add(rootProp);
+                        }
+                        break;
+
+                    case 'ternary':
+                        traverse(n.condition);
+                        traverse(n.trueValue);
+                        traverse(n.falseValue);
+                        break;
+
+                    case 'logical':
+                    case 'comparison':
+                    case 'arithmetic':
+                        traverse(n.left);
+                        traverse(n.right);
+                        break;
+
+                    case 'unary':
+                        traverse(n.operand);
+                        break;
+
+                    case 'parentheses':
+                        traverse(n.inner);
+                        break;
+
+                    case 'object':
+                        if (n.pairs) {
+                            n.pairs.forEach(pair => traverse(pair.value));
+                        }
+                        break;
+                }
+            };
+
+            traverse(node);
+            return Array.from(dependencies);
+        },
+
+        /**
+         * Parses a binding string into key-value pairs
+         * @param {string} bindingString - Binding string to parse
+         * @returns {Array} Array of binding pairs
+         */
+        parseBindingString(bindingString) {
+            if (this.bindingCache.has(bindingString)) {
+                return this.bindingCache.get(bindingString);
+            }
+
+            const pairs = [];
+            let current = '';
+            let inQuotes = false;
+            let quoteChar = '';
+            let parenDepth = 0;
+            let braceDepth = 0;
+
+            for (let i = 0; i < bindingString.length; i++) {
+                const char = bindingString[i];
+                const isEscaped = i > 0 && bindingString[i - 1] === '\\';
+
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                if (!inQuotes) {
+                    if (char === '(') {
+                        parenDepth++;
+                    } else if (char === ')') {
+                        parenDepth--;
+                    } else if (char === '{') {
+                        braceDepth++;
+                    } else if (char === '}') {
+                        braceDepth--;
+                    }
+                }
+
+                if (char === ',' && !inQuotes && parenDepth === 0 && braceDepth === 0) {
+                    this.addBindingPairIfValid(current, pairs);
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+
+            this.addBindingPairIfValid(current, pairs);
+            this.bindingCache.set(bindingString, pairs);
+            return pairs;
+        },
+
+        /**
+         * Adds a binding pair if valid
+         * @param {string} pairString - Pair string
+         * @param {Array} pairs - Pairs array
+         */
+        addBindingPairIfValid(pairString, pairs) {
+            const trimmed = pairString.trim();
+            if (!trimmed) return;
+
+            const colonIndex = this.findBindingColon(trimmed);
+
+            if (colonIndex === -1) {
+                pairs.push({
+                    type: trimmed,
+                    target: ''
+                });
+            } else {
+                pairs.push({
+                    type: trimmed.substring(0, colonIndex).trim(),
+                    target: trimmed.substring(colonIndex + 1).trim()
+                });
+            }
+        },
+
+        /**
+         * Finds binding colon in string
+         * @param {string} str - String to search
+         * @returns {number} Index of colon or -1
+         */
+        findBindingColon(str) {
+            const knownBindingTypes = [
+                'value', 'checked', 'visible', 'if', 'foreach', 'class', 'style',
+                'click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'
+            ];
+
+            for (const type of knownBindingTypes) {
+                if (str.startsWith(type + ':')) {
+                    return type.length;
+                }
+            }
+
+            let inQuotes = false;
+            let quoteChar = '';
+            let parenDepth = 0;
+
+            for (let i = 0; i < str.length; i++) {
+                const char = str[i];
+                const isEscaped = i > 0 && str[i - 1] === '\\';
+
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                if (!inQuotes) {
+                    if (char === '(') {
+                        parenDepth++;
+                    } else if (char === ')') {
+                        parenDepth--;
+                    } else if (char === ':' && parenDepth === 0) {
+                        return i;
+                    }
+                }
+            }
+
+            return -1;
         }
     };
 
