@@ -769,12 +769,12 @@
          * @returns {Object} {token, nextIndex}
          */
         tokenizeNumber(expression, start) {
-            const numberMatch = /^(\d*\.?\d+(?:[eE][+-]?\d+)?)/.exec(expression.slice(i));
+            const numberMatch = /^(\d*\.?\d+(?:[eE][+-]?\d+)?)/.exec(expression.slice(start));
 
             if (numberMatch) {
                 return {
                     token: { type: 'NUMBER', value: parseFloat(numberMatch[1]) },
-                    nextIndex: i + numberMatch[1].length
+                    nextIndex: start + numberMatch[1].length
                 };
             }
         },
