@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "minify": "terser wakapac.js -c passes=3,drop_console=true -m toplevel=true -o wakapac.min.js"
+  }
+}

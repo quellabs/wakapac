@@ -71,12 +71,6 @@
     const Utils = {
 
         /**
-         * Check if Proxy is supported in the current environment
-         * @type {boolean}
-         */
-        hasProxy: typeof Proxy !== 'undefined',
-
-        /**
          * Determines if a value should be made reactive using Proxy mechanism
          * Simple values (primitives) are handled separately and don't need Proxy
          * @param {*} value - Value to test
@@ -394,36 +388,8 @@
             return target;
         }
 
-        if (Utils.hasProxy) {
-            return createProxyReactive(target, onChange, path);
-        } else {
-            return createFallbackReactive(target, onChange, path);
-        }
-    }
-
-    /**
-     * Creates reactive proxy using ES6 Proxy (modern browsers)
-     * @param {Object} target - Target object
-     * @param {Function} onChange - Change callback
-     * @param {string} path - Property path
-     * @returns {Object} Reactive proxy
-     */
-    function createProxyReactive(target, onChange, path) {
         // Make existing nested objects/arrays reactive immediately
-        Object.keys(target).forEach(key => {
-            if (target.hasOwnProperty(key) && Utils.isReactive(target[key])) {
-                target[key] = createReactive(target[key], onChange, path ? `${path}.${key}` : key);
-            }
-        });
-
-        // For arrays, also make existing items reactive
-        if (Array.isArray(target)) {
-            target.forEach((item, index) => {
-                if (Utils.isReactive(item)) {
-                    target[index] = createReactive(item, onChange, path ? `${path}.${index}` : index);
-                }
-            });
-        }
+        makeNestedReactive(target, onChange, path);
 
         // Store original array methods for arrays
         const originalMethods = {};
@@ -435,117 +401,167 @@
             });
         }
 
+        // Create specialized handlers
+        // noinspection JSCheckFunctionSignatures
+        const arrayMutationHandler = createArrayMutationHandler(target, originalMethods, onChange, path);
+        const proxyGetter = createProxyGetter(isArray, originalMethods, arrayMutationHandler);
+        const proxySetter = createProxySetter(onChange, path);
+        const proxyDeleter = createProxyDeleter(onChange, path);
+
         return new Proxy(target, {
-            get(obj, prop) {
-                // Handle array mutation methods
-                if (isArray && originalMethods[prop]) {
-                    return function (...args) {
-                        const result = originalMethods[prop].apply(obj, args);
-
-                        // Make new items reactive
-                        if (/^(push|unshift|splice)$/.test(prop)) {
-                            obj.forEach((item, index) => {
-                                if (Utils.isReactive(item) && !item._isReactive) {
-                                    obj[index] = createReactive(item, onChange, `${path}.${index}`);
-                                }
-                            });
-                        }
-
-                        onChange(path || 'root', obj, 'array-mutation', {method: prop, args});
-                        return result;
-                    };
-                }
-
-                return obj[prop];
-            },
-
-            set(obj, prop, value) {
-                const oldValue = obj[prop];
-
-                // Make new value reactive if needed
-                if (Utils.isReactive(value)) {
-                    value = createReactive(value, onChange, path ? `${path}.${prop}` : prop);
-                }
-
-                obj[prop] = value;
-
-                // Only notify if value actually changed
-                if (!Utils.isEqual(oldValue, value)) {
-                    const propertyPath = path ? `${path}.${prop}` : prop;
-                    onChange(propertyPath, value, 'set', {oldValue});
-
-                    // CRITICAL FIX: Also notify parent array/object about nested changes
-                    if (path) {
-                        // Extract the root property (e.g., "todos" from "todos.0.completed")
-                        const rootProperty = path.split('.')[0];
-                        onChange(rootProperty, null, 'nested-change', {
-                            nestedPath: propertyPath,
-                            oldValue: oldValue,
-                            newValue: value
-                        });
-                    }
-                }
-
-                return true;
-            },
-
-            deleteProperty(obj, prop) {
-                const oldValue = obj[prop];
-                delete obj[prop];
-
-                const propertyPath = path ? `${path}.${prop}` : prop;
-                onChange(propertyPath, undefined, 'delete', {oldValue});
-
-                // Also notify parent about nested deletion
-                if (path) {
-                    const rootProperty = path.split('.')[0];
-                    onChange(rootProperty, null, 'nested-change', {
-                        nestedPath: propertyPath,
-                        oldValue: oldValue,
-                        newValue: undefined
-                    });
-                }
-
-                return true;
-            }
+            get: proxyGetter,
+            set: proxySetter,
+            deleteProperty: proxyDeleter
         });
     }
 
     /**
-     * Creates reactive object using Object.defineProperty (legacy browsers)
-     * @param {Object} target - Target object
-     * @param {Function} onChange - Change callback
-     * @param {string} path - Property path
-     * @returns {Object} Reactive object
+     * Recursively makes nested objects and arrays reactive by wrapping them
+     * with reactive proxies. This enables deep reactivity for complex data structures.
+     * @param {Object|Array} target - The object or array to make nested properties reactive
+     * @param {Function} onChange - Callback function to invoke when changes occur
+     * @param {string} path - Current path in the nested structure (for tracking changes)
      */
-    function createFallbackReactive(target, onChange, path) {
-        // Handle array mutation methods
-        if (Array.isArray(target)) {
-            ARRAY_METHODS.forEach(method => {
-                const original = target[method];
-
-                Object.defineProperty(target, method, {
-                    value: function (...args) {
-                        const result = original.apply(this, args);
-                        onChange(path || 'root', this, 'array-mutation', {method, args});
-                        return result;
-                    },
-                    enumerable: false,
-                    configurable: true
-                });
-            });
-        }
-
-        // Make nested objects reactive
+    function makeNestedReactive(target, onChange, path) {
+        // Iterate through all enumerable properties of the target object
         Object.keys(target).forEach(key => {
             if (target.hasOwnProperty(key) && Utils.isReactive(target[key])) {
                 target[key] = createReactive(target[key], onChange, path ? `${path}.${key}` : key);
             }
         });
 
-        // Mark as reactive
-        Object.defineProperty(target, '_isReactive', {value: true, enumerable: false});
-        return target;
+        // Handle arrays separately to make their elements reactive
+        if (Array.isArray(target)) {
+            target.forEach((item, index) => {
+                if (Utils.isReactive(item)) {
+                    target[index] = createReactive(item, onChange, path ? `${path}.${index}` : index);
+                }
+            });
+        }
+    }
+
+    /**
+     * Creates a handler function that wraps array mutation methods to maintain reactivity
+     * when arrays are modified. This ensures that new items added to reactive arrays
+     * are automatically made reactive as well.
+     *
+     * @param {Array} arr - The reactive array being monitored
+     * @param {Object} originalMethods - Reference to the original Array.prototype methods
+     * @param {Function} onChange - Callback function to invoke when array mutations occur
+     * @param {string} path - The path of this array in the nested reactive structure
+     * @returns {Function} A handler function that creates wrapped mutation methods
+     */
+    function createArrayMutationHandler(arr, originalMethods, onChange, path) {
+        return function(prop) {
+            return function (...args) {
+                // Execute the original array method with the provided arguments
+                const result = originalMethods[prop].apply(arr, args);
+
+                // Check if this method adds new items to the array
+                // Methods that can add new elements: push (end), unshift (beginning), splice (anywhere)
+                if (/^(push|unshift|splice)$/.test(prop)) {
+                    // Iterate through all array items to make new ones reactive
+                    arr.forEach((item, index) => {
+                        if (Utils.isReactive(item) && !item._isReactive) {
+                            arr[index] = createReactive(item, onChange, `${path}.${index}`);
+                        }
+                    });
+                }
+
+                // Notify observers that an array mutation occurred
+                // Provides context about the mutation including method name and arguments
+                onChange(path || 'root', arr, 'array-mutation', {method: prop, args});
+
+                // Return the result of the original method call
+                return result;
+            };
+        };
+    }
+
+    /**
+     * Creates proxy getter handler
+     * @param {boolean} isArray - Whether target is an array
+     * @param {Object} originalMethods - Original array methods
+     * @param {Function} arrayMutationHandler - Array mutation handler
+     * @returns {Function} Proxy getter function
+     */
+    function createProxyGetter(isArray, originalMethods, arrayMutationHandler) {
+        return function(obj, prop) {
+            // Check if we're dealing with an array
+            // If so, return a wrapped version of the array method
+            if (isArray && originalMethods[prop]) {
+                return arrayMutationHandler(prop);
+            }
+
+            // For non-array objects or non-mutating properties,
+            // return the property value directly without interception
+            return obj[prop];
+        };
+    }
+
+    /**
+     * Creates a proxy setter function that handles reactive property assignments
+     * This function is used as the 'set' trap in the Proxy handler
+     * @param {Function} onChange - Callback function to invoke when properties change
+     * @param {string} path - The current path in the object hierarchy (e.g., "user.profile")
+     * @returns {Function} A proxy setter function that handles property assignments
+     */
+    function createProxySetter(onChange, path) {
+        return function(obj, prop, value) {
+            // Store the current value before modification for comparison
+            const oldValue = obj[prop];
+
+            // Convert the new value to a reactive object if it's an object/array
+            // This ensures nested objects also trigger change notifications
+            if (Utils.isReactive(value)) {
+                value = createReactive(value, onChange, path ? `${path}.${prop}` : prop);
+            }
+
+            // Perform the actual property assignment
+            obj[prop] = value;
+
+            // Only trigger change notifications if the value actually changed
+            // This prevents unnecessary updates when the same value is assigned
+            if (!Utils.isEqual(oldValue, value)) {
+                // Construct the full property path (e.g., "user.profile.name")
+                const propertyPath = path ? `${path}.${prop}` : prop;
+
+                // Notify listeners about the property change
+                // Includes the path, new value, operation type, and old value
+                onChange(propertyPath, value, 'set', {oldValue});
+            }
+
+            // Return true to indicate the set operation was successful
+            // This is required by the Proxy specification
+            return true;
+        };
+    }
+
+    /**
+     * Creates proxy delete handler
+     * @param {Function} onChange - Change notification callback
+     * @param {string} path - Current property path
+     * @returns {Function} Proxy delete function
+     */
+    function createProxyDeleter(onChange, path) {
+        return function(obj, prop) {
+            // Store the value being deleted for the change notification
+            const oldValue = obj[prop];
+
+            // Perform the actual deletion on the target object
+            delete obj[prop];
+
+            // Build the full property path for nested objects
+            // If path exists, append the property with a dot separator
+            // Otherwise, use just the property name for root-level properties
+            const propertyPath = path ? `${path}.${prop}` : prop;
+
+            // Notify listeners of the deletion
+            onChange(propertyPath, undefined, 'delete', {oldValue});
+
+            // Return true to indicate successful deletion (Proxy requirement)
+            return true;
+        };
     }
 
     // ============================================================================
@@ -578,6 +594,30 @@
         },
 
         /**
+         * Creates helpful error messages for common expression parsing mistakes
+         */
+        createHelpfulError(expression, originalError) {
+            let message = `Expression parsing failed: "${expression}"\n`;
+            message += `Original error: ${originalError.message}\n`;
+
+            // Add specific suggestions based on common patterns
+            if (originalError.message.includes('Expected ":" after object key')) {
+                if (expression.includes('?') && expression.includes('{')) {
+                    message += '\nSuggestion: Ternary operators cannot be used as object keys in class bindings.\n';
+                    message += `Try removing the braces: ${expression.replace(/^\{|\}$/g, '').trim()}\n`;
+                    message += 'Or use object syntax: { className: condition, otherClass: !condition }';
+                }
+            }
+
+            // ... other error patterns ...
+
+            const enhancedError = new Error(message);
+            enhancedError.originalError = originalError;
+            enhancedError.expression = expression;
+            return enhancedError;
+        },
+
+        /**
          * Main entry point for parsing JavaScript-like expressions into an AST
          * @param {string|Object} expression - The expression string to parse
          * @returns {Object|null} Parsed AST node or null if unparseable
@@ -601,23 +641,28 @@
             }
 
             // Tokenize and parse
-            this.tokens = this.tokenize(expression);
-            this.currentToken = 0;
+            try {
+                this.tokens = this.tokenize(expression);
+                this.currentToken = 0;
 
-            if (this.tokens.length === 0) {
-                return null;
+                if (this.tokens.length === 0) {
+                    return null;
+                }
+
+                // Add dependencies to the result
+                const result = this.parseTernary();
+
+                if (result) {
+                    result.dependencies = this.extractDependencies(result);
+                }
+
+                // Cache the result
+                this.cache.set(expression, result);
+                return result;
+            } catch (error) {
+                // Use the parser's own error enhancement method
+                throw this.createHelpfulError(expression, error);
             }
-
-            // Add dependencies to the result
-            const result = this.parseTernary();
-
-            if (result) {
-                result.dependencies = this.extractDependencies(result);
-            }
-
-            // Cache the result
-            this.cache.set(expression, result);
-            return result;
         },
 
         /**
@@ -1505,9 +1550,7 @@
             bindingIndex: new Map(),
 
             // Reactivity and caching
-            computedCache: new Map(),
-            computedDeps: new Map(),
-            propertyDeps: new Map(),
+            deps: new Map(),
             expressionCache: new Map(),
             lastValues: new Map(),
 
@@ -1606,51 +1649,42 @@
             },
 
             /**
-             * Sets up computed properties with automatic dependency tracking
+             * Sets up computed properties with consolidated dependency tracking
              */
             setupComputedProperties(reactive) {
-                if (!this.original.computed) {
-                    return;
-                }
+                if (!this.original.computed) return;
 
                 Object.keys(this.original.computed).forEach(name => {
                     const computedFn = this.original.computed[name];
+                    const dependencies = this.analyzeComputedDependencies(computedFn, reactive);
 
-                    if (typeof computedFn === 'function') {
-                        // Analyze dependencies
-                        const dependencies = this.analyzeComputedDependencies(computedFn, reactive);
-                        this.computedDeps.set(name, dependencies);
+                    // Store computed info
+                    this.deps.set(name, {
+                        fn: computedFn,
+                        value: undefined,
+                        isDirty: true
+                    });
 
-                        // Build reverse dependency map
-                        dependencies.forEach(dep => {
-                            if (!this.propertyDeps.has(dep)) {
-                                this.propertyDeps.set(dep, []);
+                    // Build reverse lookup - don't overwrite existing entries
+                    dependencies.forEach(dep => {
+                        if (!this.deps.has(dep)) {
+                            this.deps.set(dep, { dependents: [] });
+                        }
+                        this.deps.get(dep).dependents = this.deps.get(dep).dependents || [];
+                        this.deps.get(dep).dependents.push(name);
+                    });
+
+                    Object.defineProperty(reactive, name, {
+                        get: () => {
+                            const entry = this.deps.get(name);
+                            if (entry.isDirty || entry.value === undefined) {
+                                entry.value = entry.fn.call(reactive);
+                                entry.isDirty = false;
                             }
-
-                            if (!this.propertyDeps.get(dep).includes(name)) {
-                                this.propertyDeps.get(dep).push(name);
-                            }
-                        });
-
-                        // Define computed property
-                        Object.defineProperty(reactive, name, {
-                            get: () => {
-                                if (this.computedCache.has(name)) {
-                                    return this.computedCache.get(name);
-                                }
-
-                                try {
-                                    const result = computedFn.call(reactive);
-                                    this.computedCache.set(name, result);
-                                    return result;
-                                } catch (error) {
-                                    console.error(`Error computing property '${name}':`, error);
-                                    return undefined;
-                                }
-                            },
-                            enumerable: true
-                        });
-                    }
+                            return entry.value;
+                        },
+                        enumerable: true
+                    });
                 });
             },
 
@@ -1814,13 +1848,8 @@
              * Uses modern IntersectionObserver API when available, falls back to scroll-based detection.
              */
             setupViewportTracking() {
-                // Check for modern browser support - IntersectionObserver is more efficient
-                // and provides better performance than manual scroll calculations
-                if ('IntersectionObserver' in window) {
-                    this.setupIntersectionObserver();
-                } else {
-                    this.setupScrollBasedVisibility();
-                }
+                // Setup the intersection server
+                this.setupIntersectionObserver();
 
                 // Perform initial visibility calculation on setup
                 // This ensures correct state even before any scroll/intersection events
@@ -1878,57 +1907,6 @@
 
                 // Start observing our container element
                 this.intersectionObserver.observe(this.container);
-            },
-
-            /**
-             * Fallback approach for older browsers that don't support IntersectionObserver.
-             * Uses traditional scroll event listeners with manual visibility calculations.
-             */
-            setupScrollBasedVisibility() {
-                // Create global registry for components that need viewport tracking
-                // This prevents duplicate event listeners when multiple components exist
-                if (!window._wakaPACViewportComponents) {
-                    window._wakaPACViewportComponents = new Set();
-
-                    // Only set up global listeners once
-                    this.setupViewportVisibilityListener();
-                }
-
-                // Register this component instance for visibility updates
-                window._wakaPACViewportComponents.add(this);
-            },
-
-            /**
-             * Set up global scroll and resize event listeners.
-             * These are shared across all component instances to improve performance.
-             */
-            setupViewportVisibilityListener() {
-                let scrollTimeout;
-                let resizeTimeout;
-
-                // Batch visibility updates for all registered components
-                const checkVisibility = () => {
-                    // Update visibility for every component that's registered for tracking
-                    window._wakaPACViewportComponents.forEach(component => {
-                        component.updateContainerVisibility();
-                    });
-                };
-
-                // Throttle scroll events to maintain 60fps performance
-                // Scroll events fire very frequently and can cause performance issues
-                // 16ms = ~60fps (1000ms/60frames = 16.67ms)
-                window.addEventListener('scroll', () => {
-                    clearTimeout(scrollTimeout);
-                    scrollTimeout = setTimeout(checkVisibility, 16);
-                });
-
-                // Handle window resize events with slightly longer delay
-                // Resize events are less frequent but can be more expensive to process
-                // 100ms delay gives time for resize to complete
-                window.addEventListener('resize', () => {
-                    clearTimeout(resizeTimeout);
-                    resizeTimeout = setTimeout(checkVisibility, 100);
-                });
             },
 
             /**
@@ -2014,7 +1992,7 @@
                     // Wrap the initial value in a reactive proxy to track nested changes
                     value = createReactive(value, (path, newVal, type, meta) => {
                         // Forward deep change notifications up the chain with proper path context
-                        this.handleDeepChange(path, newVal, type, meta);
+                        this.notifyChange(path, newVal, type, meta);
                     }, key);
                 }
 
@@ -2039,22 +2017,15 @@
                                 // Create reactive wrapper with change handler that forwards to deep change system
                                 newValue = createReactive(newValue, (path, changedVal, type, meta) => {
                                     // Delegate nested property changes to the deep change handler
-                                    this.handleDeepChange(path, changedVal, type, meta);
+                                    this.notifyChange(path, changedVal, type, meta);
                                 }, key);
                             }
 
                             // Update the stored value
                             value = newValue;
 
-                            // Execute any registered watchers for this specific property
-                            // Trigger watcher if it exists
-                            this.triggerWatcher(key, newValue, oldValue, key);
-
-                            // Schedule DOM/view updates for this property change
-                            this.scheduleUpdate(key, newValue);
-
-                            // Recalculate any computed properties that depend on this property
-                            this.updateComputedProperties(key);
+                            // Notify system of changes
+                            this.notifyChange(key, newValue, 'set', {oldValue});
                         }
                     },
 
@@ -2620,101 +2591,31 @@
             },
 
             /**
-             * Updates computed properties that depend on a changed property
-             * @param {string} changedProperty - The name of the property that changed
+             * Marks computed properties as dirty and schedules updates
+             * @param {string} changedProperty - The property that changed
              */
             updateComputedProperties(changedProperty) {
-                // Get all computed properties that depend on the changed property
-                const dependentComputed = this.propertyDeps.get(changedProperty) || [];
+                const entry = this.deps.get(changedProperty);
+                const dependentComputed = (entry && entry.dependents) ? entry.dependents : [];
 
                 dependentComputed.forEach(computedName => {
-                    // Store the old value before recomputation
-                    const oldValue = this.computedCache.get(computedName);
+                    const computedEntry = this.deps.get(computedName);
+                    const oldValue = computedEntry ? computedEntry.value : undefined;
 
-                    // Clear cache to force recomputation on next access
-                    this.computedCache.delete(computedName);
+                    if (computedEntry) {
+                        computedEntry.isDirty = true;
+                    }
 
-                    // Get new value (this will trigger recomputation since cache is cleared)
                     const newValue = this.abstraction[computedName];
-
-                    // Check if any foreach bindings use this computed property
-                    // Array bindings may need updates even if the reference hasn't changed
                     const hasArrayBinding = Array.from(this.bindings.values())
                         .some(b => b.type === 'foreach' && b.collection === computedName);
 
-                    // Update if value changed or if array binding needs update
-                    // Array bindings are updated regardless of equality check since
-                    // array contents may have changed without changing the reference
                     if (hasArrayBinding || !Utils.isEqual(oldValue, newValue)) {
-                        // Trigger any watchers registered for this computed property
                         this.triggerWatcher(computedName, newValue, oldValue);
-
-                        // Schedule DOM updates for elements bound to this property
                         this.scheduleUpdate(computedName, newValue);
-
-                        // Recursively update any computed properties that depend on this one
-                        // This handles chains of computed dependencies (A -> B -> C)
                         this.updateComputedProperties(computedName);
                     }
                 });
-            },
-
-            /**
-             * Handles deep property changes in nested objects/arrays
-             */
-            handleDeepChange(path, value, type, meta) {
-                const rootProperty = Utils.splitPath(path)[0];
-
-                // Handle nested property changes - force updates for computed properties
-                if (type === 'set' || type === 'nested-change') {
-                    // Clear computed cache for properties that might depend on this change
-                    const dependentComputed = this.propertyDeps.get(rootProperty) || [];
-
-                    dependentComputed.forEach(computedName => {
-                        this.computedCache.delete(computedName);
-                    });
-
-                    // Force update of any foreach bindings that use this root property OR computed properties that depend on it
-                    this.bindings.forEach(binding => {
-                        if (binding.type === 'foreach') {
-                            // Check if binding uses the changed root property directly
-                            if (binding.collection === rootProperty) {
-                                binding.previous = null;
-                            }
-                            // Check if binding uses a computed property that depends on the changed root property
-                            else if (dependentComputed.includes(binding.collection)) {
-                                binding.previous = null;
-                            }
-                        }
-                    });
-                }
-
-                // Trigger watchers with full path context
-                if ((type === 'set' || type === 'array-mutation') && path !== rootProperty) {
-                    // For deep changes, trigger watchers with the actual changed value and path
-                    // meta.oldValue contains the previous value from the Proxy set trap
-                    const actualNewValue = Utils.getNestedValue(this.abstraction, path);
-                    const actualOldValue = meta?.oldValue;
-                    this.triggerWatcher(rootProperty, actualNewValue, actualOldValue, path);
-                }
-
-                // Update computed properties that depend on this root property
-                this.updateComputedProperties(rootProperty);
-
-                // Schedule DOM updates for the root property
-                this.scheduleUpdate(rootProperty, this.abstraction[rootProperty]);
-
-                // Also schedule updates for computed properties that depend on this root property
-                const dependentComputed = this.propertyDeps.get(rootProperty) || [];
-
-                dependentComputed.forEach(computedName => {
-                    this.scheduleUpdate(computedName, this.abstraction[computedName]);
-                });
-
-                // Also schedule update for the specific nested path if it's different
-                if (path !== rootProperty) {
-                    this.scheduleUpdate(path, value);
-                }
             },
 
             /**
@@ -2857,7 +2758,7 @@
                         break;
 
                     case 'checked':
-                        this.applyCheckedBinding(binding.element, actualValue);
+                        this.applyCheckedBinding(binding.element, !!actualValue);
                         break;
 
                     case 'visible':
@@ -3014,19 +2915,21 @@
 
             /**
              * Processes a template element for foreach loops, handling text interpolation and data bindings
-             * @param {Element} element - The DOM element to process
-             * @param {*} item - The current item from the collection being iterated
-             * @param {number} index - The current index in the iteration
-             * @param {string} itemName - The variable name for the current item (e.g., 'user')
-             * @param {string} indexName - The variable name for the current index (e.g., 'i')
-             * @param {string} collectionName - The name of the collection being iterated
+             * with proper support for nested foreach loops by maintaining a scope chain of variables.
+             * @param {Element} element - The DOM element to process (template container)
+             * @param {*} item - The current item from the collection being iterated over
+             * @param {number} index - The zero-based index of the current item in the iteration
+             * @param {string} itemName - The variable name for the current item (e.g., 'user', 'product')
+             * @param {string} indexName - The variable name for the current index (e.g., 'i', 'index')
+             * @param {string} collectionName - The name of the collection being iterated over
+             * @param {Object} [parentVars={}] - Variables inherited from parent foreach scopes for nesting support
              */
-            processForeachTemplate(element, item, index, itemName, indexName, collectionName) {
-                // Create foreach variables for this iteration
-                const foreachVars = {
+            processForeachTemplate(element, item, index, itemName, indexName, collectionName, parentVars = {}) {
+                // Create foreach variables for this iteration, inheriting from parent scopes
+                const foreachVars = Object.assign({}, parentVars, {
                     [itemName]: item,
                     [indexName]: index
-                };
+                });
 
                 // Create a tree walker to traverse all text nodes in the element
                 const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -3040,60 +2943,269 @@
 
                 // Process each text node for template interpolation
                 textNodes.forEach(textNode => {
-                    // Replace template expressions in the format {{expression}}
+                    // Replace template expressions with improved variable resolution
                     textNode.textContent = textNode.textContent.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, expr) => {
                         expr = expr.trim();
 
-                        // Handle index variable (e.g., {{i}} -> current index)
-                        if (expr === indexName) {
-                            return index;
-                        }
-
-                        // Handle item variable (e.g., {{item}} -> formatted item value)
-                        if (expr === itemName) {
-                            return Utils.formatValue(item);
-                        }
-
-                        // Handle item property access (e.g., {{item.name}} -> item's name property)
-                        if (expr.startsWith(`${itemName}.`)) {
-                            // Extract the property path after the item name
-                            return Utils.formatValue(Utils.getNestedValue(item, expr.substring(itemName.length + 1)));
-                        }
-
-                        // If no pattern matches, return the original expression unchanged
-                        return match;
+                        // Try to resolve the expression using the current scope chain
+                        const resolved = this.resolveTemplateExpression(expr, foreachVars);
+                        return resolved !== undefined ? Utils.formatValue(resolved) : match;
                     });
                 });
 
-                // Process data binding attributes on the current element and all its descendants
-                [element, ...element.querySelectorAll('[data-pac-bind]')].forEach(el => {
+                // Find immediate child foreach elements to handle nested loops separately
+                const childForeachElements = this.findDirectChildForeachElements(element);
+
+                // Process non-foreach binding elements first
+                let bindingElements = Array.from(element.querySelectorAll('[data-pac-bind]'))
+                    .filter(el => !childForeachElements.includes(el));
+
+                // Also check if the current element itself has bindings
+                // Also check if the current element itself has bindings
+                if (element.hasAttribute('data-pac-bind')) {
+                    bindingElements.push(element);
+                }
+
+                bindingElements.forEach(el => {
                     const bindings = el.getAttribute('data-pac-bind');
+                    if (!bindings) return;
 
-                    // Skip elements without binding attributes
-                    if (!bindings) {
-                        return;
-                    }
-
-                    // Parse multiple bindings separated by commas
+                    // Parse and process each binding
                     this.parseBindingString(bindings).forEach(({ type, target }) => {
-                        // Set up two-way binding for form inputs
-                        if ((type === 'value' || type === 'checked') && target.startsWith(`${itemName}.`)) {
-                            // Extract the property path from the target
-                            const propertyPath = target.substring(itemName.length + 1);
+                        // Skip nested foreach bindings - they'll be handled separately
+                        if (type === 'foreach') return;
 
-                            // Create a full path including collection and index for proper data binding
-                            this.setupInputElement(el, `${collectionName}.${index}.${propertyPath}`, type);
+                        // Set up two-way binding for form inputs
+                        if ((type === 'value' || type === 'checked') && this.isNestedProperty(target, foreachVars)) {
+                            const propertyPath = this.buildNestedPropertyPath(target, foreachVars, collectionName, index);
+                            this.setupInputElement(el, propertyPath, type);
                         }
 
-                        // Process other types of bindings using unified expression evaluation
+                        // Process other types of bindings
                         this.processForeachBinding(el, type, target, foreachVars);
                     });
+                });
+
+                // Now handle nested foreach loops with proper scope inheritance
+                childForeachElements.forEach(childElement => {
+                    const bindingAttr = childElement.getAttribute('data-pac-bind');
+                    const foreachMatch = bindingAttr.match(/foreach:\s*([^,}]+)/);
+
+                    if (foreachMatch) {
+                        const nestedTarget = foreachMatch[1].trim();
+                        const nestedItemName = childElement.getAttribute('data-pac-item') || 'item';
+                        const nestedIndexName = childElement.getAttribute('data-pac-index') || 'index';
+
+                        // Create nested foreach binding with proper scope inheritance
+                        this.processNestedForeachBinding(
+                            childElement,
+                            nestedTarget,
+                            nestedItemName,
+                            nestedIndexName,
+                            foreachVars
+                        );
+                    }
                 });
             },
 
             /**
-             * Processes individual bindings within foreach templates by creating lightweight
-             * binding objects and using the unified updateBinding system
+             * Resolves template expressions using a hierarchical variable scope chain.
+             * @param {string} expr - The expression to resolve (e.g., 'item', 'item.name', 'user.profile.email')
+             * @param {Object} foreachVars - Object containing all foreach variables from current and parent scopes
+             * @returns {*} The resolved value, or undefined if the expression cannot be resolved
+             */
+            resolveTemplateExpression(expr, foreachVars) {
+                // Try foreach variables first (most specific scope)
+                if (foreachVars.hasOwnProperty(expr)) {
+                    return foreachVars[expr];
+                }
+
+                // Check for property access on foreach variables
+                for (const [varName, varValue] of Object.entries(foreachVars)) {
+                    if (expr.startsWith(`${varName}.`)) {
+                        const propertyPath = expr.substring(varName.length + 1);
+                        return Utils.getNestedValue(varValue, propertyPath);
+                    }
+                }
+
+                // Fall back to component abstraction
+                return Utils.getNestedValue(this.abstraction, expr);
+            },
+
+            /**
+             * Finds direct child elements that have foreach bindings to prevent improper nesting processing.
+             * @param {Element} element - The parent element to search within
+             * @returns {Element[]} Array of direct child elements that have foreach bindings
+             */
+            findDirectChildForeachElements(element) {
+                const result = [];
+                const children = Array.from(element.children);
+
+                children.forEach(child => {
+                    const bindings = child.getAttribute('data-pac-bind');
+
+                    if (bindings && bindings.includes('foreach:')) {
+                        result.push(child);
+                    }
+                });
+
+                return result;
+            },
+
+            /**
+             * Processes a nested foreach binding by evaluating the target expression
+             * and rendering each item in the resulting array
+             * @param {HTMLElement} element - The DOM element containing the foreach template
+             * @param {string} target - The expression to evaluate (e.g., "items.children")
+             * @param {string} itemName - Variable name for each item (e.g., "child")
+             * @param {string} indexName - Variable name for the index (e.g., "childIndex")
+             * @param {Object} parentVars - Variables from parent scope (outer foreach loops)
+             */
+            processNestedForeachBinding(element, target, itemName, indexName, parentVars) {
+                // Create evaluation context by merging abstraction data with foreach variables
+                // This allows access to both component data and parent loop variables
+                const context = Object.assign({}, this.abstraction, parentVars);
+
+                // Parse the binding expression into an evaluatable format
+                // Converts string like "items.children" into an Abstract Syntax Tree
+                const parsed = ExpressionParser.parseExpression(target);
+
+                // Evaluate the AST against the current context to get the actual array
+                // This resolves the expression to its concrete value
+                const nestedArray = ExpressionParser.evaluate(parsed, context);
+
+                // Safety check: ensure we have a valid array to iterate over
+                // If the expression doesn't resolve to an array, exit early
+                if (!Array.isArray(nestedArray)) {
+                    return;
+                }
+
+                // Store original template HTML before clearing the element
+                // This template will be cloned for each array item
+                const template = element.innerHTML;
+
+                // Clear the element to prepare for new content
+                element.innerHTML = '';
+
+                // Create document fragment for efficient DOM manipulation
+                // Fragments allow batch DOM updates, improving performance
+                const fragment = document.createDocumentFragment();
+
+                // Iterate through each item in the nested array
+                nestedArray.forEach((nestedItem, nestedIndex) => {
+                    // Render individual item using the stored template
+                    // Pass all necessary context including parent variables
+                    const itemElement = this.renderNestedForeachItem(
+                        template,           // Original template HTML
+                        nestedItem,         // Current array item data
+                        nestedIndex,        // Current item index
+                        itemName,           // Variable name for the item
+                        indexName,          // Variable name for the index
+                        target,             // Original target expression
+                        parentVars          // Variables from parent scope for nested access
+                    );
+
+                    // Add the rendered item to the document fragment
+                    fragment.appendChild(itemElement);
+                });
+
+                // Append all rendered items to the DOM in a single operation
+                // This minimizes DOM reflows and improves performance
+                element.appendChild(fragment);
+            },
+
+            /**
+             * Renders a single item from a nested foreach loop by cloning the template
+             * and processing it with the current item's data and scope variables
+             * @param {string} template - HTML template string to clone for this item
+             * @param {*} item - The current array item data
+             * @param {number} index - The current item's index in the array
+             * @param {string} itemName - Variable name for the current item (e.g., "child")
+             * @param {string} indexName - Variable name for the current index (e.g., "childIndex")
+             * @param {string} collectionName - Name of the collection being iterated
+             * @param {Object} parentVars - Variables inherited from parent foreach scopes
+             * @returns {HTMLElement} Processed DOM element ready for insertion
+             */
+            renderNestedForeachItem(template, item, index, itemName, indexName, collectionName, parentVars) {
+                // Create a temporary container to parse the template HTML
+                // This allows us to work with actual DOM nodes rather than raw HTML strings
+                const tempContainer = document.createElement('div');
+                tempContainer.innerHTML = template.trim(); // Remove whitespace to avoid text nodes
+
+                // Convert NodeList to Array for easier manipulation
+                // This gives us access to array methods and ensures consistent behavior
+                const childNodes = Array.from(tempContainer.childNodes);
+
+                // Check if template contains a single element node
+                // Single elements are preferred as they don't need wrapper containers
+                if (childNodes.length === 1 && childNodes[0].nodeType === Node.ELEMENT_NODE) {
+                    // Extract the single element from the temporary container
+                    const element = childNodes[0];
+
+                    // Create a deep clone to avoid modifying the original template
+                    // Deep cloning ensures all child elements and attributes are copied
+                    const clone = element.cloneNode(true);
+
+                    // Process the cloned element with current item data and parent scope
+                    // This handles binding resolution, nested loops, and variable substitution
+                    this.processForeachTemplate(clone, item, index, itemName, indexName, collectionName, parentVars);
+
+                    // Return the processed single element
+                    return clone;
+                }
+
+                // Handle multiple nodes or text nodes in template
+                // When template has multiple root elements, we need a wrapper container
+                const wrapper = document.createElement('span'); // Use span as lightweight wrapper
+
+                // Clone each child node and add to wrapper
+                // This preserves the original template structure while creating an isolated copy
+                childNodes.forEach(node => {
+                    // Clone each node (element, text, comment, etc.) and append to wrapper
+                    wrapper.appendChild(node.cloneNode(true));
+                });
+
+                // Process the entire wrapper with all child nodes
+                // The wrapper acts as a single root element for processing
+                this.processForeachTemplate(wrapper, item, index, itemName, indexName, collectionName, parentVars);
+
+                // Return the wrapper containing all processed template nodes
+                return wrapper;
+            },
+
+            /**
+             * Checks if a target expression represents a nested property that should use foreach variables.
+             * @param {string} target - The binding target expression to check (e.g., "item.completed", "user.name")
+             * @param {Object} foreachVars - Object containing all available foreach variables from current and parent scopes
+             * @returns {boolean} True if the target starts with a foreach variable name, false otherwise
+             */
+            isNestedProperty(target, foreachVars) {
+                return Object.keys(foreachVars).some(varName =>
+                    target.startsWith(`${varName}.`)
+                );
+            },
+
+            /**
+             * Builds the proper property path for nested bindings in foreach contexts.
+             * @param {string} target - The original binding target expression (e.g., "item.completed")
+             * @param {Object} foreachVars - Object containing all foreach variables with their current values
+             * @param {string} collectionName - The name of the collection in the data model (e.g., "todos")
+             * @param {number} index - The current index in the foreach iteration
+             * @returns {string} The absolute property path for data binding, or original target if no match
+             */
+            buildNestedPropertyPath(target, foreachVars, collectionName, index) {
+                for (const [varName, varValue] of Object.entries(foreachVars)) {
+                    if (target.startsWith(`${varName}.`)) {
+                        const propertyPath = target.substring(varName.length + 1);
+                        return `${collectionName}.${index}.${propertyPath}`;
+                    }
+                }
+
+                return target;
+            },
+
+            /**
+             * Processes individual bindings within foreach templates by using the existing binding system
              * @param {HTMLElement} element - The DOM element to apply the binding to
              * @param {string} type - The type of binding (class, checked, event name, or attribute name)
              * @param {string} target - The expression or property path to evaluate
@@ -3102,16 +3214,20 @@
             processForeachBinding(element, type, target, foreachVars) {
                 // For event bindings, handle them specially since they need item/index passed
                 if (Utils.isEventType(type)) {
-                    this.handleEventBinding(element, type, target, foreachVars[Object.keys(foreachVars)[0]], foreachVars[Object.keys(foreachVars)[1]]);
+                    this.handleEventBinding(
+                        element, type, target,
+                        foreachVars[Object.keys(foreachVars)[0]],
+                        foreachVars[Object.keys(foreachVars)[1]]
+                    );
+
                     return;
                 }
 
-                // Create a lightweight binding object specifically for foreach evaluation
-                // This avoids the two-way data binding setup that createBindingByType does
+                // Create a temporary binding object for updateBindingGeneric
                 const tempBinding = this.createForeachEvaluationBinding(element, type, target);
 
-                // Use the unified updateBinding method with foreach context
-                this.updateBinding(tempBinding, null, foreachVars);
+                // Use the existing generic binding update system
+                this.updateBindingGeneric(tempBinding, null, foreachVars);
             },
 
             /**
@@ -3124,24 +3240,46 @@
              * @returns {Object} Lightweight binding object
              */
             createForeachEvaluationBinding(element, type, target) {
-                // Map foreach types to updateBinding types
+                // Map foreach-specific binding types to standard updateBinding types
+                // This translation layer allows foreach bindings to work with the existing binding system
                 const bindingTypeMap = {
-                    'visible': 'visible',
-                    'checked': 'checked',
-                    'value': 'input',
-                    'class': 'class'
+                    'visible': 'visible',    // Controls element visibility (display: none/block)
+                    'checked': 'checked',    // For checkbox/radio input checked state
+                    'value': 'input',        // For input element values (maps to 'input' type)
+                    'class': 'class'         // For CSS class manipulation
                 };
 
+                // Determine the actual binding type to use
+                // Falls back to 'attribute' for any unmapped types (custom attributes)
                 const bindingType = bindingTypeMap[type] || 'attribute';
 
+                // Return a standardized binding configuration object
+                // This object is compatible with the main updateBinding processing system
                 return {
+                    // Generate unique identifier for this binding instance
+                    // Helps with debugging and binding lifecycle management
                     id: `foreach_eval_${Utils.generateId()}`,
+
+                    // The resolved binding type for the updateBinding system
                     type: bindingType,
+
+                    // Reference to the DOM element this binding affects
                     element: element,
+
+                    // The expression string to evaluate (e.g., "item.isVisible", "user.name")
                     target: target,
+
+                    // For attribute bindings, store which attribute to update
+                    // Null for non-attribute bindings (visible, checked, input, class)
                     attribute: bindingType === 'attribute' ? type : null,
-                    parsedExpression: null, // Will be set by getParsedExpression
-                    dependencies: null // Will be set by getParsedExpression
+
+                    // Placeholder for parsed expression AST
+                    // Will be populated later by getParsedExpression() for performance
+                    parsedExpression: null,
+
+                    // Placeholder for expression dependencies
+                    // Will be populated later by getParsedExpression() for change detection
+                    dependencies: null
                 };
             },
 
@@ -3402,6 +3540,47 @@
                 this.updateTimeouts.set(key, timeoutId);
             },
 
+            // === UNIFIED CHANGE DETECTION SECTION ===
+
+            /**
+             * Central change notification hub - all property changes flow through here
+             */
+            notifyChange(propertyPath, newValue, changeType, metadata = {}) {
+                const rootProperty = propertyPath.split('.')[0];
+
+                // 1. Update watchers (immediate)
+                this.triggerWatcher(rootProperty, newValue, metadata.oldValue, propertyPath);
+
+                // 2. Invalidate computed properties (immediate)
+                this.updateComputedProperties(rootProperty);
+
+                // 3. Schedule DOM updates (batched)
+                this.scheduleUpdate(propertyPath, newValue);
+
+                // 4. Bubble to root if this is a nested change
+                if (propertyPath !== rootProperty) {
+                    this.bubbleChangeNotification(rootProperty, this.abstraction[rootProperty], 'nested-change', {
+                        nestedPath: propertyPath,
+                        newValue,
+                        oldValue: metadata.oldValue
+                    });
+                }
+            },
+
+            /**
+             * Renamed from notifyParentChange - bubbles nested changes to root property listeners
+             */
+            bubbleChangeNotification(rootProperty, rootValue, changeType, metadata) {
+                // Trigger root property watcher with full context
+                this.triggerWatcher(rootProperty, rootValue, metadata.oldValue, metadata.nestedPath);
+
+                // Update computed properties that depend on root
+                this.updateComputedProperties(rootProperty);
+
+                // Schedule root property updates
+                this.scheduleUpdate(rootProperty, rootValue);
+            },
+
             // === UTILITY METHODS SECTION ===
 
             /**
@@ -3582,7 +3761,7 @@
             applyInputBinding(element, actualValue) {
                 // For radio buttons, we check if the element's value matches the property value
                 if (element.type === 'radio') {
-                    this.applyCheckedBinding(element, actualValue);
+                    this.applyRadioBinding(element, actualValue);
                     return;
                 }
 
@@ -3593,7 +3772,16 @@
             },
 
             /**
-             * Applies checked state to an element
+             * Applies checked state to a radio element
+             * @param {HTMLElement} element - The target DOM element
+             * @param {boolean} value
+             */
+            applyRadioBinding(element, value) {
+                element.checked = (element.value === String(value || ''));
+            },
+
+            /**
+             * Applies checked state to any element except radio
              * @param {HTMLElement} element - The target DOM element
              * @param {boolean} checked - Whether the element should be checked
              */
@@ -3608,10 +3796,24 @@
              * @param {*} value - The evaluated expression value
              */
             applyClassBinding(element, target, value) {
-                // Get previous classes that were applied by this binding
-                const previousClasses = element.dataset.pacPreviousClasses || '';
+                // Remove previously applied classes
+                this.clearPreviousClasses(element);
 
-                // Remove all previously applied classes
+                // Determine new classes to apply
+                const newClasses = this.parseClassValue(value);
+
+                // Apply new classes and store for next time
+                newClasses.forEach(cls => element.classList.add(cls));
+                element.dataset.pacPreviousClasses = newClasses.join(' ');
+            },
+
+            /**
+             * Remove all previously applied classes from the element
+             * @param {HTMLElement} element - The target DOM element
+             */
+            clearPreviousClasses(element) {
+                const previousClasses = element.dataset.pacPreviousClasses;
+
                 if (previousClasses) {
                     previousClasses.split(' ').forEach(cls => {
                         if (cls.trim()) {
@@ -3619,48 +3821,40 @@
                         }
                     });
                 }
+            },
 
-                let newClasses = '';
-
-                // Handle different value types
+            /**
+             * Parse different value types and return array of class names to apply
+             * @param {*} value - The evaluated expression value
+             * @returns {string[]} Array of valid class names
+             */
+            parseClassValue(value) {
+                // Object syntax: { className: boolean, className2: boolean }
                 if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    // Object syntax: { className: boolean, className2: boolean }
-                    Object.keys(value).forEach(className => {
-                        if (value[className] && className.trim()) {
-                            element.classList.add(className.trim());
-                            newClasses += (newClasses ? ' ' : '') + className.trim();
-                        }
-                    });
-                } else if (Array.isArray(value) && value !== null) {
-                    // Array of class names
-                    value.forEach(className => {
-                        if (className && typeof className === 'string' && className.trim()) {
-                            element.classList.add(className.trim());
-                            newClasses += (newClasses ? ' ' : '') + className.trim();
-                        }
-                    });
-                } else if (typeof value === 'string') {
-                    // String value - could be single class or space-separated classes
-                    const classNames = value.trim().split(/\s+/);
-
-                    classNames.forEach(className => {
-                        if (className.trim()) {
-                            element.classList.add(className.trim());
-                            newClasses += (newClasses ? ' ' : '') + className.trim();
-                        }
-                    });
-                } else if (value) {
-                    // Truthy non-string value - convert to string and treat as class name
-                    const className = String(value).trim();
-
-                    if (className) {
-                        element.classList.add(className);
-                        newClasses = className;
-                    }
+                    return Object.entries(value)
+                        .filter(([className, isActive]) => isActive && className.trim())
+                        .map(([className]) => className.trim());
                 }
 
-                // Store the new classes for next time
-                element.dataset.pacPreviousClasses = newClasses;
+                // Array of class names
+                if (Array.isArray(value)) {
+                    return value
+                        .filter(cls => cls && typeof cls === 'string' && cls.trim())
+                        .map(cls => cls.trim());
+                }
+
+                // String value - single class or space-separated classes
+                if (typeof value === 'string') {
+                    return value.trim().split(/\s+/).filter(cls => cls.trim());
+                }
+
+                // Truthy non-string value - convert to string
+                if (value) {
+                    const className = String(value).trim();
+                    return className ? [className] : [];
+                }
+
+                return [];
             },
 
             /**
@@ -3953,7 +4147,7 @@
              * Releases memory held by computed values and expression caches
              */
             _clearCaches() {
-                this.computedCache.clear();
+                this.deps.clear();
                 this.expressionCache.clear();
                 this.lastValues.clear();
             },
