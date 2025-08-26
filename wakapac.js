@@ -2809,6 +2809,7 @@
 
                 // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
                 if (!forceUpdate && !hasDirectNestedChanges && Utils.isEqual(currentFingerprints, previousFingerprints)) {
+                    binding.fingerprints = currentFingerprints;
                     binding.previous = [...array];
                     return;
                 }
