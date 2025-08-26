@@ -496,7 +496,7 @@
             // This prevents unnecessary updates when the same value is assigned
             if (!Utils.isEqual(oldValue, value)) {
                 // Construct the full property path (e.g., "user.profile.name")
-                const propertyPath = path ? `${path}.${prop}` : prop;
+                const propertyPath = path ? path + '.' + prop : prop;
 
                 // Notify listeners about the property change
                 // Includes the path, new value, operation type, and old value
@@ -526,7 +526,7 @@
             // Build the full property path for nested objects
             // If path exists, append the property with a dot separator
             // Otherwise, use just the property name for root-level properties
-            const propertyPath = path ? `${path}.${prop}` : prop;
+            const propertyPath = path ? path + '.' + prop : prop;
 
             // Notify listeners of the deletion
             onChange(propertyPath, undefined, 'delete', {oldValue});
@@ -1050,9 +1050,9 @@
 
                     // For simplicity, convert bracket notation to string
                     if (index.type === 'literal') {
-                        path += `[${JSON.stringify(index.value)}]`;
+                        path += '[' + JSON.stringify(index.value) + ']';
                     } else {
-                        path += `[${this.reconstructExpression(index)}]`;
+                        path += '[' + this.reconstructExpression(index) + ']';
                     }
                 } else {
                     break;
@@ -1077,7 +1077,7 @@
 
             switch (node.type) {
                 case 'literal':
-                    return typeof node.value === 'string' ? `"${node.value}"` : String(node.value);
+                    return typeof node.value === 'string' ? '"' + node.value + '"' : String(node.value);
 
                 case 'property':
                     return node.path;
@@ -2024,7 +2024,7 @@
                     try {
                         this.original.watch[property].call(this.abstraction, newValue, oldValue);
                     } catch (error) {
-                        console.error(`Error in watcher for '${property}':`, error);
+                        console.error('Error in watcher for \'' + property + '\':', error);
                     }
                 }
 
@@ -2044,7 +2044,7 @@
                                 try {
                                     watcher.call(this.abstraction, newValue, oldValue, changePath);
                                 } catch (error) {
-                                    console.error(`Error in deep watcher for '${watchKey}':`, error);
+                                    console.error('Error in deep watcher for \'' + watchKey + '\':', error);
                                 }
                             }
                         }
@@ -2698,7 +2698,7 @@
                     handler(context, ExpressionParser.evaluate(parsed, context));
 
                 } catch (error) {
-                    console.error(`Error updating ${binding.type} binding:`, error);
+                    console.error('Error updating ' + binding.type + ' binding:', error);
                 }
             },
 
@@ -2791,7 +2791,7 @@
 
                             text = text.replace(match, formattedValue);
                         } catch (error) {
-                            console.warn(`Error evaluating expression "${expression}":`, error);
+                            console.warn('Error evaluating expression "' + expression + '":', error);
                         }
                     });
                 }
@@ -2864,9 +2864,10 @@
                 // Determine the actual binding type to use
                 // Falls back to 'attribute' for any unmapped types (custom attributes)
                 const bindingType = BINDING_TYPE_MAP[type] || 'attribute';
+                const bindingId = 'eval_' + Date.now() + '_' + (Math.random() * 10000 | 0);
 
                 return {
-                    id: `eval_${Date.now() + '_' + (Math.random() * 10000 | 0)}`,
+                    id: bindingId,
                     type: bindingType,
                     element: element,
                     target: target,
@@ -2913,12 +2914,12 @@
                 }
 
                 if (typeof item !== 'object') {
-                    return `${typeof item}:${item}`;
+                    return typeof item + ':' + item;
                 }
 
                 const sortedEntries = Object.entries(item)
                     .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([key, value]) => `${key}:${this.generateItemHash(value)}`);
+                    .map(([key, value]) => key + ':' + this.generateItemHash(value));
 
                 return this.hashString(sortedEntries.join('|'));
             },
@@ -3086,7 +3087,7 @@
                 for (const [varName, varValue] of Object.entries(foreachVars)) {
                     if (target.startsWith(`${varName}.`)) {
                         const propertyPath = target.substring(varName.length + 1);
-                        return `${collectionName}.${index}.${propertyPath}`;
+                        return collectionName + '.' + index + '.' + propertyPath;
                     }
                 }
 
@@ -3231,7 +3232,7 @@
                                 method.call(this.abstraction, event);
                             } catch (error) {
                                 // Log any errors that occur during method execution
-                                console.error(`Error executing event handler '${binding.method}':`, error);
+                                console.error('Error executing event handler \'' + binding.method + '\':', error);
                             }
                         }
                     }
@@ -3252,7 +3253,7 @@
                     const method = this.abstraction[target];
 
                     if (typeof method !== 'function') {
-                        console.warn(`Event handler "${target}" is not a function`);
+                        console.warn('Event handler "' + target + '" is not a function');
                         return;
                     }
 
@@ -3325,7 +3326,7 @@
                 // This ensures all updates to the same property share the same debounce timer
                 // Note: Using property-only key means updates to different elements but same property
                 // will debounce together (which may be intentional behavior)
-                const key = `delayed_${property}`;
+                const key = 'delayed_' + property;
 
                 // Debouncing logic: Clear any existing timeout for this property
                 // This cancels the previous delayed update, ensuring only the most recent
@@ -3464,7 +3465,7 @@
                     // Check if the current path exists - if not, we can't set the property
                     if (!current) {
                         // Show which part of the path failed for debugging purposes
-                        console.warn(`Cannot set property: ${propertyPath} - path not found at '${parts.slice(0, i + 1).join('.')}'`);
+                        console.warn('Cannot set property: ' + propertyPath + ' - path not found at \'' + parts.slice(0, i + 1).join('.') + '\'');
                         return;
                     }
                 }
@@ -3541,7 +3542,7 @@
                 // Replace the DOM element with a placeholder comment
                 // Create placeholder comment if it doesn't exist yet
                 if (!binding.placeholder) {
-                    binding.placeholder = document.createComment(`pac-if: ${binding.target}`);
+                    binding.placeholder = document.createComment('pac-if: ' + binding.target);
                 }
 
                 // Replace the element with the invisible placeholder comment (removes from DOM)
@@ -3683,7 +3684,7 @@
                 const newText = this.processTextInterpolation(binding.originalText, context);
 
                 // Update text content if changed (with caching)
-                const cacheKey = `text_${binding.id}`;
+                const cacheKey = 'text_' + binding.id;
                 const lastValue = this.lastValues.get(cacheKey);
 
                 if (lastValue !== newText) {
@@ -3798,7 +3799,7 @@
 
                 // Early return if element doesn't exist to prevent errors
                 if (!element) {
-                    console.warn(`Element not found: ${elementOrSelector}`);
+                    console.warn('Element not found: ' + elementOrSelector);
                     return false;
                 }
 
