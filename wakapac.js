@@ -108,7 +108,7 @@
          * @param {*} value - Value to test
          * @returns {boolean} True if property should be reactive
          */
-        shouldPropertyBeReactive(propertyName, value) {
+        shouldReact(propertyName, value) {
             // Library convention (jQuery, etc.)
             if (propertyName.startsWith('_') ||
                 propertyName.startsWith('$') ||
@@ -1581,7 +1581,7 @@
                             // Bind functions to the reactive object so 'this' refers to reactive
                             // This ensures methods can access other reactive properties
                             reactive[key] = value.bind(reactive);
-                        } else if (!Utils.shouldPropertyBeReactive(key, value)) {
+                        } else if (!Utils.shouldReact(key, value)) {
                             // Non-reactive property - assign directly without proxy wrapping
                             // Useful for external library instances, DOM objects, or circular references
                             // These properties won't trigger change detection or DOM updates
@@ -2646,69 +2646,61 @@
             // === BINDING UPDATE SECTION ===
 
             /**
-             * Updates a specific binding based on its type
+             * Updates a data binding by evaluating its expression and applying the result to the bound element.
+             * This method serves as the central dispatcher for all binding types, handling expression evaluation
+             * and delegating to appropriate specialized binding handlers.
+             * @param {Object} binding - The binding configuration object
+             * @param {string} binding.type - The type of binding (text, foreach, event, attribute, input, checked, visible, conditional, class, style)
+             * @param {HTMLElement} binding.element - The DOM element this binding is attached to
+             * @param {string} [binding.attribute] - The attribute name (for attribute bindings)
+             * @param {string} [binding.target] - The target property name (for class/style bindings)
+             * @param {string|Object} binding.expression - The expression to evaluate or parsed expression object
+             * @param {string} property - The property name that triggered this update (used for change tracking)
+             * @param {Object|null} [foreachVars=null] - Additional variables from foreach loop context
+             * @throws {Error} Logs errors to console if binding evaluation or application fails
              */
             updateBinding(binding, property, foreachVars = null) {
                 try {
-                    switch (binding.type) {
-                        case 'text':
-                            this.applyTextBinding(binding, property, foreachVars);
-                            break;
+                    // Handler lookup table for all binding types
+                    const handlers = {
+                        // Special handlers that don't need context evaluation
+                        text: () => this.applyTextBinding(binding, property, foreachVars),
+                        foreach: () => this.applyForeachBinding(binding, property, foreachVars),
+                        event: () => {},
 
-                        case 'foreach':
-                            this.applyForeachBinding(binding, property, foreachVars);
-                            break;
+                        // Default handlers that need context evaluation
+                        attribute: (ctx, val) => this.applyAttributeBinding(binding.element, binding.attribute, val),
+                        input: (ctx, val) => this.applyInputBinding(binding.element, val),
+                        checked: (ctx, val) => this.applyCheckedBinding(binding.element, !!val),
+                        visible: (ctx, val) => this.applyVisibilityBinding(binding.element, val),
+                        conditional: (ctx, val) => this.applyConditionalBinding(binding.element, val, binding),
+                        class: (ctx, val) => this.applyClassBinding(binding.element, binding.target, val),
+                        style: (ctx, val) => this.applyStyleBinding(binding.element, binding.target, val)
+                    };
 
-                        case 'event':
-                            // Events are already handled in processForeachBinding
-                            break;
+                    // Get the appropriate handler for this binding type
+                    const handler = handlers[binding.type];
 
-                        default:
-                            // Create evaluation context by merging abstraction data with foreach variables
-                            const context = Object.assign({}, this.abstraction, foreachVars || {});
-
-                            // Parse the binding expression into an evaluatable format
-                            const parsed = this.getParsedExpression(binding);
-
-                            // Regular input handling (text, number, etc.)
-                            const actualValue = ExpressionParser.evaluate(parsed, context);
-
-                            // Call the correct apply method
-                            switch (binding.type) {
-                                case 'attribute':
-                                    this.applyAttributeBinding(binding.element, binding.attribute, actualValue);
-                                    break;
-
-                                case 'input':
-                                    this.applyInputBinding(binding.element, actualValue);
-                                    break;
-
-                                case 'checked':
-                                    this.applyCheckedBinding(binding.element, !!actualValue);
-                                    break;
-
-                                case 'visible':
-                                    this.applyVisibilityBinding(binding.element, actualValue);
-                                    break;
-
-                                case 'conditional':
-                                    this.applyConditionalBinding(binding.element, actualValue, binding);
-                                    break;
-
-                                case 'class':
-                                    this.applyClassBinding(binding.element, binding.target, actualValue);
-                                    break;
-
-                                case 'style':
-                                    this.applyStyleBinding(binding.element, binding.target, actualValue);
-                                    break;
-                            }
+                    // Skip unknown binding types silently
+                    if (!handler) {
+                        return;
                     }
+
+                    // Special cases that manage their own expression evaluation and context
+                    if (binding.type === 'text' || binding.type === 'foreach' || binding.type === 'event') {
+                        handler();
+                        return;
+                    }
+
+                    // Default case: evaluate expression and apply result
+                    const context = Object.assign({}, this.abstraction, foreachVars || {});
+                    const parsed = this.getParsedExpression(binding);
+                    handler(context, ExpressionParser.evaluate(parsed, context));
+
                 } catch (error) {
                     console.error(`Error updating ${binding.type} binding:`, error);
                 }
             },
-
 
             /**
              * Creates a DOM element from a foreach template string by parsing HTML
@@ -2749,6 +2741,7 @@
 
                 // Collect all text nodes first to avoid modifying the tree while traversing
                 const textNodes = [];
+
                 let node;
                 while (node = walker.nextNode()) {
                     textNodes.push(node);
