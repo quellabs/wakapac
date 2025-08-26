@@ -2313,8 +2313,7 @@
             createBindingByType(element, type, target) {
                 switch (type) {
                     case 'value':
-                        this.setupInputElement(element, target);
-                        return this.createInputBinding(element, target);
+                        return this.createValueBinding(element, target);
 
                     case 'visible':
                         return this.createVisibilityBinding(element, target);
@@ -2383,6 +2382,17 @@
             },
 
             /**
+             * Creates a value binding
+             */
+            createValueBinding(element, target) {
+                // Add attributes to element
+                this.setupInputElement(element, target);
+                
+                // Create an input binding
+                return this.createInputBinding(element, target);
+            },
+
+            /**
              * Creates a visibility binding
              */
             createVisibilityBinding(element, target) {
@@ -2423,6 +2433,12 @@
                 });
             },
 
+            /**
+             * Creates a class binding
+             * @param element
+             * @param target
+             * @returns {{id: string, type: string, element: Element}}
+             */
             createClassBinding: function(element, target) {
                 return this.createBinding('class', element, {
                     target: target,
