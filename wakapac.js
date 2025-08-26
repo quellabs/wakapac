@@ -2991,91 +2991,20 @@
              * @param {Object} [parentVars={}] - Variables inherited from parent foreach scopes for nesting support
              */
             processForeachTemplate(element, item, index, itemName, indexName, collectionName, parentVars = {}) {
-                // Create foreach variables for this iteration, inheriting from parent scopes
+                // Create foreach variables for this iteration
                 const foreachVars = Object.assign({}, parentVars, {
                     [itemName]: item,
                     [indexName]: index
                 });
 
-                // Create a tree walker to traverse all text nodes in the element
-                const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-                const textNodes = [];
+                // Use existing text interpolation method
+                this.processTextBindingsForElement(element, foreachVars);
 
-                // Collect all text nodes first to avoid modifying the tree while traversing
-                let node;
-                while (node = walker.nextNode()) {
-                    textNodes.push(node);
-                }
-
-                // Process each text node for template interpolation
-                textNodes.forEach(textNode => {
-                    // Replace template expressions with improved variable resolution
-                    textNode.textContent = textNode.textContent.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, expr) => {
-                        expr = expr.trim();
-
-                        // Try to resolve the expression using the current scope chain
-                        const resolved = this.resolveTemplateExpression(expr, foreachVars);
-                        return resolved !== undefined ? Utils.formatValue(resolved) : match;
-                    });
-                });
-
-                // Find immediate child foreach elements to handle nested loops separately
-                const childForeachElements = this.findDirectChildForeachElements(element);
-
-                // Process non-foreach binding elements first
-                let bindingElements = Array.from(element.querySelectorAll('[data-pac-bind]'))
-                    .filter(el => !childForeachElements.includes(el));
-
-                // Also check if the current element itself has bindings
-                // Also check if the current element itself has bindings
-                if (element.hasAttribute('data-pac-bind')) {
-                    bindingElements.push(element);
-                }
-
-                bindingElements.forEach(el => {
-                    const bindings = el.getAttribute('data-pac-bind');
-
-                    if (!bindings) {
-                        return;
-                    }
-
-                    // Parse and process each binding
-                    ExpressionParser.parseBindingString(bindings).forEach(({ type, target }) => {
-                        // Skip nested foreach bindings - they'll be handled separately
-                        if (type === 'foreach') {
-                            return;
-                        }
-
-                        // Set up two-way binding for form inputs
-                        if ((type === 'value' || type === 'checked') && this.isNestedProperty(target, foreachVars)) {
-                            const propertyPath = this.buildNestedPropertyPath(target, foreachVars, collectionName, index);
-                            this.setupInputElement(el, propertyPath, type);
-                        }
-
-                        // Process other types of bindings
-                        this.processForeachBinding(el, type, target, foreachVars);
-                    });
-                });
-
-                // Now handle nested foreach loops with proper scope inheritance
-                childForeachElements.forEach(childElement => {
-                    const bindingAttr = childElement.getAttribute('data-pac-bind');
-                    const foreachMatch = bindingAttr.match(/foreach:\s*([^,}]+)/);
-
-                    if (foreachMatch) {
-                        const nestedTarget = foreachMatch[1].trim();
-                        const nestedItemName = childElement.getAttribute('data-pac-item') || 'item';
-                        const nestedIndexName = childElement.getAttribute('data-pac-index') || 'index';
-
-                        // Create nested foreach binding with proper scope inheritance
-                        this.processNestedForeachBinding(
-                            childElement,
-                            nestedTarget,
-                            nestedItemName,
-                            nestedIndexName,
-                            foreachVars
-                        );
-                    }
+                // Use existing attribute binding method
+                this.processAttributeBindingsForElement(element, foreachVars, {
+                    collection: collectionName,
+                    itemName,
+                    indexName
                 });
             },
 
