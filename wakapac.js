@@ -452,11 +452,6 @@
      * @returns {Function} A handler function that creates wrapped mutation methods
      */
     function createArrayMutationHandler(arr, originalMethods, onChange, path) {
-        /**
-         * Returns a wrapped version of an array mutation method
-         * @param {string} prop - The name of the array method to wrap (e.g., 'push', 'splice')
-         * @returns {Function} The wrapped method that maintains reactivity
-         */
         return function(prop) {
             return function (...args) {
                 // Execute the original array method with the provided arguments
@@ -484,27 +479,6 @@
     }
 
     /**
-     * Notifies parent objects about nested changes
-     * @param {string} path - Property path
-     * @param {string} propertyPath - Full property path
-     * @param {*} oldValue - Previous value
-     * @param {*} newValue - New value
-     * @param {Function} onChange - Change notification callback
-     * @param {string} changeType - Type of change ('nested-change' or 'nested-delete')
-     */
-    function bubbleChangeNotification(path, propertyPath, oldValue, newValue, onChange, changeType = 'nested-change') {
-        if (path) {
-            const rootProperty = path.split('.')[0];
-
-            onChange(rootProperty, null, changeType, {
-                nestedPath: propertyPath,
-                oldValue: oldValue,
-                newValue: newValue
-            });
-        }
-    }
-
-    /**
      * Creates proxy getter handler
      * @param {boolean} isArray - Whether target is an array
      * @param {Object} originalMethods - Original array methods
@@ -513,12 +487,15 @@
      */
     function createProxyGetter(isArray, originalMethods, arrayMutationHandler) {
         return function(obj, prop) {
-            // Handle array mutation methods
+            // Check if we're dealing with an array
+            // If so, return a wrapped version of the array method
             if (isArray && originalMethods[prop]) {
                 return arrayMutationHandler(prop);
-            } else {
-                return obj[prop];
             }
+
+            // For non-array objects or non-mutating properties,
+            // return the property value directly without interception
+            return obj[prop];
         };
     }
 
@@ -530,13 +507,6 @@
      * @returns {Function} A proxy setter function that handles property assignments
      */
     function createProxySetter(onChange, path) {
-        /**
-         * Proxy setter function that intercepts property assignments
-         * @param {Object} obj - The target object being modified
-         * @param {string|Symbol} prop - The property name being set
-         * @param {*} value - The new value being assigned
-         * @returns {boolean} Always returns true to indicate the assignment succeeded
-         */
         return function(obj, prop, value) {
             // Store the current value before modification for comparison
             const oldValue = obj[prop];
@@ -559,10 +529,6 @@
                 // Notify listeners about the property change
                 // Includes the path, new value, operation type, and old value
                 onChange(propertyPath, value, 'set', {oldValue});
-
-                // Notify parent objects about changes to nested properties
-                // This allows parent-level listeners to react to deep changes
-                bubbleChangeNotification(path, propertyPath, oldValue, value, onChange);
             }
 
             // Return true to indicate the set operation was successful
@@ -579,15 +545,21 @@
      */
     function createProxyDeleter(onChange, path) {
         return function(obj, prop) {
+            // Store the value being deleted for the change notification
             const oldValue = obj[prop];
+
+            // Perform the actual deletion on the target object
             delete obj[prop];
 
+            // Build the full property path for nested objects
+            // If path exists, append the property with a dot separator
+            // Otherwise, use just the property name for root-level properties
             const propertyPath = path ? `${path}.${prop}` : prop;
+
+            // Notify listeners of the deletion
             onChange(propertyPath, undefined, 'delete', {oldValue});
 
-            // Notify parent about nested deletion
-            bubbleChangeNotification(path, propertyPath, oldValue, undefined, onChange, 'nested-change');
-
+            // Return true to indicate successful deletion (Proxy requirement)
             return true;
         };
     }
@@ -2020,7 +1992,7 @@
                     // Wrap the initial value in a reactive proxy to track nested changes
                     value = createReactive(value, (path, newVal, type, meta) => {
                         // Forward deep change notifications up the chain with proper path context
-                        this.handleDeepChange(path, newVal, type, meta);
+                        this.notifyChange(path, newVal, type, meta);
                     }, key);
                 }
 
@@ -2045,22 +2017,15 @@
                                 // Create reactive wrapper with change handler that forwards to deep change system
                                 newValue = createReactive(newValue, (path, changedVal, type, meta) => {
                                     // Delegate nested property changes to the deep change handler
-                                    this.handleDeepChange(path, changedVal, type, meta);
+                                    this.notifyChange(path, changedVal, type, meta);
                                 }, key);
                             }
 
                             // Update the stored value
                             value = newValue;
 
-                            // Execute any registered watchers for this specific property
-                            // Trigger watcher if it exists
-                            this.triggerWatcher(key, newValue, oldValue, key);
-
-                            // Schedule DOM/view updates for this property change
-                            this.scheduleUpdate(key, newValue);
-
-                            // Recalculate any computed properties that depend on this property
-                            this.updateComputedProperties(key);
+                            // Notify system of changes
+                            this.notifyChange(key, newValue, 'set', {oldValue});
                         }
                     },
 
@@ -2651,72 +2616,6 @@
                         this.updateComputedProperties(computedName);
                     }
                 });
-            },
-
-            /**
-             * Handles deep property changes in nested objects/arrays
-             */
-            handleDeepChange(path, value, type, meta) {
-                const rootProperty = Utils.splitPath(path)[0];
-
-                // Handle nested property changes - force updates for computed properties
-                if (type === 'set' || type === 'nested-change') {
-                    // Clear computed cache for properties that might depend on this change
-                    const entry = this.deps.get(rootProperty);
-
-                    if (entry && entry.dependents) {
-                        entry.dependents.forEach(computedName => {
-                            const computedEntry = this.deps.get(computedName);
-                            if (computedEntry) {
-                                computedEntry.isDirty = true;
-                            }
-                        });
-                    }
-
-                    // Force update of any foreach bindings that use this root property OR computed properties that depend on it
-                    this.bindings.forEach(binding => {
-                        if (binding.type === 'foreach') {
-                            // Check if binding uses the changed root property directly
-                            if (binding.collection === rootProperty) {
-                                binding.previous = null;
-                            }
-
-                            // Check if binding uses a computed property that depends on the changed root property
-                            else if (entry && entry.dependents && entry.dependents.includes(binding.collection)) {
-                                binding.previous = null;
-                            }
-                        }
-                    });
-                }
-
-                // Trigger watchers with full path context
-                if ((type === 'set' || type === 'array-mutation') && path !== rootProperty) {
-                    // For deep changes, trigger watchers with the actual changed value and path
-                    // meta.oldValue contains the previous value from the Proxy set trap
-                    const actualNewValue = Utils.getNestedValue(this.abstraction, path);
-                    const actualOldValue = meta?.oldValue;
-                    this.triggerWatcher(rootProperty, actualNewValue, actualOldValue, path);
-                }
-
-                // Update computed properties that depend on this root property
-                this.updateComputedProperties(rootProperty);
-
-                // Schedule DOM updates for the root property
-                this.scheduleUpdate(rootProperty, this.abstraction[rootProperty]);
-
-                // Also schedule updates for computed properties that depend on this root property
-                const entry = this.deps.get(rootProperty);
-
-                if (entry && entry.dependents) {
-                    entry.dependents.forEach(computedName => {
-                        this.scheduleUpdate(computedName, this.abstraction[computedName]);
-                    });
-                }
-
-                // Also schedule update for the specific nested path if it's different
-                if (path !== rootProperty) {
-                    this.scheduleUpdate(path, value);
-                }
             },
 
             /**
@@ -3639,6 +3538,47 @@
                 // Store the new timeout ID so it can be cleared if needed
                 // This maintains the debouncing mechanism for subsequent calls
                 this.updateTimeouts.set(key, timeoutId);
+            },
+
+            // === UNIFIED CHANGE DETECTION SECTION ===
+
+            /**
+             * Central change notification hub - all property changes flow through here
+             */
+            notifyChange(propertyPath, newValue, changeType, metadata = {}) {
+                const rootProperty = propertyPath.split('.')[0];
+
+                // 1. Update watchers (immediate)
+                this.triggerWatcher(rootProperty, newValue, metadata.oldValue, propertyPath);
+
+                // 2. Invalidate computed properties (immediate)
+                this.updateComputedProperties(rootProperty);
+
+                // 3. Schedule DOM updates (batched)
+                this.scheduleUpdate(propertyPath, newValue);
+
+                // 4. Bubble to root if this is a nested change
+                if (propertyPath !== rootProperty) {
+                    this.bubbleChangeNotification(rootProperty, this.abstraction[rootProperty], 'nested-change', {
+                        nestedPath: propertyPath,
+                        newValue,
+                        oldValue: metadata.oldValue
+                    });
+                }
+            },
+
+            /**
+             * Renamed from notifyParentChange - bubbles nested changes to root property listeners
+             */
+            bubbleChangeNotification(rootProperty, rootValue, changeType, metadata) {
+                // Trigger root property watcher with full context
+                this.triggerWatcher(rootProperty, rootValue, metadata.oldValue, metadata.nestedPath);
+
+                // Update computed properties that depend on root
+                this.updateComputedProperties(rootProperty);
+
+                // Schedule root property updates
+                this.scheduleUpdate(rootProperty, rootValue);
             },
 
             // === UTILITY METHODS SECTION ===
