@@ -1397,11 +1397,6 @@ wakaPAC('#app', {
 - Mobile app development
 - Teams requiring extensive TypeScript tooling
 
-## Browser Support
-
-- **Modern browsers**: Chrome, Firefox, Safari, Edge (with ES6 Proxy and IntersectionObserver)
-- **Legacy browsers**: IE11+ (fallback using Object.defineProperty and scroll-based visibility detection)
-
 ## License
 
 MIT License
