@@ -264,6 +264,29 @@
                 .replace(/>/g, '&gt;')     // Replace > with greater-than entity
                 .replace(/"/g, '&quot;')   // Replace double quotes with quote entity
                 .replace(/'/g, '&#39;');   // Replace single quotes with apostrophe entity
+        },
+
+        /**
+         * Converts a DOMRect object to a plain JavaScript object
+         * @param {DOMRect} domRect - The DOMRect object to convert
+         * @returns {Object} Plain object containing all DOMRect properties
+         */
+        domRectToSimpleObject(domRect) {
+            return {
+                // Position relative to viewport
+                top: domRect.top,           // Distance from top of viewport
+                left: domRect.left,         // Distance from left of viewport
+                right: domRect.right,       // Distance from left of viewport to right edge
+                bottom: domRect.bottom,     // Distance from top of viewport to bottom edge
+
+                // Dimensions
+                width: domRect.width,       // Width of the element
+                height: domRect.height,     // Height of the element
+
+                // Alternative position properties (aliases)
+                x: domRect.x,               // Same as left, but included for DOMRect compatibility
+                y: domRect.y                // Same as top, but included for DOMRect compatibility
+            };
         }
     };
 
@@ -1545,7 +1568,8 @@
                 this.setupBindings();
                 this.abstraction = this.createReactiveAbstraction();
                 this.setupEventHandling();
-                this.setupViewportTracking();
+                this.setupIntersectionObserver();
+                this.updateContainerVisibility();
                 this.performInitialUpdate();
                 return this;
             },
@@ -1814,19 +1838,6 @@
             },
 
             /**
-             * Initialize viewport tracking for the container element.
-             * Uses modern IntersectionObserver API when available, falls back to scroll-based detection.
-             */
-            setupViewportTracking() {
-                // Setup the intersection server
-                this.setupIntersectionObserver();
-
-                // Perform initial visibility calculation on setup
-                // This ensures correct state even before any scroll/intersection events
-                this.updateContainerVisibility();
-            },
-
-            /**
              * Modern approach using Intersection Observer API.
              * This is more performant as it runs on the main thread and batches calculations.
              */
@@ -1856,16 +1867,7 @@
                             this.abstraction.containerHeight = rect.height;
 
                             // Store current position/size data for potential use by other components
-                            this.abstraction.containerClientRect = {
-                                top: rect.top,
-                                left: rect.left,
-                                right: rect.right,
-                                bottom: rect.bottom,
-                                width: rect.width,
-                                height: rect.height,
-                                x: rect.x,
-                                y: rect.y
-                            };
+                            this.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
                         }
                     });
                 }, {
@@ -1888,19 +1890,7 @@
                 // innerHeight/innerWidth exclude scrollbars and give the actual visible area
                 const windowHeight = window.innerHeight;
                 const windowWidth = window.innerWidth;
-                const boundingRect = this.container.getBoundingClientRect();
-
-                // Convert DOMRect to simple object
-                const rect = {
-                    top: boundingRect.top,
-                    left: boundingRect.left,
-                    right: boundingRect.right,
-                    bottom: boundingRect.bottom,
-                    width: boundingRect.width,
-                    height: boundingRect.height,
-                    x: boundingRect.x,               // Same as left, but included for DOMRect compatibility
-                    y: boundingRect.y                // Same as top, but included for DOMRect compatibility
-                };
+                const rect = Utils.domRectToSimpleObject(this.container.getBoundingClientRect());
 
                 // Set dimensions
                 this.abstraction.containerClientRect = rect;
