@@ -2903,6 +2903,13 @@
              * @param {Object|string} value - The style value(s) to apply
              */
             applyStyleBinding(element, target, value) {
+                if (typeof value === 'string') {
+                    // String syntax: "color: red; font-size: 16px;"
+                    // Set the entire CSS text at once (less efficient but backwards compatible)
+                    element.style.cssText = value;
+                    return;
+                }
+
                 // Check if value is an object (preferred object syntax)
                 if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
                     // Object syntax: { color: 'red', fontSize: '16px' }
@@ -2912,18 +2919,12 @@
                         if (value[styleProp] != null) {
                             // Check if this is a CSS custom property (starts with --)
                             if (styleProp.startsWith('--')) {
-                                // Use setProperty for CSS custom properties
-                                element.style.setProperty(styleProp, value[styleProp]);
+                                element.style.setProperty(styleProp, value[styleProp]); // CSS custom properties
                             } else {
-                                // Use direct assignment for regular CSS properties
-                                element.style[styleProp] = value[styleProp];
+                                element.style[styleProp] = value[styleProp]; // regular CSS properties
                             }
                         }
                     });
-                } else if (typeof value === 'string') {
-                    // String syntax: "color: red; font-size: 16px;"
-                    // Set the entire CSS text at once (less efficient but backwards compatible)
-                    element.style.cssText = value;
                 }
             },
 
