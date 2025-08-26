@@ -2822,12 +2822,14 @@
 
                 // Process each element's bindings
                 bindingElements.forEach(el => {
+                    // Fetch the data-pac-bind attribute. If it has none, skip it
                     const bindingString = el.getAttribute('data-pac-bind');
 
                     if (!bindingString) {
                         return;
                     }
 
+                    // Parse and process the bind
                     ExpressionParser.parseBindingString(bindingString).forEach(({ type, target }) => {
                         // Handle nested foreach - existing code
                         if (type === 'foreach') {
