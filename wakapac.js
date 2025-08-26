@@ -2360,7 +2360,8 @@
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: element.innerHTML,
-                    previous: []
+                    previous: [],
+                    fingerprint: null
                 });
 
                 element.innerHTML = '';
@@ -2785,11 +2786,17 @@
                 // Check if any nested properties of the collection have changed
                 const hasNestedChanges = this.hasRelevantNestedChanges (binding);
 
+                // Generate fingerprint
+                const currentFingerprint = this.generateForeachFingerprint(array);
+
                 // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
-                if (!forceUpdate && !hasNestedChanges && Utils.isEqual(previous, array)) {
+                if (!forceUpdate && !hasNestedChanges && binding.fingerprint === currentFingerprint) {
                     binding.previous = [...array];
                     return;
                 }
+
+                // Store new fingerprint
+                binding.fingerprint = currentFingerprint;
 
                 // Update cache wi th current array state
                 binding.previous = [...array];
@@ -2844,6 +2851,43 @@
                 }
 
                 return false;
+            },
+
+            /**
+             * Generates a simple fingerprint for array state
+             * @param {Array} array - The array to fingerprint
+             * @returns {string} Fingerprint representing array structure and order
+             */
+            generateForeachFingerprint(array) {
+                if (!Array.isArray(array) || array.length === 0) {
+                    return 'empty';
+                }
+
+                // Create fingerprint based on length, item types, and key properties
+                const parts = [array.length.toString()];
+
+                array.forEach((item, index) => {
+                    let itemPrint = '';
+
+                    if (item && typeof item === 'object') {
+                        // For objects, use ID or hash of key properties
+                        if (item.id !== undefined) {
+                            itemPrint = `obj:${item.id}`;
+                        } else {
+                            // Hash key properties for consistent fingerprint
+                            const keys = Object.keys(item).sort().slice(0, 3); // First 3 keys
+                            itemPrint = `obj:${keys.join(',')}`;
+                        }
+                    } else {
+                        // For primitives, use value and type
+                        itemPrint = `${typeof item}:${item}`;
+                    }
+
+                    parts.push(`${index}:${itemPrint}`);
+                });
+
+                // Create hash of the parts for compact fingerprint
+                return this.hashString(parts.join('|'));
             },
 
             /**
@@ -3598,6 +3642,23 @@
             },
 
             // === UTILITY METHODS SECTION ===
+
+            /**
+             * Simple string hash function for fingerprinting
+             * @param {string} str - String to hash
+             * @returns {string} Hash value
+             */
+            hashString(str) {
+                let hash = 0;
+
+                for (let i = 0; i < str.length; i++) {
+                    const char = str.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + char;
+                    hash = hash & hash; // Convert to 32-bit integer
+                }
+
+                return hash.toString(36); // Base36 for shorter string
+            },
 
             /**
              * Sets element attribute with special handling for boolean attributes
