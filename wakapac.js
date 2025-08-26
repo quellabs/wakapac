@@ -2633,7 +2633,7 @@
                         // Only update if the collection has a defined value
                         if (value !== undefined) {
                             // Perform initial rendering of the foreach binding
-                            this.updateForeachBinding(binding, binding.collection);
+                            this.applyForeachBinding(binding, binding.collection);
                         }
                     } else if (
                         binding.target &&
@@ -2663,11 +2663,11 @@
                 try {
                     switch (binding.type) {
                         case 'text':
-                            this.updateTextBinding(binding, property, foreachVars);
+                            this.applyTextBinding(binding, property, foreachVars);
                             break;
 
                         case 'foreach':
-                            this.updateForeachBinding(binding, property, foreachVars);
+                            this.applyForeachBinding(binding, property, foreachVars);
                             break;
 
                         case 'event':
@@ -2675,178 +2675,51 @@
                             break;
 
                         default:
-                            this.updateBindingGeneric(binding, property, foreachVars);
+                            // Create evaluation context by merging abstraction data with foreach variables
+                            const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                            // Parse the binding expression into an evaluatable format
+                            const parsed = this.getParsedExpression(binding);
+
+                            // Regular input handling (text, number, etc.)
+                            const actualValue = ExpressionParser.evaluate(parsed, context);
+
+                            // Call the correct apply method
+                            switch (binding.type) {
+                                case 'attribute':
+                                    this.applyAttributeBinding(binding.element, binding.attribute, actualValue);
+                                    break;
+
+                                case 'input':
+                                    this.applyInputBinding(binding.element, actualValue);
+                                    break;
+
+                                case 'checked':
+                                    this.applyCheckedBinding(binding.element, !!actualValue);
+                                    break;
+
+                                case 'visible':
+                                    this.applyVisibilityBinding(binding.element, actualValue);
+                                    break;
+
+                                case 'conditional':
+                                    this.applyConditionalBinding(binding.element, actualValue, binding);
+                                    break;
+
+                                case 'class':
+                                    this.applyClassBinding(binding.element, binding.target, actualValue);
+                                    break;
+
+                                case 'style':
+                                    this.applyStyleBinding(binding.element, binding.target, actualValue);
+                                    break;
+                            }
                     }
                 } catch (error) {
                     console.error(`Error updating ${binding.type} binding:`, error);
                 }
             },
 
-            /**
-             * Updates text content with interpolated values - FIXED VERSION
-             * Now handles multiple placeholders in the same text node correctly
-             */
-            updateTextBinding(binding, property, contextVars = null) {
-                const textNode = binding.element;
-                let text = binding.originalText;
-
-                // Find ALL interpolation patterns in the original text
-                const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
-
-                if (matches) {
-                    // Replace each match with its evaluated value
-                    matches.forEach(match => {
-                        const expression = match.replace(/[{}\s]/g, '');
-
-                        // Create evaluation context - merge abstraction with optional context
-                        const context = contextVars ?
-                            Object.assign({}, this.abstraction, contextVars) :
-                            this.abstraction;
-
-                        const parsed = ExpressionParser.parseExpression(expression);
-                        const result = ExpressionParser.evaluate(parsed, context);
-                        const formattedValue = Utils.formatValue(result);
-
-                        text = text.replace(match, formattedValue);
-                    });
-                }
-
-                // Update text content if changed
-                const cacheKey = `text_${binding.id}`;
-                const lastValue = this.lastValues.get(cacheKey);
-
-                if (lastValue !== text) {
-                    this.lastValues.set(cacheKey, text);
-                    textNode.textContent = text;
-                }
-            },
-
-            /**
-             * Generic binding applicator
-             * @param {Object} binding - The binding object containing element, attribute, and expression information
-             * @param {string} property - The property name being bound
-             * @param {Object|null} foreachVars - Additional variables from foreach context, defaults to null
-             */
-            updateBindingGeneric(binding, property, foreachVars = null) {
-                // Create evaluation context by merging abstraction data with foreach variables
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
-
-                // Parse the binding expression into an evaluatable format
-                const parsed = this.getParsedExpression(binding);
-
-                // Regular input handling (text, number, etc.)
-                const actualValue = ExpressionParser.evaluate(parsed, context);
-
-                // Call the correct apply method
-                switch (binding.type) {
-                    case 'attribute':
-                        this.applyAttributeBinding(binding.element, binding.attribute, actualValue);
-                        break;
-
-                    case 'input':
-                        this.applyInputBinding(binding.element, actualValue);
-                        break;
-
-                    case 'checked':
-                        this.applyCheckedBinding(binding.element, !!actualValue);
-                        break;
-
-                    case 'visible':
-                        this.applyVisibilityBinding(binding.element, actualValue);
-                        break;
-
-                    case 'conditional':
-                        this.applyConditionalBinding(binding.element, actualValue, binding);
-                        break;
-
-                    case 'class':
-                        this.applyClassBinding(binding.element, binding.target, actualValue);
-                        break;
-
-                    case 'style':
-                        this.applyStyleBinding(binding.element, binding.target, actualValue);
-                        break;
-                }
-            },
-
-            /**
-             * Updates foreach bindings for list rendering by re-rendering the entire collection
-             * when the underlying data changes. Uses intelligent diffing and fingerprinting
-             * to avoid unnecessary DOM updates when the collection hasn't actually changed.
-             * @param {Object} binding - The foreach binding configuration object
-             * @param {string} binding.collection - Name of the collection property being rendered
-             * @param {string} binding.template - HTML template string for each item
-             * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'user')
-             * @param {string} binding.indexName - Variable name for the current index (e.g., 'index', 'i')
-             * @param {Array} binding.previous - Previously rendered array state for change detection
-             * @param {array} binding.fingerprints - Hashes of the previous array state for quick comparison
-             * @param {HTMLElement} binding.element - DOM container element to render items into
-             * @param {string|null} property - The specific property that changed (null for force update)
-             * @param {Object|null} foreachVars - Additional context variables from parent foreach loops
-             * @returns {void}
-             */
-            updateForeachBinding(binding, property, foreachVars = null) {
-                // Only update if this binding is for the changed property OR if property is null (force update)
-                if (property && binding.collection !== property) {
-                    return;
-                }
-
-                // Create evaluation context by merging abstraction data with foreach variables
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
-
-                // Parse the binding expression to get the array value
-                const parsed = this.getParsedExpression(binding);
-                const arrayValue = ExpressionParser.evaluate(parsed, context);
-
-                // Ensure we have a valid array to work with
-                const array = Array.isArray(arrayValue) ? arrayValue : [];
-                const forceUpdate = binding.previous === null;
-
-                // Check if any nested properties of the collection have changed
-                const hasDirectNestedChanges = this.pendingUpdates &&
-                    Array.from(this.pendingUpdates).some(prop =>
-                        prop.startsWith(binding.collection + '.')
-                    );
-
-                // Generate fingerprint for change detection - comparing deep structure
-                const currentFingerprints = this.generateFingerprints(array);
-                const previousFingerprints = binding.fingerprints || [];
-
-                // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
-                if (!forceUpdate && !hasDirectNestedChanges &&
-                    Utils.isEqual(currentFingerprints, previousFingerprints)) {
-                    binding.previous = [...array];
-                    return;
-                }
-
-                // Store new fingerprint and cache current array state
-                binding.fingerprints = currentFingerprints;
-                binding.previous = [...array];
-
-                // Clear current element html to accept new html
-                binding.element.innerHTML = '';
-
-                // Build new content using DocumentFragment for efficient DOM manipulation
-                const fragment = document.createDocumentFragment();
-
-                array.forEach((item, index) => {
-                    // Create DOM structure from template
-                    const itemElement = this.createForeachItemElement(binding.template);
-
-                    // Create context variables for this foreach item
-                    const itemContext = Object.assign({}, foreachVars || {}, {
-                        [binding.itemName]: item,
-                        [binding.indexName]: index
-                    });
-
-                    // Process all bindings on the item element
-                    this.processElementBindings(itemElement, itemContext, binding);
-                    fragment.appendChild(itemElement);
-                });
-
-                // Replace all existing content with new rendered items
-                binding.element.appendChild(fragment);
-            },
 
             /**
              * Creates a DOM element from a foreach template string by parsing HTML
@@ -2918,7 +2791,7 @@
                         };
 
                         // Use existing updateTextBinding with context support
-                        this.updateTextBinding(binding, null, contextVars);
+                        this.applyTextBinding(binding, null, contextVars);
                     }
                 }
             },
@@ -2962,7 +2835,7 @@
 
                             // Clear element content and process as regular foreach with parent context
                             el.innerHTML = '';
-                            this.updateForeachBinding(foreachBinding, null, contextVars);
+                            this.applyForeachBinding(foreachBinding, null, contextVars);
                         } else {
                             // Handle regular bindings using existing infrastructure
                             this.processRegularBinding(el, type, target, parentBinding, contextVars);
@@ -2999,7 +2872,7 @@
 
                 // Handle regular bindings (visible, class, style, attributes, etc.)
                 const tempBinding = this.createEvaluationBinding(element, type, target);
-                this.updateBindingGeneric(tempBinding, null, contextVars);
+                this.updateBinding(tempBinding, null, contextVars);
             },
 
             /**
@@ -3490,7 +3363,7 @@
                 const tempBinding = this.createForeachEvaluationBinding(element, type, target);
 
                 // Use the existing generic binding update system
-                this.updateBindingGeneric(tempBinding, null, foreachVars);
+                this.updateBinding(tempBinding, null, foreachVars);
             },
 
             /**
@@ -4118,6 +3991,124 @@
                 }
 
                 return [];
+            },
+
+            /**
+             * Updates text content with interpolated values - FIXED VERSION
+             * Now handles multiple placeholders in the same text node correctly
+             */
+            applyTextBinding(binding, property, contextVars = null) {
+                const textNode = binding.element;
+                let text = binding.originalText;
+
+                // Find ALL interpolation patterns in the original text
+                const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+
+                if (matches) {
+                    // Replace each match with its evaluated value
+                    matches.forEach(match => {
+                        const expression = match.replace(/[{}\s]/g, '');
+
+                        // Create evaluation context - merge abstraction with optional context
+                        const context = contextVars ?
+                            Object.assign({}, this.abstraction, contextVars) :
+                            this.abstraction;
+
+                        const parsed = ExpressionParser.parseExpression(expression);
+                        const result = ExpressionParser.evaluate(parsed, context);
+                        const formattedValue = Utils.formatValue(result);
+
+                        text = text.replace(match, formattedValue);
+                    });
+                }
+
+                // Update text content if changed
+                const cacheKey = `text_${binding.id}`;
+                const lastValue = this.lastValues.get(cacheKey);
+
+                if (lastValue !== text) {
+                    this.lastValues.set(cacheKey, text);
+                    textNode.textContent = text;
+                }
+            },
+
+            /**
+             * Updates foreach bindings for list rendering by re-rendering the entire collection
+             * when the underlying data changes. Uses intelligent diffing and fingerprinting
+             * to avoid unnecessary DOM updates when the collection hasn't actually changed.
+             * @param {Object} binding - The foreach binding configuration object
+             * @param {string} binding.collection - Name of the collection property being rendered
+             * @param {string} binding.template - HTML template string for each item
+             * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'user')
+             * @param {string} binding.indexName - Variable name for the current index (e.g., 'index', 'i')
+             * @param {Array} binding.previous - Previously rendered array state for change detection
+             * @param {array} binding.fingerprints - Hashes of the previous array state for quick comparison
+             * @param {HTMLElement} binding.element - DOM container element to render items into
+             * @param {string|null} property - The specific property that changed (null for force update)
+             * @param {Object|null} foreachVars - Additional context variables from parent foreach loops
+             * @returns {void}
+             */
+            applyForeachBinding(binding, property, foreachVars = null) {
+                // Only update if this binding is for the changed property OR if property is null (force update)
+                if (property && binding.collection !== property) {
+                    return;
+                }
+
+                // Create evaluation context by merging abstraction data with foreach variables
+                const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Parse the binding expression to get the array value
+                const parsed = this.getParsedExpression(binding);
+                const arrayValue = ExpressionParser.evaluate(parsed, context);
+
+                // Ensure we have a valid array to work with
+                const array = Array.isArray(arrayValue) ? arrayValue : [];
+                const forceUpdate = binding.previous === null;
+
+                // Check if any nested properties of the collection have changed
+                const hasDirectNestedChanges = this.pendingUpdates &&
+                    Array.from(this.pendingUpdates).some(prop =>
+                        prop.startsWith(binding.collection + '.')
+                    );
+
+                // Generate fingerprint for change detection - comparing deep structure
+                const currentFingerprints = this.generateFingerprints(array);
+                const previousFingerprints = binding.fingerprints || [];
+
+                // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
+                if (!forceUpdate && !hasDirectNestedChanges &&
+                    Utils.isEqual(currentFingerprints, previousFingerprints)) {
+                    binding.previous = [...array];
+                    return;
+                }
+
+                // Store new fingerprint and cache current array state
+                binding.fingerprints = currentFingerprints;
+                binding.previous = [...array];
+
+                // Clear current element html to accept new html
+                binding.element.innerHTML = '';
+
+                // Build new content using DocumentFragment for efficient DOM manipulation
+                const fragment = document.createDocumentFragment();
+
+                array.forEach((item, index) => {
+                    // Create DOM structure from template
+                    const itemElement = this.createForeachItemElement(binding.template);
+
+                    // Create context variables for this foreach item
+                    const itemContext = Object.assign({}, foreachVars || {}, {
+                        [binding.itemName]: item,
+                        [binding.indexName]: index
+                    });
+
+                    // Process all bindings on the item element
+                    this.processElementBindings(itemElement, itemContext, binding);
+                    fragment.appendChild(itemElement);
+                });
+
+                // Replace all existing content with new rendered items
+                binding.element.appendChild(fragment);
             },
 
             /**
