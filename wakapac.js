@@ -2566,14 +2566,10 @@
                     // Check unparsed bindings (lazy parsing happens here)
                     this.unparsedBindings.forEach(binding => {
                         if (!binding.parsedExpression) {
-                            // Lazy parse: only when we need to check dependencies
                             this.getParsedExpression(binding);
-
-                            // Remove from unparsed set since it's now parsed and indexed
                             this.unparsedBindings.delete(binding);
                         }
 
-                        // Check if this binding should update for this property
                         if (this.shouldUpdateBinding(binding, property)) {
                             relevantBindings.add(binding);
                         }
@@ -2783,8 +2779,7 @@
              * Updates foreach bindings for list rendering
              */
             updateForeachBinding(binding, property, foreachVars = null) {
-                // Only update if this binding is for the changed property
-                // OR if property is null (force update)
+                // Only update if this binding is for the changed property OR if property is null (force update)
                 if (property && binding.collection !== property) {
                     return;
                 }
@@ -2799,13 +2794,16 @@
                 const previous = binding.previous || [];
                 const forceUpdate = binding.previous === null;
 
-                // Skip update if arrays are deeply equal AND we're not forcing an update
-                if (!forceUpdate && Utils.isEqual(previous, array)) {
+                // Check if any nested properties of the collection have changed
+                const hasNestedChanges = this.hasRelevantNestedChanges (binding);
+
+                // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
+                if (!forceUpdate && !hasNestedChanges && Utils.isEqual(previous, array)) {
                     binding.previous = [...array];
                     return;
                 }
 
-                // Update cache with current array state
+                // Update cache wi th current array state
                 binding.previous = [...array];
 
                 // Build new content using DocumentFragment for efficient DOM manipulation
@@ -2814,12 +2812,12 @@
                 // Render each item in the array
                 array.forEach((item, index) => {
                     const itemElement = this.renderForeachItem(
-                        binding.template,     // Template to clone for each item
-                        item,                 // Current item data
-                        index,                // Current item index
-                        binding.itemName,     // Variable name for item in template
-                        binding.indexName,    // Variable name for index in template
-                        binding.collection    // Pass collection name to template processor
+                        binding.template,
+                        item,
+                        index,
+                        binding.itemName,
+                        binding.indexName,
+                        binding.collection
                     );
 
                     fragment.appendChild(itemElement);
@@ -2828,6 +2826,36 @@
                 // Replace all existing content with new rendered items
                 binding.element.innerHTML = '';
                 binding.element.appendChild(fragment);
+            },
+
+            /**
+             * Checks if any pending updates should force a foreach binding to re-render
+             * @param {Object} binding - The foreach binding to check
+             * @returns {boolean} True if the binding should be updated due to nested changes
+             */
+            hasRelevantNestedChanges(binding) {
+                if (!this.pendingUpdates) {
+                    return false;
+                }
+
+                for (const pendingProperty of this.pendingUpdates) {
+                    // Check for direct nested changes to this collection
+                    if (pendingProperty.startsWith(binding.collection + '.')) {
+                        return true;
+                    }
+
+                    // For computed properties, any nested change might affect the result
+                    if (pendingProperty.includes('.')) {
+                        const computedEntry = this.deps.get(binding.collection);
+
+                        if (computedEntry && computedEntry.fn) {
+                            // This is a computed property - any nested change could affect it
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
             },
 
             /**
