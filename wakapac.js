@@ -2361,7 +2361,7 @@
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: element.innerHTML,
                     previous: [],
-                    fingerprint: null
+                    fingerprints: null
                 });
 
                 element.innerHTML = '';
@@ -2775,7 +2775,7 @@
              * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'user')
              * @param {string} binding.indexName - Variable name for the current index (e.g., 'index', 'i')
              * @param {Array} binding.previous - Previously rendered array state for change detection
-             * @param {string} binding.fingerprint - Hash of the previous array state for quick comparison
+             * @param {array} binding.fingerprints - Hashes of the previous array state for quick comparison
              * @param {HTMLElement} binding.element - DOM container element to render items into
              * @param {string|null} property - The specific property that changed (null for force update)
              * @param {Object|null} foreachVars - Additional context variables from parent foreach loops
@@ -2798,19 +2798,23 @@
                 const forceUpdate = binding.previous === null;
 
                 // Check if any nested properties of the collection have changed
-                const hasNestedChanges = this.hasRelevantNestedChanges(binding);
+                const hasDirectNestedChanges = this.pendingUpdates &&
+                    Array.from(this.pendingUpdates).some(prop =>
+                        prop.startsWith(binding.collection + '.')
+                    );
 
                 // Generate fingerprint
-                const currentFingerprint = this.generateForeachFingerprint(array);
+                const currentFingerprints = this.generateItemFingerprints(array);
+                const previousFingerprints = binding.fingerprints || [];
 
                 // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
-                if (!forceUpdate && !hasNestedChanges && binding.fingerprint === currentFingerprint) {
+                if (!forceUpdate && !hasDirectNestedChanges && Utils.isEqual(currentFingerprints, previousFingerprints)) {
                     binding.previous = [...array];
                     return;
                 }
 
                 // Store new fingerprint
-                binding.fingerprint = currentFingerprint;
+                binding.fingerprints = currentFingerprints;
 
                 // Update cache with current array state
                 binding.previous = [...array];
@@ -2830,33 +2834,46 @@
             },
 
             /**
-             * Checks if any pending updates should force a foreach binding to re-render
-             * @param {Object} binding - The foreach binding to check
-             * @returns {boolean} True if the binding should be updated due to nested changes
+             * Generates fingerprints for individual array items
              */
-            hasRelevantNestedChanges(binding) {
-                if (!this.pendingUpdates) {
-                    return false;
+            generateItemFingerprints(array) {
+                return array.map((item, index) => ({
+                    index,
+                    id: this.getItemId(item),
+                    hash: this.generateItemHash(item)
+                }));
+            },
+
+            /**
+             * Generates a hash for deep content comparison
+             */
+            generateItemHash(item) {
+                if (item === null || item === undefined) {
+                    return 'null';
                 }
 
-                for (const pendingProperty of this.pendingUpdates) {
-                    // Check for direct nested changes to this collection
-                    if (pendingProperty.startsWith(binding.collection + '.')) {
-                        return true;
-                    }
-
-                    // For computed properties, any nested change might affect the result
-                    if (pendingProperty.includes('.')) {
-                        const computedEntry = this.deps.get(binding.collection);
-
-                        if (computedEntry && computedEntry.fn) {
-                            // This is a computed property - any nested change could affect it
-                            return true;
-                        }
-                    }
+                if (typeof item !== 'object') {
+                    return `${typeof item}:${item}`;
                 }
 
-                return false;
+                // For objects, create hash from sorted key-value pairs
+                const sortedEntries = Object.entries(item)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([key, value]) => `${key}:${this.generateItemHash(value)}`);
+
+                return this.hashString(sortedEntries.join('|'));
+            },
+
+            /**
+             * Gets a stable identifier for an item (for tracking moves/reorders)
+             */
+            getItemId(item) {
+                if (item && typeof item === 'object') {
+                    // Use id field if available, otherwise create hash-based id
+                    return item.id !== undefined ? item.id : `hash_${this.generateItemHash(item)}`;
+                }
+
+                return item; // For primitives, the value is the id
             },
 
             /**
