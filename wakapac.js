@@ -2765,7 +2765,21 @@
             },
 
             /**
-             * Updates foreach bindings for list rendering
+             * Updates foreach bindings for list rendering by re-rendering the entire collection
+             * when the underlying data changes. Uses intelligent diffing and fingerprinting
+             * to avoid unnecessary DOM updates when the collection hasn't actually changed.
+             *
+             * @param {Object} binding - The foreach binding configuration object
+             * @param {string} binding.collection - Name of the collection property being rendered
+             * @param {string} binding.template - HTML template string for each item
+             * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'user')
+             * @param {string} binding.indexName - Variable name for the current index (e.g., 'index', 'i')
+             * @param {Array} binding.previous - Previously rendered array state for change detection
+             * @param {string} binding.fingerprint - Hash of the previous array state for quick comparison
+             * @param {HTMLElement} binding.element - DOM container element to render items into
+             * @param {string|null} property - The specific property that changed (null for force update)
+             * @param {Object|null} foreachVars - Additional context variables from parent foreach loops
+             * @returns {void}
              */
             updateForeachBinding(binding, property, foreachVars = null) {
                 // Only update if this binding is for the changed property OR if property is null (force update)
@@ -2784,7 +2798,7 @@
                 const forceUpdate = binding.previous === null;
 
                 // Check if any nested properties of the collection have changed
-                const hasNestedChanges = this.hasRelevantNestedChanges (binding);
+                const hasNestedChanges = this.hasRelevantNestedChanges(binding);
 
                 // Generate fingerprint
                 const currentFingerprint = this.generateForeachFingerprint(array);
@@ -2798,23 +2812,15 @@
                 // Store new fingerprint
                 binding.fingerprint = currentFingerprint;
 
-                // Update cache wi th current array state
+                // Update cache with current array state
                 binding.previous = [...array];
 
                 // Build new content using DocumentFragment for efficient DOM manipulation
                 const fragment = document.createDocumentFragment();
 
-                // Render each item in the array
+                // Render each item in the array - now passing only the binding and item data
                 array.forEach((item, index) => {
-                    const itemElement = this.renderForeachItem(
-                        binding.template,
-                        item,
-                        index,
-                        binding.itemName,
-                        binding.indexName,
-                        binding.collection
-                    );
-
+                    const itemElement = this.renderForeachItem(binding, item, index);
                     fragment.appendChild(itemElement);
                 });
 
@@ -2926,18 +2932,15 @@
             /**
              * Renders a single item from a foreach loop by processing the template with item-specific data.
              * Handles both single-element and multi-node templates, optimizing DOM structure when possible.
-             * @param {string} template - The HTML template string to render for this item
+             * @param {Object} binding - The foreach binding object containing template and configuration
              * @param {*} item - The current item data from the collection being iterated
              * @param {number} index - The zero-based index of the current item in the collection
-             * @param {string} itemName - The variable name used to reference the current item in the template
-             * @param {string} indexName - The variable name used to reference the current index in the template
-             * @param {string} collectionName - The name of the collection being iterated over
              * @returns {Element} The rendered DOM element(s) for this foreach item
              */
-            renderForeachItem(template, item, index, itemName, indexName, collectionName) {
+            renderForeachItem(binding, item, index) {
                 // Create a temporary container to parse the HTML template string
                 const tempTbody = document.createElement('tbody');
-                tempTbody.innerHTML = template.trim();
+                tempTbody.innerHTML = binding.template.trim();
 
                 // Convert NodeList to Array for easier manipulation
                 const childNodes = Array.from(tempTbody.childNodes);
@@ -2951,9 +2954,9 @@
                     const clone = element.cloneNode(true);
 
                     // Process the cloned element with foreach context data (item, index, variable names)
-                    this.processForeachTemplate(clone, item, index, itemName, indexName, collectionName);
+                    this.processForeachTemplate(clone, item, index, binding.itemName, binding.indexName, binding.collection);
 
-                    // Return the clode
+                    // Return the clone
                     return clone;
                 }
 
@@ -2967,7 +2970,7 @@
                 });
 
                 // Process the wrapper and all its children with foreach context data
-                this.processForeachTemplate(wrapper, item, index, itemName, indexName, collectionName);
+                this.processForeachTemplate(wrapper, item, index, binding.itemName, binding.indexName, binding.collection);
 
                 // Return the wrapper
                 return wrapper;
