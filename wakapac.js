@@ -235,19 +235,7 @@
          * @returns {string} Formatted string
          */
         formatValue(value) {
-            if (value == null) {
-                return '';
-            }
-
-            if (typeof value !== 'object') {
-                return String(value);
-            }
-
-            if (Array.isArray(value)) {
-                return `[${value.length} items]`;
-            }
-
-            return JSON.stringify(value, null, 2);
+            return value == null ? '' : String(value);
         },
 
         /**
