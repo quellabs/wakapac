@@ -2686,7 +2686,7 @@
              * Updates text content with interpolated values - FIXED VERSION
              * Now handles multiple placeholders in the same text node correctly
              */
-            updateTextBinding(binding, property) {
+            updateTextBinding(binding, property, contextVars = null) {
                 const textNode = binding.element;
                 let text = binding.originalText;
 
@@ -2697,11 +2697,16 @@
                     // Replace each match with its evaluated value
                     matches.forEach(match => {
                         const expression = match.replace(/[{}\s]/g, '');
+
+                        // Create evaluation context - merge abstraction with optional context
+                        const context = contextVars ?
+                            Object.assign({}, this.abstraction, contextVars) :
+                            this.abstraction;
+
                         const parsed = ExpressionParser.parseExpression(expression);
-                        const result = ExpressionParser.evaluate(parsed, this.abstraction);
+                        const result = ExpressionParser.evaluate(parsed, context);
                         const formattedValue = Utils.formatValue(result);
 
-                        // Replace this specific match in the text
                         text = text.replace(match, formattedValue);
                     });
                 }
@@ -2768,7 +2773,6 @@
              * Updates foreach bindings for list rendering by re-rendering the entire collection
              * when the underlying data changes. Uses intelligent diffing and fingerprinting
              * to avoid unnecessary DOM updates when the collection hasn't actually changed.
-             *
              * @param {Object} binding - The foreach binding configuration object
              * @param {string} binding.collection - Name of the collection property being rendered
              * @param {string} binding.template - HTML template string for each item
@@ -2787,14 +2791,15 @@
                     return;
                 }
 
-                // Use parsed expression to get the array value
+                // Create evaluation context by merging abstraction data with foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Parse the binding expression to get the array value
                 const parsed = this.getParsedExpression(binding);
                 const arrayValue = ExpressionParser.evaluate(parsed, context);
 
                 // Ensure we have a valid array to work with
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
-                const previous = binding.previous || [];
                 const forceUpdate = binding.previous === null;
 
                 // Check if any nested properties of the collection have changed
@@ -2803,38 +2808,248 @@
                         prop.startsWith(binding.collection + '.')
                     );
 
-                // Generate fingerprint
+                // Generate fingerprint for change detection - comparing deep structure
                 const currentFingerprints = this.generateFingerprints(array);
                 const previousFingerprints = binding.fingerprints || [];
 
                 // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
-                if (!forceUpdate && !hasDirectNestedChanges && Utils.isEqual(currentFingerprints, previousFingerprints)) {
+                if (!forceUpdate && !hasDirectNestedChanges &&
+                    Utils.isEqual(currentFingerprints, previousFingerprints)) {
                     binding.previous = [...array];
                     return;
                 }
 
-                // Store new fingerprint
+                // Store new fingerprint and cache current array state
                 binding.fingerprints = currentFingerprints;
-
-                // Update cache with current array state
                 binding.previous = [...array];
+
+                // Clear current element html to accept new html
+                binding.element.innerHTML = '';
 
                 // Build new content using DocumentFragment for efficient DOM manipulation
                 const fragment = document.createDocumentFragment();
 
-                // Render each item in the array - now passing only the binding and item data
                 array.forEach((item, index) => {
-                    const itemElement = this.renderForeachItem(binding, item, index);
+                    // Create DOM structure from template
+                    const itemElement = this.createForeachItemElement(binding.template);
+
+                    // Create context variables for this foreach item
+                    const itemContext = Object.assign({}, foreachVars || {}, {
+                        [binding.itemName]: item,
+                        [binding.indexName]: index
+                    });
+
+                    // Process all bindings on the item element
+                    this.processElementBindings(itemElement, itemContext, binding);
                     fragment.appendChild(itemElement);
                 });
 
                 // Replace all existing content with new rendered items
-                binding.element.innerHTML = '';
                 binding.element.appendChild(fragment);
             },
 
             /**
-             * Generates fingerprints for individual array items
+             * Creates a DOM element from a foreach template string by parsing HTML
+             * and optimizing the structure when possible. Handles both single-element
+             * and multi-node templates efficiently.
+             * @param {string} template - HTML template string for the foreach item
+             * @returns {Element} The rendered DOM element(s) for this foreach item
+             */
+            createForeachItemElement(template) {
+                // Create a temporary container to parse the HTML template string
+                const tempContainer = document.createElement('tbody');
+                tempContainer.innerHTML = template.trim();
+
+                // Convert NodeList to Array for easier manipulation
+                const childNodes = Array.from(tempContainer.childNodes);
+
+                // If there's exactly one top-level element, use it directly (no wrapper)
+                // This optimizes the DOM structure by avoiding unnecessary wrapper elements
+                if (childNodes.length === 1 && childNodes[0].nodeType === Node.ELEMENT_NODE) {
+                    return childNodes[0].cloneNode(true);
+                }
+
+                // Multiple top-level nodes or text nodes - need wrapper
+                // This handles cases like: "Text <span>element</span> more text" or multiple sibling elements
+                const wrapper = document.createElement('span');
+                childNodes.forEach(node => wrapper.appendChild(node.cloneNode(true)));
+                return wrapper;
+            },
+
+            /**
+             * Universal binding processor that handles all types of bindings on an element tree.
+             * This is the core function that processes text interpolation, attribute bindings,
+             * and nested foreach loops. Reuses existing framework methods where possible.
+             * @param {HTMLElement} element - The DOM element to process bindings on
+             * @param {Object} [contextVars={}] - Variables available for binding evaluation (foreach vars, etc.)
+             * @param {Object} [parentBinding=null] - Parent binding context for nested scenarios
+             * @returns {void}
+             */
+            processElementBindings(element, contextVars = {}, parentBinding = null) {
+                // 1. Process text interpolation using existing text binding infrastructure
+                this.processTextBindingsForElement(element, contextVars);
+
+                // 2. Process attribute bindings using existing attribute binding system
+                this.processAttributeBindingsForElement(element, contextVars, parentBinding);
+            },
+
+            /**
+             * Processes text interpolation bindings for an element using the original approach
+             * but with context variable support for foreach scenarios.
+             * @param {HTMLElement} element - The DOM element to process text bindings on
+             * @param {Object} contextVars - Context variables for expression evaluation
+             */
+            processTextBindingsForElement(element, contextVars) {
+                // Create a tree walker to traverse all text nodes in the element
+                const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+                const textNodes = [];
+
+                // Collect all text nodes first to avoid modifying tree while traversing
+                let textNode;
+                while (textNode = walker.nextNode()) {
+                    textNodes.push(textNode);
+                }
+
+                // Process each text node for template interpolation {{expression}}
+                textNodes.forEach(textNode => {
+                    const text = textNode.textContent;
+
+                    // Find ALL interpolation patterns in the text content
+                    const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+
+                    if (matches) {
+                        // Create a text binding that follows the original pattern
+                        matches.forEach(match => {
+                            const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
+
+                            // Create a binding object that matches what updateTextBinding expects
+                            const binding = this.createBinding('text', textNode, {
+                                target: expression,
+                                originalText: text,
+                                fullMatch: match,
+                                parsedExpression: null,
+                                dependencies: null
+                            });
+
+                            // Use the existing updateTextBinding but with proper context support
+                            this.updateTextBinding(binding, null, contextVars);
+                        });
+                    }
+                });
+            },
+
+            /**
+             * Processes attribute bindings for an element using existing binding infrastructure
+             * @param {HTMLElement} element - Element to process attribute bindings on
+             * @param {Object} contextVars - Context variables for expression evaluation
+             * @param {Object} parentBinding - Parent binding context for nested scenarios
+             */
+            processAttributeBindingsForElement(element, contextVars, parentBinding) {
+                // Find all elements with data-pac-bind attributes (including root element)
+                let bindingElements = Array.from(element.querySelectorAll('[data-pac-bind]'));
+
+                if (element.hasAttribute('data-pac-bind')) {
+                    bindingElements.push(element);
+                }
+
+                // Process each element's bindings
+                bindingElements.forEach(el => {
+                    const bindingString = el.getAttribute('data-pac-bind');
+
+                    // Parse the binding string into individual binding pairs
+                    const bindingPairs = this.parseBindingString(bindingString);
+
+                    // Process each binding type-target pair
+                    bindingPairs.forEach(({ type, target }) => {
+                        if (type === 'foreach') {
+                            // Handle nested foreach bindings - create new foreach and process recursively
+                            const foreachBinding = {
+                                id: Utils.generateId(),
+                                type: 'foreach',
+                                element: el,
+                                collection: target,
+                                itemName: el.getAttribute('data-pac-item') || 'item',
+                                indexName: el.getAttribute('data-pac-index') || 'index',
+                                template: el.innerHTML,
+                                previous: null,
+                                fingerprints: null
+                            };
+
+                            // Clear element content and process as regular foreach with parent context
+                            el.innerHTML = '';
+                            this.updateForeachBinding(foreachBinding, null, contextVars);
+                        } else {
+                            // Handle regular bindings using existing infrastructure
+                            this.processRegularBinding(el, type, target, parentBinding, contextVars);
+                        }
+                    });
+                });
+            },
+
+            /**
+             * Processes regular (non-foreach) bindings using existing binding infrastructure
+             * @param {HTMLElement} element - Element with the binding
+             * @param {string} type - Binding type (value, visible, click, etc.)
+             * @param {string} target - Binding target/expression
+             * @param {Object} parentBinding - Parent binding context
+             * @param {Object} contextVars - Context variables for expression evaluation
+             */
+            processRegularBinding(element, type, target, parentBinding, contextVars) {
+                // Set up two-way binding for form inputs if we're in a foreach context
+                if (parentBinding && (type === 'value' || type === 'checked') && this.isNestedProperty(target, contextVars)) {
+                    const propertyPath = this.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
+                    this.setupInputElement(element, propertyPath, type);
+                }
+
+                // Handle event bindings specially if we're in foreach context
+                if (Utils.isEventType(type) && parentBinding) {
+                    this.handleEventBinding(
+                        element, type, target,
+                        contextVars[parentBinding.itemName],
+                        contextVars[parentBinding.indexName]
+                    );
+
+                    return;
+                }
+
+                // Handle regular bindings (visible, class, style, attributes, etc.)
+                const tempBinding = this.createEvaluationBinding(element, type, target);
+                this.updateBindingGeneric(tempBinding, null, contextVars);
+            },
+
+            /**
+             * Creates lightweight binding for evaluation - works with existing binding system
+             * @param {HTMLElement} element - Target element
+             * @param {string} type - Binding type
+             * @param {string} target - Target expression
+             * @returns {Object} Lightweight binding object
+             */
+            createEvaluationBinding(element, type, target) {
+                const bindingTypeMap = {
+                    'visible': 'visible',
+                    'checked': 'checked',
+                    'value': 'input',
+                    'class': 'class',
+                    'style': 'style'
+                };
+
+                const bindingType = bindingTypeMap[type] || 'attribute';
+
+                return {
+                    id: `eval_${Utils.generateId()}`,
+                    type: bindingType,
+                    element: element,
+                    target: target,
+                    attribute: bindingType === 'attribute' ? type : null,
+                    parsedExpression: null,
+                    dependencies: null
+                };
+            },
+
+            /**
+             * Generates fingerprints for change detection
+             * @param {Array} array - Array to generate fingerprints for
+             * @returns {Array} Array of fingerprint objects
              */
             generateFingerprints(array) {
                 return array.map((item, index) => ({
@@ -2845,7 +3060,22 @@
             },
 
             /**
-             * Generates a hash for deep content comparison
+             * Gets stable identifier for an item
+             * @param {*} item - Item to get identifier for
+             * @returns {string|*} Stable identifier
+             */
+            getItemId(item) {
+                if (!item || typeof item !== 'object') {
+                    return item;
+                }
+
+                return item.id !== undefined ? item.id : `hash_${this.generateItemHash(item)}`;
+            },
+
+            /**
+             * Generates hash for deep content comparison
+             * @param {*} item - Item to hash
+             * @returns {string} Hash string
              */
             generateItemHash(item) {
                 if (item === null || item === undefined) {
@@ -2856,7 +3086,6 @@
                     return `${typeof item}:${item}`;
                 }
 
-                // For objects, create hash from sorted key-value pairs
                 const sortedEntries = Object.entries(item)
                     .sort(([a], [b]) => a.localeCompare(b))
                     .map(([key, value]) => `${key}:${this.generateItemHash(value)}`);
@@ -2865,16 +3094,20 @@
             },
 
             /**
-             * Gets a stable identifier for an item (for tracking moves/reorders)
+             * Simple string hash function
+             * @param {string} str - String to hash
+             * @returns {string} Hash value as base36 string
              */
-            getItemId(item) {
-                if (!item || typeof item !== 'object') {
-                    return item; // For primitives, the value is the id
-                } else if (item.id !== undefined) {
-                    return item.id; // Use id field if available, otherwise create hash-based id
-                } else {
-                    return `hash_${this.generateItemHash(item)}`;
+            hashString(str) {
+                let hash = 0;
+
+                for (let i = 0; i < str.length; i++) {
+                    const char = str.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + char;
+                    hash = hash & hash;
                 }
+
+                return hash.toString(36);
             },
 
             /**
@@ -3627,23 +3860,6 @@
             },
 
             // === UTILITY METHODS SECTION ===
-
-            /**
-             * Simple string hash function for fingerprinting
-             * @param {string} str - String to hash
-             * @returns {string} Hash value
-             */
-            hashString(str) {
-                let hash = 0;
-
-                for (let i = 0; i < str.length; i++) {
-                    const char = str.charCodeAt(i);
-                    hash = ((hash << 5) - hash) + char;
-                    hash = hash & hash; // Convert to 32-bit integer
-                }
-
-                return hash.toString(36); // Base36 for shorter string
-            },
 
             /**
              * Sets element attribute with special handling for boolean attributes
