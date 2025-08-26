@@ -2980,53 +2980,6 @@
             // === FOREACH RENDERING SECTION ===
 
             /**
-             * Renders a single item from a foreach loop by processing the template with item-specific data.
-             * Handles both single-element and multi-node templates, optimizing DOM structure when possible.
-             * @param {Object} binding - The foreach binding object containing template and configuration
-             * @param {*} item - The current item data from the collection being iterated
-             * @param {number} index - The zero-based index of the current item in the collection
-             * @returns {Element} The rendered DOM element(s) for this foreach item
-             */
-            renderForeachItem(binding, item, index) {
-                // Create a temporary container to parse the HTML template string
-                const tempTbody = document.createElement('tbody');
-                tempTbody.innerHTML = binding.template.trim();
-
-                // Convert NodeList to Array for easier manipulation
-                const childNodes = Array.from(tempTbody.childNodes);
-
-                // If there's exactly one top-level element, use it directly (no wrapper)
-                // This optimizes the DOM structure by avoiding unnecessary wrapper elements
-                if (childNodes.length === 1 && childNodes[0].nodeType === Node.ELEMENT_NODE) {
-                    const element = childNodes[0];
-
-                    // Clone the element to avoid modifying the original template
-                    const clone = element.cloneNode(true);
-
-                    // Process the cloned element with foreach context data (item, index, variable names)
-                    this.processForeachTemplate(clone, item, index, binding.itemName, binding.indexName, binding.collection);
-
-                    // Return the clone
-                    return clone;
-                }
-
-                // Multiple top-level nodes or text nodes - need wrapper
-                // This handles cases like: "Text <span>element</span> more text" or multiple sibling elements
-                const wrapper = document.createElement('span');
-
-                // Copy childnodes in the wrapper
-                childNodes.forEach(node => {
-                    wrapper.appendChild(node.cloneNode(true));
-                });
-
-                // Process the wrapper and all its children with foreach context data
-                this.processForeachTemplate(wrapper, item, index, binding.itemName, binding.indexName, binding.collection);
-
-                // Return the wrapper
-                return wrapper;
-            },
-
-            /**
              * Processes a template element for foreach loops, handling text interpolation and data bindings
              * with proper support for nested foreach loops by maintaining a scope chain of variables.
              * @param {Element} element - The DOM element to process (template container)
