@@ -71,12 +71,6 @@
     const Utils = {
 
         /**
-         * Check if Proxy is supported in the current environment
-         * @type {boolean}
-         */
-        hasProxy: typeof Proxy !== 'undefined',
-
-        /**
          * Determines if a value should be made reactive using Proxy mechanism
          * Simple values (primitives) are handled separately and don't need Proxy
          * @param {*} value - Value to test
@@ -394,36 +388,8 @@
             return target;
         }
 
-        if (Utils.hasProxy) {
-            return createProxyReactive(target, onChange, path);
-        } else {
-            return createFallbackReactive(target, onChange, path);
-        }
-    }
-
-    /**
-     * Creates reactive proxy using ES6 Proxy (modern browsers)
-     * @param {Object} target - Target object
-     * @param {Function} onChange - Change callback
-     * @param {string} path - Property path
-     * @returns {Object} Reactive proxy
-     */
-    function createProxyReactive(target, onChange, path) {
         // Make existing nested objects/arrays reactive immediately
-        Object.keys(target).forEach(key => {
-            if (target.hasOwnProperty(key) && Utils.isReactive(target[key])) {
-                target[key] = createReactive(target[key], onChange, path ? `${path}.${key}` : key);
-            }
-        });
-
-        // For arrays, also make existing items reactive
-        if (Array.isArray(target)) {
-            target.forEach((item, index) => {
-                if (Utils.isReactive(item)) {
-                    target[index] = createReactive(item, onChange, path ? `${path}.${index}` : index);
-                }
-            });
-        }
+        makeNestedReactive(target, onChange, path);
 
         // Store original array methods for arrays
         const originalMethods = {};
@@ -435,117 +401,195 @@
             });
         }
 
+        // Create specialized handlers
+        // noinspection JSCheckFunctionSignatures
+        const arrayMutationHandler = createArrayMutationHandler(target, originalMethods, onChange, path);
+        const proxyGetter = createProxyGetter(isArray, originalMethods, arrayMutationHandler);
+        const proxySetter = createProxySetter(onChange, path);
+        const proxyDeleter = createProxyDeleter(onChange, path);
+
         return new Proxy(target, {
-            get(obj, prop) {
-                // Handle array mutation methods
-                if (isArray && originalMethods[prop]) {
-                    return function (...args) {
-                        const result = originalMethods[prop].apply(obj, args);
-
-                        // Make new items reactive
-                        if (/^(push|unshift|splice)$/.test(prop)) {
-                            obj.forEach((item, index) => {
-                                if (Utils.isReactive(item) && !item._isReactive) {
-                                    obj[index] = createReactive(item, onChange, `${path}.${index}`);
-                                }
-                            });
-                        }
-
-                        onChange(path || 'root', obj, 'array-mutation', {method: prop, args});
-                        return result;
-                    };
-                }
-
-                return obj[prop];
-            },
-
-            set(obj, prop, value) {
-                const oldValue = obj[prop];
-
-                // Make new value reactive if needed
-                if (Utils.isReactive(value)) {
-                    value = createReactive(value, onChange, path ? `${path}.${prop}` : prop);
-                }
-
-                obj[prop] = value;
-
-                // Only notify if value actually changed
-                if (!Utils.isEqual(oldValue, value)) {
-                    const propertyPath = path ? `${path}.${prop}` : prop;
-                    onChange(propertyPath, value, 'set', {oldValue});
-
-                    // CRITICAL FIX: Also notify parent array/object about nested changes
-                    if (path) {
-                        // Extract the root property (e.g., "todos" from "todos.0.completed")
-                        const rootProperty = path.split('.')[0];
-                        onChange(rootProperty, null, 'nested-change', {
-                            nestedPath: propertyPath,
-                            oldValue: oldValue,
-                            newValue: value
-                        });
-                    }
-                }
-
-                return true;
-            },
-
-            deleteProperty(obj, prop) {
-                const oldValue = obj[prop];
-                delete obj[prop];
-
-                const propertyPath = path ? `${path}.${prop}` : prop;
-                onChange(propertyPath, undefined, 'delete', {oldValue});
-
-                // Also notify parent about nested deletion
-                if (path) {
-                    const rootProperty = path.split('.')[0];
-                    onChange(rootProperty, null, 'nested-change', {
-                        nestedPath: propertyPath,
-                        oldValue: oldValue,
-                        newValue: undefined
-                    });
-                }
-
-                return true;
-            }
+            get: proxyGetter,
+            set: proxySetter,
+            deleteProperty: proxyDeleter
         });
     }
 
     /**
-     * Creates reactive object using Object.defineProperty (legacy browsers)
-     * @param {Object} target - Target object
-     * @param {Function} onChange - Change callback
-     * @param {string} path - Property path
-     * @returns {Object} Reactive object
+     * Recursively makes nested objects and arrays reactive by wrapping them
+     * with reactive proxies. This enables deep reactivity for complex data structures.
+     * @param {Object|Array} target - The object or array to make nested properties reactive
+     * @param {Function} onChange - Callback function to invoke when changes occur
+     * @param {string} path - Current path in the nested structure (for tracking changes)
      */
-    function createFallbackReactive(target, onChange, path) {
-        // Handle array mutation methods
-        if (Array.isArray(target)) {
-            ARRAY_METHODS.forEach(method => {
-                const original = target[method];
-
-                Object.defineProperty(target, method, {
-                    value: function (...args) {
-                        const result = original.apply(this, args);
-                        onChange(path || 'root', this, 'array-mutation', {method, args});
-                        return result;
-                    },
-                    enumerable: false,
-                    configurable: true
-                });
-            });
-        }
-
-        // Make nested objects reactive
+    function makeNestedReactive(target, onChange, path) {
+        // Iterate through all enumerable properties of the target object
         Object.keys(target).forEach(key => {
             if (target.hasOwnProperty(key) && Utils.isReactive(target[key])) {
                 target[key] = createReactive(target[key], onChange, path ? `${path}.${key}` : key);
             }
         });
 
-        // Mark as reactive
-        Object.defineProperty(target, '_isReactive', {value: true, enumerable: false});
-        return target;
+        // Handle arrays separately to make their elements reactive
+        if (Array.isArray(target)) {
+            target.forEach((item, index) => {
+                if (Utils.isReactive(item)) {
+                    target[index] = createReactive(item, onChange, path ? `${path}.${index}` : index);
+                }
+            });
+        }
+    }
+
+    /**
+     * Creates a handler function that wraps array mutation methods to maintain reactivity
+     * when arrays are modified. This ensures that new items added to reactive arrays
+     * are automatically made reactive as well.
+     *
+     * @param {Array} arr - The reactive array being monitored
+     * @param {Object} originalMethods - Reference to the original Array.prototype methods
+     * @param {Function} onChange - Callback function to invoke when array mutations occur
+     * @param {string} path - The path of this array in the nested reactive structure
+     * @returns {Function} A handler function that creates wrapped mutation methods
+     */
+    function createArrayMutationHandler(arr, originalMethods, onChange, path) {
+        /**
+         * Returns a wrapped version of an array mutation method
+         * @param {string} prop - The name of the array method to wrap (e.g., 'push', 'splice')
+         * @returns {Function} The wrapped method that maintains reactivity
+         */
+        return function(prop) {
+            return function (...args) {
+                // Execute the original array method with the provided arguments
+                const result = originalMethods[prop].apply(arr, args);
+
+                // Check if this method adds new items to the array
+                // Methods that can add new elements: push (end), unshift (beginning), splice (anywhere)
+                if (/^(push|unshift|splice)$/.test(prop)) {
+                    // Iterate through all array items to make new ones reactive
+                    arr.forEach((item, index) => {
+                        if (Utils.isReactive(item) && !item._isReactive) {
+                            arr[index] = createReactive(item, onChange, `${path}.${index}`);
+                        }
+                    });
+                }
+
+                // Notify observers that an array mutation occurred
+                // Provides context about the mutation including method name and arguments
+                onChange(path || 'root', arr, 'array-mutation', {method: prop, args});
+
+                // Return the result of the original method call
+                return result;
+            };
+        };
+    }
+
+    /**
+     * Notifies parent objects about nested changes
+     * @param {string} path - Property path
+     * @param {string} propertyPath - Full property path
+     * @param {*} oldValue - Previous value
+     * @param {*} newValue - New value
+     * @param {Function} onChange - Change notification callback
+     * @param {string} changeType - Type of change ('nested-change' or 'nested-delete')
+     */
+    function bubbleChangeNotification(path, propertyPath, oldValue, newValue, onChange, changeType = 'nested-change') {
+        if (path) {
+            const rootProperty = path.split('.')[0];
+
+            onChange(rootProperty, null, changeType, {
+                nestedPath: propertyPath,
+                oldValue: oldValue,
+                newValue: newValue
+            });
+        }
+    }
+
+    /**
+     * Creates proxy getter handler
+     * @param {boolean} isArray - Whether target is an array
+     * @param {Object} originalMethods - Original array methods
+     * @param {Function} arrayMutationHandler - Array mutation handler
+     * @returns {Function} Proxy getter function
+     */
+    function createProxyGetter(isArray, originalMethods, arrayMutationHandler) {
+        return function(obj, prop) {
+            // Handle array mutation methods
+            if (isArray && originalMethods[prop]) {
+                return arrayMutationHandler(prop);
+            } else {
+                return obj[prop];
+            }
+        };
+    }
+
+    /**
+     * Creates a proxy setter function that handles reactive property assignments
+     * This function is used as the 'set' trap in the Proxy handler
+     * @param {Function} onChange - Callback function to invoke when properties change
+     * @param {string} path - The current path in the object hierarchy (e.g., "user.profile")
+     * @returns {Function} A proxy setter function that handles property assignments
+     */
+    function createProxySetter(onChange, path) {
+        /**
+         * Proxy setter function that intercepts property assignments
+         * @param {Object} obj - The target object being modified
+         * @param {string|Symbol} prop - The property name being set
+         * @param {*} value - The new value being assigned
+         * @returns {boolean} Always returns true to indicate the assignment succeeded
+         */
+        return function(obj, prop, value) {
+            // Store the current value before modification for comparison
+            const oldValue = obj[prop];
+
+            // Convert the new value to a reactive object if it's an object/array
+            // This ensures nested objects also trigger change notifications
+            if (Utils.isReactive(value)) {
+                value = createReactive(value, onChange, path ? `${path}.${prop}` : prop);
+            }
+
+            // Perform the actual property assignment
+            obj[prop] = value;
+
+            // Only trigger change notifications if the value actually changed
+            // This prevents unnecessary updates when the same value is assigned
+            if (!Utils.isEqual(oldValue, value)) {
+                // Construct the full property path (e.g., "user.profile.name")
+                const propertyPath = path ? `${path}.${prop}` : prop;
+
+                // Notify listeners about the property change
+                // Includes the path, new value, operation type, and old value
+                onChange(propertyPath, value, 'set', {oldValue});
+
+                // Notify parent objects about changes to nested properties
+                // This allows parent-level listeners to react to deep changes
+                bubbleChangeNotification(path, propertyPath, oldValue, value, onChange);
+            }
+
+            // Return true to indicate the set operation was successful
+            // This is required by the Proxy specification
+            return true;
+        };
+    }
+
+    /**
+     * Creates proxy delete handler
+     * @param {Function} onChange - Change notification callback
+     * @param {string} path - Current property path
+     * @returns {Function} Proxy delete function
+     */
+    function createProxyDeleter(onChange, path) {
+        return function(obj, prop) {
+            const oldValue = obj[prop];
+            delete obj[prop];
+
+            const propertyPath = path ? `${path}.${prop}` : prop;
+            onChange(propertyPath, undefined, 'delete', {oldValue});
+
+            // Notify parent about nested deletion
+            bubbleChangeNotification(path, propertyPath, oldValue, undefined, onChange, 'nested-change');
+
+            return true;
+        };
     }
 
     // ============================================================================
@@ -1832,13 +1876,8 @@
              * Uses modern IntersectionObserver API when available, falls back to scroll-based detection.
              */
             setupViewportTracking() {
-                // Check for modern browser support - IntersectionObserver is more efficient
-                // and provides better performance than manual scroll calculations
-                if ('IntersectionObserver' in window) {
-                    this.setupIntersectionObserver();
-                } else {
-                    this.setupScrollBasedVisibility();
-                }
+                // Setup the intersection server
+                this.setupIntersectionObserver();
 
                 // Perform initial visibility calculation on setup
                 // This ensures correct state even before any scroll/intersection events
@@ -1896,57 +1935,6 @@
 
                 // Start observing our container element
                 this.intersectionObserver.observe(this.container);
-            },
-
-            /**
-             * Fallback approach for older browsers that don't support IntersectionObserver.
-             * Uses traditional scroll event listeners with manual visibility calculations.
-             */
-            setupScrollBasedVisibility() {
-                // Create global registry for components that need viewport tracking
-                // This prevents duplicate event listeners when multiple components exist
-                if (!window._wakaPACViewportComponents) {
-                    window._wakaPACViewportComponents = new Set();
-
-                    // Only set up global listeners once
-                    this.setupViewportVisibilityListener();
-                }
-
-                // Register this component instance for visibility updates
-                window._wakaPACViewportComponents.add(this);
-            },
-
-            /**
-             * Set up global scroll and resize event listeners.
-             * These are shared across all component instances to improve performance.
-             */
-            setupViewportVisibilityListener() {
-                let scrollTimeout;
-                let resizeTimeout;
-
-                // Batch visibility updates for all registered components
-                const checkVisibility = () => {
-                    // Update visibility for every component that's registered for tracking
-                    window._wakaPACViewportComponents.forEach(component => {
-                        component.updateContainerVisibility();
-                    });
-                };
-
-                // Throttle scroll events to maintain 60fps performance
-                // Scroll events fire very frequently and can cause performance issues
-                // 16ms = ~60fps (1000ms/60frames = 16.67ms)
-                window.addEventListener('scroll', () => {
-                    clearTimeout(scrollTimeout);
-                    scrollTimeout = setTimeout(checkVisibility, 16);
-                });
-
-                // Handle window resize events with slightly longer delay
-                // Resize events are less frequent but can be more expensive to process
-                // 100ms delay gives time for resize to complete
-                window.addEventListener('resize', () => {
-                    clearTimeout(resizeTimeout);
-                    resizeTimeout = setTimeout(checkVisibility, 100);
-                });
             },
 
             /**
