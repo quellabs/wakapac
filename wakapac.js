@@ -2804,7 +2804,7 @@
                     );
 
                 // Generate fingerprint
-                const currentFingerprints = this.generateItemFingerprints(array);
+                const currentFingerprints = this.generateFingerprints(array);
                 const previousFingerprints = binding.fingerprints || [];
 
                 // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
@@ -2836,7 +2836,7 @@
             /**
              * Generates fingerprints for individual array items
              */
-            generateItemFingerprints(array) {
+            generateFingerprints(array) {
                 return array.map((item, index) => ({
                     index,
                     id: this.getItemId(item),
@@ -2868,49 +2868,13 @@
              * Gets a stable identifier for an item (for tracking moves/reorders)
              */
             getItemId(item) {
-                if (item && typeof item === 'object') {
-                    // Use id field if available, otherwise create hash-based id
-                    return item.id !== undefined ? item.id : `hash_${this.generateItemHash(item)}`;
+                if (!item || typeof item !== 'object') {
+                    return item; // For primitives, the value is the id
+                } else if (item.id !== undefined) {
+                    return item.id; // Use id field if available, otherwise create hash-based id
+                } else {
+                    return `hash_${this.generateItemHash(item)}`;
                 }
-
-                return item; // For primitives, the value is the id
-            },
-
-            /**
-             * Generates a simple fingerprint for array state
-             * @param {Array} array - The array to fingerprint
-             * @returns {string} Fingerprint representing array structure and order
-             */
-            generateForeachFingerprint(array) {
-                if (!Array.isArray(array) || array.length === 0) {
-                    return 'empty';
-                }
-
-                // Create fingerprint based on length, item types, and key properties
-                const parts = [array.length.toString()];
-
-                array.forEach((item, index) => {
-                    let itemPrint = '';
-
-                    if (item && typeof item === 'object') {
-                        // For objects, use ID or hash of key properties
-                        if (item.id !== undefined) {
-                            itemPrint = `obj:${item.id}`;
-                        } else {
-                            // Hash key properties for consistent fingerprint
-                            const keys = Object.keys(item).sort().slice(0, 3); // First 3 keys
-                            itemPrint = `obj:${keys.join(',')}`;
-                        }
-                    } else {
-                        // For primitives, use value and type
-                        itemPrint = `${typeof item}:${item}`;
-                    }
-
-                    parts.push(`${index}:${itemPrint}`);
-                });
-
-                // Create hash of the parts for compact fingerprint
-                return this.hashString(parts.join('|'));
             },
 
             /**
