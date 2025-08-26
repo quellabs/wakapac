@@ -25,6 +25,21 @@
     // =============================================================================
 
     /**
+     * All binding types
+     * @type {string[]}
+     */
+    const KNOWN_BINDING_TYPES = [
+        'value', 'checked', 'visible', 'if', 'foreach', 'class', 'style',
+        'click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'
+    ];
+
+    /**
+     * Binding map
+     * @type {{visible: string, checked: string, value: string, class: string, style: string}}
+     */
+    const BINDING_TYPE_MAP = {'visible': 'visible', 'checked': 'checked', 'value': 'input', 'class': 'class', 'style': 'style'};
+
+    /**
      * Array mutation methods that trigger reactivity updates
      * @constant {string[]}
      */
@@ -41,12 +56,6 @@
      * @type {string[]}
      */
     const EVENT_TYPES = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
-
-    /**
-     * Binding map
-     * @type {{visible: string, checked: string, value: string, class: string, style: string}}
-     */
-    const BINDING_TYPE_MAP = {'visible': 'visible', 'checked': 'checked', 'value': 'input', 'class': 'class', 'style': 'style'};
 
     /**
      * Event key mappings for modifier handling
@@ -220,7 +229,7 @@
          * @returns {string} Formatted string
          */
         formatValue(value) {
-            return value == null ? '' : String(value);
+            return value !== null ? String(value) : '';
         },
 
         /**
@@ -356,6 +365,7 @@
      * @returns {Object} Reactive proxy object
      */
     function createReactive(target, onChange, path = '') {
+        // Return target unchanged when it's not reactive
         if (!Utils.isReactive(target)) {
             return target;
         }
@@ -376,14 +386,11 @@
         // Create specialized handlers
         // noinspection JSCheckFunctionSignatures
         const arrayMutationHandler = createArrayMutationHandler(target, originalMethods, onChange, path);
-        const proxyGetter = createProxyGetter(isArray, originalMethods, arrayMutationHandler);
-        const proxySetter = createProxySetter(onChange, path);
-        const proxyDeleter = createProxyDeleter(onChange, path);
 
         return new Proxy(target, {
-            get: proxyGetter,
-            set: proxySetter,
-            deleteProperty: proxyDeleter
+            get: createProxyGetter(isArray, originalMethods, arrayMutationHandler),
+            set: createProxySetter(onChange, path),
+            deleteProperty: createProxyDeleter(onChange, path)
         });
     }
 
@@ -416,7 +423,6 @@
      * Creates a handler function that wraps array mutation methods to maintain reactivity
      * when arrays are modified. This ensures that new items added to reactive arrays
      * are automatically made reactive as well.
-     *
      * @param {Array} arr - The reactive array being monitored
      * @param {Object} originalMethods - Reference to the original Array.prototype methods
      * @param {Function} onChange - Callback function to invoke when array mutations occur
@@ -830,7 +836,7 @@
          * @returns {Object|null} Ternary AST node or lower precedence expression
          */
         parseTernary() {
-            let expr = this.parseBinaryExpression();
+            let expr = this.parseBinaryWithPrecedence(1);
 
             if (this.match('QUESTION')) {
                 const trueExpr = this.parseTernary();
@@ -846,15 +852,6 @@
             }
 
             return expr;
-        },
-
-        /**
-         * Parse a binary expression using precedence climbing algorithm.
-         * Entry point that starts parsing with minimum precedence level.
-         * @returns {Object} AST node representing the parsed binary expression
-         */
-        parseBinaryExpression() {
-            return this.parseBinaryWithPrecedence(1);
         },
 
         /**
@@ -1311,9 +1308,11 @@
                 switch (n.type) {
                     case 'property':
                         const rootProp = n.path.split(/[.\[]/, 1)[0];
+
                         if (rootProp && !['true', 'false', 'null', 'undefined'].includes(rootProp)) {
                             dependencies.add(rootProp);
                         }
+
                         break;
 
                     case 'ternary':
@@ -1341,6 +1340,7 @@
                         if (n.pairs) {
                             n.pairs.forEach(pair => traverse(pair.value));
                         }
+
                         break;
                 }
             };
@@ -1412,7 +1412,10 @@
          */
         addBindingPairIfValid(pairString, pairs) {
             const trimmed = pairString.trim();
-            if (!trimmed) return;
+
+            if (!trimmed) {
+                return;
+            }
 
             const colonIndex = this.findBindingColon(trimmed);
 
@@ -1435,12 +1438,7 @@
          * @returns {number} Index of colon or -1
          */
         findBindingColon(str) {
-            const knownBindingTypes = [
-                'value', 'checked', 'visible', 'if', 'foreach', 'class', 'style',
-                'click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'
-            ];
-
-            for (const type of knownBindingTypes) {
+            for (const type of KNOWN_BINDING_TYPES) {
                 if (str.startsWith(type + ':')) {
                     return type.length;
                 }
@@ -3396,45 +3394,23 @@
 
             /**
              * Sets element attribute with special handling for boolean attributes
-             * @param element
-             * @param name
-             * @param value
              */
             setElementAttribute(element, name, value) {
-                switch (name) {
-                    case 'style':
-                        if (typeof value === 'object' && value) {
-                            Object.assign(element.style, value);
-                        } else {
-                            element.style.cssText = value || '';
-                        }
-
-                        break;
-
-                    case 'enable':
-                        // Handle 'enable' as reverse of 'disabled'
-                        if (value) {
-                            element.removeAttribute('disabled');
-                        } else {
-                            element.setAttribute('disabled', 'disabled');
-                        }
-
-                        break;
-
-                    default:
-                        if (BOOLEAN_ATTRS.includes(name)) {
-                            if (value) {
-                                element.setAttribute(name, name);
-                            } else {
-                                element.removeAttribute(name);
-                            }
-                        } else if (value != null) {
-                            element.setAttribute(name, value);
-                        } else {
-                            element.removeAttribute(name);
-                        }
-
-                        break;
+                if (name === 'style') {
+                    if (typeof value === 'object' && value) {
+                        Object.assign(element.style, value);
+                    } else {
+                        element.style.cssText = value || '';
+                    }
+                } else if (name === 'enable') {
+                    // Handle 'enable' as reverse of 'disabled'
+                    element.toggleAttribute('disabled', !value);
+                } else if (BOOLEAN_ATTRS.includes(name)) {
+                    element.toggleAttribute(name, !!value);
+                } else if (value != null) {
+                    element.setAttribute(name, value);
+                } else {
+                    element.removeAttribute(name);
                 }
             },
 
@@ -3669,26 +3645,39 @@
             },
 
             /**
-             * Updates text content with interpolated values - FIXED VERSION
-             * Now handles multiple placeholders in the same text node correctly
+             * Applies text binding to update DOM element content with interpolated values
+             * @param {Object} binding - Binding object containing element reference and original text
+             * @param {string} property - The property name being bound (for potential debugging/logging)
+             * @param {Object|null} contextVars - Optional additional context variables to merge
              */
             applyTextBinding(binding, property, contextVars = null) {
+                // Get reference to the DOM text node that will be updated
                 const textNode = binding.element;
 
                 // Create evaluation context - merge abstraction with optional context
+                // If contextVars provided, merge them with the base abstraction object
+                // Otherwise, just use the abstraction object as-is
                 const context = contextVars ?
                     Object.assign({}, this.abstraction, contextVars) :
                     this.abstraction;
 
-                // Use the shared interpolation utility
+                // Use the shared interpolation utility to process template strings
+                // This handles variable substitution within the original text template
                 const newText = this.processTextInterpolation(binding.originalText, context);
 
-                // Update text content if changed (with caching)
+                // Performance optimization: Only update DOM if text actually changed
+                // Create unique cache key for this specific binding
                 const cacheKey = 'text_' + binding.id;
+
+                // Check if we've cached a previous value for this binding
                 const lastValue = this.lastValues.get(cacheKey);
 
+                // Only update the DOM if the new text differs from the cached value
                 if (lastValue !== newText) {
+                    // Cache the new value for future comparisons
                     this.lastValues.set(cacheKey, newText);
+
+                    // Update the actual DOM element's text content
                     textNode.textContent = newText;
                 }
             },
