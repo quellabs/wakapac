@@ -2894,48 +2894,33 @@
             },
 
             /**
-             * Processes text interpolation bindings for an element using the original approach
-             * but with context variable support for foreach scenarios.
+             * Processes text interpolation bindings for an element by reusing existing text binding logic
              * @param {HTMLElement} element - The DOM element to process text bindings on
              * @param {Object} contextVars - Context variables for expression evaluation
              */
             processTextBindingsForElement(element, contextVars) {
                 // Create a tree walker to traverse all text nodes in the element
                 const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
-                const textNodes = [];
 
-                // Collect all text nodes first to avoid modifying tree while traversing
+                // Process each text node that contains interpolation patterns
                 let textNode;
-                while (textNode = walker.nextNode()) {
-                    textNodes.push(textNode);
-                }
 
-                // Process each text node for template interpolation {{expression}}
-                textNodes.forEach(textNode => {
+                while (textNode = walker.nextNode()) {
                     const text = textNode.textContent;
 
-                    // Find ALL interpolation patterns in the text content
-                    const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+                    // Only process nodes that have interpolation patterns
+                    if (/\{\{\s*[^}]+\s*\}\}/.test(text)) {
+                        // Create minimal binding object for existing updateTextBinding method
+                        const binding = {
+                            id: Utils.generateId(),
+                            element: textNode,
+                            originalText: text
+                        };
 
-                    if (matches) {
-                        // Create a text binding that follows the original pattern
-                        matches.forEach(match => {
-                            const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
-
-                            // Create a binding object that matches what updateTextBinding expects
-                            const binding = this.createBinding('text', textNode, {
-                                target: expression,
-                                originalText: text,
-                                fullMatch: match,
-                                parsedExpression: null,
-                                dependencies: null
-                            });
-
-                            // Use the existing updateTextBinding but with proper context support
-                            this.updateTextBinding(binding, null, contextVars);
-                        });
+                        // Use existing updateTextBinding with context support
+                        this.updateTextBinding(binding, null, contextVars);
                     }
-                });
+                }
             },
 
             /**
