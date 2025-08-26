@@ -2183,7 +2183,7 @@
                     const bindingString = element.getAttribute('data-pac-bind');
 
                     // Parse the binding string into individual binding pairs
-                    const bindingPairs = this.parseBindingString(bindingString);
+                    const bindingPairs = ExpressionParser.parseBindingString(bindingString);;
 
                     // Automatically reorder bindings: foreach first, then others
                     const reorderedBindings = this.reorderBindings(bindingPairs);
@@ -2198,17 +2198,6 @@
                         }
                     });
                 });
-            },
-
-            /**
-             * Parses a binding string into an array of type-target pairs.
-             * Handles comma separation while respecting quoted strings, parentheses, and escaped characters.
-             * Supports ternary operators and other expressions with parentheses.
-             * @param {string} bindingString - String in format "type1:target1,type2:target2"
-             * @returns {Array<{type: string, target: string}>} Array of parsed binding pairs
-             */
-            parseBindingString(bindingString) {
-                return ExpressionParser.parseBindingString(bindingString);
             },
 
             /**
@@ -2842,7 +2831,7 @@
                     const bindingString = el.getAttribute('data-pac-bind');
 
                     // Parse the binding string into individual binding pairs
-                    const bindingPairs = this.parseBindingString(bindingString);
+                    const bindingPairs = ExpressionParser.parseBindingString(bindingString);
 
                     // Process each binding type-target pair
                     bindingPairs.forEach(({ type, target }) => {
@@ -3125,12 +3114,17 @@
 
                 bindingElements.forEach(el => {
                     const bindings = el.getAttribute('data-pac-bind');
-                    if (!bindings) return;
+
+                    if (!bindings) {
+                        return;
+                    }
 
                     // Parse and process each binding
-                    this.parseBindingString(bindings).forEach(({ type, target }) => {
+                    ExpressionParser.parseBindingString(bindings).forEach(({ type, target }) => {
                         // Skip nested foreach bindings - they'll be handled separately
-                        if (type === 'foreach') return;
+                        if (type === 'foreach') {
+                            return;
+                        }
 
                         // Set up two-way binding for form inputs
                         if ((type === 'value' || type === 'checked') && this.isNestedProperty(target, foreachVars)) {
