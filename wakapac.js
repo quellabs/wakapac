@@ -43,6 +43,12 @@
     const EVENT_TYPES = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
 
     /**
+     * Binding map
+     * @type {{visible: string, checked: string, value: string, class: string, style: string}}
+     */
+    const BINDING_TYPE_MAP = {'visible': 'visible', 'checked': 'checked', 'value': 'input', 'class': 'class', 'style': 'style'};
+
+    /**
      * Event key mappings for modifier handling
      * @constant {Object.<string, string|string[]>}
      */
@@ -2904,15 +2910,9 @@
              * @returns {Object} Lightweight binding object
              */
             createEvaluationBinding(element, type, target) {
-                const bindingTypeMap = {
-                    'visible': 'visible',
-                    'checked': 'checked',
-                    'value': 'input',
-                    'class': 'class',
-                    'style': 'style'
-                };
-
-                const bindingType = bindingTypeMap[type] || 'attribute';
+                // Determine the actual binding type to use
+                // Falls back to 'attribute' for any unmapped types (custom attributes)
+                const bindingType = BINDING_TYPE_MAP[type] || 'attribute';
 
                 return {
                     id: `eval_${Utils.generateId()}`,
@@ -3381,63 +3381,10 @@
                 }
 
                 // Create a temporary binding object for updateBindingGeneric
-                const tempBinding = this.createForeachEvaluationBinding(element, type, target);
+                const tempBinding = this.createBindingByType(element, type, target);
 
                 // Use the existing generic binding update system
                 this.updateBinding(tempBinding, null, foreachVars);
-            },
-
-            /**
-             * Creates a lightweight binding object for foreach evaluation
-             * This is different from createBindingByType because it doesn't set up
-             * two-way data binding infrastructure - it's just for one-way evaluation
-             * @param {HTMLElement} element - Target element
-             * @param {string} type - Binding type
-             * @param {string} target - Target expression
-             * @returns {Object} Lightweight binding object
-             */
-            createForeachEvaluationBinding(element, type, target) {
-                // Map foreach-specific binding types to standard updateBinding types
-                // This translation layer allows foreach bindings to work with the existing binding system
-                const bindingTypeMap = {
-                    'visible': 'visible',    // Controls element visibility (display: none/block)
-                    'checked': 'checked',    // For checkbox/radio input checked state
-                    'value': 'input',        // For input element values (maps to 'input' type)
-                    'class': 'class'         // For CSS class manipulation
-                };
-
-                // Determine the actual binding type to use
-                // Falls back to 'attribute' for any unmapped types (custom attributes)
-                const bindingType = bindingTypeMap[type] || 'attribute';
-
-                // Return a standardized binding configuration object
-                // This object is compatible with the main updateBinding processing system
-                return {
-                    // Generate unique identifier for this binding instance
-                    // Helps with debugging and binding lifecycle management
-                    id: `foreach_eval_${Utils.generateId()}`,
-
-                    // The resolved binding type for the updateBinding system
-                    type: bindingType,
-
-                    // Reference to the DOM element this binding affects
-                    element: element,
-
-                    // The expression string to evaluate (e.g., "item.isVisible", "user.name")
-                    target: target,
-
-                    // For attribute bindings, store which attribute to update
-                    // Null for non-attribute bindings (visible, checked, input, class)
-                    attribute: bindingType === 'attribute' ? type : null,
-
-                    // Placeholder for parsed expression AST
-                    // Will be populated later by getParsedExpression() for performance
-                    parsedExpression: null,
-
-                    // Placeholder for expression dependencies
-                    // Will be populated later by getParsedExpression() for change detection
-                    dependencies: null
-                };
             },
 
             // === EVENT HANDLING SECTION ===
