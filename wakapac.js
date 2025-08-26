@@ -2892,8 +2892,37 @@
                 }
 
                 // Handle regular bindings (visible, class, style, attributes, etc.)
-                const tempBinding = this.createBindingByType(element, type, target);
+                const tempBinding = this.createEvaluationBinding(element, type, target);
                 this.updateBinding(tempBinding, null, contextVars);
+            },
+
+            /**
+             * Creates lightweight binding for evaluation - works with existing binding system
+             * @param {HTMLElement} element - Target element
+             * @param {string} type - Binding type
+             * @param {string} target - Target expression
+             * @returns {Object} Lightweight binding object
+             */
+            createEvaluationBinding(element, type, target) {
+                const bindingTypeMap = {
+                    'visible': 'visible',
+                    'checked': 'checked',
+                    'value': 'input',
+                    'class': 'class',
+                    'style': 'style'
+                };
+
+                const bindingType = bindingTypeMap[type] || 'attribute';
+
+                return {
+                    id: `eval_${Utils.generateId()}`,
+                    type: bindingType,
+                    element: element,
+                    target: target,
+                    attribute: bindingType === 'attribute' ? type : null,
+                    parsedExpression: null,
+                    dependencies: null
+                };
             },
 
             /**
