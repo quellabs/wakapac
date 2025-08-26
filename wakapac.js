@@ -2170,13 +2170,23 @@
              * Builds an index of bindings by property for efficient lookups
              */
             buildBindingIndex() {
+                // Clear any existing index to start fresh
                 this.bindingIndex.clear();
+
+                // Initialize a new set to track bindings that haven't been parsed yet
                 this.unparsedBindings = new Set();
 
+                // Iterate through all bindings in the collection
                 this.bindings.forEach(binding => {
+                    // Check if the binding has a target property defined
                     if (binding.target) {
+                        // Add bindings with targets to the unparsed set
+                        // These will be processed later to build the actual index
                         this.unparsedBindings.add(binding);
                     }
+
+                    // Note: Bindings without targets are implicitly ignored
+                    // as they cannot be indexed or used for lookups
                 });
             },
 
@@ -2451,7 +2461,13 @@
             },
 
             /**
-             * Sets up input element attributes for binding
+             * Sets up input element attributes for binding to properties
+             * This method configures an HTML element with data attributes needed for
+             * property binding and automatic updates in the PAC (Property Auto-Complete) system.
+             * @param {HTMLElement} element - The DOM element to configure for binding
+             * @param {string} property - The property name to bind to this element
+             * @param {string} [bindingType='value'] - The type of binding ('value', 'text', 'html', etc.)
+             * @returns {void}
              */
             setupInputElement(element, property, bindingType = 'value') {
                 element.setAttribute('data-pac-property', property);
