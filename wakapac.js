@@ -2525,45 +2525,56 @@
 
             /**
              * Processes all pending DOM updates in a single batch
+             * @returns {void}
              */
             flushUpdates() {
+                // Early exit if no pending updates to process
                 if (!this.pendingUpdates) {
                     return;
                 }
 
-                // Collect bindings that need updates with lazy parsing
+                /**
+                 * Set to collect all bindings that need to be updated
+                 * @type {Set}
+                 */
                 const relevantBindings = new Set();
 
+                // Process each property that has pending updates
                 this.pendingUpdates.forEach(property => {
-                    // Get already-indexed bindings for this property
-                    const indexedBindings = this.bindingIndex.get(property) || new Set();
+                    /**
+                     * Get all bindings indexed by this property
+                     * @type {Set}
+                     */
+                    const indexed = this.bindingIndex.get(property) || new Set();
 
-                    // Add all already-indexed bindings
-                    indexedBindings.forEach(binding => {
+                    // Add indexed bindings that should be updated
+                    indexed.forEach(binding => {
                         if (this.shouldUpdateBinding(binding, property)) {
                             relevantBindings.add(binding);
                         }
                     });
 
-                    // Check unparsed bindings (lazy parsing happens here)
+                    // Process unparsed bindings that may reference this property
                     this.unparsedBindings.forEach(binding => {
                         if (!binding.parsedExpression) {
+                            // Parse the binding expression and cache it
                             this.getParsedExpression(binding);
+
+                            // Remove from unparsed set since it's now parsed
                             this.unparsedBindings.delete(binding);
                         }
 
+                        // Check if this parsed binding should be updated
                         if (this.shouldUpdateBinding(binding, property)) {
                             relevantBindings.add(binding);
                         }
                     });
                 });
 
-                // Update all relevant bindings
-                relevantBindings.forEach(binding => {
-                    this.updateBinding(binding, null, null);
-                });
+                // Execute updates for all relevant bindings in batch
+                relevantBindings.forEach(binding => this.updateBinding(binding, null, null));
 
-                // Clear pending state
+                // Clean up pending state after successful batch update
                 this.pendingUpdates = null;
                 this.pendingValues = null;
             },
@@ -3006,65 +3017,6 @@
                     itemName,
                     indexName
                 });
-            },
-
-            /**
-             * Renders a single item from a nested foreach loop by cloning the template
-             * and processing it with the current item's data and scope variables
-             * @param {string} template - HTML template string to clone for this item
-             * @param {*} item - The current array item data
-             * @param {number} index - The current item's index in the array
-             * @param {string} itemName - Variable name for the current item (e.g., "child")
-             * @param {string} indexName - Variable name for the current index (e.g., "childIndex")
-             * @param {string} collectionName - Name of the collection being iterated
-             * @param {Object} parentVars - Variables inherited from parent foreach scopes
-             * @returns {HTMLElement} Processed DOM element ready for insertion
-             */
-            renderNestedForeachItem(template, item, index, itemName, indexName, collectionName, parentVars) {
-                // Create a temporary container to parse the template HTML
-                // This allows us to work with actual DOM nodes rather than raw HTML strings
-                const tempContainer = document.createElement('div');
-                tempContainer.innerHTML = template.trim(); // Remove whitespace to avoid text nodes
-
-                // Convert NodeList to Array for easier manipulation
-                // This gives us access to array methods and ensures consistent behavior
-                const childNodes = Array.from(tempContainer.childNodes);
-
-                // Check if template contains a single element node
-                // Single elements are preferred as they don't need wrapper containers
-                if (childNodes.length === 1 && childNodes[0].nodeType === Node.ELEMENT_NODE) {
-                    // Extract the single element from the temporary container
-                    const element = childNodes[0];
-
-                    // Create a deep clone to avoid modifying the original template
-                    // Deep cloning ensures all child elements and attributes are copied
-                    const clone = element.cloneNode(true);
-
-                    // Process the cloned element with current item data and parent scope
-                    // This handles binding resolution, nested loops, and variable substitution
-                    this.processForeachTemplate(clone, item, index, itemName, indexName, collectionName, parentVars);
-
-                    // Return the processed single element
-                    return clone;
-                }
-
-                // Handle multiple nodes or text nodes in template
-                // When template has multiple root elements, we need a wrapper container
-                const wrapper = document.createElement('span'); // Use span as lightweight wrapper
-
-                // Clone each child node and add to wrapper
-                // This preserves the original template structure while creating an isolated copy
-                childNodes.forEach(node => {
-                    // Clone each node (element, text, comment, etc.) and append to wrapper
-                    wrapper.appendChild(node.cloneNode(true));
-                });
-
-                // Process the entire wrapper with all child nodes
-                // The wrapper acts as a single root element for processing
-                this.processForeachTemplate(wrapper, item, index, itemName, indexName, collectionName, parentVars);
-
-                // Return the wrapper containing all processed template nodes
-                return wrapper;
             },
 
             /**
