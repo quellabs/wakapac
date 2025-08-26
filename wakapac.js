@@ -2824,65 +2824,38 @@
                 bindingElements.forEach(el => {
                     const bindingString = el.getAttribute('data-pac-bind');
 
-                    // Parse the binding string into individual binding pairs
-                    const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+                    if (!bindingString) {
+                        return;
+                    }
 
-                    // Process each binding type-target pair
-                    bindingPairs.forEach(({ type, target }) => {
+                    ExpressionParser.parseBindingString(bindingString).forEach(({ type, target }) => {
+                        // Handle nested foreach - existing code
                         if (type === 'foreach') {
-                            // Handle nested foreach bindings - create new foreach and process recursively
-                            const foreachBinding = {
-                                id: Date.now() + '_' + (Math.random() * 10000 | 0),
-                                type: 'foreach',
-                                element: el,
-                                collection: target,
-                                itemName: el.getAttribute('data-pac-item') || 'item',
-                                indexName: el.getAttribute('data-pac-index') || 'index',
-                                template: el.innerHTML,
-                                previous: null,
-                                fingerprints: null
-                            };
-
-                            // Clear element content and process as regular foreach with parent context
-                            el.innerHTML = '';
-                            this.applyForeachBinding(foreachBinding, null, contextVars);
-                        } else {
-                            // Handle regular bindings using existing infrastructure
-                            this.processRegularBinding(el, type, target, parentBinding, contextVars);
+                            return;
                         }
+
+                        // Set up two-way binding for form inputs if we're in a foreach context
+                        if (parentBinding && (type === 'value' || type === 'checked') && this.isNestedProperty(target, contextVars)) {
+                            const propertyPath = this.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
+                            this.setupInputElement(el, propertyPath, type);
+                        }
+
+                        // Handle event bindings specially if we're in foreach context
+                        if (Utils.isEventType(type) && parentBinding) {
+                            this.handleEventBinding(
+                                el, type, target,
+                                contextVars[parentBinding.itemName],
+                                contextVars[parentBinding.indexName]
+                            );
+
+                            return;
+                        }
+
+                        // Handle all other bindings using existing infrastructure
+                        const tempBinding = this.createEvaluationBinding(el, type, target);
+                        this.updateBinding(tempBinding, null, contextVars);
                     });
                 });
-            },
-
-            /**
-             * Processes regular (non-foreach) bindings using existing binding infrastructure
-             * @param {HTMLElement} element - Element with the binding
-             * @param {string} type - Binding type (value, visible, click, etc.)
-             * @param {string} target - Binding target/expression
-             * @param {Object} parentBinding - Parent binding context
-             * @param {Object} contextVars - Context variables for expression evaluation
-             */
-            processRegularBinding(element, type, target, parentBinding, contextVars) {
-                // Set up two-way binding for form inputs if we're in a foreach context
-                if (parentBinding && (type === 'value' || type === 'checked') && this.isNestedProperty(target, contextVars)) {
-                    const propertyPath = this.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
-                    this.setupInputElement(element, propertyPath, type);
-                }
-
-                // Handle event bindings specially if we're in foreach context
-                if (Utils.isEventType(type) && parentBinding) {
-                    this.handleEventBinding(
-                        element, type, target,
-                        contextVars[parentBinding.itemName],
-                        contextVars[parentBinding.indexName]
-                    );
-
-                    return;
-                }
-
-                // Handle regular bindings (visible, class, style, attributes, etc.)
-                const tempBinding = this.createEvaluationBinding(element, type, target);
-                this.updateBinding(tempBinding, null, contextVars);
             },
 
             /**
