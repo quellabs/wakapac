@@ -2758,25 +2758,63 @@
                 // Create a tree walker to traverse all text nodes in the element
                 const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
 
-                // Process each text node that contains interpolation patterns
-                let textNode;
+                // Collect all text nodes first to avoid modifying the tree while traversing
+                const textNodes = [];
+                let node;
+                while (node = walker.nextNode()) {
+                    textNodes.push(node);
+                }
 
-                while (textNode = walker.nextNode()) {
-                    const text = textNode.textContent;
+                // Create evaluation context
+                const context = Object.assign({}, this.abstraction, contextVars);
+
+                // Process each text node that contains interpolation patterns
+                textNodes.forEach(textNode => {
+                    // Fetch original text to replace
+                    const originalText = textNode.textContent;
 
                     // Only process nodes that have interpolation patterns
-                    if (/\{\{\s*[^}]+\s*\}\}/.test(text)) {
-                        // Create minimal binding object for existing updateTextBinding method
-                        const binding = {
-                            id: Utils.generateId(),
-                            element: textNode,
-                            originalText: text
-                        };
-
-                        // Use existing updateTextBinding with context support
-                        this.applyTextBinding(binding, null, contextVars);
+                    if (/\{\{\s*[^}]+\s*\}\}/.test(originalText)) {
+                        textNode.textContent = this.processTextInterpolation(originalText, context);
                     }
+                });
+            },
+
+            /**
+             * Processes text interpolation by finding and evaluating expressions within double curly braces.
+             * Replaces {{expression}} patterns with their evaluated values from the provided context.
+             * @param {string|null|undefined} textContent - The text content containing interpolation patterns
+             * @param {Object} context - The context object containing variables and values for expression evaluation
+             * @returns {string} The processed text with interpolations replaced by their evaluated values
+             * @throws Will log warnings to console if expression evaluation fails, but won't throw errors
+             * @see ExpressionParser.parseExpression
+             * @see ExpressionParser.evaluate
+             * @see Utils.formatValue
+             */
+            processTextInterpolation(textContent, context) {
+                // Convert to string and handle null/undefined cases
+                let text = String(textContent || '');
+
+                // Find ALL interpolation patterns in the text
+                const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+
+                if (matches) {
+                    matches.forEach(match => {
+                        const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
+
+                        try {
+                            const parsed = ExpressionParser.parseExpression(expression);
+                            const result = ExpressionParser.evaluate(parsed, context);
+                            const formattedValue = Utils.formatValue(result);
+
+                            text = text.replace(match, formattedValue);
+                        } catch (error) {
+                            console.warn(`Error evaluating expression "${expression}":`, error);
+                        }
+                    });
                 }
+
+                return text;
             },
 
             /**
@@ -3982,36 +4020,22 @@
              */
             applyTextBinding(binding, property, contextVars = null) {
                 const textNode = binding.element;
-                let text = binding.originalText;
 
-                // Find ALL interpolation patterns in the original text
-                const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+                // Create evaluation context - merge abstraction with optional context
+                const context = contextVars ?
+                    Object.assign({}, this.abstraction, contextVars) :
+                    this.abstraction;
 
-                if (matches) {
-                    // Replace each match with its evaluated value
-                    matches.forEach(match => {
-                        const expression = match.replace(/[{}\s]/g, '');
+                // Use the shared interpolation utility
+                const newText = this.processTextInterpolation(binding.originalText, context);
 
-                        // Create evaluation context - merge abstraction with optional context
-                        const context = contextVars ?
-                            Object.assign({}, this.abstraction, contextVars) :
-                            this.abstraction;
-
-                        const parsed = ExpressionParser.parseExpression(expression);
-                        const result = ExpressionParser.evaluate(parsed, context);
-                        const formattedValue = Utils.formatValue(result);
-
-                        text = text.replace(match, formattedValue);
-                    });
-                }
-
-                // Update text content if changed
+                // Update text content if changed (with caching)
                 const cacheKey = `text_${binding.id}`;
                 const lastValue = this.lastValues.get(cacheKey);
 
-                if (lastValue !== text) {
-                    this.lastValues.set(cacheKey, text);
-                    textNode.textContent = text;
+                if (lastValue !== newText) {
+                    this.lastValues.set(cacheKey, newText);
+                    textNode.textContent = newText;
                 }
             },
 
