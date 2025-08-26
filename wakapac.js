@@ -2750,23 +2750,6 @@
             },
 
             /**
-             * Universal binding processor that handles all types of bindings on an element tree.
-             * This is the core function that processes text interpolation, attribute bindings,
-             * and nested foreach loops. Reuses existing framework methods where possible.
-             * @param {HTMLElement} element - The DOM element to process bindings on
-             * @param {Object} [contextVars={}] - Variables available for binding evaluation (foreach vars, etc.)
-             * @param {Object} [parentBinding=null] - Parent binding context for nested scenarios
-             * @returns {void}
-             */
-            processElementBindings(element, contextVars = {}, parentBinding = null) {
-                // 1. Process text interpolation using existing text binding infrastructure
-                this.processTextBindingsForElement(element, contextVars);
-
-                // 2. Process attribute bindings using existing attribute binding system
-                this.processAttributeBindingsForElement(element, contextVars, parentBinding);
-            },
-
-            /**
              * Processes text interpolation bindings for an element by reusing existing text binding logic
              * @param {HTMLElement} element - The DOM element to process text bindings on
              * @param {Object} contextVars - Context variables for expression evaluation
@@ -4102,8 +4085,13 @@
                         [binding.indexName]: index
                     });
 
-                    // Process all bindings on the item element
-                    this.processElementBindings(itemElement, itemContext, binding);
+                    // Process text interpolation using existing text binding infrastructure
+                    this.processTextBindingsForElement(itemElement, itemContext);
+
+                    // Process attribute bindings using existing attribute binding system
+                    this.processAttributeBindingsForElement(itemElement, itemContext, binding);
+
+                    // Add itemElement to fragment
                     fragment.appendChild(itemElement);
                 });
 
