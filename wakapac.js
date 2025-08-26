@@ -190,33 +190,12 @@
         },
 
         /**
-         * Generates a unique identifier
-         * @returns {string} Unique ID string
-         */
-        generateId() {
-            return Date.now() + '_' + (Math.random() * 10000 | 0);
-        },
-
-        /**
          * Checks if a string represents a DOM event type
          * @param {string} type - Event type to test
          * @returns {boolean} True if it's a valid event type
          */
         isEventType(type) {
             return /^(click|submit|change|input|focus|blur|key(up|down))$/.test(type);
-        },
-
-        /**
-         * Splits a property path into segments with caching
-         * @param {string} path - Property path like "user.profile.name"
-         * @returns {string[]} Array of path segments
-         */
-        splitPath(path) {
-            if (!path || typeof path !== 'string') {
-                return [];
-            }
-
-            return path.split('.');
         },
 
         /**
@@ -230,7 +209,7 @@
                 return obj;
             }
 
-            return Utils.splitPath(path).reduce((current, segment) => {
+            return path.split('.').reduce((current, segment) => {
                 return current && current.hasOwnProperty(segment) ? current[segment] : undefined;
             }, obj);
         },
@@ -353,7 +332,6 @@
 
             // Find child components
             const children = [];
-
             this.components.forEach(component => {
                 if (container.contains(component.container) && component.container !== container) {
                     children.push(component);
@@ -2254,7 +2232,7 @@
              */
             createBinding(type, element, config) {
                 const binding = {
-                    id: Utils.generateId(),
+                    id: Date.now() + '_' + (Math.random() * 10000 | 0),
                     type: type,
                     element: element,
                     ...config
@@ -2262,7 +2240,7 @@
 
                 // Add property tracking
                 if (config.target) {
-                    binding.property = Utils.splitPath(config.target)[0];
+                    binding.property = config.target.split('.')[0];
                     binding.propertyPath = config.target;
                 }
 
@@ -2854,7 +2832,7 @@
                         if (type === 'foreach') {
                             // Handle nested foreach bindings - create new foreach and process recursively
                             const foreachBinding = {
-                                id: Utils.generateId(),
+                                id: Date.now() + '_' + (Math.random() * 10000 | 0),
                                 type: 'foreach',
                                 element: el,
                                 collection: target,
@@ -2920,7 +2898,7 @@
                 const bindingType = BINDING_TYPE_MAP[type] || 'attribute';
 
                 return {
-                    id: `eval_${Utils.generateId()}`,
+                    id: `eval_${Date.now() + '_' + (Math.random() * 10000 | 0)}`,
                     type: bindingType,
                     element: element,
                     target: target,
