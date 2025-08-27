@@ -3753,14 +3753,12 @@
                 // Check if selector starts with '#' to use getElementById for better performance
                 let element;
 
-                if (typeof elementOrSelector === 'string') {
-                    if (elementOrSelector.startsWith('#')) {
-                        element = document.getElementById(elementOrSelector.slice(1));
-                    } else {
-                        element = document.querySelector(elementOrSelector);
-                    }
-                } else if (elementOrSelector && elementOrSelector.nodeType) {
-                    element = elementOrSelector;
+                if (typeof elementOrSelector !== 'string') {
+                    element = elementOrSelector && elementOrSelector.nodeType ? elementOrSelector : null;
+                } else if (elementOrSelector.startsWith('#')) {
+                    element = document.getElementById(elementOrSelector.slice(1));
+                } else {
+                    element = document.querySelector(elementOrSelector);
                 }
 
                 // Early return if element doesn't exist to prevent errors
@@ -3780,7 +3778,7 @@
                     case element.type === 'radio': {
                         // Radio buttons work in groups, so find the currently checked one
                         // Use the 'name' attribute to identify radio buttons in the same group
-                        const checkedRadio = document.querySelector(`input[name="${element.name}"]:checked`);
+                        const checkedRadio = document.querySelector('input[name="' + element.name + '"]:checked');
                         return checkedRadio ? checkedRadio.value : ''; // Get value or empty string
                     }
 
@@ -3792,6 +3790,76 @@
                         // textContent gets all text including hidden elements
                         // innerText respects styling and returns visible text only
                         return element.textContent || element.innerText;
+                }
+            },
+
+            /**
+             * Sets a value to a DOM element (input, select, textarea, etc.)
+             * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
+             * @param {string|boolean} value - The value to set (string for most inputs, boolean for checkboxes)
+             * @returns {boolean} True if value was set successfully, false otherwise
+             */
+            writeDOMValue: (elementOrSelector, value) => {
+                // Find the element using either ID selector (#id) or CSS selector
+                // Check if selector starts with '#' to use getElementById for better performance
+                let element;
+
+                if (typeof elementOrSelector !== 'string') {
+                    element = elementOrSelector && elementOrSelector.nodeType ? elementOrSelector : null;
+                } else if (elementOrSelector.startsWith('#')) {
+                    element = document.getElementById(elementOrSelector.slice(1));
+                } else {
+                    element = document.querySelector(elementOrSelector);
+                }
+
+                // Early return if element doesn't exist to prevent errors
+                if (!element) {
+                    console.warn('Element not found: ' + elementOrSelector);
+                    return false;
+                }
+
+                // Use switch(true) pattern to check multiple conditions in order of priority
+                switch (true) {
+                    case element.tagName === 'SELECT': {
+                        element.value = value;
+                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+
+                    case element.type === 'checkbox': {
+                        element.checked = Boolean(value);
+                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+
+                    case element.type === 'radio': {
+                        // Radio buttons work in groups, so find the one with matching value
+                        // Use the 'name' attribute to identify radio buttons in the same group
+                        const targetRadio = document.querySelector('input[name="' + element.name + '"][value="' + value + '"]');
+
+                        if (targetRadio) {
+                            targetRadio.checked = true;
+                            targetRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                            return true;
+                        } else {
+                            console.warn('Radio button with value "' + value + '" not found in group "' + element.name + '"');
+                            return false;
+                        }
+                    }
+
+                    case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA': {
+                        element.value = value;
+                        element.dispatchEvent(new Event('input', { bubbles: true }));
+                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+
+                    default: {
+                        // Set text content for other elements
+                        // Use textContent to set plain text (safer than innerHTML)
+                        element.textContent = value;
+                        return true;
+                    }
                 }
             },
 
@@ -4303,6 +4371,14 @@
                  * @returns {boolean|boolean|*|string|string}
                  */
                 readDOMValue: (elementSelector) => control.readDOMValue(elementSelector),
+
+                /**
+                 * Sets a value to a DOM element (input, select, textarea, etc.)
+                 * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
+                 * @param {string|boolean} value - The value to set (string for most inputs, boolean for checkboxes)
+                 * @returns {boolean} True if value was set successfully, false otherwise
+                 */
+                writeDOMValue: (elementOrSelector, value) => control.writeDOMValue(elementOrSelector, value),
 
                 /**
                  * Formats a value for display in text content or UI elements
