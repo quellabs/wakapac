@@ -3837,14 +3837,14 @@
                         // Use the 'name' attribute to identify radio buttons in the same group
                         const targetRadio = document.querySelector('input[name="' + element.name + '"][value="' + value + '"]');
 
-                        if (targetRadio) {
-                            targetRadio.checked = true;
-                            targetRadio.dispatchEvent(new Event('change', { bubbles: true }));
-                            return true;
-                        } else {
+                        if (!targetRadio) {
                             console.warn('Radio button with value "' + value + '" not found in group "' + element.name + '"');
                             return false;
                         }
+
+                        targetRadio.checked = true;
+                        targetRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
                     }
 
                     case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA': {
