@@ -3575,56 +3575,6 @@
             },
 
             /**
-             * Remove all previously applied classes from the element
-             * @param {HTMLElement} element - The target DOM element
-             */
-            clearPreviousClasses(element) {
-                const previousClasses = element.dataset.pacPreviousClasses;
-
-                if (previousClasses) {
-                    previousClasses.split(' ').forEach(cls => {
-                        if (cls.trim()) {
-                            element.classList.remove(cls.trim());
-                        }
-                    });
-                }
-            },
-
-            /**
-             * Parse different value types and return array of class names to apply
-             * @param {*} value - The evaluated expression value
-             * @returns {string[]} Array of valid class names
-             */
-            parseClassValue(value) {
-                // Object syntax: { className: boolean, className2: boolean }
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    return Object.entries(value)
-                        .filter(([className, isActive]) => isActive && className.trim())
-                        .map(([className]) => className.trim());
-                }
-
-                // Array of class names
-                if (Array.isArray(value)) {
-                    return value
-                        .filter(cls => cls && typeof cls === 'string' && cls.trim())
-                        .map(cls => cls.trim());
-                }
-
-                // String value - single class or space-separated classes
-                if (typeof value === 'string') {
-                    return value.trim().split(/\s+/).filter(cls => cls.trim());
-                }
-
-                // Truthy non-string value - convert to string
-                if (value) {
-                    const className = String(value).trim();
-                    return className ? [className] : [];
-                }
-
-                return [];
-            },
-
-            /**
              * Applies text binding to update DOM element content with interpolated values
              * @param {Object} binding - Binding object containing element reference and original text
              * @param {string} property - The property name being bound (for potential debugging/logging)
@@ -3744,6 +3694,56 @@
 
                 // Replace all existing content with new rendered items
                 binding.element.appendChild(fragment);
+            },
+
+            /**
+             * Remove all previously applied classes from the element
+             * @param {HTMLElement} element - The target DOM element
+             */
+            clearPreviousClasses(element) {
+                const previousClasses = element.dataset.pacPreviousClasses;
+
+                if (previousClasses) {
+                    previousClasses.split(' ').forEach(cls => {
+                        if (cls.trim()) {
+                            element.classList.remove(cls.trim());
+                        }
+                    });
+                }
+            },
+
+            /**
+             * Parse different value types and return array of class names to apply
+             * @param {*} value - The evaluated expression value
+             * @returns {string[]} Array of valid class names
+             */
+            parseClassValue(value) {
+                // Object syntax: { className: boolean, className2: boolean }
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    return Object.entries(value)
+                        .filter(([className, isActive]) => isActive && className.trim())
+                        .map(([className]) => className.trim());
+                }
+
+                // Array of class names
+                if (Array.isArray(value)) {
+                    return value
+                        .filter(cls => cls && typeof cls === 'string' && cls.trim())
+                        .map(cls => cls.trim());
+                }
+
+                // String value - single class or space-separated classes
+                if (typeof value === 'string') {
+                    return value.trim().split(/\s+/).filter(cls => cls.trim());
+                }
+
+                // Truthy non-string value - convert to string
+                if (value) {
+                    const className = String(value).trim();
+                    return className ? [className] : [];
+                }
+
+                return [];
             },
 
             /**
