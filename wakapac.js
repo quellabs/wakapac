@@ -348,8 +348,7 @@
                 current = current[parts[i]];
 
                 // Check if the current path exists - if not, we can't set the property
-                if (!current) {
-                    // Show which part of the path failed for debugging purposes
+                if (!current || typeof current !== 'object') {
                     console.warn('Cannot set property: ' + propertyPath + ' - path not found at \'' + parts.slice(0, i + 1).join('.') + '\'');
                     return;
                 }
@@ -851,6 +850,12 @@
          * @returns {Object|null} Parsed AST node or null if unparseable
          */
         parseExpression(expression) {
+            // Limit cache
+            if (this.cache.size > 1000) {
+                const firstKey = this.cache.keys().next().value;
+                this.cache.delete(firstKey);
+            }
+
             // Handle already parsed objects
             if (typeof expression === 'object' && expression !== null) {
                 if (expression.dependencies) {
@@ -861,6 +866,7 @@
                 return Object.assign({}, expression, {dependencies});
             }
 
+            // Remove whitespace around expression
             expression = String(expression).trim();
 
             // Check cache first
