@@ -2917,7 +2917,10 @@
                             const result = ExpressionParser.evaluate(parsed, context);
                             const formattedValue = Utils.formatValue(result);
 
-                            text = text.replace(match, formattedValue);
+                            // Automatically sanitize all interpolated values
+                            const sanitizedValue = Utils.sanitizeUserInput(formattedValue);
+
+                            text = text.replace(match, sanitizedValue);
                         } catch (error) {
                             console.warn('Error evaluating expression "' + expression + '":', error);
                         }
