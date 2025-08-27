@@ -314,7 +314,11 @@
             }
 
             return path.split('.').reduce((current, segment) => {
-                return current && current.hasOwnProperty(segment) ? current[segment] : undefined;
+                if (current && current.hasOwnProperty(segment)) {
+                    return current[segment];
+                } else {
+                    return undefined;
+                }
             }, obj);
         },
 
