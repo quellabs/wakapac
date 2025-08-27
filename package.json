@@ -1,5 +1,13 @@
 {
   "scripts": {
     "minify": "terser wakapac.js -c passes=3,drop_console=true -m toplevel=true -o wakapac.min.js"
+  },
+  "dependencies": {
+    "jslint": "^0.12.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "eslint": "^9.34.0",
+    "globals": "^16.3.0"
   }
 }

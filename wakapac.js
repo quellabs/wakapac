@@ -195,7 +195,7 @@
             const keysB = Object.keys(b);
 
             return keysA.length === keysB.length &&
-                keysA.every(key => b.hasOwnProperty(key) && Utils.isEqual(a[key], b[key]));
+                keysA.every(key => Object.prototype.hasOwnProperty.call(b, key) && Utils.isEqual(a[key], b[key]));
         },
 
         /**
@@ -287,7 +287,7 @@
 
             // Walk through each text node and add it to our collection
             let node;
-            while (node = walker.nextNode()) {
+            while ((node = walker.nextNode())) {
                 textNodes.push(node);
             }
 
@@ -314,7 +314,7 @@
             }
 
             return path.split('.').reduce((current, segment) => {
-                if (current && current.hasOwnProperty(segment)) {
+                if (current && Object.prototype.hasOwnProperty.call(current, segment)) {
                     return current[segment];
                 } else {
                     return undefined;
@@ -384,7 +384,7 @@
          * @returns {string} The absolute property path for data binding, or original target if no match
          */
         buildNestedPropertyPath(target, foreachVars, collectionName, index) {
-            for (const [varName, varValue] of Object.entries(foreachVars)) {
+            for (const [varName] of Object.entries(foreachVars)) {
                 if (target.startsWith(`${varName}.`)) {
                     const propertyPath = target.substring(varName.length + 1);
                     return collectionName + '.' + index + '.' + propertyPath;
@@ -532,7 +532,7 @@
     function makeNestedReactive(target, onChange, path) {
         // Iterate through all enumerable properties of the target object
         Object.keys(target).forEach(key => {
-            if (target.hasOwnProperty(key) && Utils.isReactive(target[key])) {
+            if (Object.prototype.hasOwnProperty.call(target, key) && Utils.isReactive(target[key])) {
                 target[key] = createReactive(target[key], onChange, path ? `${path}.${key}` : key);
             }
         });
@@ -1336,14 +1336,15 @@
                 case 'object':
                     return this.evaluateObjectLiteral(parsedExpr, context);
 
-                case 'ternary':
+                case 'ternary': {
                     const condition = this.evaluate(parsedExpr.condition, context);
 
                     return condition ?
                         this.evaluate(parsedExpr.trueValue, context) :
                         this.evaluate(parsedExpr.falseValue, context);
+                }
 
-                case 'logical':
+                case 'logical': {
                     const leftLogical = this.evaluate(parsedExpr.left, context);
 
                     if (parsedExpr.operator === '&&') {
@@ -1353,14 +1354,16 @@
                     } else {
                         return false;
                     }
+                }
 
                 case 'comparison':
-                case 'arithmetic':
+                case 'arithmetic': {
                     const leftVal = this.evaluate(parsedExpr.left, context);
                     const rightVal = this.evaluate(parsedExpr.right, context);
                     return this.performOperation(leftVal, parsedExpr.operator, rightVal);
+                }
 
-                case 'unary':
+                case 'unary': {
                     const operandValue = this.evaluate(parsedExpr.operand, context);
 
                     switch (parsedExpr.operator) {
@@ -1376,6 +1379,7 @@
                         default:
                             return operandValue;
                     }
+                }
 
                 default:
                     return undefined;
@@ -1434,14 +1438,15 @@
                 if (!n) return;
 
                 switch (n.type) {
-                    case 'property':
-                        const rootProp = n.path.split(/[.\[]/, 1)[0];
+                    case 'property': {
+                        const rootProp = n.path.split(/[.[]/, 1)[0];
 
                         if (rootProp && !['true', 'false', 'null', 'undefined'].includes(rootProp)) {
                             dependencies.add(rootProp);
                         }
 
                         break;
+                    }
 
                     case 'ternary':
                         traverse(n.condition);
@@ -1699,7 +1704,7 @@
                 Object.keys(this.original).forEach(key => {
                     // Only process own properties, skip inherited ones and the 'computed' key
                     // which was already handled by setupComputedProperties
-                    if (this.original.hasOwnProperty(key) && key !== 'computed') {
+                    if (Object.prototype.hasOwnProperty.call(this.original, key) && key !== 'computed') {
                         // Read value
                         const value = this.original[key];
 
@@ -1812,8 +1817,8 @@
                     // 1. Property exists in either the original object or reactive object
                     // 2. Property is NOT a computed property (to avoid circular dependencies)
                     // 3. Property hasn't already been added to dependencies (avoid duplicates)
-                    if ((this.original.hasOwnProperty(property) || reactive.hasOwnProperty(property)) &&
-                        (!this.original.computed || !this.original.computed.hasOwnProperty(property)) &&
+                    if ((Object.prototype.hasOwnProperty.call(this.original, property) || Object.prototype.hasOwnProperty.call(reactive, property)) &&
+                        (!this.original.computed || !Object.prototype.hasOwnProperty.call(this.original.computed, property)) &&
                         !dependencies.includes(property)) {
                         // Add the valid dependency to our list
                         dependencies.push(property);
@@ -2214,17 +2219,16 @@
                 );
 
                 let node;
-                let nodeCount = 0;
 
-                while (node = walker.nextNode()) {
-                    nodeCount++;
+                while ((node = walker.nextNode())) {
+                    // Fetch the text
                     const text = node.textContent;
 
                     // Enhanced regex to catch ALL interpolation patterns, including complex expressions
                     const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
 
                     if (matches) {
-                        matches.forEach((match, index) => {
+                        matches.forEach((match) => {
                             const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
 
                             const binding = this.createBinding('text', node, {
@@ -2622,7 +2626,7 @@
 
                 // For lazy-parsed expressions, parse them now if needed
                 if (binding.target && !binding.dependencies) {
-                    const parsed = this.getParsedExpression(binding);
+                    this.getParsedExpression(binding);
                 }
 
                 // Expression dependencies
@@ -2737,7 +2741,7 @@
             performInitialUpdate() {
                 // Update all regular properties
                 Object.keys(this.abstraction).forEach(key => {
-                    if (this.abstraction.hasOwnProperty(key) && typeof this.abstraction[key] !== 'function') {
+                    if (Object.prototype.hasOwnProperty.call(this.abstraction, key) && typeof this.abstraction[key] !== 'function') {
                         this.scheduleUpdate(key, this.abstraction[key]);
                     }
                 });
@@ -3168,9 +3172,6 @@
             handleInputEvent(event, target, property) {
                 // Determine the update mode - check element's data attribute first, fall back to global config
                 const updateMode = target.getAttribute('data-pac-update-mode') || this.config.updateMode;
-
-                // Determine the binding type - 'value' for most inputs, 'checked' for checkboxes/radios
-                const bindingType = target.getAttribute('data-pac-binding-type') || 'value';
 
                 // Extract the appropriate value based on the input type
                 const value = this.readDOMValue(target);
@@ -3780,11 +3781,12 @@
                     case element.type === 'checkbox':
                         return element.checked; // true/false based on checked state
 
-                    case element.type === 'radio':
+                    case element.type === 'radio': {
                         // Radio buttons work in groups, so find the currently checked one
                         // Use the 'name' attribute to identify radio buttons in the same group
                         const checkedRadio = document.querySelector(`input[name="${element.name}"]:checked`);
                         return checkedRadio ? checkedRadio.value : ''; // Get value or empty string
+                    }
 
                     case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA':
                         return element.value; // Get the input value
@@ -4412,7 +4414,9 @@
     window.wakaPAC = wakaPAC;
 
     // Export for CommonJS/Node.js environments
+    // eslint-disable-next-line no-undef
     if (typeof module !== 'undefined' && module.exports) {
+        // eslint-disable-next-line no-undef
         module.exports = {wakaPAC, ComponentRegistry, Utils};
     }
 })();
