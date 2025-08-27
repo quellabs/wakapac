@@ -208,22 +208,6 @@
         },
 
         /**
-         * Safely resolves a nested property path
-         * @param {Object} obj - Object to traverse
-         * @param {string} path - Property path
-         * @returns {*} Resolved value or undefined
-         */
-        getNestedValue(obj, path) {
-            if (!path) {
-                return obj;
-            }
-
-            return path.split('.').reduce((current, segment) => {
-                return current && current.hasOwnProperty(segment) ? current[segment] : undefined;
-            }, obj);
-        },
-
-        /**
          * Formats a value for display in text content
          * @param {*} value - Value to format
          * @returns {string} Formatted string
@@ -287,8 +271,94 @@
                 x: domRect.x,               // Same as left, but included for DOMRect compatibility
                 y: domRect.y                // Same as top, but included for DOMRect compatibility
             };
-        }
+        },
+
+        /**
+         * Collects all text nodes within a given DOM element using TreeWalker
+         * @param {Element} element - The DOM element to traverse for text nodes
+         * @returns {Text[]} Array of all text nodes found within the element
+         */
+        getTextNodesFromElement(element) {
+            // Create a tree walker to traverse all text nodes in the element
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+
+            // Collect all text nodes first to avoid modifying the tree while traversing
+            const textNodes = [];
+
+            // Walk through each text node and add it to our collection
+            let node;
+            while (node = walker.nextNode()) {
+                textNodes.push(node);
+            }
+
+            // Return the text nodes
+            return textNodes;
+        },
     };
+
+    // =============================================================================
+    // Unified Property Path Utility
+    // =============================================================================
+
+    const PropertyPath = {
+
+        /**
+         * Safely resolves a nested property path
+         * @param {Object} obj - Object to traverse
+         * @param {string} path - Property path
+         * @returns {*} Resolved value or undefined
+         */
+        get(obj, path) {
+            if (!path) {
+                return obj;
+            }
+
+            return path.split('.').reduce((current, segment) => {
+                return current && current.hasOwnProperty(segment) ? current[segment] : undefined;
+            }, obj);
+        },
+
+        /**
+         * Sets a nested property value (e.g., "todos.0.completed" = true)
+         * @param {Object} control
+         * @param {string} propertyPath - Dot-separated property path
+         * @param {*} value - Value to set
+         */
+        set(control, propertyPath, value) {
+            // Split the property path into individual parts (e.g., "todos.0.completed" → ["todos", "0", "completed"])
+            const parts = propertyPath.split('.');
+
+            // Simple property (no nesting)
+            // If there's only one part, we're setting a top-level property directly
+            if (parts.length === 1) {
+                control.abstraction[propertyPath] = value;
+                return;
+            }
+
+            // Navigate to the parent object
+            // We need to traverse through all parts except the last one to reach the parent
+            let current = control.abstraction;
+
+            for (let i = 0; i < parts.length - 1; i++) {
+                // Move deeper into the nested structure using the current part as a key
+                current = current[parts[i]];
+
+                // Check if the current path exists - if not, we can't set the property
+                if (!current) {
+                    // Show which part of the path failed for debugging purposes
+                    console.warn('Cannot set property: ' + propertyPath + ' - path not found at \'' + parts.slice(0, i + 1).join('.') + '\'');
+                    return;
+                }
+            }
+
+            // Set the final property
+            // Extract the last part of the path (the actual property name to set)
+            const finalProperty = parts[parts.length - 1];
+
+            // Set the value on the parent object we navigated to
+            current[finalProperty] = value;
+        }
+    }
 
     // =============================================================================
     // COMPONENT REGISTRY
@@ -1223,7 +1293,7 @@
                     return parsedExpr.value;
 
                 case 'property':
-                    return Utils.getNestedValue(context, parsedExpr.path);
+                    return PropertyPath.get(context, parsedExpr.path);
 
                 case 'parentheses':
                     return this.evaluate(parsedExpr.inner, context);
@@ -2287,43 +2357,35 @@
              * @returns {Object|null} The created binding object, or null if invalid
              */
             createBindingByType(element, type, target) {
-                switch (type) {
-                    case 'value':
-                        return this.createValueBinding(element, target);
+                const bindingMap = {
+                    'value': () => this.createValueBinding(element, target),
+                    'visible': () => this.createVisibilityBinding(element, target),
+                    'checked': () => this.createCheckedBinding(element, target),
+                    'class': () => this.createClassBinding(element, target),
+                    'style': () => this.createStyleBinding(element, target),
+                    'if': () => this.createConditionalBinding(element, target),
+                    'foreach': () => this.createForeachBinding(element, target)
+                };
 
-                    case 'visible':
-                        return this.createVisibilityBinding(element, target);
-
-                    case 'checked':
-                        return this.createCheckedBinding(element, target);
-
-                    case 'class':
-                        return this.createClassBinding(element, target);
-
-                    case 'style':
-                        return this.createStyleBinding(element, target);
-
-                    case 'if':
-                        return this.createConditionalBinding(element, target);
-
-                    case 'foreach':
-                        return this.createForeachBinding(element, target);
-
-                    default:
-                        if (Utils.isEventType(type)) {
-                            return this.createEventBinding(element, type, target);
-                        } else if (target) {
-                            return this.createAttributeBinding(element, type, target);
-                        } else {
-                            return null;
-                        }
+                if (bindingMap[type]) {
+                    return bindingMap[type]();
                 }
+
+                if (Utils.isEventType(type)) {
+                    return this.createEventBinding(element, type, target);
+                }
+
+                return target ? this.createAttributeBinding(element, type, target) : null;
             },
 
             /**
-             * Creates a foreach binding for rendering lists
+             * Creates a foreach binding for rendering dynamic lists of data
+             * @param {HTMLElement} element - The DOM element that will contain the rendered list
+             * @param {string|Array} target - The data source (property path or array) to iterate over
+             * @returns {Object} The created binding element object for further manipulation
              */
             createForeachBinding(element, target) {
+                // Create the binding object with foreach-specific configuration
                 const bindingElement = this.createBinding('foreach', element, {
                     target: target,
                     collection: target,
@@ -2334,8 +2396,11 @@
                     fingerprints: null
                 });
 
+                // Clear the element content since we'll populate it dynamically
+                // The original template is preserved in bindingElement.template
                 element.innerHTML = '';
 
+                // Return the binding for potential chaining or further configuration
                 return bindingElement;
             },
 
@@ -2358,18 +2423,24 @@
             },
 
             /**
-             * Creates a value binding
+             * Creates a value binding for form elements
+             * @param {HTMLElement} element - The DOM element to bind
+             * @param {string} target - The target property path for binding
+             * @returns {Object} The created input binding object
              */
             createValueBinding(element, target) {
                 // Add attributes to element
                 this.setupInputElement(element, target);
-                
+
                 // Create an input binding
                 return this.createInputBinding(element, target);
             },
 
             /**
-             * Creates a visibility binding
+             * Creates a visibility binding to show/hide elements based on data
+             * @param {HTMLElement} element - The DOM element to control visibility
+             * @param {string} target - The target property path that determines visibility
+             * @returns {Object} The created visibility binding object
              */
             createVisibilityBinding(element, target) {
                 return this.createBinding('visible', element, {
@@ -2380,7 +2451,10 @@
             },
 
             /**
-             * Creates an input value binding
+             * Creates an input value binding with configurable update behavior
+             * @param {HTMLElement} element - The input element to bind
+             * @param {string} target - The target property path for two-way binding
+             * @returns {Object} The created input binding object with update configuration
              */
             createInputBinding(element, target) {
                 return this.createBinding('input', element, {
@@ -2391,17 +2465,24 @@
             },
 
             /**
-             * Creates a checkbox/radio checked binding
+             * Creates a checkbox/radio checked binding with special handling for radio buttons
+             * @param {HTMLElement} element - The checkbox or radio input element
+             * @param {string} target - The target property path for the checked state
+             * @returns {Object} The created checked binding object
+             * @throws {Warning} Logs warning if used with radio buttons (should use value binding instead)
              */
             createCheckedBinding(element, target) {
+                // Special case for radio buttons
                 if (element.type === 'radio') {
                     console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
                     this.setupInputElement(element, target);
                     return this.createInputBinding(element, target);
                 }
 
+                // Setup input element
                 this.setupInputElement(element, target, 'checked');
 
+                // Create the binding
                 return this.createBinding('checked', element, {
                     target: target,
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
@@ -2424,7 +2505,11 @@
             },
 
             /**
-             * Creates an event binding
+             * Creates an event binding between a DOM element and a target method
+             * @param {Element} element - The DOM element to bind the event to
+             * @param {string} eventType - The type of event to listen for (e.g., 'click', 'change', 'input')
+             * @param {string|Function} target - The target method name or function to execute when the event occurs
+             * @returns {Object} The created event binding object
              */
             createEventBinding(element, eventType, target) {
                 return this.createBinding('event', element, {
@@ -2435,7 +2520,11 @@
             },
 
             /**
-             * Creates an attribute binding
+             * Creates an attribute binding between a DOM element attribute and a target value
+             * @param {Element} element - The DOM element whose attribute will be bound
+             * @param {string} attributeName - The name of the attribute to bind (e.g., 'class', 'disabled', 'value')
+             * @param {string} target - The target property or expression that will provide the attribute value
+             * @returns {Object} The created attribute binding object with target, attribute, parsedExpression, and dependencies properties
              */
             createAttributeBinding(element, attributeName, target) {
                 return this.createBinding('attribute', element, {
@@ -2751,16 +2840,8 @@
              * @param {Object} contextVars - Context variables for expression evaluation
              */
             processTextBindingsForElement(element, contextVars) {
-                // Create a tree walker to traverse all text nodes in the element
-                const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
-
                 // Collect all text nodes first to avoid modifying the tree while traversing
-                const textNodes = [];
-
-                let node;
-                while (node = walker.nextNode()) {
-                    textNodes.push(node);
-                }
+                const textNodes = Utils.getTextNodesFromElement(element);
 
                 // Create evaluation context
                 const context = Object.assign({}, this.abstraction, contextVars);
@@ -3125,7 +3206,7 @@
                 switch (updateMode) {
                     case 'immediate':
                         // Update the data model immediately as the user types/changes the input
-                        this.setNestedProperty(property, value);
+                        PropertyPath.set(control, property, value);
                         break;
 
                     case 'delayed':
@@ -3138,7 +3219,7 @@
                         // Only update when the input loses focus or user explicitly commits the change
                         // This prevents updates during intermediate typing states
                         if (event.type === 'change') {
-                            this.setNestedProperty(property, value);
+                            PropertyPath.set(control, property, value);
                         }
 
                         break;
@@ -3349,48 +3430,6 @@
 
                 // Schedule root property updates
                 this.scheduleUpdate(rootProperty, rootValue);
-            },
-
-            // === UTILITY METHODS SECTION ===
-
-            /**
-             * Sets a nested property value (e.g., "todos.0.completed" = true)
-             * @param {string} propertyPath - Dot-separated property path
-             * @param {*} value - Value to set
-             */
-            setNestedProperty(propertyPath, value) {
-                // Split the property path into individual parts (e.g., "todos.0.completed" → ["todos", "0", "completed"])
-                const parts = propertyPath.split('.');
-
-                // Simple property (no nesting)
-                // If there's only one part, we're setting a top-level property directly
-                if (parts.length === 1) {
-                    this.abstraction[propertyPath] = value;
-                    return;
-                }
-
-                // Navigate to the parent object
-                // We need to traverse through all parts except the last one to reach the parent
-                let current = this.abstraction;
-
-                for (let i = 0; i < parts.length - 1; i++) {
-                    // Move deeper into the nested structure using the current part as a key
-                    current = current[parts[i]];
-
-                    // Check if the current path exists - if not, we can't set the property
-                    if (!current) {
-                        // Show which part of the path failed for debugging purposes
-                        console.warn('Cannot set property: ' + propertyPath + ' - path not found at \'' + parts.slice(0, i + 1).join('.') + '\'');
-                        return;
-                    }
-                }
-
-                // Set the final property
-                // Extract the last part of the path (the actual property name to set)
-                const finalProperty = parts[parts.length - 1];
-
-                // Set the value on the parent object we navigated to
-                current[finalProperty] = value;
             },
 
             /**
