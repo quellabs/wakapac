@@ -361,6 +361,37 @@
 
             // Set the value on the parent object we navigated to
             current[finalProperty] = value;
+        },
+
+        /**
+         * Checks if a target expression represents a nested property that should use foreach variables.
+         * @param {string} target - The binding target expression to check (e.g., "item.completed", "user.name")
+         * @param {Object} foreachVars - Object containing all available foreach variables from current and parent scopes
+         * @returns {boolean} True if the target starts with a foreach variable name, false otherwise
+         */
+        isNested(target, foreachVars) {
+            return Object.keys(foreachVars).some(varName =>
+                target.startsWith(`${varName}.`)
+            );
+        },
+
+        /**
+         * Builds the proper property path for nested bindings in foreach contexts.
+         * @param {string} target - The original binding target expression (e.g., "item.completed")
+         * @param {Object} foreachVars - Object containing all foreach variables with their current values
+         * @param {string} collectionName - The name of the collection in the data model (e.g., "todos")
+         * @param {number} index - The current index in the foreach iteration
+         * @returns {string} The absolute property path for data binding, or original target if no match
+         */
+        buildNestedPropertyPath(target, foreachVars, collectionName, index) {
+            for (const [varName, varValue] of Object.entries(foreachVars)) {
+                if (target.startsWith(`${varName}.`)) {
+                    const propertyPath = target.substring(varName.length + 1);
+                    return collectionName + '.' + index + '.' + propertyPath;
+                }
+            }
+
+            return target;
         }
     }
 
@@ -2930,8 +2961,8 @@
                         }
 
                         // Set up two-way binding for form inputs if we're in a foreach context
-                        if (parentBinding && (type === 'value' || type === 'checked') && this.isNestedProperty(target, contextVars)) {
-                            const propertyPath = this.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
+                        if (parentBinding && (type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
+                            const propertyPath = PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
                             this.setupInputElement(el, propertyPath, type);
                         }
 
@@ -3076,39 +3107,6 @@
                 }
             },
 
-            // === FOREACH RENDERING SECTION ===
-
-            /**
-             * Checks if a target expression represents a nested property that should use foreach variables.
-             * @param {string} target - The binding target expression to check (e.g., "item.completed", "user.name")
-             * @param {Object} foreachVars - Object containing all available foreach variables from current and parent scopes
-             * @returns {boolean} True if the target starts with a foreach variable name, false otherwise
-             */
-            isNestedProperty(target, foreachVars) {
-                return Object.keys(foreachVars).some(varName =>
-                    target.startsWith(`${varName}.`)
-                );
-            },
-
-            /**
-             * Builds the proper property path for nested bindings in foreach contexts.
-             * @param {string} target - The original binding target expression (e.g., "item.completed")
-             * @param {Object} foreachVars - Object containing all foreach variables with their current values
-             * @param {string} collectionName - The name of the collection in the data model (e.g., "todos")
-             * @param {number} index - The current index in the foreach iteration
-             * @returns {string} The absolute property path for data binding, or original target if no match
-             */
-            buildNestedPropertyPath(target, foreachVars, collectionName, index) {
-                for (const [varName, varValue] of Object.entries(foreachVars)) {
-                    if (target.startsWith(`${varName}.`)) {
-                        const propertyPath = target.substring(varName.length + 1);
-                        return collectionName + '.' + index + '.' + propertyPath;
-                    }
-                }
-
-                return target;
-            },
-
             // === EVENT HANDLING SECTION ===
 
             /**
@@ -3150,7 +3148,7 @@
 
                 // Handle form input events ONLY if there's a data-pac-property
                 // This ensures we only process elements that are bound to data properties
-                if ((type === 'input' || type === 'change') && property) {
+                if (property && (type === 'input' || type === 'change')) {
                     // Route to specialized input handler for form data binding
                     this.handleInputEvent(event, target, property);
                 }
