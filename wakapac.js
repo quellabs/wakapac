@@ -396,6 +396,128 @@
     }
 
     // =============================================================================
+    // DEPENDENCY TRACKING
+    // =============================================================================
+
+    /**
+     * A utility class for tracking property dependencies during function execution.
+     * Uses Proxy objects to monitor which properties are accessed during evaluation,
+     * enabling reactive programming patterns and dependency-aware caching.
+     * @class DependencyTracker
+     */
+    function DependencyTracker() {
+        /**
+         * Creates a new DependencyTracker instance.
+         * Initializes the evaluation stack and current dependencies tracker.
+         * @constructor
+         */
+        this.evaluationStack = [];
+        this.currentDependencies = null;
+    }
+
+    /**
+     * Tracks property dependencies during function execution.
+     * Wraps the provided context in a Proxy to monitor property access,
+     * then executes the function and returns both result and dependencies.
+     * @param {Function} fn - The function to execute and track dependencies for
+     * @param {Object} context - The context object to proxy and bind as 'this'
+     * @returns {{result: any, dependencies: string[]}} Object containing function result and tracked dependencies
+     */
+    DependencyTracker.prototype.track = function (fn, context) {
+        // Create new dependency set for this tracking session
+        const dependencies = new Set();
+
+        // Push to stack and set as current tracker
+        this.evaluationStack.push(dependencies);
+        this.currentDependencies = dependencies;
+
+        try {
+            // Create tracking proxy and execute function
+            const trackedContext = this.createTrackingProxy(context);
+            const result = fn.call(trackedContext);
+
+            return {
+                result: result,
+                dependencies: Array.from(dependencies)
+            };
+        } finally {
+            // Clean up: pop from stack and restore previous tracker
+            this.evaluationStack.pop();
+            this.currentDependencies = this.evaluationStack[this.evaluationStack.length - 1] || null;
+        }
+    };
+
+    /**
+     * Creates a tracking proxy that intercepts property access to automatically discover dependencies
+     * during computed property evaluation. This proxy wraps the reactive context object and records
+     * which properties are accessed, enabling precise dependency tracking without fragile string parsing.
+     * @param {Object} target - The object to wrap with dependency tracking (usually the reactive abstraction)
+     * @param {string} [path=''] - Current property path for nested object tracking (e.g., "user.profile")
+     * @returns {Object} A proxy that intercepts property access and records dependencies
+     */
+    DependencyTracker.prototype.createTrackingProxy = function (target, path) {
+        path = path || '';
+        const self = this;
+
+        return new Proxy(target, {
+            /**
+             * Intercepts property access to track dependencies and handle nested objects
+             * @param {Object} obj - The target object being accessed
+             * @param {string|Symbol} prop - The property being accessed
+             * @returns {*} The property value, potentially wrapped in another tracking proxy
+             */
+            get: function (obj, prop) {
+                // Skip tracking for internal JavaScript symbols
+                if (typeof prop === 'symbol') {
+                    return obj[prop];
+                }
+
+                // Skip tracking for internal JavaScript properties
+                // These are not user-defined reactive properties and should not trigger dependency tracking
+                if (!Utils.shouldReact(prop, obj[prop])) {
+                    return obj[prop];
+                }
+
+                // Build the complete property path for this access
+                // Root level: prop='name', path='' → fullPath='name'
+                // Nested: prop='settings', path='user.profile' → fullPath='user.profile.settings'
+                const fullPath = path ? path + '.' + prop : prop;
+
+                // Record dependencies if we're currently tracking (inside computed property evaluation)
+                if (self.currentDependencies) {
+                    // Extract root property for compatibility with existing reactivity system
+                    // Many parts of the framework expect root-level property names (e.g., 'user', 'todos')
+                    const rootProperty = fullPath.split('.')[0];
+
+                    // Record root property dependency (required for existing invalidation system)
+                    self.currentDependencies.add(rootProperty);
+
+                    // Also record the full nested path for precise change detection
+                    // This allows the system to distinguish between different nested property changes
+                    // Example: 'user.profile.name' vs 'user.settings.theme' are tracked separately
+                    if (fullPath !== rootProperty) {
+                        self.currentDependencies.add(fullPath);
+                    }
+                }
+
+                // Get the actual property value from the target object
+                const value = obj[prop];
+
+                // Handle nested object access by creating recursive tracking proxies
+                // Only wrap plain objects and arrays - skip primitives, DOM elements, and custom classes
+                if (Utils.isReactive(value)) {
+                    // Create a new tracking proxy for the nested object with extended path
+                    // This enables deep dependency tracking: user.profile.settings.theme
+                    return self.createTrackingProxy(value, fullPath);
+                }
+
+                // Return primitive values directly (strings, numbers, booleans, null, undefined)
+                return value;
+            }
+        });
+    };
+
+    // =============================================================================
     // COMPONENT REGISTRY
     // =============================================================================
 
@@ -558,7 +680,7 @@
      * @returns {Function} A handler function that creates wrapped mutation methods
      */
     function createArrayMutationHandler(arr, originalMethods, onChange, path) {
-        return function(prop) {
+        return function (prop) {
             return function (...args) {
                 // Execute the original array method with the provided arguments
                 const result = originalMethods[prop].apply(arr, args);
@@ -592,7 +714,7 @@
      * @returns {Function} Proxy getter function
      */
     function createProxyGetter(isArray, originalMethods, arrayMutationHandler) {
-        return function(obj, prop) {
+        return function (obj, prop) {
             // Check if we're dealing with an array
             // If so, return a wrapped version of the array method
             if (isArray && originalMethods[prop]) {
@@ -613,7 +735,7 @@
      * @returns {Function} A proxy setter function that handles property assignments
      */
     function createProxySetter(onChange, path) {
-        return function(obj, prop, value) {
+        return function (obj, prop, value) {
             // Store the current value before modification for comparison
             const oldValue = obj[prop];
 
@@ -650,7 +772,7 @@
      * @returns {Function} Proxy delete function
      */
     function createProxyDeleter(onChange, path) {
-        return function(obj, prop) {
+        return function (obj, prop) {
             // Store the value being deleted for the change notification
             const oldValue = obj[prop];
 
@@ -736,7 +858,7 @@
                 }
 
                 const dependencies = this.extractDependencies(expression);
-                return Object.assign({}, expression, { dependencies });
+                return Object.assign({}, expression, {dependencies});
             }
 
             expression = String(expression).trim();
@@ -810,7 +932,7 @@
 
                 if (multiChar) {
                     const op = multiChar[1];
-                    tokens.push({ type: 'OPERATOR', value: op, precedence: this.getOperatorPrecedence(op) });
+                    tokens.push({type: 'OPERATOR', value: op, precedence: this.getOperatorPrecedence(op)});
                     i += op.length;
                     continue;
                 }
@@ -828,7 +950,7 @@
                 };
 
                 if (singleCharTokens[char]) {
-                    tokens.push({ type: singleCharTokens[char], value: char });
+                    tokens.push({type: singleCharTokens[char], value: char});
                     i++;
                     continue;
                 }
@@ -852,7 +974,7 @@
                             break;
                     }
 
-                    tokens.push({ type, value: char, precedence });
+                    tokens.push({type, value: char, precedence});
                     i++;
                     continue;
                 }
@@ -900,7 +1022,7 @@
                 } else if (char === quote) {
                     // End of string
                     return {
-                        token: { type: 'STRING', value },
+                        token: {type: 'STRING', value},
                         nextIndex: i + 1
                     };
                 } else {
@@ -924,7 +1046,7 @@
 
             if (numberMatch) {
                 return {
-                    token: { type: 'NUMBER', value: parseFloat(numberMatch[1]) },
+                    token: {type: 'NUMBER', value: parseFloat(numberMatch[1])},
                     nextIndex: start + numberMatch[1].length
                 };
             }
@@ -944,7 +1066,7 @@
                 const type = ['true', 'false', 'null', 'undefined'].includes(value) ? 'KEYWORD' : 'IDENTIFIER';
 
                 return {
-                    token: { type, value },
+                    token: {type, value},
                     nextIndex: start + value.length
                 };
             }
@@ -1017,7 +1139,7 @@
 
                 // Create a new binary expression node with the parsed components
                 // This becomes the new left operand for potential further parsing
-                left = { type, left, operator: op, right };
+                left = {type, left, operator: op, right};
             }
 
             // Return the final parsed expression (could be the original left operand
@@ -1142,7 +1264,7 @@
                     // Parse value
                     const value = this.parseTernary();
 
-                    pairs.push({ key, value });
+                    pairs.push({key, value});
 
                 } while (this.match('COMMA') && !this.check('RBRACE'));
             }
@@ -1287,7 +1409,7 @@
          * @returns {Object} Current token
          */
         peek() {
-            return this.tokens[this.currentToken] || { type: 'EOF', value: null };
+            return this.tokens[this.currentToken] || {type: 'EOF', value: null};
         },
 
         /**
@@ -1396,7 +1518,7 @@
             const result = {};
 
             if (objectExpr.pairs) {
-                objectExpr.pairs.forEach(({ key, value }) => {
+                objectExpr.pairs.forEach(({key, value}) => {
                     result[key] = this.evaluate(value, context);
                 });
             }
@@ -1406,19 +1528,32 @@
 
         performOperation(left, operator, right) {
             switch (operator) {
-                case '+': return left + right;
-                case '-': return Number(left) - Number(right);
-                case '*': return Number(left) * Number(right);
-                case '/': return Number(left) / Number(right);
-                case '===': return left === right;
-                case '!==': return left !== right;
-                case '==': return left == right;
-                case '!=': return left != right;
-                case '>=': return left >= right;
-                case '<=': return left <= right;
-                case '>': return left > right;
-                case '<': return left < right;
-                default: return false;
+                case '+':
+                    return left + right;
+                case '-':
+                    return Number(left) - Number(right);
+                case '*':
+                    return Number(left) * Number(right);
+                case '/':
+                    return Number(left) / Number(right);
+                case '===':
+                    return left === right;
+                case '!==':
+                    return left !== right;
+                case '==':
+                    return left == right;
+                case '!=':
+                    return left != right;
+                case '>=':
+                    return left >= right;
+                case '<=':
+                    return left <= right;
+                case '>':
+                    return left > right;
+                case '<':
+                    return left < right;
+                default:
+                    return false;
             }
         },
 
@@ -1435,7 +1570,9 @@
             const dependencies = new Set();
 
             const traverse = (n) => {
-                if (!n) return;
+                if (!n) {
+                    return;
+                }
 
                 switch (n.type) {
                     case 'property': {
@@ -1756,34 +1893,38 @@
              * Sets up computed properties with consolidated dependency tracking
              */
             setupComputedProperties(reactive) {
-                if (!this.original.computed) return;
+                if (!this.original.computed) {
+                    return;
+                }
+
+                // Create dependency tracker instance
+                const tracker = new DependencyTracker();
 
                 Object.keys(this.original.computed).forEach(name => {
                     const computedFn = this.original.computed[name];
-                    const dependencies = this.analyzeComputedDependencies(computedFn, reactive);
 
                     // Store computed info
                     this.deps.set(name, {
                         fn: computedFn,
                         value: undefined,
-                        isDirty: true
-                    });
-
-                    // Build reverse lookup - don't overwrite existing entries
-                    dependencies.forEach(dep => {
-                        if (!this.deps.has(dep)) {
-                            this.deps.set(dep, { dependents: [] });
-                        }
-                        this.deps.get(dep).dependents = this.deps.get(dep).dependents || [];
-                        this.deps.get(dep).dependents.push(name);
+                        isDirty: true,
+                        dependencies: [] // Will be populated by proxy tracking
                     });
 
                     Object.defineProperty(reactive, name, {
                         get: () => {
                             const entry = this.deps.get(name);
+
                             if (entry.isDirty || entry.value === undefined) {
-                                entry.value = entry.fn.call(reactive);
+                                // Use proxy tracking to discover dependencies
+                                const {result, dependencies} = tracker.track(computedFn, reactive);
+
+                                entry.value = result;
                                 entry.isDirty = false;
+                                entry.dependencies = dependencies;
+
+                                // Update reverse dependency mappings
+                                this.updateReverseDependencies(name, dependencies);
                             }
                             return entry.value;
                         },
@@ -1793,40 +1934,25 @@
             },
 
             /**
-             * Analyzes computed function dependencies by parsing the function source
-             * @param {Function} fn - The computed function to analyze
-             * @param {Object} reactive - The reactive object containing reactive properties
-             * @returns {Array<string>} Array of property names that the function depends on
+             * Updates the reverse dependency mapping by registering a computed property
+             * as a dependent of the specified dependencies.
+             * @param {string} computedName - The name of the computed property that depends on the dependencies
+             * @param {string[]} dependencies - Array of dependency names that the computed property relies on
+             * @returns {void}
              */
-            analyzeComputedDependencies(fn, reactive) {
-                // Array to store the discovered dependencies
-                const dependencies = [];
-
-                // Regex pattern to match property access on 'this' object
-                // Matches: this.propertyName (where propertyName follows JS identifier rules)
-                const regex = /this\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
-
-                // Iterate through all regex matches in the function's string representation
-                let match;
-
-                while ((match = regex.exec(fn.toString()))) {
-                    // Extract the property name from the regex capture group
-                    const property = match[1];
-
-                    // Check if this property should be considered a dependency:
-                    // 1. Property exists in either the original object or reactive object
-                    // 2. Property is NOT a computed property (to avoid circular dependencies)
-                    // 3. Property hasn't already been added to dependencies (avoid duplicates)
-                    if ((Object.prototype.hasOwnProperty.call(this.original, property) || Object.prototype.hasOwnProperty.call(reactive, property)) &&
-                        (!this.original.computed || !Object.prototype.hasOwnProperty.call(this.original.computed, property)) &&
-                        !dependencies.includes(property)) {
-                        // Add the valid dependency to our list
-                        dependencies.push(property);
+            updateReverseDependencies(computedName, dependencies) {
+                dependencies.forEach(dep => {
+                    if (!this.deps.has(dep)) {
+                        this.deps.set(dep, {dependents: []});
                     }
-                }
 
-                // Return the complete list of dependencies
-                return dependencies;
+                    const entry = this.deps.get(dep);
+                    entry.dependents = entry.dependents || [];
+
+                    if (!entry.dependents.includes(computedName)) {
+                        entry.dependents.push(computedName);
+                    }
+                });
             },
 
             /**
@@ -2251,13 +2377,14 @@
                     const bindingString = element.getAttribute('data-pac-bind');
 
                     // Parse the binding string into individual binding pairs
-                    const bindingPairs = ExpressionParser.parseBindingString(bindingString);;
+                    const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+                    ;
 
                     // Automatically reorder bindings: foreach first, then others
                     const reorderedBindings = this.reorderBindings(bindingPairs);
 
                     // Process each binding pair in the correct order
-                    reorderedBindings.forEach(({ type, target }) => {
+                    reorderedBindings.forEach(({type, target}) => {
                         const binding = this.createBindingByType(element, type, target);
 
                         if (binding) {
@@ -2528,7 +2655,7 @@
              * @param target
              * @returns {{id: string, type: string, element: Element}}
              */
-            createClassBinding: function(element, target) {
+            createClassBinding: function (element, target) {
                 return this.createBinding('class', element, {
                     target: target,
                     parsedExpression: null,
@@ -2802,7 +2929,8 @@
                         // Special handlers that don't need context evaluation
                         text: () => this.applyTextBinding(binding, property, foreachVars),
                         foreach: () => this.applyForeachBinding(binding, property, foreachVars),
-                        event: () => {},
+                        event: () => {
+                        },
 
                         // Default handlers that need context evaluation
                         attribute: (ctx, val) => this.applyAttributeBinding(binding, val),
@@ -2954,7 +3082,7 @@
                     }
 
                     // Parse and process the bind
-                    ExpressionParser.parseBindingString(bindingString).forEach(({ type, target }) => {
+                    ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
                         // Handle nested foreach - existing code
                         if (type === 'foreach') {
                             return;
@@ -3822,13 +3950,13 @@
                 switch (true) {
                     case element.tagName === 'SELECT': {
                         element.value = value;
-                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        element.dispatchEvent(new Event('change', {bubbles: true}));
                         return true;
                     }
 
                     case element.type === 'checkbox': {
                         element.checked = Boolean(value);
-                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        element.dispatchEvent(new Event('change', {bubbles: true}));
                         return true;
                     }
 
@@ -3843,14 +3971,14 @@
                         }
 
                         targetRadio.checked = true;
-                        targetRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                        targetRadio.dispatchEvent(new Event('change', {bubbles: true}));
                         return true;
                     }
 
                     case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA': {
                         element.value = value;
-                        element.dispatchEvent(new Event('input', { bubbles: true }));
-                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        element.dispatchEvent(new Event('input', {bubbles: true}));
+                        element.dispatchEvent(new Event('change', {bubbles: true}));
                         return true;
                     }
 
