@@ -2684,13 +2684,13 @@
                         event: () => {},
 
                         // Default handlers that need context evaluation
-                        attribute: (ctx, val) => this.applyAttributeBinding(binding.element, binding.attribute, val),
-                        input: (ctx, val) => this.applyInputBinding(binding.element, val),
-                        checked: (ctx, val) => this.applyCheckedBinding(binding.element, !!val),
-                        visible: (ctx, val) => this.applyVisibilityBinding(binding.element, val),
-                        conditional: (ctx, val) => this.applyConditionalBinding(binding.element, val, binding),
-                        class: (ctx, val) => this.applyClassBinding(binding.element, binding.target, val),
-                        style: (ctx, val) => this.applyStyleBinding(binding.element, binding.target, val)
+                        attribute: (ctx, val) => this.applyAttributeBinding(binding, val),
+                        input: (ctx, val) => this.applyInputBinding(binding, val),
+                        checked: (ctx, val) => this.applyCheckedBinding(binding, val),
+                        visible: (ctx, val) => this.applyVisibilityBinding(binding, val),
+                        conditional: (ctx, val) => this.applyConditionalBinding(binding, val),
+                        class: (ctx, val) => this.applyClassBinding(binding, val),
+                        style: (ctx, val) => this.applyStyleBinding(binding, val)
                     };
 
                     // Get the appropriate handler for this binding type
@@ -2958,21 +2958,16 @@
 
             /**
              * Applies style binding to a DOM element
-             * @param {HTMLElement} element - The target DOM element
-             * @param {string} target - The original target expression (for debugging)
+             * @param {Object} binding - The binding
              * @param {Object|string} value - The style value(s) to apply
              */
-            applyStyleBinding(element, target, value) {
-                if (typeof value === 'string') {
-                    // String syntax: "color: red; font-size: 16px;"
-                    // Set the entire CSS text at once (less efficient but backwards compatible)
-                    element.style.cssText = value;
-                    return;
-                }
+            applyStyleBinding(binding, value) {
+                // Fetch the element
+                const element = binding.element;
 
+                // Object syntax: { color: 'red', fontSize: '16px' }
                 // Check if value is an object (preferred object syntax)
                 if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    // Object syntax: { color: 'red', fontSize: '16px' }
                     // Iterate through each style property in the object
                     Object.keys(value).forEach(styleProp => {
                         // Only set non-null/undefined values to avoid clearing styles accidentally
@@ -2985,6 +2980,14 @@
                             }
                         }
                     });
+
+                    return;
+                }
+
+                // String syntax: "color: red; font-size: 16px;"
+                // Set the entire CSS text at once (less efficient but backwards compatible)
+                if (typeof value === 'string') {
+                    element.style.cssText = value;
                 }
             },
 
@@ -3351,28 +3354,6 @@
             // === UTILITY METHODS SECTION ===
 
             /**
-             * Sets element attribute with special handling for boolean attributes
-             */
-            setElementAttribute(element, name, value) {
-                if (name === 'style') {
-                    if (typeof value === 'object' && value) {
-                        Object.assign(element.style, value);
-                    } else {
-                        element.style.cssText = value || '';
-                    }
-                } else if (name === 'enable') {
-                    // Handle 'enable' as reverse of 'disabled'
-                    element.toggleAttribute('disabled', !value);
-                } else if (BOOLEAN_ATTRS.includes(name)) {
-                    element.toggleAttribute(name, !!value);
-                } else if (value != null) {
-                    element.setAttribute(name, value);
-                } else {
-                    element.removeAttribute(name);
-                }
-            },
-
-            /**
              * Sets a nested property value (e.g., "todos.0.completed" = true)
              * @param {string} propertyPath - Dot-separated property path
              * @param {*} value - Value to set
@@ -3415,10 +3396,13 @@
             /**
              * Applies visibility binding to an element by showing or hiding it
              * while preserving the original display style value
-             * @param {HTMLElement} element - The DOM element to show or hide.
-             * @param {boolean} shouldShow - Determines the visibility action to perform
+             * @param {Object} binding - The binding
+             * @param {boolean} value - Determines the visibility action to perform
              */
-            applyVisibilityBinding(element, shouldShow) {
+            applyVisibilityBinding(binding, value) {
+                const element = binding.element;
+                const shouldShow = !!value;
+
                 if (shouldShow) {
                     // Show element: restore original display value
                     if (element.hasAttribute('data-pac-hidden')) {
@@ -3450,18 +3434,21 @@
 
             /**
              * Apply the condition binding
-             * @param element
-             * @param actualValue
+             * @param {Object} binding - The binding
+             * @param value
              * @param binding
              */
-            applyConditionalBinding(element, actualValue, binding) {
+            applyConditionalBinding(binding, value) {
                 // Early return if the value did not change
-                if (binding.isRendered === actualValue) {
+                if (binding.isRendered === value) {
                     return;
                 }
 
+                // Fetch the element
+                const element = binding.element;
+
                 // If true, add the element to the DOM
-                if (actualValue) {
+                if (value) {
                     // Add element to DOM: Replace the placeholder comment with the actual DOM element
                     if (binding.placeholder && binding.placeholder.parentNode) {
                         binding.placeholder.parentNode.replaceChild(element, binding.placeholder);
@@ -3490,29 +3477,48 @@
 
             /**
              * Apply attribute binding
-             * @param element
-             * @param attribute
+             * @param {Object} binding
              * @param value
              */
-            applyAttributeBinding(element, attribute, value) {
-                this.setElementAttribute(element, attribute, value);
+            applyAttributeBinding(binding, value) {
+                const element = binding.element;
+                const attribute = binding.attribute;
+
+                if (attribute === 'style') {
+                    if (typeof value === 'object' && value) {
+                        Object.assign(element.style, value);
+                    } else {
+                        element.style.cssText = value || '';
+                    }
+                } else if (attribute === 'enable') {
+                    // Handle 'enable' as reverse of 'disabled'
+                    element.toggleAttribute('disabled', !value);
+                } else if (BOOLEAN_ATTRS.includes(attribute)) {
+                    element.toggleAttribute(attribute, !!value);
+                } else if (value != null) {
+                    element.setAttribute(attribute, value);
+                } else {
+                    element.removeAttribute(attribute);
+                }
             },
 
             /**
              * Apply input binding to element
-             * @param {HTMLElement} element - The target DOM element
-             * @param actualValue - The value to set
+             * @param {Object} binding
+             * @param value - The value to set
              */
-            applyInputBinding(element, actualValue) {
+            applyInputBinding(binding, value) {
+                const element = binding.element;
+
                 // For radio buttons, we check if the element's value matches the property value
                 if (element.type === 'radio') {
-                    this.applyRadioBinding(element, actualValue);
+                    this.applyRadioBinding(element, value);
                     return;
                 }
 
                 // For everything else directly set the value
-                if (element.value !== String(actualValue || '')) {
-                    element.value = actualValue || '';
+                if (element.value !== String(value || '')) {
+                    element.value = value || '';
                 }
             },
 
@@ -3527,20 +3533,22 @@
 
             /**
              * Applies checked state to any element except radio
-             * @param {HTMLElement} element - The target DOM element
-             * @param {boolean} checked - Whether the element should be checked
+             * @param {Object} binding - The binding
+             * @param {boolean} value - Whether the element should be checked
              */
-            applyCheckedBinding(element, checked) {
-                element.checked = checked;
+            applyCheckedBinding(binding, value) {
+                binding.element.checked = !!value;
             },
 
             /**
              * Enhanced applyClassBinding that handles conditional classes, boolean-based classes, and multiple classes
-             * @param {HTMLElement} element - The target DOM element
-             * @param {string} target - The class expression (e.g., "todo.completed", "item.active", or object syntax)
+             * @param {Object} binding - The binding
              * @param {*} value - The evaluated expression value
              */
-            applyClassBinding(element, target, value) {
+            applyClassBinding(binding, value) {
+                // Fetch the element
+                const element = binding.element;
+
                 // Remove previously applied classes
                 this.clearPreviousClasses(element);
 
@@ -3972,8 +3980,8 @@
              * proper resource deallocation and prevent memory leaks
              */
             destroy() {
-                // Clear timeouts first (might trigger other operations)
-                this._clearTimeouts();
+                // Clear all collections in one operation
+                this._clearCollections();
 
                 // Remove from registry (this also handles global cleanup)
                 this._unregisterFromGlobalRegistry();
@@ -3990,33 +3998,34 @@
                 // Clean up viewport tracking
                 this._cleanupViewportTracking();
 
-                // Clear caches
-                this._clearCaches();
-
-                // Clear bindings
-                this._clearBindings();
-
                 // Final nullification (MOVED TO END)
                 this._nullifyReferences();
             },
 
             /**
-             * Clears all pending timeout operations
-             * Prevents callbacks from executing after component destruction
+             * Clears all collection-based data structures in a single operation
+             * This consolidates the clearing of timeouts, caches, and bindings to reduce code duplication
              */
-            _clearTimeouts() {
+            _clearCollections() {
+                // Clear all pending timeout operations
+                // Prevents callbacks from executing after component destruction
                 this.updateTimeouts.forEach(id => clearTimeout(id));
                 this.updateTimeouts.clear();
-            },
 
-            /**
-             * Clears all cached data structures
-             * Releases memory held by computed values and expression caches
-             */
-            _clearCaches() {
+                // Clear all cached data structures
+                // Releases memory held by computed values and expression caches
                 this.deps.clear();
                 this.expressionCache.clear();
                 this.lastValues.clear();
+
+                // Clear all binding-related data structures
+                // Removes references between data bindings and their indices
+                this.bindings.clear();
+                this.bindingIndex.clear();
+
+                // Clear hierarchy relationships
+                this.children.clear();
+                this.eventListeners.clear();
             },
 
             /**
@@ -4051,15 +4060,6 @@
                         clearTimeout(window._wakaPACResizeTimeout);
                     }
                 }
-            },
-
-            /**
-             * Clears all binding-related data structures
-             * Removes references between data bindings and their indices
-             */
-            _clearBindings() {
-                this.bindings.clear();
-                this.bindingIndex.clear();
             },
 
             /**
