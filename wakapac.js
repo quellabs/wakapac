@@ -2212,19 +2212,12 @@
              * Finds and creates text interpolation bindings {{property}}
              */
             setupTextBindings() {
-                const walker = document.createTreeWalker(
-                    this.container,
-                    NodeFilter.SHOW_TEXT,
-                    null
-                );
+                // Single pass to collect all text nodes
+                const textNodes = Utils.getTextNodesFromElement(this.container);
 
-                let node;
-
-                while ((node = walker.nextNode())) {
-                    // Fetch the text
+                // Process collected nodes
+                textNodes.forEach(node => {
                     const text = node.textContent;
-
-                    // Enhanced regex to catch ALL interpolation patterns, including complex expressions
                     const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
 
                     if (matches) {
@@ -2235,14 +2228,14 @@
                                 target: expression,
                                 originalText: text,
                                 fullMatch: match,
-                                parsedExpression: null,  // Will be lazily parsed on first use
-                                dependencies: null       // Will be lazily extracted on first use
+                                parsedExpression: null,
+                                dependencies: null
                             });
 
                             this.bindings.set(binding.id, binding);
                         });
                     }
-                }
+                });
             },
 
             /**
