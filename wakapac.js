@@ -3165,15 +3165,20 @@
                     return item;
                 }
 
-                return item.id !== undefined ? item.id : `hash_${this.generateItemHash(item)}`;
+                if (item.id !== undefined) {
+                    return item.id;
+                }
+
+                return 'hash_' + this.generateItemHash(item);
             },
 
             /**
              * Generates hash for deep content comparison
              * @param {*} item - Item to hash
+             * @param visited
              * @returns {string} Hash string
              */
-            generateItemHash(item) {
+            generateItemHash(item, visited = new WeakSet()) {
                 if (item === null || item === undefined) {
                     return 'null';
                 }
@@ -3182,9 +3187,15 @@
                     return typeof item + ':' + item;
                 }
 
+                if (visited.has(item)) {
+                    return 'circular';
+                }
+
+                visited.add(item);
+
                 const sortedEntries = Object.entries(item)
                     .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([key, value]) => key + ':' + this.generateItemHash(value));
+                    .map(([key, value]) => key + ':' + this.generateItemHash(value, visited));
 
                 return this.hashString(sortedEntries.join('|'));
             },
