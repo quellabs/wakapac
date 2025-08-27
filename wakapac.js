@@ -3079,35 +3079,6 @@
             // === FOREACH RENDERING SECTION ===
 
             /**
-             * Processes a template element for foreach loops, handling text interpolation and data bindings
-             * with proper support for nested foreach loops by maintaining a scope chain of variables.
-             * @param {Element} element - The DOM element to process (template container)
-             * @param {*} item - The current item from the collection being iterated over
-             * @param {number} index - The zero-based index of the current item in the iteration
-             * @param {string} itemName - The variable name for the current item (e.g., 'user', 'product')
-             * @param {string} indexName - The variable name for the current index (e.g., 'i', 'index')
-             * @param {string} collectionName - The name of the collection being iterated over
-             * @param {Object} [parentVars={}] - Variables inherited from parent foreach scopes for nesting support
-             */
-            processForeachTemplate(element, item, index, itemName, indexName, collectionName, parentVars = {}) {
-                // Create foreach variables for this iteration
-                const foreachVars = Object.assign({}, parentVars, {
-                    [itemName]: item,
-                    [indexName]: index
-                });
-
-                // Use existing text interpolation method
-                this.processTextBindingsForElement(element, foreachVars);
-
-                // Use existing attribute binding method
-                this.processAttributeBindingsForElement(element, foreachVars, {
-                    collection: collectionName,
-                    itemName,
-                    indexName
-                });
-            },
-
-            /**
              * Checks if a target expression represents a nested property that should use foreach variables.
              * @param {string} target - The binding target expression to check (e.g., "item.completed", "user.name")
              * @param {Object} foreachVars - Object containing all available foreach variables from current and parent scopes
@@ -3395,7 +3366,9 @@
                 this.updateTimeouts.set(key, timeoutId);
             },
 
-            // === UNIFIED CHANGE DETECTION SECTION ===
+            // ====================================================================
+            //  UNIFIED CHANGE DETECTION SECTION
+            // ====================================================================
 
             /**
              * Central change notification hub - all property changes flow through here
