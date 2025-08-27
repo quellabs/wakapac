@@ -195,7 +195,7 @@
             const keysB = Object.keys(b);
 
             return keysA.length === keysB.length &&
-                keysA.every(key => b.hasOwnProperty(key) && Utils.isEqual(a[key], b[key]));
+                keysA.every(key => Object.prototype.hasOwnProperty.call(b, key) && Utils.isEqual(a[key], b[key]));
         },
 
         /**
@@ -287,7 +287,7 @@
 
             // Walk through each text node and add it to our collection
             let node;
-            while (node = walker.nextNode()) {
+            while ((node = walker.nextNode())) {
                 textNodes.push(node);
             }
 
@@ -314,7 +314,7 @@
             }
 
             return path.split('.').reduce((current, segment) => {
-                if (current && current.hasOwnProperty(segment)) {
+                if (current && Object.prototype.hasOwnProperty.call(current, segment)) {
                     return current[segment];
                 } else {
                     return undefined;
@@ -361,6 +361,37 @@
 
             // Set the value on the parent object we navigated to
             current[finalProperty] = value;
+        },
+
+        /**
+         * Checks if a target expression represents a nested property that should use foreach variables.
+         * @param {string} target - The binding target expression to check (e.g., "item.completed", "user.name")
+         * @param {Object} foreachVars - Object containing all available foreach variables from current and parent scopes
+         * @returns {boolean} True if the target starts with a foreach variable name, false otherwise
+         */
+        isNested(target, foreachVars) {
+            return Object.keys(foreachVars).some(varName =>
+                target.startsWith(`${varName}.`)
+            );
+        },
+
+        /**
+         * Builds the proper property path for nested bindings in foreach contexts.
+         * @param {string} target - The original binding target expression (e.g., "item.completed")
+         * @param {Object} foreachVars - Object containing all foreach variables with their current values
+         * @param {string} collectionName - The name of the collection in the data model (e.g., "todos")
+         * @param {number} index - The current index in the foreach iteration
+         * @returns {string} The absolute property path for data binding, or original target if no match
+         */
+        buildNestedPropertyPath(target, foreachVars, collectionName, index) {
+            for (const [varName] of Object.entries(foreachVars)) {
+                if (target.startsWith(`${varName}.`)) {
+                    const propertyPath = target.substring(varName.length + 1);
+                    return collectionName + '.' + index + '.' + propertyPath;
+                }
+            }
+
+            return target;
         }
     }
 
@@ -501,7 +532,7 @@
     function makeNestedReactive(target, onChange, path) {
         // Iterate through all enumerable properties of the target object
         Object.keys(target).forEach(key => {
-            if (target.hasOwnProperty(key) && Utils.isReactive(target[key])) {
+            if (Object.prototype.hasOwnProperty.call(target, key) && Utils.isReactive(target[key])) {
                 target[key] = createReactive(target[key], onChange, path ? `${path}.${key}` : key);
             }
         });
@@ -1305,14 +1336,15 @@
                 case 'object':
                     return this.evaluateObjectLiteral(parsedExpr, context);
 
-                case 'ternary':
+                case 'ternary': {
                     const condition = this.evaluate(parsedExpr.condition, context);
 
                     return condition ?
                         this.evaluate(parsedExpr.trueValue, context) :
                         this.evaluate(parsedExpr.falseValue, context);
+                }
 
-                case 'logical':
+                case 'logical': {
                     const leftLogical = this.evaluate(parsedExpr.left, context);
 
                     if (parsedExpr.operator === '&&') {
@@ -1322,14 +1354,16 @@
                     } else {
                         return false;
                     }
+                }
 
                 case 'comparison':
-                case 'arithmetic':
+                case 'arithmetic': {
                     const leftVal = this.evaluate(parsedExpr.left, context);
                     const rightVal = this.evaluate(parsedExpr.right, context);
                     return this.performOperation(leftVal, parsedExpr.operator, rightVal);
+                }
 
-                case 'unary':
+                case 'unary': {
                     const operandValue = this.evaluate(parsedExpr.operand, context);
 
                     switch (parsedExpr.operator) {
@@ -1345,6 +1379,7 @@
                         default:
                             return operandValue;
                     }
+                }
 
                 default:
                     return undefined;
@@ -1403,14 +1438,15 @@
                 if (!n) return;
 
                 switch (n.type) {
-                    case 'property':
-                        const rootProp = n.path.split(/[.\[]/, 1)[0];
+                    case 'property': {
+                        const rootProp = n.path.split(/[.[]/, 1)[0];
 
                         if (rootProp && !['true', 'false', 'null', 'undefined'].includes(rootProp)) {
                             dependencies.add(rootProp);
                         }
 
                         break;
+                    }
 
                     case 'ternary':
                         traverse(n.condition);
@@ -1668,7 +1704,7 @@
                 Object.keys(this.original).forEach(key => {
                     // Only process own properties, skip inherited ones and the 'computed' key
                     // which was already handled by setupComputedProperties
-                    if (this.original.hasOwnProperty(key) && key !== 'computed') {
+                    if (Object.prototype.hasOwnProperty.call(this.original, key) && key !== 'computed') {
                         // Read value
                         const value = this.original[key];
 
@@ -1781,8 +1817,8 @@
                     // 1. Property exists in either the original object or reactive object
                     // 2. Property is NOT a computed property (to avoid circular dependencies)
                     // 3. Property hasn't already been added to dependencies (avoid duplicates)
-                    if ((this.original.hasOwnProperty(property) || reactive.hasOwnProperty(property)) &&
-                        (!this.original.computed || !this.original.computed.hasOwnProperty(property)) &&
+                    if ((Object.prototype.hasOwnProperty.call(this.original, property) || Object.prototype.hasOwnProperty.call(reactive, property)) &&
+                        (!this.original.computed || !Object.prototype.hasOwnProperty.call(this.original.computed, property)) &&
                         !dependencies.includes(property)) {
                         // Add the valid dependency to our list
                         dependencies.push(property);
@@ -2183,17 +2219,16 @@
                 );
 
                 let node;
-                let nodeCount = 0;
 
-                while (node = walker.nextNode()) {
-                    nodeCount++;
+                while ((node = walker.nextNode())) {
+                    // Fetch the text
                     const text = node.textContent;
 
                     // Enhanced regex to catch ALL interpolation patterns, including complex expressions
                     const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
 
                     if (matches) {
-                        matches.forEach((match, index) => {
+                        matches.forEach((match) => {
                             const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
 
                             const binding = this.createBinding('text', node, {
@@ -2591,7 +2626,7 @@
 
                 // For lazy-parsed expressions, parse them now if needed
                 if (binding.target && !binding.dependencies) {
-                    const parsed = this.getParsedExpression(binding);
+                    this.getParsedExpression(binding);
                 }
 
                 // Expression dependencies
@@ -2706,7 +2741,7 @@
             performInitialUpdate() {
                 // Update all regular properties
                 Object.keys(this.abstraction).forEach(key => {
-                    if (this.abstraction.hasOwnProperty(key) && typeof this.abstraction[key] !== 'function') {
+                    if (Object.prototype.hasOwnProperty.call(this.abstraction, key) && typeof this.abstraction[key] !== 'function') {
                         this.scheduleUpdate(key, this.abstraction[key]);
                     }
                 });
@@ -2930,8 +2965,8 @@
                         }
 
                         // Set up two-way binding for form inputs if we're in a foreach context
-                        if (parentBinding && (type === 'value' || type === 'checked') && this.isNestedProperty(target, contextVars)) {
-                            const propertyPath = this.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
+                        if (parentBinding && (type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
+                            const propertyPath = PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
                             this.setupInputElement(el, propertyPath, type);
                         }
 
@@ -3076,68 +3111,6 @@
                 }
             },
 
-            // === FOREACH RENDERING SECTION ===
-
-            /**
-             * Processes a template element for foreach loops, handling text interpolation and data bindings
-             * with proper support for nested foreach loops by maintaining a scope chain of variables.
-             * @param {Element} element - The DOM element to process (template container)
-             * @param {*} item - The current item from the collection being iterated over
-             * @param {number} index - The zero-based index of the current item in the iteration
-             * @param {string} itemName - The variable name for the current item (e.g., 'user', 'product')
-             * @param {string} indexName - The variable name for the current index (e.g., 'i', 'index')
-             * @param {string} collectionName - The name of the collection being iterated over
-             * @param {Object} [parentVars={}] - Variables inherited from parent foreach scopes for nesting support
-             */
-            processForeachTemplate(element, item, index, itemName, indexName, collectionName, parentVars = {}) {
-                // Create foreach variables for this iteration
-                const foreachVars = Object.assign({}, parentVars, {
-                    [itemName]: item,
-                    [indexName]: index
-                });
-
-                // Use existing text interpolation method
-                this.processTextBindingsForElement(element, foreachVars);
-
-                // Use existing attribute binding method
-                this.processAttributeBindingsForElement(element, foreachVars, {
-                    collection: collectionName,
-                    itemName,
-                    indexName
-                });
-            },
-
-            /**
-             * Checks if a target expression represents a nested property that should use foreach variables.
-             * @param {string} target - The binding target expression to check (e.g., "item.completed", "user.name")
-             * @param {Object} foreachVars - Object containing all available foreach variables from current and parent scopes
-             * @returns {boolean} True if the target starts with a foreach variable name, false otherwise
-             */
-            isNestedProperty(target, foreachVars) {
-                return Object.keys(foreachVars).some(varName =>
-                    target.startsWith(`${varName}.`)
-                );
-            },
-
-            /**
-             * Builds the proper property path for nested bindings in foreach contexts.
-             * @param {string} target - The original binding target expression (e.g., "item.completed")
-             * @param {Object} foreachVars - Object containing all foreach variables with their current values
-             * @param {string} collectionName - The name of the collection in the data model (e.g., "todos")
-             * @param {number} index - The current index in the foreach iteration
-             * @returns {string} The absolute property path for data binding, or original target if no match
-             */
-            buildNestedPropertyPath(target, foreachVars, collectionName, index) {
-                for (const [varName, varValue] of Object.entries(foreachVars)) {
-                    if (target.startsWith(`${varName}.`)) {
-                        const propertyPath = target.substring(varName.length + 1);
-                        return collectionName + '.' + index + '.' + propertyPath;
-                    }
-                }
-
-                return target;
-            },
-
             // === EVENT HANDLING SECTION ===
 
             /**
@@ -3179,7 +3152,7 @@
 
                 // Handle form input events ONLY if there's a data-pac-property
                 // This ensures we only process elements that are bound to data properties
-                if ((type === 'input' || type === 'change') && property) {
+                if (property && (type === 'input' || type === 'change')) {
                     // Route to specialized input handler for form data binding
                     this.handleInputEvent(event, target, property);
                 }
@@ -3199,9 +3172,6 @@
             handleInputEvent(event, target, property) {
                 // Determine the update mode - check element's data attribute first, fall back to global config
                 const updateMode = target.getAttribute('data-pac-update-mode') || this.config.updateMode;
-
-                // Determine the binding type - 'value' for most inputs, 'checked' for checkboxes/radios
-                const bindingType = target.getAttribute('data-pac-binding-type') || 'value';
 
                 // Extract the appropriate value based on the input type
                 const value = this.readDOMValue(target);
@@ -3395,7 +3365,9 @@
                 this.updateTimeouts.set(key, timeoutId);
             },
 
-            // === UNIFIED CHANGE DETECTION SECTION ===
+            // ====================================================================
+            //  UNIFIED CHANGE DETECTION SECTION
+            // ====================================================================
 
             /**
              * Central change notification hub - all property changes flow through here
@@ -3604,56 +3576,6 @@
             },
 
             /**
-             * Remove all previously applied classes from the element
-             * @param {HTMLElement} element - The target DOM element
-             */
-            clearPreviousClasses(element) {
-                const previousClasses = element.dataset.pacPreviousClasses;
-
-                if (previousClasses) {
-                    previousClasses.split(' ').forEach(cls => {
-                        if (cls.trim()) {
-                            element.classList.remove(cls.trim());
-                        }
-                    });
-                }
-            },
-
-            /**
-             * Parse different value types and return array of class names to apply
-             * @param {*} value - The evaluated expression value
-             * @returns {string[]} Array of valid class names
-             */
-            parseClassValue(value) {
-                // Object syntax: { className: boolean, className2: boolean }
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    return Object.entries(value)
-                        .filter(([className, isActive]) => isActive && className.trim())
-                        .map(([className]) => className.trim());
-                }
-
-                // Array of class names
-                if (Array.isArray(value)) {
-                    return value
-                        .filter(cls => cls && typeof cls === 'string' && cls.trim())
-                        .map(cls => cls.trim());
-                }
-
-                // String value - single class or space-separated classes
-                if (typeof value === 'string') {
-                    return value.trim().split(/\s+/).filter(cls => cls.trim());
-                }
-
-                // Truthy non-string value - convert to string
-                if (value) {
-                    const className = String(value).trim();
-                    return className ? [className] : [];
-                }
-
-                return [];
-            },
-
-            /**
              * Applies text binding to update DOM element content with interpolated values
              * @param {Object} binding - Binding object containing element reference and original text
              * @param {string} property - The property name being bound (for potential debugging/logging)
@@ -3776,6 +3698,56 @@
             },
 
             /**
+             * Remove all previously applied classes from the element
+             * @param {HTMLElement} element - The target DOM element
+             */
+            clearPreviousClasses(element) {
+                const previousClasses = element.dataset.pacPreviousClasses;
+
+                if (previousClasses) {
+                    previousClasses.split(' ').forEach(cls => {
+                        if (cls.trim()) {
+                            element.classList.remove(cls.trim());
+                        }
+                    });
+                }
+            },
+
+            /**
+             * Parse different value types and return array of class names to apply
+             * @param {*} value - The evaluated expression value
+             * @returns {string[]} Array of valid class names
+             */
+            parseClassValue(value) {
+                // Object syntax: { className: boolean, className2: boolean }
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    return Object.entries(value)
+                        .filter(([className, isActive]) => isActive && className.trim())
+                        .map(([className]) => className.trim());
+                }
+
+                // Array of class names
+                if (Array.isArray(value)) {
+                    return value
+                        .filter(cls => cls && typeof cls === 'string' && cls.trim())
+                        .map(cls => cls.trim());
+                }
+
+                // String value - single class or space-separated classes
+                if (typeof value === 'string') {
+                    return value.trim().split(/\s+/).filter(cls => cls.trim());
+                }
+
+                // Truthy non-string value - convert to string
+                if (value) {
+                    const className = String(value).trim();
+                    return className ? [className] : [];
+                }
+
+                return [];
+            },
+
+            /**
              * Reads the current value from a DOM element (input, select, textarea, etc.)
              * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
              * @returns {string|boolean} The element's value (string for most inputs, boolean for checkboxes)
@@ -3809,11 +3781,12 @@
                     case element.type === 'checkbox':
                         return element.checked; // true/false based on checked state
 
-                    case element.type === 'radio':
+                    case element.type === 'radio': {
                         // Radio buttons work in groups, so find the currently checked one
                         // Use the 'name' attribute to identify radio buttons in the same group
                         const checkedRadio = document.querySelector(`input[name="${element.name}"]:checked`);
                         return checkedRadio ? checkedRadio.value : ''; // Get value or empty string
+                    }
 
                     case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA':
                         return element.value; // Get the input value
@@ -4441,7 +4414,9 @@
     window.wakaPAC = wakaPAC;
 
     // Export for CommonJS/Node.js environments
+    // eslint-disable-next-line no-undef
     if (typeof module !== 'undefined' && module.exports) {
+        // eslint-disable-next-line no-undef
         module.exports = {wakaPAC, ComponentRegistry, Utils};
     }
 })();
