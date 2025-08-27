@@ -1041,11 +1041,11 @@ const parent = wakaPAC('#parent-app', {
 // Parent to Child (Commands)
 const parent = wakaPAC('#parent-app', {
     broadcastMessage() {
-        // Send to all children
-        this.sendToChildren('update', {theme: 'dark'});
+        // Notify all children
+        this.notifyChildren('update', {theme: 'dark'});
 
-        // Send to specific child
-        this.sendToChild('#child-app', 'focus');
+        // Notify specific child
+        this.notifyChild('#child-app', 'focus');
     }
 });
 
@@ -1260,8 +1260,8 @@ const component = wakaPAC(selector, abstraction, options);
 ```javascript
 // Communication
 component.notifyParent(type, data)
-component.sendToChildren(command, data)
-component.sendToChild(selector, command, data)
+component.notifyChildren(command, data)
+component.notifyChild(selector, command, data)
 
 // DOM interaction
 component.readDOMValue(selector)

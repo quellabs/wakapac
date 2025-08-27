@@ -250,7 +250,7 @@
                         type: 'broadcast'
                     };
                     
-                    this.sendToChildren('parentBroadcast', broadcastMessage);
+                    this.notifyChildren('parentBroadcast', broadcastMessage);
                     this.status = 'Broadcasted message to all children';
                     
                     // Add to activity log
@@ -267,7 +267,7 @@
                     this.status = 'Counters reset - waiting for messages...';
                     
                     // Tell children to reset their counters too
-                    this.sendToChildren('resetCounters', {});
+                    this.notifyChildren('resetCounters', {});
                 }
             });
 

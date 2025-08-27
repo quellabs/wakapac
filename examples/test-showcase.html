@@ -797,41 +797,47 @@
 
         receiveFromParent(command, data) {
             logMessage('child', `Received command: ${command}`, data);
+
             switch(command) {
                 case 'pause':
                     this.isPaused = true;
                     this.pauseReason = data.reason || 'Paused by parent';
                     this.status = 'inactive';
-                    this.sendToChildren('deactivate', { reason: 'Parent paused' });
+                    this.notifyChildren('deactivate', { reason: 'Parent paused' });
                     break;
+
                 case 'resume':
                     this.isPaused = false;
                     this.pauseReason = '';
                     this.updateStatus();
-                    this.sendToChildren('activate', { task: this.taskName });
+                    this.notifyChildren('activate', { task: this.taskName });
                     break;
+
                 case 'updateData':
                     this.parentData = `Master: ${data.masterValue}`;
                     logMessage('child', 'Received data update from parent - forwarding to grandchildren', data);
-                    this.sendToChildren('updateData', data);
-                    this.sendToChildren('setProgress', { progress: Math.min(100, data.masterValue || 0) });
+                    this.notifyChildren('updateData', data);
+                    this.notifyChildren('setProgress', { progress: Math.min(100, data.masterValue || 0) });
                     break;
+
                 case 'emergencyStop':
                     this.isPaused = true;
                     this.pauseReason = 'EMERGENCY STOP';
                     this.status = 'high';
                     this.count = 0;
-                    this.sendToChildren('emergencyStop', { reason: 'Emergency stop initiated' });
+                    this.notifyChildren('emergencyStop', { reason: 'Emergency stop initiated' });
                     break;
+
                 case 'blur':
                     const inputs = this.container.querySelectorAll('input');
                     inputs.forEach(input => input.blur());
                     break;
+
                 case 'updateTheme':
                     const container = this.container;
                     container.className = container.className.replace(/theme-\w+/g, '');
                     container.classList.add(`theme-${data.theme}`);
-                    this.sendToChildren('updateTheme', data);
+                    this.notifyChildren('updateTheme', data);
                     break;
             }
         },
@@ -855,20 +861,25 @@
             switch(eventType) {
                 case 'progressUpdate':
                     logMessage('child', `Grandchild progress: ${data.progress}%`);
+
                     this.notifyParent('grandchildProgress', {
                         grandchildId: data.workerId,
                         progress: data.progress,
                         childTask: this.taskName
                     });
+
                     break;
+
                 case 'progressReport':
                     logMessage('child', `Received progress report from ${data.workerId} - forwarding to parent`);
                     this.notifyParent('progressReport', data);
                     break;
+
                 case 'dataRequest':
                     logMessage('child', `Received data request from ${data.requesterId} - forwarding to parent`);
                     this.notifyParent('dataRequest', data);
                     break;
+
                 case 'statusChange':
                     logMessage('child', `Grandchild ${data.workerId} status changed to: ${data.isActive ? 'active' : 'inactive'}`);
                     break;
@@ -909,7 +920,7 @@
             this.count = 0;
             this.updateStatus();
             this.message = 'Reset completed';
-            this.sendToChildren('setProgress', { progress: 0 });
+            this.notifyChildren('setProgress', { progress: 0 });
             logMessage('child', 'Reset completed');
             this.notifyParent('reset', { taskName: this.taskName });
         },
@@ -936,16 +947,20 @@
         createGrandchild() {
             if (this.grandchildActive) {
                 logMessage('child', 'Deactivating grandchild worker');
-                this.sendToChild('#grandchild-app', 'deactivate', {
+
+                this.notifyChildren('#grandchild-app', 'deactivate', {
                     reason: 'Deactivated by parent'
                 });
+
                 this.grandchildActive = false;
             } else {
                 logMessage('child', 'Activating grandchild worker');
-                this.sendToChild('#grandchild-app', 'activate', {
+
+                this.notifyChild('#grandchild-app', 'activate', {
                     task: `Sub-task of ${this.taskName}`,
                     assignedBy: this.name
                 });
+
                 this.grandchildActive = true;
             }
         }
@@ -983,25 +998,32 @@
                     break;
                 case 'focusRequest':
                     logMessage('parent', 'Handling focus request - blurring other children');
-                    this.sendToChildren('blur');
+                    this.notifyChildren('blur');
                     break;
+
                 case 'progressReport':
                     logMessage('parent', `Progress report from grandchild ${data.workerId}: ${data.progress}%`);
                     break;
+
                 case 'dataRequest':
                     logMessage('parent', `Received data request from ${data.requesterId} for: ${data.requestedData.join(', ')}`);
+
                     const requestedData = {};
+
                     data.requestedData.forEach(key => {
                         if (this.hasOwnProperty(key)) {
                             requestedData[key] = this[key];
                         }
                     });
+
                     logMessage('parent', `Sending requested data back to ${data.requesterId}`, requestedData);
-                    this.sendToChildren('updateData', requestedData);
+                    this.notifyChildren('updateData', requestedData);
                     break;
+
                 case 'grandchildProgress':
                     logMessage('parent', `Grandchild ${data.grandchildId} progress: ${data.progress}% (via ${data.childTask})`);
                     break;
+
                 case 'reset':
                     this.parentStatus = 'low';
                     this.parentStatusText = 'Child reset completed';
@@ -1015,21 +1037,24 @@
 
         coordinateAllChildren() {
             logMessage('parent', 'Coordinating all children');
-            this.sendToChild('#child-app', 'updateData', {
+
+            this.notifyChild('#child-app', 'updateData', {
                 masterValue: this.masterValue,
                 coordinationTime: new Date().toISOString()
             });
-            this.sendToChildren('activate', {
+
+            this.notifyChildren('activate', {
                 task: 'Coordinated task',
                 priority: 'high'
             });
+
             this.parentStatusText = 'Coordination completed';
         },
 
         broadcastThemeChange() {
             this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
             logMessage('parent', `Broadcasting theme change to: ${this.currentTheme}`);
-            this.sendToChildren('updateTheme', { theme: this.currentTheme });
+            this.notifyChildren('updateTheme', { theme: this.currentTheme });
             const container = this.container;
             container.className = container.className.replace(/theme-\w+/g, '');
             container.classList.add(`theme-${this.currentTheme}`);
@@ -1037,7 +1062,7 @@
 
         pauseAllChildren() {
             logMessage('parent', 'Pausing all children');
-            this.sendToChildren('pause', {
+            this.notifyChildren('pause', {
                 reason: 'Paused by parent',
                 timestamp: Date.now()
             });
@@ -1046,7 +1071,7 @@
 
         resumeAllChildren() {
             logMessage('parent', 'Resuming all children');
-            this.sendToChildren('resume', {
+            this.notifyChildren('resume', {
                 reason: 'Resumed by parent',
                 timestamp: Date.now()
             });
@@ -1055,11 +1080,13 @@
 
         emergencyStop() {
             logMessage('parent', 'EMERGENCY STOP - All operations halted!');
-            this.sendToChildren('emergencyStop', {
+
+            this.notifyChildren('emergencyStop', {
                 reason: 'Emergency stop initiated by parent',
                 timestamp: Date.now(),
                 severity: 'critical'
             });
+
             this.parentStatus = 'high';
             this.parentStatusText = '🛑 EMERGENCY STOP ACTIVE';
         },
@@ -1069,8 +1096,10 @@
                 logMessage('parent', 'Invalid master value - must be 0-100');
                 return;
             }
+
             logMessage('parent', `Broadcasting master value: ${this.masterValue}`);
-            this.sendToChildren('updateData', {
+
+            this.notifyChildren('updateData', {
                 masterValue: this.masterValue,
                 broadcastTime: new Date().toISOString()
             });
@@ -1094,7 +1123,7 @@
 
     setTimeout(() => {
         logMessage('parent', 'Auto-demo: Activating grandchild and setting initial state');
-        parentPAC.sendToChildren('activate', { task: 'Demo task', priority: 'normal' });
+        parentPAC.notifyChildren('activate', { task: 'Demo task', priority: 'normal' });
     }, 2000);
 </script>
 
