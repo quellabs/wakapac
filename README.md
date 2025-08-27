@@ -43,7 +43,7 @@
 <div id="my-app">
     <h1>Hello {{name}}!</h1>
     <p>Count: {{count}}</p>
-    <button data-pac-bind="click:increment">Click me!</button>
+    <button data-pac-bind="click: increment">Click me!</button>
 </div>
 
 <script>
@@ -1265,6 +1265,7 @@ component.notifyChild(selector, command, data)
 
 // DOM interaction
 component.readDOMValue(selector)
+component.writeDOMValue(selector, value)
 component.control(url, options)
 
 // Data safety and display utilities
