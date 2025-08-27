@@ -17,7 +17,7 @@
         message: 'Hello from parent',
 
         sendMessageToChild() {
-            this.sendToChild('#child-component', 'updateMessage', 'Hello from parent!');
+            this.notifyChild('#child-component', 'updateMessage', 'Hello from parent!');
         },
 
         onChildUpdate(type, data, child) {

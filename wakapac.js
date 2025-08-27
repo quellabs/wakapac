@@ -1733,10 +1733,10 @@
                     notifyParent: (type, data) => this.notifyParent(type, data),
 
                     // Broadcasting messages to all child components
-                    sendToChildren: (cmd, data) => this.sendToChildren(cmd, data),
+                    notifyChildren: (cmd, data) => this.notifyChildren(cmd, data),
 
                     // Sending targeted messages to a specific child component
-                    sendToChild: (selector, cmd, data) => this.sendToChild(selector, cmd, data),
+                    notifyChild: (selector, cmd, data) => this.notifyChild(selector, cmd, data),
 
                     // Finding a specific child component using a predicate function
                     findChild: predicate => Array.from(this.children).find(predicate),
@@ -3886,7 +3886,7 @@
              * @param {string} cmd - The command identifier
              * @param {*} data - The command data payload
              */
-            sendToChildren(cmd, data) {
+            notifyChildren(cmd, data) {
                 // Iterate through all child components
                 this.children.forEach(child => {
                     // Ensure child has the receiveFromParent method before calling
@@ -3902,7 +3902,7 @@
              * @param {string} cmd - The command identifier
              * @param {*} data - The command data payload
              */
-            sendToChild(selector, cmd, data) {
+            notifyChild(selector, cmd, data) {
                 // Find the first child whose container element matches the selector
                 const child = Array.from(this.children).find(c => c.container.matches(selector));
 
@@ -3960,7 +3960,7 @@
 
                 // Define internal method names that should be excluded from serialization
                 // These are component lifecycle and communication methods, not data
-                const methodNames = ['notifyParent', 'sendToChildren', 'sendToChild', 'findChild', 'toJSON'];
+                const methodNames = ['notifyParent', 'notifyChildren', 'notifyChild', 'findChild', 'toJSON'];
 
                 // Iterate through all properties in the component's abstraction layer
                 Object.keys(this.abstraction).forEach(key => {
@@ -4242,7 +4242,7 @@
                  * @param {string} cmd - Command to send
                  * @param {*} data - Data to send with the command
                  */
-                sendToChildren: (cmd, data) => control.sendToChildren(cmd, data),
+                notifyChildren: (cmd, data) => control.notifyChildren(cmd, data),
 
                 /**
                  * Sends a command to a specific child component
@@ -4250,7 +4250,7 @@
                  * @param {string} cmd - Command to send
                  * @param {*} data - Data to send with the command
                  */
-                sendToChild: (selector, cmd, data) => control.sendToChild(selector, cmd, data),
+                notifyChild: (selector, cmd, data) => control.notifyChild(selector, cmd, data),
 
                 /**
                  * Finds the first child component that matches the predicate
