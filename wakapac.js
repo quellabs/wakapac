@@ -1811,11 +1811,20 @@
              * Initializes the PAC component
              */
             initialize() {
-                this.setupBindings();
+                // Setup bindings
+                this.setupTextBindings();
+                this.setupAttributeBindings();
+                this.buildBindingIndex();
+
+                // Creates the reactive abstraction object with computed properties
                 this.abstraction = this.createReactiveAbstraction();
+
+                // Sets up event handling with delegation
                 this.setupEventHandling();
                 this.setupIntersectionObserver();
                 this.updateContainerVisibility();
+
+                // Read all binds and set there initial values
                 this.performInitialUpdate();
                 return this;
             },
@@ -2006,6 +2015,7 @@
                     return;
                 }
 
+                // Set flag to indicate that the singleton was initialized
                 window._wakaPACBrowserListeners = true;
 
                 /**
@@ -2332,15 +2342,6 @@
             },
 
             // === BINDING SETUP SECTION ===
-
-            /**
-             * Sets up all DOM bindings by scanning for directives
-             */
-            setupBindings() {
-                this.setupTextBindings();
-                this.setupAttributeBindings();
-                this.buildBindingIndex();
-            },
 
             /**
              * Finds and creates text interpolation bindings {{property}}
