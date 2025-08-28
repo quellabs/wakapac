@@ -2386,7 +2386,6 @@
 
                     // Parse the binding string into individual binding pairs
                     const bindingPairs = ExpressionParser.parseBindingString(bindingString);
-                    ;
 
                     // Automatically reorder bindings: foreach first, then others
                     const reorderedBindings = this.reorderBindings(bindingPairs);
@@ -2430,18 +2429,19 @@
             // === BINDING CREATION SECTION ===
 
             /**
-             * Gets parsed expression and ensures binding is indexed (lazy indexing)
+             * Ensures binding is indexed for efficient lookups (lazy indexing)
              * @param {Object} binding - The binding object
              * @returns {Object} Parsed expression object
              */
             getParsedExpression(binding) {
-                // Get parsed expression (ExpressionParser handles caching)
+                // Get cached parsed expression (ExpressionParser handles caching)
                 const parsedExpression = ExpressionParser.parseExpression(binding.target);
-                const dependencies = parsedExpression.dependencies || [];
 
-                // Only do the indexing work if not already done
+                // Only do indexing work if not already done
                 if (!binding.isIndexed) {
-                    // Index this binding under each of its dependencies
+                    const dependencies = parsedExpression.dependencies || [];
+
+                    // Index this binding under each dependency
                     dependencies.forEach(dep => {
                         if (!this.bindingIndex.has(dep)) {
                             this.bindingIndex.set(dep, new Set());
@@ -2450,7 +2450,6 @@
                         this.bindingIndex.get(dep).add(binding);
                     });
 
-                    // Mark as indexed to avoid re-indexing
                     binding.isIndexed = true;
                     binding.dependencies = dependencies;
                 }
@@ -2784,59 +2783,57 @@
             },
 
             /**
-             * Processes all pending DOM updates in a single batch
+             * Processes all pending DOM updates in a single batch.
+             * This:
+             *  1. Collects all bindings that need updating (from both parsed and unparsed sources).
+             *  2. Ensures unparsed bindings are parsed before being updated.
+             *  3. Executes all updates in a single pass.
+             *  4. Resets pending state after completion.
+             *
              * @returns {void}
              */
             flushUpdates() {
-                // Early exit if no pending updates to process
+                // Exit early if no updates are pending
                 if (!this.pendingUpdates) {
                     return;
                 }
 
-                /**
-                 * Set to collect all bindings that need to be updated
-                 * @type {Set}
-                 */
+                /** @type {Set} bindings scheduled for update */
                 const relevantBindings = new Set();
 
-                // Process each property that has pending updates
+                /**
+                 * Ensures a binding is parsed and checks whether it needs an update.
+                 * If yes, adds it to the relevant set.
+                 * @param {object} binding - The binding to check
+                 * @param {string} property - The property that triggered the check
+                 */
+                const collect = (binding, property) => {
+                    // Parse binding expression if not already parsed
+                    if (!binding.parsedExpression) {
+                        this.getParsedExpression(binding);
+                        this.unparsedBindings.delete(binding);
+                    }
+
+                    // Add binding if it should be updated for this property
+                    if (this.shouldUpdateBinding(binding, property)) {
+                        relevantBindings.add(binding);
+                    }
+                };
+
+                // Iterate through all properties that have pending updates
                 this.pendingUpdates.forEach(property => {
-                    /**
-                     * Get all bindings indexed by this property
-                     * @type {Set}
-                     */
-                    const indexed = this.bindingIndex.get(property) || new Set();
+                    // Collect from bindings already indexed by property
+                    (this.bindingIndex.get(property) || []).forEach(b => collect(b, property));
 
-                    // Add indexed bindings that should be updated
-                    indexed.forEach(binding => {
-                        if (this.shouldUpdateBinding(binding, property)) {
-                            relevantBindings.add(binding);
-                        }
-                    });
-
-                    // Process unparsed bindings that may reference this property
-                    this.unparsedBindings.forEach(binding => {
-                        if (!binding.parsedExpression) {
-                            // Parse the binding expression and cache it
-                            this.getParsedExpression(binding);
-
-                            // Remove from unparsed set since it's now parsed
-                            this.unparsedBindings.delete(binding);
-                        }
-
-                        // Check if this parsed binding should be updated
-                        if (this.shouldUpdateBinding(binding, property)) {
-                            relevantBindings.add(binding);
-                        }
-                    });
+                    // Also check all unparsed bindings against this property
+                    this.unparsedBindings.forEach(b => collect(b, property));
                 });
 
-                // Execute updates for all relevant bindings in batch
-                relevantBindings.forEach(binding => this.updateBinding(binding, null, null));
+                // Execute updates for all collected bindings
+                relevantBindings.forEach(b => this.updateBinding(b, null, null));
 
-                // Clean up pending state after successful batch update
-                this.pendingUpdates = null;
-                this.pendingValues = null;
+                // Reset pending state after successful batch update
+                this.pendingUpdates = this.pendingValues = null;
             },
 
             /**
