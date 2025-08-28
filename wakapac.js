@@ -1997,81 +1997,88 @@
             },
 
             /**
-             * Sets up global browser event listeners to track browser state changes
-             * and synchronize them across all registered PAC components
+             * Sets up global browser event listeners to track and synchronize
+             * browser state (visibility, scroll, resize) across all registered PAC components.
              */
             setupGlobalBrowserListeners() {
-                // Use singleton pattern to avoid duplicate listeners
-                // Check if listeners have already been set up to prevent memory leaks
-                // and duplicate event handlers when this method is called multiple times
+                // Prevent duplicate setup (singleton pattern)
                 if (window._wakaPACBrowserListeners) {
                     return;
                 }
 
-                // Initialize singleton
                 window._wakaPACBrowserListeners = true;
 
-                // Track page visibility changes (tab switching, window minimizing, etc.)
-                // Useful for pausing animations or reducing CPU usage when page is not visible
-                const visibilityHandler = () => {
-                    if (window.PACRegistry && window.PACRegistry.components.size > 0) {
-                        window.PACRegistry.components.forEach(component => {
-                            // document.hidden is true when page is not visible, so invert it
-                            // browserVisible will be false when tab is hidden/minimized
-                            component.abstraction.browserVisible = !document.hidden;
-                        });
+                /**
+                 * Utility: Iterate over all registered PAC components (if any)
+                 * and apply a given callback function.
+                 * @param {Function} fn - Callback executed with each component
+                 */
+                const eachComponent = fn => {
+                    const comps = window.PACRegistry?.components;
+
+                    if (comps?.size) {
+                        comps.forEach(fn);
                     }
                 };
 
-                // Track scroll position changes across the page
-                // Updates all registered components with current scroll position and document height
-                const scrollHandler = () => {
-                    // Debounce scroll events for performance
-                    clearTimeout(window._wakaPACScrollTimeout);
-
-                    // Iterate through all registered PAC components
-                    window._wakaPACScrollTimeout = setTimeout(() => {
-                        if (window.PACRegistry && window.PACRegistry.components.size > 0) {
-                            window.PACRegistry.components.forEach(component => {
-                                component.abstraction.browserScrollX = window.scrollX;
-                                component.abstraction.browserScrollY = window.scrollY;
-                            });
-                        }
-                    }, 16);
+                /**
+                 * Utility: Create a debounced version of a function
+                 * that cancels previous calls until the delay passes.
+                 * Timeout ID is stored on `window` to avoid leaks.
+                 * @param {Function} fn - Function to debounce
+                 * @param {number} delay - Delay in ms
+                 * @param {string} key - Unique window property to store timeout ID
+                 * @returns {Function} Debounced function
+                 */
+                const debounce = (fn, delay, key) => (...args) => {
+                    clearTimeout(window[key]);
+                    window[key] = setTimeout(() => fn(...args), delay);
                 };
 
-                // Track window resize events to handle responsive behavior
-                // Updates components when user resizes browser window or rotates mobile device
-                const resizeHandler = () => {
-                    // Debounce resize events for performance
-                    clearTimeout(window._wakaPACResizeTimeout);
+                // Define all event handlers
+                const handlers = {
+                    /**
+                     * Handles tab/window visibility changes.
+                     * Updates each component's `browserVisible` state.
+                     */
+                    visibility: () => eachComponent(c =>
+                        c.abstraction.browserVisible = !document.hidden
+                    ),
 
-                    // Iterate through all registered PAC components
-                    window._wakaPACResizeTimeout = setTimeout(() => {
-                        if (window.PACRegistry && window.PACRegistry.components.size > 0) {
-                            window.PACRegistry.components.forEach(component => {
-                                component.abstraction.browserViewportWidth = window.innerWidth;
-                                component.abstraction.browserViewportHeight = window.innerHeight;
-                                component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
-                                component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-                                component.abstraction.browserScrollX = window.scrollX;
-                                component.abstraction.browserScrollY = window.scrollY;
-                            });
-                        }
-                    }, 100);
+                    /**
+                     * Handles scroll events.
+                     * Updates current scroll position for each component.
+                     * Debounced for performance (~60fps).
+                     */
+                    scroll: debounce(() => eachComponent(c => {
+                        c.abstraction.browserScrollX = window.scrollX;
+                        c.abstraction.browserScrollY = window.scrollY;
+                    }), 16, "_wakaPACScrollTimeout"),
+
+                    /**
+                     * Handles window resize events.
+                     * Updates viewport/document dimensions and scroll position.
+                     * Debounced for performance (fires after resizing stops).
+                     */
+                    resize: debounce(() => eachComponent(c => {
+                        Object.assign(c.abstraction, {
+                            browserViewportWidth: window.innerWidth,
+                            browserViewportHeight: window.innerHeight,
+                            browserDocumentWidth: document.documentElement.scrollWidth,
+                            browserDocumentHeight: document.documentElement.scrollHeight,
+                            browserScrollX: window.scrollX,
+                            browserScrollY: window.scrollY
+                        });
+                    }), 100, "_wakaPACResizeTimeout")
                 };
 
-                // Store handlers globally for cleanup
-                window._wakaPACGlobalHandlers = {
-                    visibility: visibilityHandler,
-                    scroll: scrollHandler,
-                    resize: resizeHandler
-                };
+                // Store handlers globally for potential cleanup
+                window._wakaPACGlobalHandlers = handlers;
 
-                // Add event listeners
-                document.addEventListener('visibilitychange', visibilityHandler);
-                window.addEventListener('scroll', scrollHandler);
-                window.addEventListener('resize', resizeHandler);
+                // Attach event listeners
+                document.addEventListener('visibilitychange', handlers.visibility);
+                window.addEventListener('scroll', handlers.scroll);
+                window.addEventListener('resize', handlers.resize);
             },
 
             /**
