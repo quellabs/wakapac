@@ -18,7 +18,7 @@
  */
 
 (function () {
-    'use strict';
+    "use strict";
 
     // =============================================================================
     // CONSTANTS AND CONFIGURATION
@@ -29,50 +29,50 @@
      * @type {string[]}
      */
     const KNOWN_BINDING_TYPES = [
-        'value', 'checked', 'visible', 'if', 'foreach', 'class', 'style',
-        'click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'
+        "value", "checked", "visible", "if", "foreach", "class", "style",
+        "click", "change", "input", "submit", "focus", "blur", "keyup", "keydown"
     ];
 
     /**
      * Binding map
      * @type {{visible: string, checked: string, value: string, class: string, style: string}}
      */
-    const BINDING_TYPE_MAP = {'visible': 'visible', 'checked': 'checked', 'value': 'input', 'class': 'class', 'style': 'style'};
+    const BINDING_TYPE_MAP = {"visible": "visible", "checked": "checked", "value": "input", "class": "class", "style": "style"};
 
     /**
      * Array mutation methods that trigger reactivity updates
      * @constant {string[]}
      */
-    const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+    const ARRAY_METHODS = ["push", "pop", "shift", "unshift", "splice", "sort", "reverse"];
 
     /**
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
-    const BOOLEAN_ATTRS = ['readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
+    const BOOLEAN_ATTRS = ["readonly", "required", "selected", "checked", "hidden", "multiple"];
 
     /**
      * Common DOM event types for event listeners
      * @type {string[]}
      */
-    const EVENT_TYPES = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
+    const EVENT_TYPES = ["input", "change", "click", "submit", "focus", "blur", "keyup", "keydown"];
 
     /**
      * Event key mappings for modifier handling
      * @constant {Object.<string, string|string[]>}
      */
     const EVENT_KEYS = {
-        'enter': 'Enter',
-        'escape': 'Escape',
-        'esc': 'Escape',
-        'space': ' ',
-        'tab': 'Tab',
-        'delete': ['Delete', 'Backspace'],
-        'del': ['Delete', 'Backspace'],
-        'up': 'ArrowUp',
-        'down': 'ArrowDown',
-        'left': 'ArrowLeft',
-        'right': 'ArrowRight'
+        "enter": "Enter",
+        "escape": "Escape",
+        "esc": "Escape",
+        "space": " ",
+        "tab": "Tab",
+        "delete": ["Delete", "Backspace"],
+        "del": ["Delete", "Backspace"],
+        "up": "ArrowUp",
+        "down": "ArrowDown",
+        "left": "ArrowLeft",
+        "right": "ArrowRight"
     };
 
     // =============================================================================
@@ -2890,7 +2890,6 @@
 
                         // Only update if the collection has a defined value
                         if (value !== undefined) {
-                            // Perform initial rendering of the foreach binding
                             this.applyForeachBinding(binding, binding.collection);
                         }
                     } else if (
@@ -2935,8 +2934,7 @@
                         // Special handlers that don't need context evaluation
                         text: () => this.applyTextBinding(binding, property, foreachVars),
                         foreach: () => this.applyForeachBinding(binding, property, foreachVars),
-                        event: () => {
-                        },
+                        event: () => {},
 
                         // Default handlers that need context evaluation
                         attribute: (ctx, val) => this.applyAttributeBinding(binding, val),
@@ -3755,87 +3753,205 @@
             },
 
             /**
-             * Updates foreach bindings for list rendering by re-rendering the entire collection
-             * when the underlying data changes. Uses intelligent diffing and fingerprinting
-             * to avoid unnecessary DOM updates when the collection hasn't actually changed.
+             * Applies foreach binding updates using a smart skip system that minimizes DOM manipulation.
+             *
+             * This method implements a three-path update strategy:
+             * 1. No changes: Skip update entirely
+             * 2. Content-only changes: Refresh bindings on existing DOM elements (performance optimization)
+             * 3. Structural changes: Full DOM rebuild (fallback for complex changes)
+             *
+             * The fingerprinting system detects the type of change by comparing item IDs and content hashes
+             * between the previous and current array states.
+             *
              * @param {Object} binding - The foreach binding configuration object
              * @param {string} binding.collection - Name of the collection property being rendered
              * @param {string} binding.template - HTML template string for each item
-             * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'user')
+             * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'todo')
              * @param {string} binding.indexName - Variable name for the current index (e.g., 'index', 'i')
              * @param {Array} binding.previous - Previously rendered array state for change detection
-             * @param {array} binding.fingerprints - Hashes of the previous array state for quick comparison
+             * @param {Array} binding.fingerprints - Hashes of the previous array state for comparison
              * @param {HTMLElement} binding.element - DOM container element to render items into
              * @param {string|null} property - The specific property that changed (null for force update)
              * @param {Object|null} foreachVars - Additional context variables from parent foreach loops
              * @returns {void}
              */
             applyForeachBinding(binding, property, foreachVars = null) {
-                // Only update if this binding is for the changed property OR if property is null (force update)
+                // Early exit: Only update if this binding matches the changed property OR if property is null (force update)
                 if (property && binding.collection !== property) {
                     return;
                 }
 
-                // Create evaluation context by merging abstraction data with foreach variables
+                // Create evaluation context by merging abstraction data with parent foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
 
-                // Parse the binding expression to get the array value
+                // Parse and evaluate the binding expression to get the current array value
                 const parsed = this.getParsedExpression(binding);
                 const arrayValue = ExpressionParser.evaluate(parsed, context);
 
-                // Ensure we have a valid array to work with
+                // Ensure we have a valid array to work with (handle null/undefined gracefully)
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
-                const forceUpdate = binding.previous === null;
+                const forceUpdate = binding.previous === null; // Initial render flag
 
-                // Check if any nested properties of the collection have changed
-                const hasDirectNestedChanges = this.pendingUpdates &&
-                    Array.from(this.pendingUpdates).some(prop =>
-                        prop.startsWith(binding.collection + '.')
-                    );
-
-                // Generate fingerprint for change detection - comparing deep structure
+                // Generate fingerprints for change detection using existing fingerprinting system
+                // Each fingerprint contains: { index, id, hash } for tracking item identity and content
                 const currentFingerprints = this.generateFingerprints(array);
                 const previousFingerprints = binding.fingerprints || [];
 
-                // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
-                if (!forceUpdate && !hasDirectNestedChanges &&
-                    Utils.isEqual(currentFingerprints, previousFingerprints)) {
+                // Detect content-only changes: same items in same positions but different properties
+                // This is the key optimization for cases like checkbox changes (todo.completed = true)
+                const hasContentOnlyChanges = this.hasContentOnlyChanges(previousFingerprints, currentFingerprints);
+
+                // PATH 1: No changes detected - skip update entirely
+                if (!forceUpdate && Utils.isEqual(currentFingerprints, previousFingerprints)) {
+                    // Update cached state but don't touch the DOM
                     binding.previous = [...array];
                     return;
                 }
 
-                // Store new fingerprint and cache current array state
+                // Update cached state for future comparisons
                 binding.fingerprints = currentFingerprints;
                 binding.previous = [...array];
 
-                // Clear current element html to accept new html
-                binding.element.innerHTML = '';
+                // PATH 2: Content-only changes - refresh bindings without DOM reconstruction
+                // This path handles property changes like todo.completed, user.name, etc.
+                // Keeps existing DOM elements and just updates their bindings for performance
+                if (hasContentOnlyChanges && !forceUpdate) {
+                    this.refreshForeachElementBindings(binding, array, foreachVars);
+                    return;
+                }
 
-                // Build new content using DocumentFragment for efficient DOM manipulation
+                // PATH 3: Structural changes - complete DOM rebuild
+                // This handles additions, removals, reorderings, and initial renders
+                // More expensive but necessary when the array structure changes
+                this.rebuildForeachContent(binding, array, foreachVars);
+            },
+
+            /**
+             * Determines if changes are content-only (same array structure, different item properties).
+             * @param {Array} oldFingerprints - Previous array fingerprints from last update
+             * @param {Array} newFingerprints - Current array fingerprints from this update
+             * @returns {boolean} True if changes are content-only and can use optimized update path
+             */
+            hasContentOnlyChanges(oldFingerprints, newFingerprints) {
+                // Structural change: Array length changed (items added or removed)
+                if (oldFingerprints.length !== newFingerprints.length) {
+                    return false;
+                }
+
+                // Structural change: Items reordered (same IDs but different positions)
+                // Check each position to ensure the same item ID is still there
+                for (let i = 0; i < oldFingerprints.length; i++) {
+                    if (!oldFingerprints[i] || !newFingerprints[i] ||
+                        oldFingerprints[i].id !== newFingerprints[i].id) {
+                        return false;
+                    }
+                }
+
+                // Content change detection: At least one item must have different content
+                // If hashes are identical, no properties changed so no update needed
+                return oldFingerprints.some((oldFp, i) =>
+                    oldFp.hash !== newFingerprints[i].hash
+                );
+            },
+
+            /**
+             * Refreshes data bindings on existing DOM elements without rebuilding the DOM structure.
+             * @param {Object} binding - The foreach binding being updated
+             * @param {Array} array - Current array of data items to bind
+             * @param {Object|null} foreachVars - Parent foreach context variables
+             * @returns {void}
+             */
+            refreshForeachElementBindings(binding, array, foreachVars) {
+                const container = binding.element;
+                const existingElements = Array.from(container.children);
+
+                // Process each data item and its corresponding DOM element
+                array.forEach((item, index) => {
+                    const element = existingElements[index];
+                    if (!element) return; // Safety check - should not happen in content-only updates
+
+                    // Create context variables for this specific foreach item
+                    // This makes the item data available to binding expressions as variables
+                    const itemContext = Object.assign({}, foreachVars || {}, {
+                        [binding.itemName]: item,      // e.g., 'todo' -> { id: 1, text: '...', completed: true }
+                        [binding.indexName]: index     // e.g., 'index' -> 0, 1, 2, ...
+                    });
+
+                    // Update text content using interpolation ({{todo.text}}, {{index}}, etc.)
+                    this.processTextBindingsForElement(element, itemContext);
+
+                    // Find all elements with attribute bindings within this foreach item
+                    // This includes the root element itself and any nested elements
+                    const elementsWithBindings = [element, ...element.querySelectorAll('[data-pac-bind]')]
+                        .filter(el => el.hasAttribute('data-pac-bind'));
+
+                    // Process each element's bindings to refresh their state
+                    elementsWithBindings.forEach(el => {
+                        const bindingString = el.getAttribute('data-pac-bind');
+
+                        if (!bindingString) {
+                            return;
+                        }
+
+                        // Parse the binding string and update each individual binding
+                        // Examples: "class: { completed: todo.completed }", "checked: todo.completed"
+                        ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
+                            // Skip nested foreach bindings - they're handled separately
+                            if (type === 'foreach') return;
+
+                            // Create a temporary binding object for evaluation
+                            // This reuses the existing binding infrastructure
+                            const tempBinding = this.createEvaluationBinding(el, type, target);
+
+                            // Update the binding using existing update pipeline with item context
+                            // The itemContext provides access to the current item's data
+                            this.updateBinding(tempBinding, null, itemContext);
+                        });
+                    });
+                });
+            },
+
+            /**
+             * Rebuilds the entire foreach content by destroying existing DOM and creating new elements.
+             * @param {Object} binding - The foreach binding being rebuilt
+             * @param {Array} array - Current array of data items to render
+             * @param {Object|null} foreachVars - Parent foreach context variables
+             * @returns {void}
+             */
+            rebuildForeachContent(binding, array, foreachVars) {
+                const container = binding.element;
+
+                // Clear existing content completely - destroys all child elements and their bindings
+                container.innerHTML = '';
+
+                // Use DocumentFragment for efficient DOM manipulation
+                // This allows building the entire structure in memory before adding to DOM
                 const fragment = document.createDocumentFragment();
 
+                // Create DOM elements for each item in the array
                 array.forEach((item, index) => {
-                    // Create DOM structure from template
+                    // Create new DOM element from the stored template HTML
                     const itemElement = this.createForeachItemElement(binding.template);
 
                     // Create context variables for this foreach item
                     const itemContext = Object.assign({}, foreachVars || {}, {
-                        [binding.itemName]: item,
-                        [binding.indexName]: index
+                        [binding.itemName]: item,      // e.g., 'todo' -> current todo object
+                        [binding.indexName]: index     // e.g., 'index' -> current position
                     });
 
-                    // Process text interpolation using existing text binding infrastructure
+                    // Set up text interpolation for the new element
                     this.processTextBindingsForElement(itemElement, itemContext);
 
-                    // Process attribute bindings using existing attribute binding system
+                    // Set up attribute bindings (class, style, events, etc.) for the new element
                     this.processAttributeBindingsForElement(itemElement, itemContext, binding);
 
-                    // Add itemElement to fragment
+                    // Add the configured element to the fragment
                     fragment.appendChild(itemElement);
                 });
 
-                // Replace all existing content with new rendered items
-                binding.element.appendChild(fragment);
+                // Add all new elements to the DOM in a single operation
+                // This minimizes layout recalculations and improves performance
+                container.appendChild(fragment);
             },
 
             /**
