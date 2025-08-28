@@ -169,26 +169,27 @@
                 return true;
             }
 
-            // Handle NaN case
-            if (typeof a === 'number' && typeof b === 'number' && Number.isNaN(a) && Number.isNaN(b)) {
+            if (Number.isNaN(a) && Number.isNaN(b)) {
                 return true;
             }
 
-            if (!a || !b || typeof a !== typeof b || typeof a !== 'object') {
+            if (!a || !b || typeof a !== 'object' || typeof b !== 'object') {
                 return false;
             }
 
             if (Array.isArray(a)) {
-                return Array.isArray(b) && a.length === b.length &&
-                    a.every((item, i) => Utils.isEqual(item, b[i]));
+                return Array.isArray(b) &&
+                    a.length === b.length &&
+                    a.every((item, i) => this.isEqual(item, b[i]));
             }
 
             const keysA = Object.keys(a);
             const keysB = Object.keys(b);
 
             return keysA.length === keysB.length &&
-                keysA.every(key => Object.prototype.hasOwnProperty.call(b, key) && Utils.isEqual(a[key], b[key]));
+                keysA.every(k => Object.hasOwn(b, k) && this.isEqual(a[k], b[k]));
         },
+
 
         /**
          * Checks if a string represents a DOM event type
