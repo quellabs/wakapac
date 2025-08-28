@@ -18,7 +18,7 @@
  */
 
 (function () {
-    'use strict';
+    "use strict";
 
     // =============================================================================
     // CONSTANTS AND CONFIGURATION
@@ -29,50 +29,50 @@
      * @type {string[]}
      */
     const KNOWN_BINDING_TYPES = [
-        'value', 'checked', 'visible', 'if', 'foreach', 'class', 'style',
-        'click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'
+        "value", "checked", "visible", "if", "foreach", "class", "style",
+        "click", "change", "input", "submit", "focus", "blur", "keyup", "keydown"
     ];
 
     /**
      * Binding map
      * @type {{visible: string, checked: string, value: string, class: string, style: string}}
      */
-    const BINDING_TYPE_MAP = {'visible': 'visible', 'checked': 'checked', 'value': 'input', 'class': 'class', 'style': 'style'};
+    const BINDING_TYPE_MAP = {"visible": "visible", "checked": "checked", "value": "input", "class": "class", "style": "style"};
 
     /**
      * Array mutation methods that trigger reactivity updates
      * @constant {string[]}
      */
-    const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+    const ARRAY_METHODS = ["push", "pop", "shift", "unshift", "splice", "sort", "reverse"];
 
     /**
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
-    const BOOLEAN_ATTRS = ['readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
+    const BOOLEAN_ATTRS = ["readonly", "required", "selected", "checked", "hidden", "multiple"];
 
     /**
      * Common DOM event types for event listeners
      * @type {string[]}
      */
-    const EVENT_TYPES = ['input', 'change', 'click', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
+    const EVENT_TYPES = ["input", "change", "click", "submit", "focus", "blur", "keyup", "keydown"];
 
     /**
      * Event key mappings for modifier handling
      * @constant {Object.<string, string|string[]>}
      */
     const EVENT_KEYS = {
-        'enter': 'Enter',
-        'escape': 'Escape',
-        'esc': 'Escape',
-        'space': ' ',
-        'tab': 'Tab',
-        'delete': ['Delete', 'Backspace'],
-        'del': ['Delete', 'Backspace'],
-        'up': 'ArrowUp',
-        'down': 'ArrowDown',
-        'left': 'ArrowLeft',
-        'right': 'ArrowRight'
+        "enter": "Enter",
+        "escape": "Escape",
+        "esc": "Escape",
+        "space": " ",
+        "tab": "Tab",
+        "delete": ["Delete", "Backspace"],
+        "del": ["Delete", "Backspace"],
+        "up": "ArrowUp",
+        "down": "ArrowDown",
+        "left": "ArrowLeft",
+        "right": "ArrowRight"
     };
 
     // =============================================================================
@@ -92,23 +92,15 @@
          * @returns {boolean} True if value should be proxied for deep reactivity
          */
         isReactive(value) {
-            // Primitives don't need Proxy - they're handled by property descriptors
             if (!value || typeof value !== 'object') {
                 return false;
             }
 
-            // Plain objects (created with {} or new Object() or Object.create(null))
             if (this.isPlainObject(value)) {
                 return true;
             }
 
-            // Arrays (but not typed arrays)
-            if (Array.isArray(value)) {
-                return true;
-            }
-
-            // Everything else is NOT reactive by default
-            return false;
+            return Array.isArray(value);
         },
 
         /**
@@ -177,26 +169,27 @@
                 return true;
             }
 
-            // Handle NaN case
-            if (typeof a === 'number' && typeof b === 'number' && Number.isNaN(a) && Number.isNaN(b)) {
+            if (Number.isNaN(a) && Number.isNaN(b)) {
                 return true;
             }
 
-            if (!a || !b || typeof a !== typeof b || typeof a !== 'object') {
+            if (!a || !b || typeof a !== 'object' || typeof b !== 'object') {
                 return false;
             }
 
             if (Array.isArray(a)) {
-                return Array.isArray(b) && a.length === b.length &&
-                    a.every((item, i) => Utils.isEqual(item, b[i]));
+                return Array.isArray(b) &&
+                    a.length === b.length &&
+                    a.every((item, i) => this.isEqual(item, b[i]));
             }
 
             const keysA = Object.keys(a);
             const keysB = Object.keys(b);
 
             return keysA.length === keysB.length &&
-                keysA.every(key => Object.prototype.hasOwnProperty.call(b, key) && Utils.isEqual(a[key], b[key]));
+                keysA.every(k => Object.hasOwn(b, k) && this.isEqual(a[k], b[k]));
         },
+
 
         /**
          * Checks if a string represents a DOM event type
@@ -1818,11 +1811,20 @@
              * Initializes the PAC component
              */
             initialize() {
-                this.setupBindings();
+                // Setup bindings
+                this.setupTextBindings();
+                this.setupAttributeBindings();
+                this.buildBindingIndex();
+
+                // Creates the reactive abstraction object with computed properties
                 this.abstraction = this.createReactiveAbstraction();
+
+                // Sets up event handling with delegation
                 this.setupEventHandling();
                 this.setupIntersectionObserver();
                 this.updateContainerVisibility();
+
+                // Read all binds and set there initial values
                 this.performInitialUpdate();
                 return this;
             },
@@ -1967,33 +1969,35 @@
              * @param {Object} reactive - The reactive object to attach browser properties to
              */
             setupBrowserProperties(reactive) {
-                // Define empty rect for containerClientRect
-                const emptyRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
+                const props = {
+                    // Initialize page visibility state - tracks if the browser tab/window is currently visible
+                    // Useful for pausing animations or reducing CPU usage when user switches tabs
+                    browserVisible: !document.hidden,
 
-                // Initialize page visibility state - tracks if the browser tab/window is currently visible
-                // Useful for pausing animations or reducing CPU usage when user switches tabs
-                this.createReactiveProperty(reactive, 'browserVisible', !document.hidden);
+                    // Initialize current horizontal/vertical scroll position in pixels from left/top of document
+                    browserScrollX: window.scrollX,
+                    browserScrollY: window.scrollY,
 
-                // Initialize current horizontal/vertical scroll position in pixels from left/top of document
-                this.createReactiveProperty(reactive, 'browserScrollX', window.scrollX);
-                this.createReactiveProperty(reactive, 'browserScrollY', window.scrollY);
+                    // Initialize current viewport width & height - the visible area of the browser window
+                    // Updates automatically when user resizes window or rotates mobile device
+                    browserViewportHeight: window.innerHeight,
+                    browserViewportWidth: window.innerWidth,
 
-                // Initialize current viewport width & height - the visible area of the browser window
-                // Updates automatically when user resizes window or rotates mobile device
-                this.createReactiveProperty(reactive, 'browserViewportHeight', window.innerHeight);
-                this.createReactiveProperty(reactive, 'browserViewportWidth', window.innerWidth);
+                    // Initialize total document width/height including content outside the viewport
+                    // Useful for calculating scroll percentages or infinite scroll triggers
+                    browserDocumentWidth: document.documentElement.scrollWidth,
+                    browserDocumentHeight: document.documentElement.scrollHeight,
 
-                // Initialize total document width/height including content outside the viewport
-                // Useful for calculating scroll percentages or infinite scroll triggers
-                this.createReactiveProperty(reactive, 'browserDocumentWidth', document.documentElement.scrollWidth);
-                this.createReactiveProperty(reactive, 'browserDocumentHeight', document.documentElement.scrollHeight);
+                    // Per-container viewport visibility properties
+                    containerVisible: false,
+                    containerFullyVisible: false,
+                    containerClientRect: {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0},
+                    containerWidth: 0,
+                    containerHeight: 0
+                };
 
-                // Per-container viewport visibility properties
-                this.createReactiveProperty(reactive, 'containerVisible', false);
-                this.createReactiveProperty(reactive, 'containerFullyVisible', false);
-                this.createReactiveProperty(reactive, 'containerClientRect', emptyRect);
-                this.createReactiveProperty(reactive, 'containerWidth', 0);
-                this.createReactiveProperty(reactive, 'containerHeight', 0);
+                // Create reactive properties for all properties
+                Object.entries(props).forEach(([k, v]) => this.createReactiveProperty(reactive, k, v));
 
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
@@ -2002,81 +2006,89 @@
             },
 
             /**
-             * Sets up global browser event listeners to track browser state changes
-             * and synchronize them across all registered PAC components
+             * Sets up global browser event listeners to track and synchronize
+             * browser state (visibility, scroll, resize) across all registered PAC components.
              */
             setupGlobalBrowserListeners() {
-                // Use singleton pattern to avoid duplicate listeners
-                // Check if listeners have already been set up to prevent memory leaks
-                // and duplicate event handlers when this method is called multiple times
+                // Prevent duplicate setup (singleton pattern)
                 if (window._wakaPACBrowserListeners) {
                     return;
                 }
 
-                // Initialize singleton
+                // Set flag to indicate that the singleton was initialized
                 window._wakaPACBrowserListeners = true;
 
-                // Track page visibility changes (tab switching, window minimizing, etc.)
-                // Useful for pausing animations or reducing CPU usage when page is not visible
-                const visibilityHandler = () => {
-                    if (window.PACRegistry && window.PACRegistry.components.size > 0) {
-                        window.PACRegistry.components.forEach(component => {
-                            // document.hidden is true when page is not visible, so invert it
-                            // browserVisible will be false when tab is hidden/minimized
-                            component.abstraction.browserVisible = !document.hidden;
-                        });
+                /**
+                 * Utility: Iterate over all registered PAC components (if any)
+                 * and apply a given callback function.
+                 * @param {Function} fn - Callback executed with each component
+                 */
+                const eachComponent = fn => {
+                    const comps = window.PACRegistry?.components;
+
+                    if (comps?.size) {
+                        comps.forEach(fn);
                     }
                 };
 
-                // Track scroll position changes across the page
-                // Updates all registered components with current scroll position and document height
-                const scrollHandler = () => {
-                    // Debounce scroll events for performance
-                    clearTimeout(window._wakaPACScrollTimeout);
-
-                    // Iterate through all registered PAC components
-                    window._wakaPACScrollTimeout = setTimeout(() => {
-                        if (window.PACRegistry && window.PACRegistry.components.size > 0) {
-                            window.PACRegistry.components.forEach(component => {
-                                component.abstraction.browserScrollX = window.scrollX;
-                                component.abstraction.browserScrollY = window.scrollY;
-                            });
-                        }
-                    }, 16);
+                /**
+                 * Utility: Create a debounced version of a function
+                 * that cancels previous calls until the delay passes.
+                 * Timeout ID is stored on `window` to avoid leaks.
+                 * @param {Function} fn - Function to debounce
+                 * @param {number} delay - Delay in ms
+                 * @param {string} key - Unique window property to store timeout ID
+                 * @returns {Function} Debounced function
+                 */
+                const debounce = (fn, delay, key) => (...args) => {
+                    clearTimeout(window[key]);
+                    window[key] = setTimeout(() => fn(...args), delay);
                 };
 
-                // Track window resize events to handle responsive behavior
-                // Updates components when user resizes browser window or rotates mobile device
-                const resizeHandler = () => {
-                    // Debounce resize events for performance
-                    clearTimeout(window._wakaPACResizeTimeout);
+                // Define all event handlers
+                const handlers = {
+                    /**
+                     * Handles tab/window visibility changes.
+                     * Updates each component's `browserVisible` state.
+                     */
+                    visibility: () => eachComponent(c =>
+                        c.abstraction.browserVisible = !document.hidden
+                    ),
 
-                    // Iterate through all registered PAC components
-                    window._wakaPACResizeTimeout = setTimeout(() => {
-                        if (window.PACRegistry && window.PACRegistry.components.size > 0) {
-                            window.PACRegistry.components.forEach(component => {
-                                component.abstraction.browserViewportWidth = window.innerWidth;
-                                component.abstraction.browserViewportHeight = window.innerHeight;
-                                component.abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
-                                component.abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-                                component.abstraction.browserScrollX = window.scrollX;
-                                component.abstraction.browserScrollY = window.scrollY;
-                            });
-                        }
-                    }, 100);
+                    /**
+                     * Handles scroll events.
+                     * Updates current scroll position for each component.
+                     * Debounced for performance (~60fps).
+                     */
+                    scroll: debounce(() => eachComponent(c => {
+                        c.abstraction.browserScrollX = window.scrollX;
+                        c.abstraction.browserScrollY = window.scrollY;
+                    }), 16, "_wakaPACScrollTimeout"),
+
+                    /**
+                     * Handles window resize events.
+                     * Updates viewport/document dimensions and scroll position.
+                     * Debounced for performance (fires after resizing stops).
+                     */
+                    resize: debounce(() => eachComponent(c => {
+                        Object.assign(c.abstraction, {
+                            browserViewportWidth: window.innerWidth,
+                            browserViewportHeight: window.innerHeight,
+                            browserDocumentWidth: document.documentElement.scrollWidth,
+                            browserDocumentHeight: document.documentElement.scrollHeight,
+                            browserScrollX: window.scrollX,
+                            browserScrollY: window.scrollY
+                        });
+                    }), 100, "_wakaPACResizeTimeout")
                 };
 
-                // Store handlers globally for cleanup
-                window._wakaPACGlobalHandlers = {
-                    visibility: visibilityHandler,
-                    scroll: scrollHandler,
-                    resize: resizeHandler
-                };
+                // Store handlers globally for potential cleanup
+                window._wakaPACGlobalHandlers = handlers;
 
-                // Add event listeners
-                document.addEventListener('visibilitychange', visibilityHandler);
-                window.addEventListener('scroll', scrollHandler);
-                window.addEventListener('resize', resizeHandler);
+                // Attach event listeners
+                document.addEventListener('visibilitychange', handlers.visibility);
+                window.addEventListener('scroll', handlers.scroll);
+                window.addEventListener('resize', handlers.resize);
             },
 
             /**
@@ -2332,15 +2344,6 @@
             // === BINDING SETUP SECTION ===
 
             /**
-             * Sets up all DOM bindings by scanning for directives
-             */
-            setupBindings() {
-                this.setupTextBindings();
-                this.setupAttributeBindings();
-                this.buildBindingIndex();
-            },
-
-            /**
              * Finds and creates text interpolation bindings {{property}}
              */
             setupTextBindings() {
@@ -2350,14 +2353,12 @@
                 // Process collected nodes
                 textNodes.forEach(node => {
                     const text = node.textContent;
-                    const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+                    const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
 
                     if (matches) {
                         matches.forEach((match) => {
-                            const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
-
                             const binding = this.createBinding('text', node, {
-                                target: expression,
+                                target: match.replace(/^\{\{\s*|\s*}}$/g, '').trim(),
                                 originalText: text,
                                 fullMatch: match,
                                 parsedExpression: null,
@@ -2384,7 +2385,6 @@
 
                     // Parse the binding string into individual binding pairs
                     const bindingPairs = ExpressionParser.parseBindingString(bindingString);
-                    ;
 
                     // Automatically reorder bindings: foreach first, then others
                     const reorderedBindings = this.reorderBindings(bindingPairs);
@@ -2428,18 +2428,19 @@
             // === BINDING CREATION SECTION ===
 
             /**
-             * Gets parsed expression and ensures binding is indexed (lazy indexing)
+             * Ensures binding is indexed for efficient lookups (lazy indexing)
              * @param {Object} binding - The binding object
              * @returns {Object} Parsed expression object
              */
             getParsedExpression(binding) {
-                // Get parsed expression (ExpressionParser handles caching)
+                // Get cached parsed expression (ExpressionParser handles caching)
                 const parsedExpression = ExpressionParser.parseExpression(binding.target);
-                const dependencies = parsedExpression.dependencies || [];
 
-                // Only do the indexing work if not already done
+                // Only do indexing work if not already done
                 if (!binding.isIndexed) {
-                    // Index this binding under each of its dependencies
+                    const dependencies = parsedExpression.dependencies || [];
+
+                    // Index this binding under each dependency
                     dependencies.forEach(dep => {
                         if (!this.bindingIndex.has(dep)) {
                             this.bindingIndex.set(dep, new Set());
@@ -2448,7 +2449,6 @@
                         this.bindingIndex.get(dep).add(binding);
                     });
 
-                    // Mark as indexed to avoid re-indexing
                     binding.isIndexed = true;
                     binding.dependencies = dependencies;
                 }
@@ -2724,10 +2724,14 @@
              * @returns {void}
              */
             setupInputElement(element, property, bindingType = 'value') {
-                element.setAttribute('data-pac-property', property);
-                element.setAttribute('data-pac-binding-type', bindingType);
-                element.setAttribute('data-pac-update-mode', element.getAttribute('data-pac-update') || this.config.updateMode);
-                element.setAttribute('data-pac-update-delay', element.getAttribute('data-pac-delay') || this.config.delay);
+                const attrs = {
+                    'data-pac-property': property,
+                    'data-pac-binding-type': bindingType,
+                    'data-pac-update-mode': element.getAttribute('data-pac-update') || this.config.updateMode,
+                    'data-pac-update-delay': element.getAttribute('data-pac-delay') || this.config.delay
+                };
+
+                Object.entries(attrs).forEach(([k,v]) => element.setAttribute(k, v));
             },
 
             // === UPDATE MANAGEMENT SECTION ===
@@ -2778,59 +2782,57 @@
             },
 
             /**
-             * Processes all pending DOM updates in a single batch
+             * Processes all pending DOM updates in a single batch.
+             * This:
+             *  1. Collects all bindings that need updating (from both parsed and unparsed sources).
+             *  2. Ensures unparsed bindings are parsed before being updated.
+             *  3. Executes all updates in a single pass.
+             *  4. Resets pending state after completion.
+             *
              * @returns {void}
              */
             flushUpdates() {
-                // Early exit if no pending updates to process
+                // Exit early if no updates are pending
                 if (!this.pendingUpdates) {
                     return;
                 }
 
-                /**
-                 * Set to collect all bindings that need to be updated
-                 * @type {Set}
-                 */
+                /** @type {Set} bindings scheduled for update */
                 const relevantBindings = new Set();
 
-                // Process each property that has pending updates
+                /**
+                 * Ensures a binding is parsed and checks whether it needs an update.
+                 * If yes, adds it to the relevant set.
+                 * @param {object} binding - The binding to check
+                 * @param {string} property - The property that triggered the check
+                 */
+                const collect = (binding, property) => {
+                    // Parse binding expression if not already parsed
+                    if (!binding.parsedExpression) {
+                        this.getParsedExpression(binding);
+                        this.unparsedBindings.delete(binding);
+                    }
+
+                    // Add binding if it should be updated for this property
+                    if (this.shouldUpdateBinding(binding, property)) {
+                        relevantBindings.add(binding);
+                    }
+                };
+
+                // Iterate through all properties that have pending updates
                 this.pendingUpdates.forEach(property => {
-                    /**
-                     * Get all bindings indexed by this property
-                     * @type {Set}
-                     */
-                    const indexed = this.bindingIndex.get(property) || new Set();
+                    // Collect from bindings already indexed by property
+                    (this.bindingIndex.get(property) || []).forEach(b => collect(b, property));
 
-                    // Add indexed bindings that should be updated
-                    indexed.forEach(binding => {
-                        if (this.shouldUpdateBinding(binding, property)) {
-                            relevantBindings.add(binding);
-                        }
-                    });
-
-                    // Process unparsed bindings that may reference this property
-                    this.unparsedBindings.forEach(binding => {
-                        if (!binding.parsedExpression) {
-                            // Parse the binding expression and cache it
-                            this.getParsedExpression(binding);
-
-                            // Remove from unparsed set since it's now parsed
-                            this.unparsedBindings.delete(binding);
-                        }
-
-                        // Check if this parsed binding should be updated
-                        if (this.shouldUpdateBinding(binding, property)) {
-                            relevantBindings.add(binding);
-                        }
-                    });
+                    // Also check all unparsed bindings against this property
+                    this.unparsedBindings.forEach(b => collect(b, property));
                 });
 
-                // Execute updates for all relevant bindings in batch
-                relevantBindings.forEach(binding => this.updateBinding(binding, null, null));
+                // Execute updates for all collected bindings
+                relevantBindings.forEach(b => this.updateBinding(b, null, null));
 
-                // Clean up pending state after successful batch update
-                this.pendingUpdates = null;
-                this.pendingValues = null;
+                // Reset pending state after successful batch update
+                this.pendingUpdates = this.pendingValues = null;
             },
 
             /**
@@ -2890,7 +2892,6 @@
 
                         // Only update if the collection has a defined value
                         if (value !== undefined) {
-                            // Perform initial rendering of the foreach binding
                             this.applyForeachBinding(binding, binding.collection);
                         }
                     } else if (
@@ -2935,8 +2936,7 @@
                         // Special handlers that don't need context evaluation
                         text: () => this.applyTextBinding(binding, property, foreachVars),
                         foreach: () => this.applyForeachBinding(binding, property, foreachVars),
-                        event: () => {
-                        },
+                        event: () => {},
 
                         // Default handlers that need context evaluation
                         attribute: (ctx, val) => this.applyAttributeBinding(binding, val),
@@ -3589,45 +3589,46 @@
             },
 
             /**
-             * Apply the condition binding
-             * @param {Object} binding - The binding
-             * @param value
-             * @param binding
+             * Applies conditional binding to show/hide DOM elements based on a boolean value.
+             * This function manages the visibility of elements by replacing them with placeholder
+             * comments when they should be hidden, and restoring them when they should be shown.
+             * @param {Object} binding - The binding configuration object
+             * @param {HTMLElement} binding.element - The DOM element to show/hide
+             * @param {Comment} [binding.placeholder] - Comment node placeholder when element is hidden
+             * @param {string} binding.target - Target identifier for the binding (used in placeholder text)
+             * @param {boolean} binding.isRendered - Current render state of the element
+             * @param {boolean} value - Whether the element should be visible (true) or hidden (false)
+             * @returns {void}
              */
             applyConditionalBinding(binding, value) {
-                // Early return if the value did not change
+                // Early return if the value did not change - avoids unnecessary DOM manipulation
                 if (binding.isRendered === value) {
                     return;
                 }
 
-                // Fetch the element
-                const element = binding.element;
+                // Destructure binding properties for cleaner code
+                const {element, placeholder} = binding;
 
-                // If true, add the element to the DOM
+                // Show the element: replace placeholder with actual element
                 if (value) {
-                    // Add element to DOM: Replace the placeholder comment with the actual DOM element
-                    if (binding.placeholder && binding.placeholder.parentNode) {
-                        binding.placeholder.parentNode.replaceChild(element, binding.placeholder);
-                    }
-
-                    // Update the binding state to reflect that element is now in the DOM
+                    // Only replace if placeholder exists and has a parent node
+                    placeholder?.parentNode?.replaceChild(element, placeholder);
+                    // Update the rendered state to reflect that element is now visible
                     binding.isRendered = true;
                     return;
                 }
 
-                // Otherwise remove element from DOM
-                // Replace the DOM element with a placeholder comment
-                // Create placeholder comment if it doesn't exist yet
+                // Hide the element: create placeholder if it doesn't exist
                 if (!binding.placeholder) {
+                    // Create a comment node as placeholder with descriptive text for debugging
                     binding.placeholder = document.createComment('pac-if: ' + binding.target);
                 }
 
-                // Replace the element with the invisible placeholder comment (removes from DOM)
-                if (element.parentNode) {
-                    element.parentNode.replaceChild(binding.placeholder, element);
-                }
+                // Replace the visible element with the placeholder comment
+                // This effectively hides the element while maintaining its position in the DOM
+                element.parentNode?.replaceChild(binding.placeholder, element);
 
-                // Update the binding state to reflect that element is now removed from DOM
+                // Update the rendered state to reflect that element is now hidden
                 binding.isRendered = false;
             },
 
@@ -3755,87 +3756,205 @@
             },
 
             /**
-             * Updates foreach bindings for list rendering by re-rendering the entire collection
-             * when the underlying data changes. Uses intelligent diffing and fingerprinting
-             * to avoid unnecessary DOM updates when the collection hasn't actually changed.
+             * Applies foreach binding updates using a smart skip system that minimizes DOM manipulation.
+             *
+             * This method implements a three-path update strategy:
+             * 1. No changes: Skip update entirely
+             * 2. Content-only changes: Refresh bindings on existing DOM elements (performance optimization)
+             * 3. Structural changes: Full DOM rebuild (fallback for complex changes)
+             *
+             * The fingerprinting system detects the type of change by comparing item IDs and content hashes
+             * between the previous and current array states.
+             *
              * @param {Object} binding - The foreach binding configuration object
              * @param {string} binding.collection - Name of the collection property being rendered
              * @param {string} binding.template - HTML template string for each item
-             * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'user')
+             * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'todo')
              * @param {string} binding.indexName - Variable name for the current index (e.g., 'index', 'i')
              * @param {Array} binding.previous - Previously rendered array state for change detection
-             * @param {array} binding.fingerprints - Hashes of the previous array state for quick comparison
+             * @param {Array} binding.fingerprints - Hashes of the previous array state for comparison
              * @param {HTMLElement} binding.element - DOM container element to render items into
              * @param {string|null} property - The specific property that changed (null for force update)
              * @param {Object|null} foreachVars - Additional context variables from parent foreach loops
              * @returns {void}
              */
             applyForeachBinding(binding, property, foreachVars = null) {
-                // Only update if this binding is for the changed property OR if property is null (force update)
+                // Early exit: Only update if this binding matches the changed property OR if property is null (force update)
                 if (property && binding.collection !== property) {
                     return;
                 }
 
-                // Create evaluation context by merging abstraction data with foreach variables
+                // Create evaluation context by merging abstraction data with parent foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
 
-                // Parse the binding expression to get the array value
+                // Parse and evaluate the binding expression to get the current array value
                 const parsed = this.getParsedExpression(binding);
                 const arrayValue = ExpressionParser.evaluate(parsed, context);
 
-                // Ensure we have a valid array to work with
+                // Ensure we have a valid array to work with (handle null/undefined gracefully)
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
-                const forceUpdate = binding.previous === null;
+                const forceUpdate = binding.previous === null; // Initial render flag
 
-                // Check if any nested properties of the collection have changed
-                const hasDirectNestedChanges = this.pendingUpdates &&
-                    Array.from(this.pendingUpdates).some(prop =>
-                        prop.startsWith(binding.collection + '.')
-                    );
-
-                // Generate fingerprint for change detection - comparing deep structure
+                // Generate fingerprints for change detection using existing fingerprinting system
+                // Each fingerprint contains: { index, id, hash } for tracking item identity and content
                 const currentFingerprints = this.generateFingerprints(array);
                 const previousFingerprints = binding.fingerprints || [];
 
-                // Skip update if arrays are deeply equal AND we're not forcing an update AND no nested changes
-                if (!forceUpdate && !hasDirectNestedChanges &&
-                    Utils.isEqual(currentFingerprints, previousFingerprints)) {
+                // Detect content-only changes: same items in same positions but different properties
+                // This is the key optimization for cases like checkbox changes (todo.completed = true)
+                const hasContentOnlyChanges = this.hasContentOnlyChanges(previousFingerprints, currentFingerprints);
+
+                // PATH 1: No changes detected - skip update entirely
+                if (!forceUpdate && Utils.isEqual(currentFingerprints, previousFingerprints)) {
+                    // Update cached state but don't touch the DOM
                     binding.previous = [...array];
                     return;
                 }
 
-                // Store new fingerprint and cache current array state
+                // Update cached state for future comparisons
                 binding.fingerprints = currentFingerprints;
                 binding.previous = [...array];
 
-                // Clear current element html to accept new html
-                binding.element.innerHTML = '';
+                // PATH 2: Content-only changes - refresh bindings without DOM reconstruction
+                // This path handles property changes like todo.completed, user.name, etc.
+                // Keeps existing DOM elements and just updates their bindings for performance
+                if (hasContentOnlyChanges && !forceUpdate) {
+                    this.refreshForeachElementBindings(binding, array, foreachVars);
+                    return;
+                }
 
-                // Build new content using DocumentFragment for efficient DOM manipulation
+                // PATH 3: Structural changes - complete DOM rebuild
+                // This handles additions, removals, reorderings, and initial renders
+                // More expensive but necessary when the array structure changes
+                this.rebuildForeachContent(binding, array, foreachVars);
+            },
+
+            /**
+             * Determines if changes are content-only (same array structure, different item properties).
+             * @param {Array} oldFingerprints - Previous array fingerprints from last update
+             * @param {Array} newFingerprints - Current array fingerprints from this update
+             * @returns {boolean} True if changes are content-only and can use optimized update path
+             */
+            hasContentOnlyChanges(oldFingerprints, newFingerprints) {
+                // Structural change: Array length changed (items added or removed)
+                if (oldFingerprints.length !== newFingerprints.length) {
+                    return false;
+                }
+
+                // Structural change: Items reordered (same IDs but different positions)
+                // Check each position to ensure the same item ID is still there
+                for (let i = 0; i < oldFingerprints.length; i++) {
+                    if (!oldFingerprints[i] || !newFingerprints[i] ||
+                        oldFingerprints[i].id !== newFingerprints[i].id) {
+                        return false;
+                    }
+                }
+
+                // Content change detection: At least one item must have different content
+                // If hashes are identical, no properties changed so no update needed
+                return oldFingerprints.some((oldFp, i) =>
+                    oldFp.hash !== newFingerprints[i].hash
+                );
+            },
+
+            /**
+             * Refreshes data bindings on existing DOM elements without rebuilding the DOM structure.
+             * @param {Object} binding - The foreach binding being updated
+             * @param {Array} array - Current array of data items to bind
+             * @param {Object|null} foreachVars - Parent foreach context variables
+             * @returns {void}
+             */
+            refreshForeachElementBindings(binding, array, foreachVars) {
+                const container = binding.element;
+                const existingElements = Array.from(container.children);
+
+                // Process each data item and its corresponding DOM element
+                array.forEach((item, index) => {
+                    const element = existingElements[index];
+                    if (!element) return; // Safety check - should not happen in content-only updates
+
+                    // Create context variables for this specific foreach item
+                    // This makes the item data available to binding expressions as variables
+                    const itemContext = Object.assign({}, foreachVars || {}, {
+                        [binding.itemName]: item,      // e.g., 'todo' -> { id: 1, text: '...', completed: true }
+                        [binding.indexName]: index     // e.g., 'index' -> 0, 1, 2, ...
+                    });
+
+                    // Update text content using interpolation ({{todo.text}}, {{index}}, etc.)
+                    this.processTextBindingsForElement(element, itemContext);
+
+                    // Find all elements with attribute bindings within this foreach item
+                    // This includes the root element itself and any nested elements
+                    const elementsWithBindings = [element, ...element.querySelectorAll('[data-pac-bind]')]
+                        .filter(el => el.hasAttribute('data-pac-bind'));
+
+                    // Process each element's bindings to refresh their state
+                    elementsWithBindings.forEach(el => {
+                        const bindingString = el.getAttribute('data-pac-bind');
+
+                        if (!bindingString) {
+                            return;
+                        }
+
+                        // Parse the binding string and update each individual binding
+                        // Examples: "class: { completed: todo.completed }", "checked: todo.completed"
+                        ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
+                            // Skip nested foreach bindings - they're handled separately
+                            if (type === 'foreach') return;
+
+                            // Create a temporary binding object for evaluation
+                            // This reuses the existing binding infrastructure
+                            const tempBinding = this.createEvaluationBinding(el, type, target);
+
+                            // Update the binding using existing update pipeline with item context
+                            // The itemContext provides access to the current item's data
+                            this.updateBinding(tempBinding, null, itemContext);
+                        });
+                    });
+                });
+            },
+
+            /**
+             * Rebuilds the entire foreach content by destroying existing DOM and creating new elements.
+             * @param {Object} binding - The foreach binding being rebuilt
+             * @param {Array} array - Current array of data items to render
+             * @param {Object|null} foreachVars - Parent foreach context variables
+             * @returns {void}
+             */
+            rebuildForeachContent(binding, array, foreachVars) {
+                const container = binding.element;
+
+                // Clear existing content completely - destroys all child elements and their bindings
+                container.innerHTML = '';
+
+                // Use DocumentFragment for efficient DOM manipulation
+                // This allows building the entire structure in memory before adding to DOM
                 const fragment = document.createDocumentFragment();
 
+                // Create DOM elements for each item in the array
                 array.forEach((item, index) => {
-                    // Create DOM structure from template
+                    // Create new DOM element from the stored template HTML
                     const itemElement = this.createForeachItemElement(binding.template);
 
                     // Create context variables for this foreach item
                     const itemContext = Object.assign({}, foreachVars || {}, {
-                        [binding.itemName]: item,
-                        [binding.indexName]: index
+                        [binding.itemName]: item,      // e.g., 'todo' -> current todo object
+                        [binding.indexName]: index     // e.g., 'index' -> current position
                     });
 
-                    // Process text interpolation using existing text binding infrastructure
+                    // Set up text interpolation for the new element
                     this.processTextBindingsForElement(itemElement, itemContext);
 
-                    // Process attribute bindings using existing attribute binding system
+                    // Set up attribute bindings (class, style, events, etc.) for the new element
                     this.processAttributeBindingsForElement(itemElement, itemContext, binding);
 
-                    // Add itemElement to fragment
+                    // Add the configured element to the fragment
                     fragment.appendChild(itemElement);
                 });
 
-                // Replace all existing content with new rendered items
-                binding.element.appendChild(fragment);
+                // Add all new elements to the DOM in a single operation
+                // This minimizes layout recalculations and improves performance
+                container.appendChild(fragment);
             },
 
             /**
@@ -3860,26 +3979,18 @@
              * @returns {string[]} Array of valid class names
              */
             parseClassValue(value) {
-                // Object syntax: { className: boolean, className2: boolean }
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    return Object.entries(value)
-                        .filter(([className, isActive]) => isActive && className.trim())
-                        .map(([className]) => className.trim());
+                if (value && typeof value === 'object' && !Array.isArray(value)) {
+                    return Object.entries(value).filter(([k, v]) => v && k.trim()).map(([k]) => k.trim());
                 }
 
-                // Array of class names
                 if (Array.isArray(value)) {
-                    return value
-                        .filter(cls => cls && typeof cls === 'string' && cls.trim())
-                        .map(cls => cls.trim());
+                    return value.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim());
                 }
 
-                // String value - single class or space-separated classes
                 if (typeof value === 'string') {
-                    return value.trim().split(/\s+/).filter(cls => cls.trim());
+                    return value.trim().split(/\s+/).filter(Boolean);
                 }
 
-                // Truthy non-string value - convert to string
                 if (value) {
                     const className = String(value).trim();
                     return className ? [className] : [];
