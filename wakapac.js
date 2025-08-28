@@ -3988,8 +3988,8 @@
                 }
 
                 if (value) {
-                    const s = String(value).trim();
-                    return s ? [s] : [];
+                    const className = String(value).trim();
+                    return className ? [className] : [];
                 }
 
                 return [];
