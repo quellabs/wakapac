@@ -92,23 +92,15 @@
          * @returns {boolean} True if value should be proxied for deep reactivity
          */
         isReactive(value) {
-            // Primitives don't need Proxy - they're handled by property descriptors
             if (!value || typeof value !== 'object') {
                 return false;
             }
 
-            // Plain objects (created with {} or new Object() or Object.create(null))
             if (this.isPlainObject(value)) {
                 return true;
             }
 
-            // Arrays (but not typed arrays)
-            if (Array.isArray(value)) {
-                return true;
-            }
-
-            // Everything else is NOT reactive by default
-            return false;
+            return Array.isArray(value);
         },
 
         /**
@@ -1967,33 +1959,35 @@
              * @param {Object} reactive - The reactive object to attach browser properties to
              */
             setupBrowserProperties(reactive) {
-                // Define empty rect for containerClientRect
-                const emptyRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
+                const props = {
+                    // Initialize page visibility state - tracks if the browser tab/window is currently visible
+                    // Useful for pausing animations or reducing CPU usage when user switches tabs
+                    browserVisible: !document.hidden,
 
-                // Initialize page visibility state - tracks if the browser tab/window is currently visible
-                // Useful for pausing animations or reducing CPU usage when user switches tabs
-                this.createReactiveProperty(reactive, 'browserVisible', !document.hidden);
+                    // Initialize current horizontal/vertical scroll position in pixels from left/top of document
+                    browserScrollX: window.scrollX,
+                    browserScrollY: window.scrollY,
 
-                // Initialize current horizontal/vertical scroll position in pixels from left/top of document
-                this.createReactiveProperty(reactive, 'browserScrollX', window.scrollX);
-                this.createReactiveProperty(reactive, 'browserScrollY', window.scrollY);
+                    // Initialize current viewport width & height - the visible area of the browser window
+                    // Updates automatically when user resizes window or rotates mobile device
+                    browserViewportHeight: window.innerHeight,
+                    browserViewportWidth: window.innerWidth,
 
-                // Initialize current viewport width & height - the visible area of the browser window
-                // Updates automatically when user resizes window or rotates mobile device
-                this.createReactiveProperty(reactive, 'browserViewportHeight', window.innerHeight);
-                this.createReactiveProperty(reactive, 'browserViewportWidth', window.innerWidth);
+                    // Initialize total document width/height including content outside the viewport
+                    // Useful for calculating scroll percentages or infinite scroll triggers
+                    browserDocumentWidth: document.documentElement.scrollWidth,
+                    browserDocumentHeight: document.documentElement.scrollHeight,
 
-                // Initialize total document width/height including content outside the viewport
-                // Useful for calculating scroll percentages or infinite scroll triggers
-                this.createReactiveProperty(reactive, 'browserDocumentWidth', document.documentElement.scrollWidth);
-                this.createReactiveProperty(reactive, 'browserDocumentHeight', document.documentElement.scrollHeight);
+                    // Per-container viewport visibility properties
+                    containerVisible: false,
+                    containerFullyVisible: false,
+                    containerClientRect: {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0},
+                    containerWidth: 0,
+                    containerHeight: 0
+                };
 
-                // Per-container viewport visibility properties
-                this.createReactiveProperty(reactive, 'containerVisible', false);
-                this.createReactiveProperty(reactive, 'containerFullyVisible', false);
-                this.createReactiveProperty(reactive, 'containerClientRect', emptyRect);
-                this.createReactiveProperty(reactive, 'containerWidth', 0);
-                this.createReactiveProperty(reactive, 'containerHeight', 0);
+                // Create reactive properties for all properties
+                Object.entries(props).forEach(([k, v]) => this.createReactiveProperty(reactive, k, v));
 
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
@@ -2724,10 +2718,14 @@
              * @returns {void}
              */
             setupInputElement(element, property, bindingType = 'value') {
-                element.setAttribute('data-pac-property', property);
-                element.setAttribute('data-pac-binding-type', bindingType);
-                element.setAttribute('data-pac-update-mode', element.getAttribute('data-pac-update') || this.config.updateMode);
-                element.setAttribute('data-pac-update-delay', element.getAttribute('data-pac-delay') || this.config.delay);
+                const attrs = {
+                    'data-pac-property': property,
+                    'data-pac-binding-type': bindingType,
+                    'data-pac-update-mode': element.getAttribute('data-pac-update') || this.config.updateMode,
+                    'data-pac-update-delay': element.getAttribute('data-pac-delay') || this.config.delay
+                };
+
+                Object.entries(attrs).forEach(([k,v]) => element.setAttribute(k, v));
             },
 
             // === UPDATE MANAGEMENT SECTION ===
@@ -3587,45 +3585,46 @@
             },
 
             /**
-             * Apply the condition binding
-             * @param {Object} binding - The binding
-             * @param value
-             * @param binding
+             * Applies conditional binding to show/hide DOM elements based on a boolean value.
+             * This function manages the visibility of elements by replacing them with placeholder
+             * comments when they should be hidden, and restoring them when they should be shown.
+             * @param {Object} binding - The binding configuration object
+             * @param {HTMLElement} binding.element - The DOM element to show/hide
+             * @param {Comment} [binding.placeholder] - Comment node placeholder when element is hidden
+             * @param {string} binding.target - Target identifier for the binding (used in placeholder text)
+             * @param {boolean} binding.isRendered - Current render state of the element
+             * @param {boolean} value - Whether the element should be visible (true) or hidden (false)
+             * @returns {void}
              */
             applyConditionalBinding(binding, value) {
-                // Early return if the value did not change
+                // Early return if the value did not change - avoids unnecessary DOM manipulation
                 if (binding.isRendered === value) {
                     return;
                 }
 
-                // Fetch the element
-                const element = binding.element;
+                // Destructure binding properties for cleaner code
+                const {element, placeholder} = binding;
 
-                // If true, add the element to the DOM
+                // Show the element: replace placeholder with actual element
                 if (value) {
-                    // Add element to DOM: Replace the placeholder comment with the actual DOM element
-                    if (binding.placeholder && binding.placeholder.parentNode) {
-                        binding.placeholder.parentNode.replaceChild(element, binding.placeholder);
-                    }
-
-                    // Update the binding state to reflect that element is now in the DOM
+                    // Only replace if placeholder exists and has a parent node
+                    placeholder?.parentNode?.replaceChild(element, placeholder);
+                    // Update the rendered state to reflect that element is now visible
                     binding.isRendered = true;
                     return;
                 }
 
-                // Otherwise remove element from DOM
-                // Replace the DOM element with a placeholder comment
-                // Create placeholder comment if it doesn't exist yet
+                // Hide the element: create placeholder if it doesn't exist
                 if (!binding.placeholder) {
+                    // Create a comment node as placeholder with descriptive text for debugging
                     binding.placeholder = document.createComment('pac-if: ' + binding.target);
                 }
 
-                // Replace the element with the invisible placeholder comment (removes from DOM)
-                if (element.parentNode) {
-                    element.parentNode.replaceChild(binding.placeholder, element);
-                }
+                // Replace the visible element with the placeholder comment
+                // This effectively hides the element while maintaining its position in the DOM
+                element.parentNode?.replaceChild(binding.placeholder, element);
 
-                // Update the binding state to reflect that element is now removed from DOM
+                // Update the rendered state to reflect that element is now hidden
                 binding.isRendered = false;
             },
 
@@ -3976,29 +3975,21 @@
              * @returns {string[]} Array of valid class names
              */
             parseClassValue(value) {
-                // Object syntax: { className: boolean, className2: boolean }
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    return Object.entries(value)
-                        .filter(([className, isActive]) => isActive && className.trim())
-                        .map(([className]) => className.trim());
+                if (value && typeof value === 'object' && !Array.isArray(value)) {
+                    return Object.entries(value).filter(([k, v]) => v && k.trim()).map(([k]) => k.trim());
                 }
 
-                // Array of class names
                 if (Array.isArray(value)) {
-                    return value
-                        .filter(cls => cls && typeof cls === 'string' && cls.trim())
-                        .map(cls => cls.trim());
+                    return value.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim());
                 }
 
-                // String value - single class or space-separated classes
                 if (typeof value === 'string') {
-                    return value.trim().split(/\s+/).filter(cls => cls.trim());
+                    return value.trim().split(/\s+/).filter(Boolean);
                 }
 
-                // Truthy non-string value - convert to string
                 if (value) {
-                    const className = String(value).trim();
-                    return className ? [className] : [];
+                    const s = String(value).trim();
+                    return s ? [s] : [];
                 }
 
                 return [];
