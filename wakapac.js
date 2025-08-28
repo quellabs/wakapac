@@ -2353,14 +2353,12 @@
                 // Process collected nodes
                 textNodes.forEach(node => {
                     const text = node.textContent;
-                    const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+                    const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
 
                     if (matches) {
                         matches.forEach((match) => {
-                            const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
-
                             const binding = this.createBinding('text', node, {
-                                target: expression,
+                                target: match.replace(/^\{\{\s*|\s*}}$/g, '').trim(),
                                 originalText: text,
                                 fullMatch: match,
                                 parsedExpression: null,
