@@ -2130,7 +2130,6 @@
                     if (pollingInterval !== 0 && pollingInterval !== false) {
                         window._wakaPACNetworkPollingInterval = setInterval(() => {
                             if (navigator.onLine) {
-                                console.log("poll network quality");
                                 this.detectNetworkQuality();
                             }
                         }, pollingInterval || 30000);
