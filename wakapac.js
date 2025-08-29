@@ -2121,7 +2121,6 @@
                         let quality = duration < 300 ? 'fast' : 'slow';
 
                         eachComponent(c => {
-                            console.log('Updating component network quality to:', quality);
                             c.abstraction.browserNetworkQuality = quality;
                         });
                     };
