@@ -1757,6 +1757,7 @@
      * @param {Object} [options={}] - Configuration options
      * @param {string} [options.updateMode='immediate'] - Update mode: 'immediate', 'delayed', or 'change'
      * @param {number} [options.delay=300] - Delay for 'delayed' update mode in milliseconds
+     * @param {number} [options.networkQualityPollingInterval=300000] - Network quality polling interval
      * @returns {Object} Public API for the PAC component
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
@@ -2107,30 +2108,9 @@
                     }), 100, "_wakaPACResizeTimeout")
                 };
 
-                // Define network quality detection function
-                const detectNetworkQuality = () => {
-                    if (!navigator.onLine) {
-                        return;
-                    }
-
-                    const startTime = performance.now();
-                    const testImage = new Image();
-
-                    testImage.onload = testImage.onerror = () => {
-                        const duration = performance.now() - startTime;
-                        let quality = duration < 300 ? 'fast' : 'slow';
-
-                        eachComponent(c => {
-                            c.abstraction.browserNetworkQuality = quality;
-                        });
-                    };
-
-                    testImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7?' + Math.random();
-                };
-                
                 // Store handlers globally for potential cleanup
                 window._wakaPACGlobalHandlers = handlers;
-                window._wakaPACDetectNetworkQuality = detectNetworkQuality;
+                window._wakaPACDetectNetworkQuality = () => this.detectNetworkQuality();
 
                 // Attach event listeners
                 document.addEventListener('visibilitychange', handlers.visibility);
@@ -2141,8 +2121,52 @@
 
                 // Run initial network quality detection if online
                 if (navigator.onLine) {
-                    detectNetworkQuality();
+                    // Initial detection
+                    this.detectNetworkQuality();
+
+                    // Detect network speed every 30s or so
+                    const pollingInterval = this.config?.networkQualityPollingInterval;
+
+                    if (pollingInterval !== 0 && pollingInterval !== false) {
+                        window._wakaPACNetworkPollingInterval = setInterval(() => {
+                            if (navigator.onLine) {
+                                console.log("poll network quality");
+                                this.detectNetworkQuality();
+                            }
+                        }, pollingInterval || 30000);
+                    }
                 }
+            },
+
+            /**
+             * Detects current network quality by measuring response time
+             * to a small test resource.
+             */
+            detectNetworkQuality() {
+                if (!navigator.onLine) {
+                    return;
+                }
+
+                const eachComponent = fn => {
+                    const comps = window.PACRegistry?.components;
+                    if (comps?.size) {
+                        comps.forEach(fn);
+                    }
+                };
+
+                const startTime = performance.now();
+                const testImage = new Image();
+
+                testImage.onload = testImage.onerror = () => {
+                    const duration = performance.now() - startTime;
+                    let quality = duration < 300 ? 'fast' : 'slow';
+
+                    eachComponent(c => {
+                        c.abstraction.browserNetworkQuality = quality;
+                    });
+                };
+
+                testImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7?' + Math.random();
             },
 
             /**
@@ -4441,6 +4465,12 @@
                     delete window._wakaPACGlobalHandlers;
                     delete window._wakaPACBrowserListeners;
                     delete window._wakaPACDetectNetworkQuality;
+
+                    // Clear the polling interval
+                    if (window._wakaPACNetworkPollingInterval) {
+                        clearInterval(window._wakaPACNetworkPollingInterval);
+                        window._wakaPACNetworkPollingInterval = null;
+                    }
 
                     // Clear any pending timeouts to prevent them from firing after cleanup
                     // Clear scroll debounce timeout if it exists

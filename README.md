@@ -1285,8 +1285,14 @@ component.destroy()
 
 ```javascript
 wakaPAC('#app', data, {
-    updateMode: 'immediate',    // 'immediate', 'delayed', 'change'
-    delay: 300                  // Delay for 'delayed' mode (ms)
+    // 'immediate', 'delayed', 'change'
+    updateMode: 'immediate',
+
+    // Default delay for 'delayed' mode (ms)
+    delay: 300,
+
+    // Network quality polling interval (0 to disable)
+    networkQualityPollingInterval: 30000  
 });
 ```
 
