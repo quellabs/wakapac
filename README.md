@@ -1100,7 +1100,11 @@ WakaPAC automatically provides reactive browser state properties that update whe
 
 ### Available Properties
 
-**Page Visibility:**
+**Network Status:**
+- **`browserOnline`**: `true` when the browser is online, `false` when offline
+- **`browserNetworkQuality`**: A reactive string property that provides network performance insights. Possible values: `'detecting'`, '`fast'`, '`slow'` and '`offline'`.
+- 
+- **Page Visibility:**
 - **`browserVisible`**: `true` when the browser tab is active/visible, `false` when tab is hidden or minimized
 
 **Scroll Position:**
