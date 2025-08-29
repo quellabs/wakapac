@@ -1970,6 +1970,10 @@
              */
             setupBrowserProperties(reactive) {
                 const props = {
+                    // Initialize online/offline state and network quality
+                    browserOnline: navigator.onLine,
+                    browserNetworkQuality: 'detecting',
+
                     // Initialize page visibility state - tracks if the browser tab/window is currently visible
                     // Useful for pausing animations or reducing CPU usage when user switches tabs
                     browserVisible: !document.hidden,
@@ -2048,6 +2052,27 @@
                 // Define all event handlers
                 const handlers = {
                     /**
+                     * Handles online/offline events.
+                     * Updates network status for each component.
+                     */
+                    online: () => {
+                        eachComponent(c => {
+                            c.abstraction.browserOnline = true;
+                            c.abstraction.browserNetworkQuality = 'detecting';
+                        });
+
+                        // Detect network quality when coming online
+                        if (window._wakaPACDetectNetworkQuality) {
+                            window._wakaPACDetectNetworkQuality();
+                        }
+                    },
+
+                    offline: () => eachComponent(c => {
+                        c.abstraction.browserOnline = false;
+                        c.abstraction.browserNetworkQuality = 'offline';
+                    }),
+
+                    /**
                      * Handles tab/window visibility changes.
                      * Updates each component's `browserVisible` state.
                      */
@@ -2082,13 +2107,43 @@
                     }), 100, "_wakaPACResizeTimeout")
                 };
 
+                // Define network quality detection function
+                const detectNetworkQuality = () => {
+                    if (!navigator.onLine) {
+                        return;
+                    }
+
+                    const startTime = performance.now();
+                    const testImage = new Image();
+
+                    testImage.onload = testImage.onerror = () => {
+                        const duration = performance.now() - startTime;
+                        let quality = duration < 300 ? 'fast' : 'slow';
+
+                        eachComponent(c => {
+                            console.log('Updating component network quality to:', quality);
+                            c.abstraction.browserNetworkQuality = quality;
+                        });
+                    };
+
+                    testImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7?' + Math.random();
+                };
+                
                 // Store handlers globally for potential cleanup
                 window._wakaPACGlobalHandlers = handlers;
+                window._wakaPACDetectNetworkQuality = detectNetworkQuality;
 
                 // Attach event listeners
                 document.addEventListener('visibilitychange', handlers.visibility);
+                window.addEventListener('online', handlers.online);
+                window.addEventListener('offline', handlers.offline);
                 window.addEventListener('scroll', handlers.scroll);
                 window.addEventListener('resize', handlers.resize);
+
+                // Run initial network quality detection if online
+                if (navigator.onLine) {
+                    detectNetworkQuality();
+                }
             },
 
             /**
@@ -4378,12 +4433,15 @@
                 if (window._wakaPACGlobalHandlers && window.PACRegistry.components.size === 0) {
                     // Remove document-level event listeners that were shared across all components
                     document.removeEventListener('visibilitychange', window._wakaPACGlobalHandlers.visibility);
+                    window.removeEventListener('online', window._wakaPACGlobalHandlers.online);
+                    window.removeEventListener('offline', window._wakaPACGlobalHandlers.offline);
                     window.removeEventListener('scroll', window._wakaPACGlobalHandlers.scroll);
                     window.removeEventListener('resize', window._wakaPACGlobalHandlers.resize);
 
                     // Clean up global handler references to prevent memory leaks
                     delete window._wakaPACGlobalHandlers;
                     delete window._wakaPACBrowserListeners;
+                    delete window._wakaPACDetectNetworkQuality;
 
                     // Clear any pending timeouts to prevent them from firing after cleanup
                     // Clear scroll debounce timeout if it exists
