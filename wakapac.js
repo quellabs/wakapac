@@ -1757,7 +1757,6 @@
      * @param {Object} [options={}] - Configuration options
      * @param {string} [options.updateMode='immediate'] - Update mode: 'immediate', 'delayed', or 'change'
      * @param {number} [options.delay=300] - Delay for 'delayed' update mode in milliseconds
-     * @param {number} [options.networkQualityPollingInterval=300000] - Network quality polling interval
      * @returns {Object} Public API for the PAC component
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
@@ -1973,7 +1972,7 @@
                 const props = {
                     // Initialize online/offline state and network quality
                     browserOnline: navigator.onLine,
-                    browserNetworkQuality: 'detecting',
+                    browserNetworkQuality: this.detectNetworkQuality(),
 
                     // Initialize page visibility state - tracks if the browser tab/window is currently visible
                     // Useful for pausing animations or reducing CPU usage when user switches tabs
@@ -2057,21 +2056,28 @@
                      * Updates network status for each component.
                      */
                     online: () => {
+                        const quality = this.detectNetworkQuality();
                         eachComponent(c => {
                             c.abstraction.browserOnline = true;
-                            c.abstraction.browserNetworkQuality = 'detecting';
+                            c.abstraction.browserNetworkQuality = quality;
                         });
-
-                        // Detect network quality when coming online
-                        if (window._wakaPACDetectNetworkQuality) {
-                            window._wakaPACDetectNetworkQuality();
-                        }
                     },
 
                     offline: () => eachComponent(c => {
                         c.abstraction.browserOnline = false;
                         c.abstraction.browserNetworkQuality = 'offline';
                     }),
+
+                    /**
+                     * Handles network connection changes.
+                     * Updates network quality when connection type changes.
+                     */
+                    connectionChange: () => {
+                        const quality = this.detectNetworkQuality();
+                        eachComponent(c => {
+                            c.abstraction.browserNetworkQuality = quality;
+                        });
+                    },
 
                     /**
                      * Handles tab/window visibility changes.
@@ -2110,7 +2116,6 @@
 
                 // Store handlers globally for potential cleanup
                 window._wakaPACGlobalHandlers = handlers;
-                window._wakaPACDetectNetworkQuality = () => this.detectNetworkQuality();
 
                 // Attach event listeners
                 document.addEventListener('visibilitychange', handlers.visibility);
@@ -2119,21 +2124,9 @@
                 window.addEventListener('scroll', handlers.scroll);
                 window.addEventListener('resize', handlers.resize);
 
-                // Run initial network quality detection if online
-                if (navigator.onLine) {
-                    // Initial detection
-                    this.detectNetworkQuality();
-
-                    // Detect network speed every 30s or so
-                    const pollingInterval = this.config?.networkQualityPollingInterval;
-
-                    if (pollingInterval !== 0 && pollingInterval !== false) {
-                        window._wakaPACNetworkPollingInterval = setInterval(() => {
-                            if (navigator.onLine) {
-                                this.detectNetworkQuality();
-                            }
-                        }, pollingInterval || 30000);
-                    }
+                // Add connection change listener if supported
+                if ('connection' in navigator && navigator.connection) {
+                    navigator.connection.addEventListener('change', handlers.connectionChange);
                 }
             },
 
@@ -2143,29 +2136,24 @@
              */
             detectNetworkQuality() {
                 if (!navigator.onLine) {
-                    return;
+                    return 'offline';
                 }
 
-                const eachComponent = fn => {
-                    const comps = window.PACRegistry?.components;
-                    if (comps?.size) {
-                        comps.forEach(fn);
+                // Use Network Information API when available (Chrome, Edge, mobile browsers)
+                if ('connection' in navigator && navigator.connection?.effectiveType) {
+                    switch (navigator.connection.effectiveType) {  // Fix: use effectiveType
+                        case 'slow-2g':
+                        case '2g':
+                        case '3g':
+                            return 'slow';
+
+                        default:
+                            return 'fast';
                     }
-                };
+                }
 
-                const startTime = performance.now();
-                const testImage = new Image();
-
-                testImage.onload = testImage.onerror = () => {
-                    const duration = performance.now() - startTime;
-                    let quality = duration < 300 ? 'fast' : 'slow';
-
-                    eachComponent(c => {
-                        c.abstraction.browserNetworkQuality = quality;
-                    });
-                };
-
-                testImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7?' + Math.random();
+                // Default when navigator.connection.effectiveType is not available
+                return 'fast';
             },
 
             /**
@@ -4460,16 +4448,14 @@
                     window.removeEventListener('scroll', window._wakaPACGlobalHandlers.scroll);
                     window.removeEventListener('resize', window._wakaPACGlobalHandlers.resize);
 
+                    // Remove connection event listener
+                    if ('connection' in navigator && navigator.connection) {
+                        navigator.connection.removeEventListener('change', window._wakaPACGlobalHandlers.connectionChange);
+                    }
+
                     // Clean up global handler references to prevent memory leaks
                     delete window._wakaPACGlobalHandlers;
                     delete window._wakaPACBrowserListeners;
-                    delete window._wakaPACDetectNetworkQuality;
-
-                    // Clear the polling interval
-                    if (window._wakaPACNetworkPollingInterval) {
-                        clearInterval(window._wakaPACNetworkPollingInterval);
-                        window._wakaPACNetworkPollingInterval = null;
-                    }
 
                     // Clear any pending timeouts to prevent them from firing after cleanup
                     // Clear scroll debounce timeout if it exists

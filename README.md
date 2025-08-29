@@ -1102,8 +1102,8 @@ WakaPAC automatically provides reactive browser state properties that update whe
 
 **Network Status:**
 - **`browserOnline`**: `true` when the browser is online, `false` when offline
-- **`browserNetworkQuality`**: A reactive string property that provides network performance insights. Possible values: `'detecting'`, '`fast'`, '`slow'` and '`offline'`.
-- 
+- **`browserNetworkQuality`**: A reactive string property that provides network performance insights. Possible values: ``fast`, 'slow` and 'offline`.
+ 
 - **Page Visibility:**
 - **`browserVisible`**: `true` when the browser tab is active/visible, `false` when tab is hidden or minimized
 
@@ -1289,10 +1289,7 @@ wakaPAC('#app', data, {
     updateMode: 'immediate',
 
     // Default delay for 'delayed' mode (ms)
-    delay: 300,
-
-    // Network quality polling interval (0 to disable)
-    networkQualityPollingInterval: 30000  
+    delay: 300
 });
 ```
 
