@@ -2227,14 +2227,14 @@
                     }), 100, "_wakaPACResizeTimeout"),
 
                     /**
-                     * Handles global message processing for components with MsgProc
+                     * Handles global message processing for components with msgProc
                      */
                     keyboard_message: (event) => {
-                        // Create Win32-style message object
-                        const message = {
+                        // Dispatch Win32-style message object
+                        this.dispatchEventToMsgProc(event, {
                             type: event.type === 'keydown' ? 'MSG_KEYDOWN' : 'MSG_KEYUP',
                             wParam: event.keyCode,
-                            lParam: 0, // Could pack additional info later if needed
+                            lParam: 0,
                             key: event.key,
                             ctrlKey: event.ctrlKey,
                             altKey: event.altKey,
@@ -2242,24 +2242,6 @@
                             target: event.target,
                             originalEvent: event,
                             handled: false
-                        };
-
-                        // Send to components that have MsgProc  and contain the target
-                        eachComponent(component => {
-                            if (
-                                component.original.MsgProc  &&
-                                typeof component.original.MsgProc  === 'function' &&
-                                component.container.contains(event.target)
-                            ) {
-                                try {
-                                    if (component.original.MsgProc.call(component.abstraction, message)) {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                    }
-                                } catch (error) {
-                                    console.error('Error in MsgProc method:', error);
-                                }
-                            }
                         });
                     }
                 };
@@ -2279,6 +2261,34 @@
                 // Add connection change listener if supported
                 if ('connection' in navigator && navigator.connection) {
                     navigator.connection.addEventListener('change', handlers.connectionChange);
+                }
+            },
+
+            /**
+             * Dispatch an event to MsgProc
+             * @param event
+             * @param message
+             */
+            dispatchEventToMsgProc(event, message) {
+                const comps = window.PACRegistry?.components;
+
+                if (comps?.size) {
+                    comps.forEach(component => {
+                        if (
+                            component.original.msgProc &&
+                            typeof component.original.msgProc === 'function' &&
+                            component.container.contains(event.target)
+                        ) {
+                            try {
+                                if (component.original.msgProc.call(component.abstraction, message) === true) {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                }
+                            } catch (error) {
+                                console.error('Error in msgProc method:', error);
+                            }
+                        }
+                    });
                 }
             },
 
