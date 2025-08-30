@@ -16,8 +16,6 @@
         msgProc(message) {
             if (message.type === 'MSG_KEYUP') {
                 if (message.key === 'ArrowUp') {
-                    console.log('ArrowUp');
-
                     this.increment();
                     return true;
                 }
