@@ -2278,8 +2278,7 @@
                             altKey: event.altKey,
                             shiftKey: event.shiftKey,
                             target: event.target,
-                            originalEvent: event,
-                            handled: false
+                            originalEvent: event
                         });
                     }
                 };

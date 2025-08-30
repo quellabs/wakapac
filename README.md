@@ -775,8 +775,7 @@ The message object passed to `msgProc` contains Win32-inspired properties:
     altKey: false,
     shiftKey: false,
     target: HTMLElement,     // The DOM element that received the event
-    originalEvent: Event,    // Original DOM event for edge cases
-    handled: false           // Reserved for future use
+    originalEvent: Event    // Original DOM event for edge cases
 }
 ```
 
