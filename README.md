@@ -640,6 +640,197 @@ wakaPAC('#todo-app', {
 | **Usage**        | Use in templates: `{{computed}}`   | Execute code when data changes         |
 | **When to use**  | Need a value based on other values | Need to do something when data changes |
 
+## Browser Reactive Properties
+
+WakaPAC automatically provides reactive browser state properties that update when the browser environment changes. These are available in all components without any setup:
+
+### Available Properties
+
+**Network Status:**
+- **`browserOnline`**: `true` when the browser is online, `false` when offline
+- **`browserNetworkQuality`**: A reactive string property that provides network performance insights. Possible values: `'fast'`, `'slow'` and `'offline'`.
+
+**Page Visibility:**
+- **`browserVisible`**: `true` when the browser tab is active/visible, `false` when tab is hidden or minimized
+
+**Scroll Position:**
+- **`browserScrollX`**: How many pixels the page is scrolled horizontally (left/right)
+- **`browserScrollY`**: How many pixels the page is scrolled vertically (up/down)
+
+**Page Dimensions:**
+- **`browserViewportWidth`**: Width of the browser's content area (viewport) in pixels
+- **`browserViewportHeight`**: Height of the browser's content area (viewport) in pixels
+- **`browserDocumentWidth`**: Total width of the entire webpage content in pixels
+- **`browserDocumentHeight`**: Total height of the entire webpage content in pixels
+
+**Container Viewport Visibility:**
+- **`containerVisible`**: `true` when any part of the component's container is visible in the viewport
+- **`containerFullyVisible`**: `true` when the component's container is completely visible in the viewport
+- **`containerClientRect`**: Object containing the container's position and dimensions relative to the viewport
+- **`containerWidth`**: Width of the container element in pixels
+- **`containerHeight`**: Height of the container element in pixels
+
+**Container Focus State:**
+- **`containerFocus`**: `true` when the container element itself has direct focus (equivalent to CSS `:focus`)
+- **`containerFocusWithin`**: `true` when the container or any of its child elements has focus (equivalent to CSS `:focus-within`)
+
+> **Note:** `containerFocusWithin` is typically more useful as it tracks when users are actively interacting within the component, regardless of which specific child element has focus.
+
+### Understanding difference between viewport and document
+
+Think of it like looking through a window at a tall building:
+
+```
+┌─────────────────────┐ ← browserViewportHeight (800px)
+│   What you can see  │   The "viewport" - your browser window.
+│   right now         │   Changes when you resize browser window
+│                     │
+│   [Webpage Content] │
+├─────────────────────┤ ← You scroll down to see more...
+│   [More Content]    │
+│   [Even More]       │   browserDocumentHeight (2000px) 
+│   [Content Below]   │   The "building" - total webpage height
+│   [Footer]          │   Changes when content is added/removed
+└─────────────────────┘
+```
+
+### Container ClientRect Object
+
+The `containerClientRect` property contains detailed position and size information:
+
+```javascript
+// containerClientRect contains:
+{
+    top: 150,      // Distance from top of viewport
+    left: 50,      // Distance from left of viewport  
+    right: 850,    // Distance from left to right edge
+    bottom: 400,   // Distance from top to bottom edge
+    width: 800,    // Width of the container
+    height: 250,   // Height of the container
+    x: 50,         // Same as left
+    y: 150         // Same as top
+}
+```
+
+## Message Processing System
+
+WakaPAC provides a powerful message processing system inspired by Win32 window procedures. This allows components to handle all keyboard events in a centralized, procedural manner similar to traditional desktop application frameworks.
+
+### Basic Message Processing
+
+Any component can implement a `MsgProc` method to handle keyboard events in a Win32-style message loop pattern:
+
+```javascript
+wakaPAC('#file-manager', {
+    activePane: 'left',
+
+    MsgProc(message) {
+        switch(message.type) {
+            case 'MSG_KEYDOWN':
+                return this.handleKeyDown(message);
+
+            case 'MSG_KEYUP':
+                return this.handleKeyUp(message);
+
+            default:
+                return false; // Not handled
+        }
+    },
+
+    handleKeyDown(message) {
+        switch(message.key) {
+            case 'Tab':
+                this.switchActivePane();
+                return true; // Handled - prevent browser default
+                
+            case 'F5':
+                this.refreshCurrentDirectory();
+                return true;
+                
+            case 'ArrowUp':
+                this.navigateUp();
+                return true;
+                
+            case 'ArrowDown':
+                this.navigateDown();
+                return true;
+        }
+        
+        return false; // Not handled - allow browser default
+    }
+});
+```
+
+### Message Object Structure
+
+The message object passed to `MsgProc` contains Win32-inspired properties:
+
+```javascript
+{
+    type: 'MSG_KEYDOWN',     // Message type: MSG_KEYDOWN or MSG_KEYUP
+    wParam: 65,              // Key code (like Win32 wParam)
+    lParam: 0,               // Reserved for future use (like Win32 lParam)
+    key: 'a',                // Modern key name for convenience
+    ctrlKey: false,          // Modifier key states
+    altKey: false,
+    shiftKey: false,
+    target: HTMLElement,     // The DOM element that received the event
+    originalEvent: Event,    // Original DOM event for edge cases
+    handled: false           // Reserved for future use
+}
+```
+
+### Focus-Aware Message Routing
+
+Messages are only sent to components whose containers have keyboard focus.
+
+```javascript
+wakaPAC('#editor', {
+    MsgProc(message) {
+        // Process keyboard shortcuts for editor
+        if (message.type === 'MSG_KEYDOWN') {
+            if (message.ctrlKey) {
+                switch(message.key) {
+                    case 's':
+                        this.saveDocument();
+                        return true;
+                        
+                    case 'o':
+                        this.openDocument();
+                        return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+});
+```
+
+### Focus State Properties
+
+WakaPAC automatically tracks focus state for each component:
+
+```html
+<div id="panel" tabindex="0">
+    <p>Focus state: {{containerFocus ? 'FOCUSED' : 'NOT FOCUSED'}}</p>
+    <p>Focus within: {{containerFocusWithin ? 'YES' : 'NO'}}</p>
+    <input type="text" placeholder="Type here">
+</div>
+```
+
+**Focus Properties:**
+- **`containerFocus`**: `true` when the container element itself has direct focus (CSS `:focus`)
+- **`containerFocusWithin`**: `true` when the container or any child element has focus (CSS `:focus-within`)
+
+**Making Elements Focusable:**
+```html
+<!-- Add tabindex to make divs focusable -->
+<div id="file-manager" tabindex="0" style="outline: none;">
+    <!-- Component content -->
+</div>
+```
+
 ## Data Safety and Display Utilities
 
 WakaPAC provides built-in utility functions to help you safely handle and display data. These functions are available on all component instances and help prevent XSS attacks while providing consistent data formatting.
@@ -768,116 +959,6 @@ wakaPAC('#app', {
 - For debugging output in development
 - When displaying API responses of unknown structure
 - In admin interfaces showing database records
-
-### Practical Examples
-
-#### Safe User Profile Display
-```html
-<div id="profile">
-    <h2>{{safeDisplayName}}</h2>
-    <p class="bio">{{safeBio}}</p>
-    <div class="debug">Raw data: {{formattedRawData}}</div>
-</div>
-```
-
-```javascript
-wakaPAC('#profile', {
-    displayName: 'John "The Rock" <strong>Doe</strong>',
-    bio: '<p>I love <script>coding</script> and hiking!</p>',
-    rawData: { preferences: ['hiking', 'coding'], score: 95 },
-
-    computed: {
-        safeDisplayName() {
-            return this.escapeHTML(this.displayName);
-        },
-
-        safeBio() {
-            return this.sanitizeUserInput(this.bio);
-        },
-
-        formattedRawData() {
-            return this.formatValue(this.rawData);
-        }
-    }
-});
-```
-
-#### Comment System with Safety
-```javascript
-wakaPAC('#comments', {
-    comments: [],
-    newComment: '',
-
-    addComment() {
-        if (this.newComment.trim()) {
-            this.comments.push({
-                id: Date.now(),
-                text: this.sanitizeUserInput(this.newComment), // Strip HTML, keep text
-                author: this.escapeHTML(this.currentUser.name), // Escape for display
-                timestamp: new Date(),
-                raw: this.formatValue(this.newComment) // For debugging
-            });
-            
-            this.newComment = '';
-        }
-    }
-});
-```
-
-#### API Response Display
-```javascript
-wakaPAC('#api-explorer', {
-    response: null,
-    loading: false,
-
-    async callAPI(endpoint) {
-        this.loading = true;
-        
-        try {
-            this.response = await fetch(endpoint).then(r => r.json());
-        } catch (error) {
-            this.response = { error: error.message };
-        } finally {
-            this.loading = false;
-        }
-    },
-
-    computed: {
-        formattedResponse() {
-            // Use formatValue to display any type of API response
-            return this.formatValue(this.response);
-        }
-    }
-});
-```
-
-#### Form Validation with Safe Display
-```javascript
-wakaPAC('#registration', {
-    form: {
-        username: '',
-        bio: ''
-    },
-    errors: [],
-
-    validateForm() {
-        this.errors = [];
-        
-        // Validate username (escape for safe error display)
-        if (!this.form.username.trim()) {
-            this.errors.push('Username is required');
-        } else if (this.form.username.includes('<')) {
-            this.errors.push(`Invalid character in username: ${this.escapeHTML(this.form.username)}`);
-        }
-        
-        // Clean bio input
-        this.form.bio = this.sanitizeUserInput(this.form.bio);
-        
-        // Debug output
-        console.log('Form data:', this.formatValue(this.form));
-    }
-});
-```
 
 ## Non-Reactive Properties
 
@@ -1094,164 +1175,6 @@ wakaPAC('#app', {
 });
 ```
 
-## Browser Reactive Properties
-
-WakaPAC automatically provides reactive browser state properties that update when the browser environment changes. These are available in all components without any setup:
-
-### Available Properties
-
-**Network Status:**
-- **`browserOnline`**: `true` when the browser is online, `false` when offline
-- **`browserNetworkQuality`**: A reactive string property that provides network performance insights. Possible values: `'fast'`, `'slow'` and `'offline'`.
-
-**Page Visibility:**
-- **`browserVisible`**: `true` when the browser tab is active/visible, `false` when tab is hidden or minimized
-
-**Scroll Position:**
-- **`browserScrollX`**: How many pixels the page is scrolled horizontally (left/right)
-- **`browserScrollY`**: How many pixels the page is scrolled vertically (up/down)
-
-**Page Dimensions:**
-- **`browserViewportWidth`**: Width of the browser's content area (viewport) in pixels
-- **`browserViewportHeight`**: Height of the browser's content area (viewport) in pixels
-- **`browserDocumentWidth`**: Total width of the entire webpage content in pixels
-- **`browserDocumentHeight`**: Total height of the entire webpage content in pixels
-
-**Container Viewport Visibility:**
-- **`containerVisible`**: `true` when any part of the component's container is visible in the viewport
-- **`containerFullyVisible`**: `true` when the component's container is completely visible in the viewport
-- **`containerClientRect`**: Object containing the container's position and dimensions relative to the viewport
-- **`containerWidth`**: Width of the container element in pixels
-- **`containerHeight`**: Height of the container element in pixels
-
-**Container Focus State:**
-- **`containerFocus`**: `true` when the container element itself has direct focus (equivalent to CSS `:focus`)
-- **`containerFocusWithin`**: `true` when the container or any of its child elements has focus (equivalent to CSS `:focus-within`)
-
-> **Note:** `containerFocusWithin` is typically more useful as it tracks when users are actively interacting within the component, regardless of which specific child element has focus.
- 
-### Understanding difference between viewport and document
-
-Think of it like looking through a window at a tall building:
-
-```
-┌─────────────────────┐ ← browserViewportHeight (800px)
-│   What you can see  │   The "viewport" - your browser window.
-│   right now         │   Changes when you resize browser window
-│                     │
-│   [Webpage Content] │
-├─────────────────────┤ ← You scroll down to see more...
-│   [More Content]    │
-│   [Even More]       │   browserDocumentHeight (2000px) 
-│   [Content Below]   │   The "building" - total webpage height
-│   [Footer]          │   Changes when content is added/removed
-└─────────────────────┘
-```
-
-### Container ClientRect Object
-
-The `containerClientRect` property contains detailed position and size information:
-
-```javascript
-// containerClientRect contains:
-{
-    top: 150,      // Distance from top of viewport
-    left: 50,      // Distance from left of viewport  
-    right: 850,    // Distance from left to right edge
-    bottom: 400,   // Distance from top to bottom edge
-    width: 800,    // Width of the container
-    height: 250,   // Height of the container
-    x: 50,         // Same as left
-    y: 150         // Same as top
-}
-```
-
-### Practical Browser Property Examples
-
-```html
-<div id="scroll-app">
-    <!-- Scroll-based navigation -->
-    <nav data-pac-bind="class: { fixed: browserScrollY > 100 }">
-        <span>Scroll position: {{browserScrollY}}px</span>
-    </nav>
-    
-    <!-- Responsive design without CSS media queries -->
-    <div data-pac-bind="class: { mobile: browserViewportWidth < 768, desktop: browserViewportWidth >= 1200 }">
-        <p data-pac-bind="if: browserViewportWidth < 480">Mobile view</p>
-        <p data-pac-bind="if: browserViewportWidth >= 480 && browserViewportWidth < 1024">Tablet view</p>
-        <p data-pac-bind="if: browserViewportWidth >= 1024">Desktop view</p>
-    </div>
-    
-    <!-- Visibility-aware performance -->
-    <div data-pac-bind="visible: browserVisible">
-        <p>Active content that only updates when tab is visible</p>
-        <span>Last updated: {{lastUpdateTime}}</span>
-    </div>
-    
-    <!-- Viewport intersection -->
-    <div data-pac-bind="class: { highlight: containerVisible, pulse: containerFullyVisible }">
-        <p>This element knows when it's in the viewport!</p>
-        <p data-pac-bind="if: containerVisible">I'm visible in viewport</p>
-        <p data-pac-bind="if: containerFullyVisible">I'm completely visible!</p>
-    </div>
-    
-    <!-- Scroll progress indicator -->
-    <div class="progress-bar" data-pac-bind="style: { width: scrollProgress + '%' }"></div>
-</div>
-```
-
-```javascript
-wakaPAC('#scroll-app', {
-    lastUpdateTime: new Date().toLocaleTimeString(),
-    updateTimer: null,
-
-    computed: {
-        scrollProgress() {
-            // Calculate scroll percentage
-            const maxScroll = this.browserDocumentHeight - this.browserViewportHeight;
-            return maxScroll > 0 ? (this.browserScrollY / maxScroll) * 100 : 0;
-        }
-    },
-
-    watch: {
-        browserVisible(isVisible) {
-            if (isVisible) {
-                // Start updates when tab becomes visible
-                this.startUpdates();
-            } else {
-                // Pause updates when tab is hidden
-                this.stopUpdates();
-            }
-        },
-
-        containerVisible(isVisible) {
-            if (isVisible) {
-                console.log('Component entered viewport');
-                // Start lazy loading, animations, etc.
-            }
-        }
-    },
-
-    init() {
-        if (this.browserVisible) {
-            this.startUpdates();
-        }
-    },
-
-    startUpdates() {
-        this.updateTimer = setInterval(() => {
-            this.lastUpdateTime = new Date().toLocaleTimeString();
-        }, 1000);
-    },
-
-    stopUpdates() {
-        if (this.updateTimer) {
-            clearInterval(this.updateTimer);
-        }
-    }
-});
-```
-
 ## API Reference
 
 ### Creating Components
@@ -1405,6 +1328,7 @@ wakaPAC('#app', {
 - Real-time applications where performance matters
 - Applications that need visibility-aware performance optimization
 - Lazy loading and performance optimization based on viewport visibility
+- Desktop-style applications requiring complex keyboard interaction patterns
 
 **⚠️ Consider alternatives for:**
 - Server-side rendering requirements

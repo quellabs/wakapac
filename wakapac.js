@@ -2224,7 +2224,44 @@
                             browserScrollX: window.scrollX,
                             browserScrollY: window.scrollY
                         });
-                    }), 100, "_wakaPACResizeTimeout")
+                    }), 100, "_wakaPACResizeTimeout"),
+
+                    /**
+                     * Handles global message processing for components with MsgProc
+                     */
+                    keyboard_message: (event) => {
+                        // Create Win32-style message object
+                        const message = {
+                            type: event.type === 'keydown' ? 'MSG_KEYDOWN' : 'MSG_KEYUP',
+                            wParam: event.keyCode,
+                            lParam: 0, // Could pack additional info later if needed
+                            key: event.key,
+                            ctrlKey: event.ctrlKey,
+                            altKey: event.altKey,
+                            shiftKey: event.shiftKey,
+                            target: event.target,
+                            originalEvent: event,
+                            handled: false
+                        };
+
+                        // Send to components that have MsgProc  and contain the target
+                        eachComponent(component => {
+                            if (
+                                component.original.MsgProc  &&
+                                typeof component.original.MsgProc  === 'function' &&
+                                component.container.contains(event.target)
+                            ) {
+                                try {
+                                    if (component.original.MsgProc.call(component.abstraction, message)) {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                    }
+                                } catch (error) {
+                                    console.error('Error in MsgProc method:', error);
+                                }
+                            }
+                        });
+                    }
                 };
 
                 // Store handlers globally for potential cleanup
@@ -2232,6 +2269,8 @@
 
                 // Attach event listeners
                 document.addEventListener('visibilitychange', handlers.visibility);
+                document.addEventListener('keydown', handlers.keyboard_message, true);
+                document.addEventListener('keyup', handlers.keyboard_message, true);
                 window.addEventListener('online', handlers.online);
                 window.addEventListener('offline', handlers.offline);
                 window.addEventListener('scroll', handlers.scroll);
@@ -4520,6 +4559,8 @@
                 if (window._wakaPACGlobalHandlers && window.PACRegistry.components.size === 0) {
                     // Remove document-level event listeners that were shared across all components
                     document.removeEventListener('visibilitychange', window._wakaPACGlobalHandlers.visibility);
+                    document.removeEventListener('keydown', window._wakaPACGlobalHandlers.keyboard_message, true);
+                    document.removeEventListener('keyup', window._wakaPACGlobalHandlers.keyboard_message, true);
                     window.removeEventListener('online', window._wakaPACGlobalHandlers.online);
                     window.removeEventListener('offline', window._wakaPACGlobalHandlers.offline);
                     window.removeEventListener('scroll', window._wakaPACGlobalHandlers.scroll);
