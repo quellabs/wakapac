@@ -1610,28 +1610,40 @@
             switch (operator) {
                 case '+':
                     return left + right;
+
                 case '-':
                     return Number(left) - Number(right);
+
                 case '*':
                     return Number(left) * Number(right);
+
                 case '/':
                     return Number(left) / Number(right);
+
                 case '===':
                     return left === right;
+
                 case '!==':
                     return left !== right;
+
                 case '==':
                     return left == right;
+
                 case '!=':
                     return left != right;
+
                 case '>=':
                     return left >= right;
+
                 case '<=':
                     return left <= right;
+
                 case '>':
                     return left > right;
+
                 case '<':
                     return left < right;
+                    
                 default:
                     return false;
             }
