@@ -1102,9 +1102,9 @@ WakaPAC automatically provides reactive browser state properties that update whe
 
 **Network Status:**
 - **`browserOnline`**: `true` when the browser is online, `false` when offline
-- **`browserNetworkQuality`**: A reactive string property that provides network performance insights. Possible values: ``fast`, 'slow` and 'offline`.
- 
-- **Page Visibility:**
+- **`browserNetworkQuality`**: A reactive string property that provides network performance insights. Possible values: `'fast'`, `'slow'` and `'offline'`.
+
+**Page Visibility:**
 - **`browserVisible`**: `true` when the browser tab is active/visible, `false` when tab is hidden or minimized
 
 **Scroll Position:**
@@ -1124,6 +1124,12 @@ WakaPAC automatically provides reactive browser state properties that update whe
 - **`containerWidth`**: Width of the container element in pixels
 - **`containerHeight`**: Height of the container element in pixels
 
+**Container Focus State:**
+- **`containerFocus`**: `true` when the container element itself has direct focus (equivalent to CSS `:focus`)
+- **`containerFocusWithin`**: `true` when the container or any of its child elements has focus (equivalent to CSS `:focus-within`)
+
+> **Note:** `containerFocusWithin` is typically more useful as it tracks when users are actively interacting within the component, regardless of which specific child element has focus.
+ 
 ### Understanding difference between viewport and document
 
 Think of it like looking through a window at a tall building:

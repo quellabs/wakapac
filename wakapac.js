@@ -287,6 +287,61 @@
             // Return the text nodes
             return textNodes;
         },
+
+        /**
+         * Checks if an element is at least partially visible in the viewport
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if element intersects with viewport
+         */
+        isElementVisible(element) {
+            const rect = element.getBoundingClientRect();
+            const viewHeight = window.innerHeight;
+            const viewWidth = window.innerWidth;
+
+            return (
+                rect.top < viewHeight &&
+                rect.bottom > 0 &&
+                rect.left < viewWidth &&
+                rect.right > 0
+            );
+        },
+
+        /**
+         * Checks if an element is completely visible in the viewport
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if entire element is within viewport bounds
+         */
+        isElementFullyVisible(element) {
+            const rect = element.getBoundingClientRect();
+            const viewHeight = window.innerHeight;
+            const viewWidth = window.innerWidth;
+
+            return (
+                rect.top >= 0 &&
+                rect.left >= 0 &&
+                rect.bottom <= viewHeight &&
+                rect.right <= viewWidth
+            );
+        },
+
+        /**
+         * Checks if an element has direct focus (is the activeElement)
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if the element is currently focused
+         */
+        isElementDirectlyFocused(element) {
+            return element === document.activeElement;
+        },
+
+        /**
+         * Checks if an element or any of its descendants has focus
+         * @param {HTMLElement} element - The container element to check
+         * @returns {boolean} True if focus is within the element's boundaries
+         */
+        isElementFocusWithin(element) {
+            return element === document.activeElement ||
+                element.contains(document.activeElement);
+        },
     };
 
     // =============================================================================
@@ -1993,8 +2048,10 @@
                     browserDocumentHeight: document.documentElement.scrollHeight,
 
                     // Per-container viewport visibility properties
-                    containerVisible: false,
-                    containerFullyVisible: false,
+                    containerFocus: Utils.isElementDirectlyFocused(this.container),
+                    containerFocusWithin: Utils.isElementFocusWithin(this.container),
+                    containerVisible: Utils.isElementVisible(container),
+                    containerFullyVisible: Utils.isElementFullyVisible(container),
                     containerClientRect: {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0},
                     containerWidth: 0,
                     containerHeight: 0
@@ -2007,6 +2064,62 @@
                 // Uses singleton pattern to ensure listeners are only attached once per page
                 // regardless of how many components use browser properties
                 this.setupGlobalBrowserListeners();
+
+                // Setup focus tracking
+                this.setupFocusTracking();
+            },
+
+            /**
+             * Handles the focusin event when any element within the container receives focus
+             * Updates the abstraction state to reflect that the container has focus
+             */
+            handleFocusIn() {
+                // Always mark container as having focus within its boundaries
+                this.abstraction.containerFocusWithin = true;
+
+                // Only mark container as directly focused if the container itself received focus
+                this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
+            },
+
+            /**
+             * Handles the focusout event when focus leaves an element within the container
+             * Updates the abstraction state based on where focus is moving to
+             * @param {FocusEvent} event - The focusout event containing relatedTarget info
+             */
+            handleFocusOut(event) {
+                // Container itself no longer has direct focus (will be updated in handleFocusIn if needed)
+                this.abstraction.containerFocus = false;
+
+                // Check if focus is moving to an element outside the container
+                // relatedTarget is the element receiving focus (null if moving outside the page)
+                if (!this.container.contains(event.relatedTarget)) {
+                    // Focus has completely left the container and its children
+                    this.abstraction.containerFocusWithin = false;
+                }
+
+                // If relatedTarget is still within container, containerFocusWithin stays true
+            },
+
+            /**
+             * Sets up event listeners for focus tracking on the container element
+             * Uses focusin/focusout events which bubble up from child elements
+             * Stores bound handlers for proper cleanup later
+             */
+            setupFocusTracking() {
+                // Bind handlers to preserve 'this' context when called as event listeners
+                // Without binding, 'this' would refer to the DOM element in the handler
+                const focusinHandler = this.handleFocusIn.bind(this);
+                const focusoutHandler = this.handleFocusOut.bind(this);
+
+                // Add event listeners for focus events that bubble up from children
+                // focusin/focusout bubble, unlike focus/blur which don't
+                this.container.addEventListener('focusin', focusinHandler);
+                this.container.addEventListener('focusout', focusoutHandler);
+
+                // Store bound handlers in eventListeners Map for later cleanup
+                // This allows proper removal of the exact same function references
+                this.eventListeners.set('focusin', focusinHandler);
+                this.eventListeners.set('focusout', focusoutHandler);
             },
 
             /**
@@ -2205,10 +2318,7 @@
              * This is the fallback method used when IntersectionObserver isn't available
              */
             updateContainerVisibility() {
-                // Get current viewport dimensions
-                // innerHeight/innerWidth exclude scrollbars and give the actual visible area
-                const windowHeight = window.innerHeight;
-                const windowWidth = window.innerWidth;
+                // Get current state using Utils
                 const rect = Utils.domRectToSimpleObject(this.container.getBoundingClientRect());
 
                 // Set dimensions
@@ -2216,42 +2326,9 @@
                 this.abstraction.containerWidth = rect.width;
                 this.abstraction.containerHeight = rect.height;
 
-                // Check if any part of container intersects with viewport boundaries
-                // Intersection logic: An element is considered "in viewport" if it overlaps
-                // with the visible area in both horizontal and vertical dimensions.
-                const isInViewport = (
-                    rect.top < windowHeight &&    // Element's top edge hasn't scrolled below viewport bottom
-                    rect.bottom > 0 &&            // Element's bottom edge hasn't scrolled above viewport top
-                    rect.left < windowWidth &&    // Element's left edge hasn't scrolled past viewport right
-                    rect.right > 0                // Element's right edge hasn't scrolled past viewport left
-                );
-
-                // Early exit optimization: If element is completely out of view,
-                // skip the more expensive fully-visible calculation and update state immediately
-                if (!isInViewport) {
-                    // Set visibility flags to false since element is not in viewport
-                    this.abstraction.containerVisible = false;
-                    this.abstraction.containerFullyVisible = false;
-                    return;
-                }
-
-                // Calculate if element is completely within viewport bounds (no clipping)
-                // "Fully visible" means the entire element can be seen without any parts
-                // being cut off by viewport edges. This is stricter than just "visible"
-                // and useful for determining if content can be read/interacted with completely.
-                const isFullyVisible = (
-                    rect.top >= 0 &&                    // Top edge is at or below viewport top (not clipped above)
-                    rect.bottom <= windowHeight &&      // Bottom edge is at or above viewport bottom (not clipped below)
-                    rect.left >= 0 &&                   // Left edge is at or right of viewport left (not clipped on left)
-                    rect.right <= windowWidth           // Right edge is at or left of viewport right (not clipped on right)
-                );
-
-                // Update component's reactive state with calculated visibility data
-                // These property updates will trigger Wakapac's reactivity system
-                // and can be observed by other components or used to conditionally render content,
-                // start/stop animations, lazy load resources, etc.
-                this.abstraction.containerVisible = true;                    // Element has some visible pixels
-                this.abstraction.containerFullyVisible = isFullyVisible;     // Element is completely unclipped
+                // Use Utils for consistent visibility calculation
+                this.abstraction.containerVisible = Utils.isElementVisible(this.container);
+                this.abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
             },
 
             /**
@@ -4519,19 +4596,27 @@
 
             /**
              * Removes all event listeners that were registered by this component
-             * This method prevents memory leaks by ensuring event handlers are properly cleaned up
+             * Prevents memory leaks by ensuring event handlers are properly cleaned up
+             * @private
              */
             _removeEventListeners() {
-                // Iterate through all stored event listeners
-                this.eventListeners.forEach((handler, type) => {
-                    // Remove the event listener from the container element
-                    // The 'true' parameter indicates this was registered with capture=true
-                    // It's important to use the same parameters (capture flag) that were used when adding the listener
-                    this.container.removeEventListener(type, handler, true);
+                // Remove all stored event listeners with capture=true
+                this.eventListeners?.forEach((handler, type) => {
+                    this.container?.removeEventListener(type, handler, true);
                 });
 
-                // Clear the Map to remove all stored references
-                this.eventListeners.clear();
+                this.eventListeners?.clear();
+
+                // Remove focus event listeners and clear handlers
+                if (this.handleFocusIn) {
+                    this.container.removeEventListener('focusin', this.handleFocusIn);
+                    this.handleFocusIn = null;
+                }
+
+                if (this.handleFocusOut) {
+                    this.container.removeEventListener('focusout', this.handleFocusOut);
+                    this.handleFocusOut = null;
+                }
             },
 
             /**
