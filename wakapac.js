@@ -1643,7 +1643,7 @@
 
                 case '<':
                     return left < right;
-                    
+
                 default:
                     return false;
             }

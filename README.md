@@ -718,13 +718,13 @@ WakaPAC provides a powerful message processing system inspired by Win32 window p
 
 ### Basic Message Processing
 
-Any component can implement a `MsgProc` method to handle keyboard events in a Win32-style message loop pattern:
+Any component can implement a `msgProc` method to handle keyboard events in a Win32-style message loop pattern:
 
 ```javascript
 wakaPAC('#file-manager', {
     activePane: 'left',
 
-    MsgProc(message) {
+    msgProc(message) {
         switch(message.type) {
             case 'MSG_KEYDOWN':
                 return this.handleKeyDown(message);
@@ -763,7 +763,7 @@ wakaPAC('#file-manager', {
 
 ### Message Object Structure
 
-The message object passed to `MsgProc` contains Win32-inspired properties:
+The message object passed to `msgProc` contains Win32-inspired properties:
 
 ```javascript
 {
@@ -786,7 +786,7 @@ Messages are only sent to components whose containers have keyboard focus.
 
 ```javascript
 wakaPAC('#editor', {
-    MsgProc(message) {
+    msgProc(message) {
         // Process keyboard shortcuts for editor
         if (message.type === 'MSG_KEYDOWN') {
             if (message.ctrlKey) {
