@@ -342,6 +342,32 @@
             return element === document.activeElement ||
                 element.contains(document.activeElement);
         },
+
+        /**
+         * Detects current network quality by measuring response time
+         * to a small test resource.
+         */
+        detectNetworkQuality() {
+            if (!navigator.onLine) {
+                return 'offline';
+            }
+
+            // Use Network Information API when available (Chrome, Edge, mobile browsers)
+            if ('connection' in navigator && navigator.connection?.effectiveType) {
+                switch (navigator.connection.effectiveType) {
+                    case 'slow-2g':
+                    case '2g':
+                    case '3g':
+                        return 'slow';
+
+                    default:
+                        return 'fast';
+                }
+            }
+
+            // Default when navigator.connection.effectiveType is not available
+            return 'fast';
+        },
     };
 
     // =============================================================================
@@ -2027,7 +2053,7 @@
                 const props = {
                     // Initialize online/offline state and network quality
                     browserOnline: navigator.onLine,
-                    browserNetworkQuality: this.detectNetworkQuality(),
+                    browserNetworkQuality: Utils.detectNetworkQuality(),
 
                     // Initialize page visibility state - tracks if the browser tab/window is currently visible
                     // Useful for pausing animations or reducing CPU usage when user switches tabs
@@ -2169,7 +2195,7 @@
                      * Updates network status for each component.
                      */
                     online: () => {
-                        const quality = this.detectNetworkQuality();
+                        const quality = Utils.detectNetworkQuality();
                         eachComponent(c => {
                             c.abstraction.browserOnline = true;
                             c.abstraction.browserNetworkQuality = quality;
@@ -2186,7 +2212,7 @@
                      * Updates network quality when connection type changes.
                      */
                     connectionChange: () => {
-                        const quality = this.detectNetworkQuality();
+                        const quality = Utils.detectNetworkQuality();
                         eachComponent(c => {
                             c.abstraction.browserNetworkQuality = quality;
                         });
@@ -2292,31 +2318,6 @@
                 }
             },
 
-            /**
-             * Detects current network quality by measuring response time
-             * to a small test resource.
-             */
-            detectNetworkQuality() {
-                if (!navigator.onLine) {
-                    return 'offline';
-                }
-
-                // Use Network Information API when available (Chrome, Edge, mobile browsers)
-                if ('connection' in navigator && navigator.connection?.effectiveType) {
-                    switch (navigator.connection.effectiveType) {  // Fix: use effectiveType
-                        case 'slow-2g':
-                        case '2g':
-                        case '3g':
-                            return 'slow';
-
-                        default:
-                            return 'fast';
-                    }
-                }
-
-                // Default when navigator.connection.effectiveType is not available
-                return 'fast';
-            },
 
             /**
              * Modern approach using Intersection Observer API.
