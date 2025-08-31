@@ -3227,7 +3227,7 @@
                     const originalText = textNode.textContent;
 
                     // Only process nodes that have interpolation patterns
-                    if (/\{\{\s*[^}]+\s*\}\}/.test(originalText)) {
+                    if (/\{\{\s*[^}]+\s*}}/.test(originalText)) {
                         textNode.textContent = this.processTextInterpolation(originalText, context);
                     }
                 });
@@ -3249,11 +3249,11 @@
                 let text = String(textContent || '');
 
                 // Find ALL interpolation patterns in the text
-                const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+                const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
 
                 if (matches) {
                     matches.forEach(match => {
-                        const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
+                        const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
 
                         try {
                             const parsed = ExpressionParser.parseExpression(expression);
