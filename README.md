@@ -234,29 +234,29 @@ All standard DOM events are supported:
 
 **`keyup`** / **`keydown`** - Keyboard events
 ```html
-<input data-pac-bind="keyup: handleKey" data-pac-modifiers="enter">
-<input data-pac-bind="keydown: handleKeyDown" data-pac-modifiers="escape">
+<input data-pac-bind="keyup: handleKey" data-pac-event="enter">
+<input data-pac-bind="keydown: handleKeyDown" data-pac-event="escape">
 ```
 
 #### Event Modifiers
 
-Event modifiers allow you to control how events behave by using the `data-pac-modifiers` attribute. They can prevent default browser actions, filter events to specific keys, or control event propagation. Multiple modifiers can be combined by separating them with spaces.
+Event modifiers allow you to control how events behave by using the `data-pac-event` attribute. They can prevent default browser actions, filter events to specific keys, or control event propagation. Multiple modifiers can be combined by separating them with spaces.
 
 ```html
 <!-- Prevent form submission redirect -->
-<form data-pac-bind="submit: handleSubmit" data-pac-modifiers="prevent">
+<form data-pac-bind="submit: handleSubmit" data-pac-event="prevent">
 
 <!-- Search on Enter key -->
-<input data-pac-bind="keyup: search" data-pac-modifiers="enter">
+<input data-pac-bind="keyup: search" data-pac-event="enter">
 
 <!-- Close modal on Escape -->
-<div data-pac-bind="keyup: closeModal" data-pac-modifiers="escape">
+<div data-pac-bind="keyup: closeModal" data-pac-event="escape">
 
 <!-- One-time event -->
-<button data-pac-bind="click: initialize" data-pac-modifiers="once">
+<button data-pac-bind="click: initialize" data-pac-event="once">
 
 <!-- Multiple modifiers -->
-<form data-pac-bind="submit: handleForm" data-pac-modifiers="prevent stop">
+<form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
 ```
 
 **Available modifiers:**

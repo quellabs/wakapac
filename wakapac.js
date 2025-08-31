@@ -3627,10 +3627,10 @@
             },
 
             /**
-             * Parses event modifiers from data-pac-modifiers attribute
+             * Parses event modifiers from data-pac-event attribute
              */
             parseEventModifiers(element) {
-                const modifiersAttr = element.getAttribute('data-pac-modifiers');
+                const modifiersAttr = element.getAttribute('data-pac-event');
                 return modifiersAttr ? modifiersAttr.trim().split(/\s+/).filter(m => m.length > 0) : [];
             },
 
@@ -3640,37 +3640,57 @@
              * @param {string[]} modifiers - Array of modifier strings to check against
              * @returns {boolean} - True if event matches modifiers, false otherwise
              */
+            /**
+             * Applies event modifiers to validate if event should trigger
+             * @param {Event} event - The keyboard/mouse event to validate
+             * @param {string[]} modifiers - Array of modifier strings to check against
+             * @returns {boolean} - True if event matches modifiers, false otherwise
+             */
             applyEventModifiers(event, modifiers) {
-                // Iterate through each modifier to find a matching key constraint
+                let hasKeyConstraints = false;
+                let keyConstraintsMet = false;
+
+                // Iterate through each modifier
                 for (const modifier of modifiers) {
-                    // Read key
-                    const expectedKey = EVENT_KEYS[modifier.toLowerCase()];
+                    switch (modifier.toLowerCase()) {
+                        case 'prevent':
+                            event.preventDefault();
+                            break;
 
-                    // Skip modifiers that don't correspond to key constraints
-                    if (!expectedKey) {
-                        continue;
-                    }
+                        case 'stop':
+                            event.stopPropagation();
+                            break;
 
-                    // Handle multiple valid keys (array format)
-                    if (Array.isArray(expectedKey)) {
-                        // Return false immediately if pressed key isn't in the valid key list
-                        if (!expectedKey.includes(event.key)) {
-                            return false;
+                        default: {
+                            // Read key
+                            const expectedKey = EVENT_KEYS[modifier.toLowerCase()];
+
+                            // Skip modifiers that don't correspond to key constraints
+                            if (!expectedKey) {
+                                continue;
+                            }
+
+                            hasKeyConstraints = true;
+
+                            // Handle multiple valid keys (array format)
+                            if (Array.isArray(expectedKey)) {
+                                if (expectedKey.includes(event.key)) {
+                                    keyConstraintsMet = true;
+                                }
+                            } else {
+                                // Handle single valid key (string format)
+                                if (event.key === expectedKey) {
+                                    keyConstraintsMet = true;
+                                }
+                            }
+
+                            break;
                         }
-                    } else {
-                        // Handle single valid key (string format)
-                        // Return false immediately if pressed key doesn't match expected key
-                        if (event.key !== expectedKey) {
-                            return false;
-                        }
                     }
-
-                    // Found a matching key constraint, stop checking further modifiers
-                    break;
                 }
 
-                // All key constraints passed (or no key constraints found)
-                return true;
+                // If there were key constraints, at least one must be met
+                return !hasKeyConstraints || keyConstraintsMet;
             },
 
             /**
