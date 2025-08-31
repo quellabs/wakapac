@@ -142,7 +142,7 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 
 #### Attribute Bindings
 
-**`enable`** - Enable/disable form controls (reverse of disabled)
+**`enable`** - Enable/disable form controls
 ```html
 <button data-pac-bind="enable: isFormValid">Submit</button>
 <input data-pac-bind="enable: !isReadonly">
@@ -155,14 +155,14 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <img data-pac-bind="src: imageUrl, alt: altText">
 <div data-pac-bind="id: dynamicId, role: userRole">
 
-<!-- Data attributes -->
-<div data-pac-bind="data-id: userId, data-category: itemCategory">
+    <!-- Data attributes -->
+    <div data-pac-bind="data-id: userId, data-category: itemCategory">
 
-<!-- ARIA attributes -->
-<button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
+        <!-- ARIA attributes -->
+        <button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
 
-<!-- Multiple custom attributes -->
-<div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
+            <!-- Multiple custom attributes -->
+            <div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
 ```
 
 #### Style and Appearance Bindings
@@ -172,11 +172,11 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <!-- Simple class binding -->
 <div data-pac-bind="class: statusClass">
 
-<!-- Object syntax: conditional classes -->
-<div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
+    <!-- Object syntax: conditional classes -->
+    <div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
 
-<!-- Array of classes -->
-<div data-pac-bind="class: [baseClass, conditionalClass]">
+        <!-- Array of classes -->
+        <div data-pac-bind="class: [baseClass, conditionalClass]">
 ```
 
 **`style`** - CSS style manipulation (supports object syntax)
@@ -184,11 +184,11 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <!-- Simple style binding -->
 <div data-pac-bind="style: dynamicStyleString">
 
-<!-- Object syntax: multiple CSS properties -->
-<div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
+    <!-- Object syntax: multiple CSS properties -->
+    <div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
 
-<!-- CSS custom properties -->
-<div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
+        <!-- CSS custom properties -->
+        <div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
 ```
 
 #### List Rendering Binding
@@ -239,6 +239,8 @@ All standard DOM events are supported:
 ```
 
 #### Event Modifiers
+
+Event modifiers allow you to control how events behave by using the `data-pac-modifiers` attribute. They can prevent default browser actions, filter events to specific keys, or control event propagation. Multiple modifiers can be combined by separating them with spaces.
 
 ```html
 <!-- Prevent form submission redirect -->
@@ -517,7 +519,7 @@ wakaPAC('#file-manager', {
                         case 's':
                             this.saveDocument();
                             return true;
-                            
+
                         case 'o':
                             this.openDocument();
                             return true;
@@ -533,7 +535,7 @@ wakaPAC('#file-manager', {
                 this.showContextMenu(message.clientX, message.clientY);
                 break;
         }
-        
+
         return false;
     }
 });
@@ -545,14 +547,14 @@ For keyboard events:
 ```javascript
 {
     type: 'EVENT_KEYDOWN',         // or EVENT_KEYUP
-    wParam: 65,                    // Key code
-    lParam: 0,                     // Reserved
-    key: 'a',                      // Modern key name
-    ctrlKey: false,                // Modifier states
-    altKey: false,
-    shiftKey: false,
-    target: HTMLElement,           // Target element
-    originalEvent: Event           // Original DOM event
+        wParam: 65,                    // Key code
+        lParam: 0,                     // Reserved
+        key: 'a',                      // Modern key name
+        ctrlKey: false,                // Modifier states
+        altKey: false,
+        shiftKey: false,
+        target: HTMLElement,           // Target element
+        originalEvent: Event           // Original DOM event
 }
 ```
 
@@ -560,15 +562,15 @@ For mouse events:
 ```javascript
 {
     type: 'EVENT_LBUTTONDOWN',     // LBUTTON, MBUTTON, RBUTTON + DOWN/UP
-    wParam: 0,                     // Button: 0=left, 1=middle, 2=right
-    lParam: 3435533,               // Packed coordinates
-    clientX: 205,                  // X position
-    clientY: 150,                  // Y position
-    ctrlKey: false,                // Modifier states
-    altKey: false,
-    shiftKey: false,
-    target: HTMLElement,
-    originalEvent: Event
+        wParam: 0,                     // Button: 0=left, 1=middle, 2=right
+        lParam: 3435533,               // Packed coordinates
+        clientX: 205,                  // X position
+        clientY: 150,                  // Y position
+        ctrlKey: false,                // Modifier states
+        altKey: false,
+        shiftKey: false,
+        target: HTMLElement,
+        originalEvent: Event
 }
 ```
 
