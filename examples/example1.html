@@ -14,7 +14,7 @@
         count: 0,
 
         eventProc(message) {
-            if (message.type === 'MSG_KEYUP') {
+            if (message.type === 'EVENT_KEYUP') {
                 if (message.key === 'ArrowUp') {
                     this.increment();
                     return true;
