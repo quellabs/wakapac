@@ -13,7 +13,7 @@
     const counter = wakaPAC('#counter', {
         count: 0,
 
-        msgProc(message) {
+        eventProc(message) {
             if (message.type === 'MSG_KEYUP') {
                 if (message.key === 'ArrowUp') {
                     this.increment();

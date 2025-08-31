@@ -2229,39 +2229,41 @@
                      * Handles global mouse events for components with eventProc
                      */
                     mouse_message: (event) => {
-                        // Determine mouse event type
-                        let msgType;
+                        requestAnimationFrame(() => {
+                            // Dispatch mouse event to eventProc
+                            // Determine mouse event type
+                            let msgType;
 
-                        if (event.type === 'mousedown') {
-                            if (event.button === 0) {
-                                msgType = 'EVENT_LBUTTONDOWN';
-                            } else if (event.button === 1) {
-                                msgType = 'EVENT_MBUTTONDOWN';
-                            } else if (event.button === 2) {
-                                msgType = 'EVENT_RBUTTONDOWN';
+                            if (event.type === 'mousedown') {
+                                if (event.button === 0) {
+                                    msgType = 'EVENT_LBUTTONDOWN';
+                                } else if (event.button === 1) {
+                                    msgType = 'EVENT_MBUTTONDOWN';
+                                } else if (event.button === 2) {
+                                    msgType = 'EVENT_RBUTTONDOWN';
+                                }
+                            } else if (event.type === 'mouseup') {
+                                if (event.button === 0) {
+                                    msgType = 'EVENT_LBUTTONUP';
+                                } else if (event.button === 1) {
+                                    msgType = 'EVENT_MBUTTONUP';
+                                } else if (event.button === 2) {
+                                    msgType = 'EVENT_RBUTTONUP';
+                                }
                             }
-                        } else if (event.type === 'mouseup') {
-                            if (event.button === 0) {
-                                msgType = 'EVENT_LBUTTONUP';
-                            } else if (event.button === 1) {
-                                msgType = 'EVENT_MBUTTONUP';
-                            } else if (event.button === 2) {
-                                msgType = 'EVENT_RBUTTONUP';
-                            }
-                        }
 
-                        // Dispatch mouse event to eventProc
-                        this.dispatchEventToEventProc(event, {
-                            type: msgType, // etc
-                            wParam: event.button,  // 0=left, 1=middle, 2=right
-                            lParam: (event.clientY << 16) | event.clientX,  // Win32-style coordinates
-                            clientX: event.clientX,
-                            clientY: event.clientY,
-                            ctrlKey: event.ctrlKey,
-                            altKey: event.altKey,
-                            shiftKey: event.shiftKey,
-                            target: event.target,
-                            originalEvent: event
+                            this.dispatchEventToEventProc(event, {
+                                type: msgType, // etc
+                                wParam: event.button,  // 0=left, 1=middle, 2=right
+                                lParam: (event.clientY << 16) | event.clientX,  // Win32-style coordinates
+                                clientX: event.clientX,
+                                clientY: event.clientY,
+                                ctrlKey: event.ctrlKey,
+                                altKey: event.altKey,
+                                shiftKey: event.shiftKey,
+                                target: event.target,
+                                originalEvent: event
+                            });
                         });
                     },
 
@@ -2322,11 +2324,9 @@
                             component.container.contains(event.target)
                         ) {
                             try {
-                                if (component.original.eventProc.call(component.abstraction, message) === true) {
-                                    if (message.type !== 'EVENT_LBUTTONDOWN') {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                    }
+                                if (component.original.eventProc.call(component.abstraction, message)) {
+                                    event.preventDefault();
+                                    event.stopPropagation();
                                 }
                             } catch (error) {
                                 console.error('Error in eventProc method:', error);
