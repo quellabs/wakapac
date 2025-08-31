@@ -3670,9 +3670,9 @@
                                 continue;
                             }
 
+                            // Handle multiple valid keys (array format)
                             hasKeyConstraints = true;
 
-                            // Handle multiple valid keys (array format)
                             if (Array.isArray(expectedKey)) {
                                 if (expectedKey.includes(event.key)) {
                                     keyConstraintsMet = true;

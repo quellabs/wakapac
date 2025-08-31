@@ -261,7 +261,7 @@ Event modifiers allow you to control how events behave by using the `data-pac-ev
 
 **Available modifiers:**
 - **Keys**: `enter`, `escape`/`esc`, `space`, `tab`, `delete`/`del`, `up`, `down`, `left`, `right`
-- **Behavior**: `prevent`, `stop`, `once`
+- **Behavior**: `prevent`, `stop`
 
 ### Deep Reactivity
 
