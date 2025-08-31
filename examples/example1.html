@@ -1,8 +1,9 @@
 <html>
 <body>
 
-<div id="counter">
+<div id="counter" tabindex="0" style="border: 1px solid #ccc; padding: 20px; outline: none;">
     <p>Count: {{count}}</p>
+    <p>Focus: {{containerFocusWithin ? 'YES' : 'NO'}}</p>
     <button data-pac-bind="click: increment">+</button>
     <button data-pac-bind="click: decrement">-</button>
 </div>
@@ -12,6 +13,22 @@
     const counter = wakaPAC('#counter', {
         count: 0,
 
+        eventProc(message) {
+            if (message.type === 'MSG_KEYUP') {
+                if (message.key === 'ArrowUp') {
+                    this.increment();
+                    return true;
+                }
+
+                if (message.key === 'ArrowDown') {
+                    this.decrement();
+                    return true;
+                }
+            }
+
+            return true;
+        },
+
         increment() {
             this.count++;
         },
@@ -20,6 +37,9 @@
             this.count--;
         }
     });
+
+    // Auto-focus for testing
+    document.getElementById('counter').focus();
 </script>
 </body>
 </html>

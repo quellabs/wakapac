@@ -287,6 +287,87 @@
             // Return the text nodes
             return textNodes;
         },
+
+        /**
+         * Checks if an element is at least partially visible in the viewport
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if element intersects with viewport
+         */
+        isElementVisible(element) {
+            const rect = element.getBoundingClientRect();
+            const viewHeight = window.innerHeight;
+            const viewWidth = window.innerWidth;
+
+            return (
+                rect.top < viewHeight &&
+                rect.bottom > 0 &&
+                rect.left < viewWidth &&
+                rect.right > 0
+            );
+        },
+
+        /**
+         * Checks if an element is completely visible in the viewport
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if entire element is within viewport bounds
+         */
+        isElementFullyVisible(element) {
+            const rect = element.getBoundingClientRect();
+            const viewHeight = window.innerHeight;
+            const viewWidth = window.innerWidth;
+
+            return (
+                rect.top >= 0 &&
+                rect.left >= 0 &&
+                rect.bottom <= viewHeight &&
+                rect.right <= viewWidth
+            );
+        },
+
+        /**
+         * Checks if an element has direct focus (is the activeElement)
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if the element is currently focused
+         */
+        isElementDirectlyFocused(element) {
+            return element === document.activeElement;
+        },
+
+        /**
+         * Checks if an element or any of its descendants has focus
+         * @param {HTMLElement} element - The container element to check
+         * @returns {boolean} True if focus is within the element's boundaries
+         */
+        isElementFocusWithin(element) {
+            return element === document.activeElement ||
+                element.contains(document.activeElement);
+        },
+
+        /**
+         * Detects current network quality by measuring response time
+         * to a small test resource.
+         */
+        detectNetworkQuality() {
+            if (!navigator.onLine) {
+                return 'offline';
+            }
+
+            // Use Network Information API when available (Chrome, Edge, mobile browsers)
+            if ('connection' in navigator && navigator.connection?.effectiveType) {
+                switch (navigator.connection.effectiveType) {
+                    case 'slow-2g':
+                    case '2g':
+                    case '3g':
+                        return 'slow';
+
+                    default:
+                        return 'fast';
+                }
+            }
+
+            // Default when navigator.connection.effectiveType is not available
+            return 'fast';
+        },
     };
 
     // =============================================================================
@@ -1529,28 +1610,40 @@
             switch (operator) {
                 case '+':
                     return left + right;
+
                 case '-':
                     return Number(left) - Number(right);
+
                 case '*':
                     return Number(left) * Number(right);
+
                 case '/':
                     return Number(left) / Number(right);
+
                 case '===':
                     return left === right;
+
                 case '!==':
                     return left !== right;
+
                 case '==':
                     return left == right;
+
                 case '!=':
                     return left != right;
+
                 case '>=':
                     return left >= right;
+
                 case '<=':
                     return left <= right;
+
                 case '>':
                     return left > right;
+
                 case '<':
                     return left < right;
+
                 default:
                     return false;
             }
@@ -1972,7 +2065,7 @@
                 const props = {
                     // Initialize online/offline state and network quality
                     browserOnline: navigator.onLine,
-                    browserNetworkQuality: this.detectNetworkQuality(),
+                    browserNetworkQuality: Utils.detectNetworkQuality(),
 
                     // Initialize page visibility state - tracks if the browser tab/window is currently visible
                     // Useful for pausing animations or reducing CPU usage when user switches tabs
@@ -1993,8 +2086,10 @@
                     browserDocumentHeight: document.documentElement.scrollHeight,
 
                     // Per-container viewport visibility properties
-                    containerVisible: false,
-                    containerFullyVisible: false,
+                    containerFocus: Utils.isElementDirectlyFocused(this.container),
+                    containerFocusWithin: Utils.isElementFocusWithin(this.container),
+                    containerVisible: Utils.isElementVisible(container),
+                    containerFullyVisible: Utils.isElementFullyVisible(container),
                     containerClientRect: {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0},
                     containerWidth: 0,
                     containerHeight: 0
@@ -2056,7 +2151,7 @@
                      * Updates network status for each component.
                      */
                     online: () => {
-                        const quality = this.detectNetworkQuality();
+                        const quality = Utils.detectNetworkQuality();
                         eachComponent(c => {
                             c.abstraction.browserOnline = true;
                             c.abstraction.browserNetworkQuality = quality;
@@ -2073,7 +2168,7 @@
                      * Updates network quality when connection type changes.
                      */
                     connectionChange: () => {
-                        const quality = this.detectNetworkQuality();
+                        const quality = Utils.detectNetworkQuality();
                         eachComponent(c => {
                             c.abstraction.browserNetworkQuality = quality;
                         });
@@ -2111,7 +2206,84 @@
                             browserScrollX: window.scrollX,
                             browserScrollY: window.scrollY
                         });
-                    }), 100, "_wakaPACResizeTimeout")
+                    }), 100, "_wakaPACResizeTimeout"),
+
+                    /**
+                     * Handles global message processing for components with eventProc
+                     */
+                    keyboard_message: (event) => {
+                        this.dispatchEventToEventProc(event, {
+                            type: event.type === 'keydown' ? 'EVENT_KEYDOWN' : 'EVENT_KEYUP',
+                            wParam: event.keyCode,
+                            lParam: 0,
+                            key: event.key,
+                            ctrlKey: event.ctrlKey,
+                            altKey: event.altKey,
+                            shiftKey: event.shiftKey,
+                            target: event.target,
+                            originalEvent: event
+                        });
+                    },
+
+                    /**
+                     * Handles global mouse events for components with eventProc
+                     */
+                    mouse_message: (event) => {
+                        requestAnimationFrame(() => {
+                            // Dispatch mouse event to eventProc
+                            // Determine mouse event type
+                            let msgType;
+
+                            if (event.type === 'mousedown') {
+                                if (event.button === 0) {
+                                    msgType = 'EVENT_LBUTTONDOWN';
+                                } else if (event.button === 1) {
+                                    msgType = 'EVENT_MBUTTONDOWN';
+                                } else if (event.button === 2) {
+                                    msgType = 'EVENT_RBUTTONDOWN';
+                                }
+                            } else if (event.type === 'mouseup') {
+                                if (event.button === 0) {
+                                    msgType = 'EVENT_LBUTTONUP';
+                                } else if (event.button === 1) {
+                                    msgType = 'EVENT_MBUTTONUP';
+                                } else if (event.button === 2) {
+                                    msgType = 'EVENT_RBUTTONUP';
+                                }
+                            }
+
+                            this.dispatchEventToEventProc(event, {
+                                type: msgType, // etc
+                                wParam: event.button,  // 0=left, 1=middle, 2=right
+                                lParam: (event.clientY << 16) | event.clientX,  // Win32-style coordinates
+                                clientX: event.clientX,
+                                clientY: event.clientY,
+                                ctrlKey: event.ctrlKey,
+                                altKey: event.altKey,
+                                shiftKey: event.shiftKey,
+                                target: event.target,
+                                originalEvent: event
+                            });
+                        });
+                    },
+
+                    focusin_message: (event) => {
+                        eachComponent(component => {
+                            if (component.container.contains(event.target) || component.container === event.target) {
+                                component.abstraction.containerFocus = Utils.isElementDirectlyFocused(component.container);
+                                component.abstraction.containerFocusWithin = Utils.isElementFocusWithin(component.container);
+                            }
+                        });
+                    },
+
+                    focusout_message: (event) => {
+                        eachComponent(component => {
+                            if (component.container.contains(event.target) || component.container === event.target) {
+                                component.abstraction.containerFocus = Utils.isElementDirectlyFocused(component.container);
+                                component.abstraction.containerFocusWithin = component.container.contains(event.relatedTarget);
+                            }
+                        });
+                    }
                 };
 
                 // Store handlers globally for potential cleanup
@@ -2119,6 +2291,12 @@
 
                 // Attach event listeners
                 document.addEventListener('visibilitychange', handlers.visibility);
+                document.addEventListener('keydown', handlers.keyboard_message, true);
+                document.addEventListener('keyup', handlers.keyboard_message, true);
+                document.addEventListener('mousedown', handlers.mouse_message, true);
+                document.addEventListener('mouseup', handlers.mouse_message, true);
+                document.addEventListener('focusin', handlers.focusin_message, true);
+                document.addEventListener('focusout', handlers.focusout_message, true);
                 window.addEventListener('online', handlers.online);
                 window.addEventListener('offline', handlers.offline);
                 window.addEventListener('scroll', handlers.scroll);
@@ -2131,29 +2309,31 @@
             },
 
             /**
-             * Detects current network quality by measuring response time
-             * to a small test resource.
+             * Dispatch an event to eventProc
+             * @param event
+             * @param message
              */
-            detectNetworkQuality() {
-                if (!navigator.onLine) {
-                    return 'offline';
+            dispatchEventToEventProc(event, message) {
+                const comps = window.PACRegistry?.components;
+
+                if (comps?.size) {
+                    comps.forEach(component => {
+                        if (
+                            component.original.eventProc &&
+                            typeof component.original.eventProc === 'function' &&
+                            component.container.contains(event.target)
+                        ) {
+                            try {
+                                if (component.original.eventProc.call(component.abstraction, message)) {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                }
+                            } catch (error) {
+                                console.error('Error in eventProc method:', error);
+                            }
+                        }
+                    });
                 }
-
-                // Use Network Information API when available (Chrome, Edge, mobile browsers)
-                if ('connection' in navigator && navigator.connection?.effectiveType) {
-                    switch (navigator.connection.effectiveType) {  // Fix: use effectiveType
-                        case 'slow-2g':
-                        case '2g':
-                        case '3g':
-                            return 'slow';
-
-                        default:
-                            return 'fast';
-                    }
-                }
-
-                // Default when navigator.connection.effectiveType is not available
-                return 'fast';
             },
 
             /**
@@ -2205,10 +2385,7 @@
              * This is the fallback method used when IntersectionObserver isn't available
              */
             updateContainerVisibility() {
-                // Get current viewport dimensions
-                // innerHeight/innerWidth exclude scrollbars and give the actual visible area
-                const windowHeight = window.innerHeight;
-                const windowWidth = window.innerWidth;
+                // Get current state using Utils
                 const rect = Utils.domRectToSimpleObject(this.container.getBoundingClientRect());
 
                 // Set dimensions
@@ -2216,42 +2393,9 @@
                 this.abstraction.containerWidth = rect.width;
                 this.abstraction.containerHeight = rect.height;
 
-                // Check if any part of container intersects with viewport boundaries
-                // Intersection logic: An element is considered "in viewport" if it overlaps
-                // with the visible area in both horizontal and vertical dimensions.
-                const isInViewport = (
-                    rect.top < windowHeight &&    // Element's top edge hasn't scrolled below viewport bottom
-                    rect.bottom > 0 &&            // Element's bottom edge hasn't scrolled above viewport top
-                    rect.left < windowWidth &&    // Element's left edge hasn't scrolled past viewport right
-                    rect.right > 0                // Element's right edge hasn't scrolled past viewport left
-                );
-
-                // Early exit optimization: If element is completely out of view,
-                // skip the more expensive fully-visible calculation and update state immediately
-                if (!isInViewport) {
-                    // Set visibility flags to false since element is not in viewport
-                    this.abstraction.containerVisible = false;
-                    this.abstraction.containerFullyVisible = false;
-                    return;
-                }
-
-                // Calculate if element is completely within viewport bounds (no clipping)
-                // "Fully visible" means the entire element can be seen without any parts
-                // being cut off by viewport edges. This is stricter than just "visible"
-                // and useful for determining if content can be read/interacted with completely.
-                const isFullyVisible = (
-                    rect.top >= 0 &&                    // Top edge is at or below viewport top (not clipped above)
-                    rect.bottom <= windowHeight &&      // Bottom edge is at or above viewport bottom (not clipped below)
-                    rect.left >= 0 &&                   // Left edge is at or right of viewport left (not clipped on left)
-                    rect.right <= windowWidth           // Right edge is at or left of viewport right (not clipped on right)
-                );
-
-                // Update component's reactive state with calculated visibility data
-                // These property updates will trigger Wakapac's reactivity system
-                // and can be observed by other components or used to conditionally render content,
-                // start/stop animations, lazy load resources, etc.
-                this.abstraction.containerVisible = true;                    // Element has some visible pixels
-                this.abstraction.containerFullyVisible = isFullyVisible;     // Element is completely unclipped
+                // Use Utils for consistent visibility calculation
+                this.abstraction.containerVisible = Utils.isElementVisible(this.container);
+                this.abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
             },
 
             /**
@@ -3083,7 +3227,7 @@
                     const originalText = textNode.textContent;
 
                     // Only process nodes that have interpolation patterns
-                    if (/\{\{\s*[^}]+\s*\}\}/.test(originalText)) {
+                    if (/\{\{\s*[^}]+\s*}}/.test(originalText)) {
                         textNode.textContent = this.processTextInterpolation(originalText, context);
                     }
                 });
@@ -3105,11 +3249,11 @@
                 let text = String(textContent || '');
 
                 // Find ALL interpolation patterns in the text
-                const matches = text.match(/\{\{\s*([^}]+)\s*\}\}/g);
+                const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
 
                 if (matches) {
                     matches.forEach(match => {
-                        const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
+                        const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
 
                         try {
                             const parsed = ExpressionParser.parseExpression(expression);
@@ -3483,10 +3627,10 @@
             },
 
             /**
-             * Parses event modifiers from data-pac-modifiers attribute
+             * Parses event modifiers from data-pac-event attribute
              */
             parseEventModifiers(element) {
-                const modifiersAttr = element.getAttribute('data-pac-modifiers');
+                const modifiersAttr = element.getAttribute('data-pac-event');
                 return modifiersAttr ? modifiersAttr.trim().split(/\s+/).filter(m => m.length > 0) : [];
             },
 
@@ -3496,37 +3640,57 @@
              * @param {string[]} modifiers - Array of modifier strings to check against
              * @returns {boolean} - True if event matches modifiers, false otherwise
              */
+            /**
+             * Applies event modifiers to validate if event should trigger
+             * @param {Event} event - The keyboard/mouse event to validate
+             * @param {string[]} modifiers - Array of modifier strings to check against
+             * @returns {boolean} - True if event matches modifiers, false otherwise
+             */
             applyEventModifiers(event, modifiers) {
-                // Iterate through each modifier to find a matching key constraint
+                let hasKeyConstraints = false;
+                let keyConstraintsMet = false;
+
+                // Iterate through each modifier
                 for (const modifier of modifiers) {
-                    // Read key
-                    const expectedKey = EVENT_KEYS[modifier.toLowerCase()];
+                    switch (modifier.toLowerCase()) {
+                        case 'prevent':
+                            event.preventDefault();
+                            break;
 
-                    // Skip modifiers that don't correspond to key constraints
-                    if (!expectedKey) {
-                        continue;
-                    }
+                        case 'stop':
+                            event.stopPropagation();
+                            break;
 
-                    // Handle multiple valid keys (array format)
-                    if (Array.isArray(expectedKey)) {
-                        // Return false immediately if pressed key isn't in the valid key list
-                        if (!expectedKey.includes(event.key)) {
-                            return false;
+                        default: {
+                            // Read key
+                            const expectedKey = EVENT_KEYS[modifier.toLowerCase()];
+
+                            // Skip modifiers that don't correspond to key constraints
+                            if (!expectedKey) {
+                                continue;
+                            }
+
+                            // Handle multiple valid keys (array format)
+                            hasKeyConstraints = true;
+
+                            if (Array.isArray(expectedKey)) {
+                                if (expectedKey.includes(event.key)) {
+                                    keyConstraintsMet = true;
+                                }
+                            } else {
+                                // Handle single valid key (string format)
+                                if (event.key === expectedKey) {
+                                    keyConstraintsMet = true;
+                                }
+                            }
+
+                            break;
                         }
-                    } else {
-                        // Handle single valid key (string format)
-                        // Return false immediately if pressed key doesn't match expected key
-                        if (event.key !== expectedKey) {
-                            return false;
-                        }
                     }
-
-                    // Found a matching key constraint, stop checking further modifiers
-                    break;
                 }
 
-                // All key constraints passed (or no key constraints found)
-                return true;
+                // If there were key constraints, at least one must be met
+                return !hasKeyConstraints || keyConstraintsMet;
             },
 
             /**
@@ -3638,7 +3802,7 @@
                     // Hide element: save current display and set to none
                     if (!element.hasAttribute('data-pac-hidden')) {
                         // Get the computed display style before we change it
-                        const currentDisplay = this.getComputedStyle(element).display;
+                        const currentDisplay = getComputedStyle(element).display;
 
                         // Only save the display value if it's not already 'none'
                         // (no point in saving 'none' as the original value)
@@ -4443,6 +4607,12 @@
                 if (window._wakaPACGlobalHandlers && window.PACRegistry.components.size === 0) {
                     // Remove document-level event listeners that were shared across all components
                     document.removeEventListener('visibilitychange', window._wakaPACGlobalHandlers.visibility);
+                    document.removeEventListener('keydown', window._wakaPACGlobalHandlers.keyboard_message, true);
+                    document.removeEventListener('keyup', window._wakaPACGlobalHandlers.keyboard_message, true);
+                    document.removeEventListener('mousedown', window._wakaPACGlobalHandlers.mouse_message, true);
+                    document.removeEventListener('mouseup', window._wakaPACGlobalHandlers.mouse_message, true);
+                    document.removeEventListener('focusin', window._wakaPACGlobalHandlers.focusin_message, true);
+                    document.removeEventListener('focusout', window._wakaPACGlobalHandlers.focusout_message, true);
                     window.removeEventListener('online', window._wakaPACGlobalHandlers.online);
                     window.removeEventListener('offline', window._wakaPACGlobalHandlers.offline);
                     window.removeEventListener('scroll', window._wakaPACGlobalHandlers.scroll);
@@ -4519,19 +4689,17 @@
 
             /**
              * Removes all event listeners that were registered by this component
-             * This method prevents memory leaks by ensuring event handlers are properly cleaned up
+             * Prevents memory leaks by ensuring event handlers are properly cleaned up
+             * @private
              */
             _removeEventListeners() {
-                // Iterate through all stored event listeners
-                this.eventListeners.forEach((handler, type) => {
-                    // Remove the event listener from the container element
-                    // The 'true' parameter indicates this was registered with capture=true
-                    // It's important to use the same parameters (capture flag) that were used when adding the listener
-                    this.container.removeEventListener(type, handler, true);
+                // Remove all stored event listeners with capture=true
+                this.eventListeners?.forEach((handler, type) => {
+                    this.container?.removeEventListener(type, handler, true);
                 });
 
-                // Clear the Map to remove all stored references
-                this.eventListeners.clear();
+                // Clear the event listener list
+                this.eventListeners?.clear();
             },
 
             /**
