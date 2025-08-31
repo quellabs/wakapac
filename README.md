@@ -714,7 +714,7 @@ The `containerClientRect` property contains detailed position and size informati
 
 ## Message Processing System
 
-WakaPAC provides a powerful message processing system inspired by Win32 window procedures. This allows components to handle all keyboard events in a centralized, procedural manner similar to traditional desktop application frameworks.
+WakaPAC provides a powerful message processing system inspired by Win32 window procedures. This allows components to handle all mouse and keyboard events in a centralized, procedural manner similar to traditional desktop application frameworks.
 
 ### Basic Message Processing
 
@@ -727,36 +727,14 @@ wakaPAC('#file-manager', {
     eventProc(message) {
         switch(message.type) {
             case 'EVENT_KEYDOWN':
-                return this.handleKeyDown(message);
+                break;
 
             case 'EVENT_KEYUP':
-                return this.handleKeyUp(message);
+                break;
 
-            default:
-                return false; // Not handled
+            case 'EVENT_LBUTTONDOWN' :
+                break;
         }
-    },
-
-    handleKeyDown(message) {
-        switch(message.key) {
-            case 'Tab':
-                this.switchActivePane();
-                return true; // Handled - prevent browser default
-                
-            case 'F5':
-                this.refreshCurrentDirectory();
-                return true;
-                
-            case 'ArrowUp':
-                this.navigateUp();
-                return true;
-                
-            case 'ArrowDown':
-                this.navigateDown();
-                return true;
-        }
-        
-        return false; // Not handled - allow browser default
     }
 });
 ```
@@ -767,16 +745,32 @@ The message object passed to `eventProc` contains Win32-inspired properties:
 
 ```javascript
 {
-    type: 'EVENT_KEYDOWN',     // Message type: EVENT_KEYDOWN or EVENT_KEYUP
-    wParam: 65,              // Key code (like Win32 wParam)
-    lParam: 0,               // Reserved for future use (like Win32 lParam)
-    key: 'a',                // Modern key name for convenience
-    ctrlKey: false,          // Modifier key states
+    type: 'EVENT_KEYDOWN',         // Message type: EVENT_KEYDOWN or EVENT_KEYUP
+    wParam: 65,                    // Key code (like Win32 wParam)
+    lParam: 0,                     // Reserved for future use (like Win32 lParam)
+    key: 'a',                      // Modern key name for convenience
+    ctrlKey: false,                // Modifier key states
     altKey: false,
     shiftKey: false,
-    target: HTMLElement,     // The DOM element that received the event
-    originalEvent: Event    // Original DOM event for edge cases
+    target: HTMLElement,           // The DOM element that received the event
+    originalEvent: Event           // Original DOM event for edge cases
 }
+```
+
+```javascript
+{
+    type: 'EVENT_LBUTTONDOWN',     // EVENT_LBUTTONDOWN, EVENT_MBUTTONDOWN, EVENT_RBUTTONDOWN
+                                   // EVENT_LBUTTONUP, EVENT_MBUTTONUP, EVENT_RBUTTONUP
+    wParam: 0,                     // 0=left, 1=middle, 2=right
+    lParam: 3435533,               // Win32-style coordinates ((event.clientY << 16) | event.clientX)
+    clientX: 0,                    // X position
+    clientY: 0,                    // Y position
+    ctrlKey: false,                // Modifier key states
+    altKey: false,
+    shiftKey: false,
+    target: HTMLElement,           // The DOM element that received the event
+    originalEvent: Event           // Original DOM event for edge cases
+})
 ```
 
 ### Focus-Aware Message Routing
