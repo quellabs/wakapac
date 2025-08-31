@@ -2102,62 +2102,6 @@
                 // Uses singleton pattern to ensure listeners are only attached once per page
                 // regardless of how many components use browser properties
                 this.setupGlobalBrowserListeners();
-
-                // Setup focus tracking
-                this.setupFocusTracking();
-            },
-
-            /**
-             * Handles the focusin event when any element within the container receives focus
-             * Updates the abstraction state to reflect that the container has focus
-             */
-            handleFocusIn() {
-                // Always mark container as having focus within its boundaries
-                this.abstraction.containerFocusWithin = true;
-
-                // Only mark container as directly focused if the container itself received focus
-                this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
-            },
-
-            /**
-             * Handles the focusout event when focus leaves an element within the container
-             * Updates the abstraction state based on where focus is moving to
-             * @param {FocusEvent} event - The focusout event containing relatedTarget info
-             */
-            handleFocusOut(event) {
-                // Container itself no longer has direct focus (will be updated in handleFocusIn if needed)
-                this.abstraction.containerFocus = false;
-
-                // Check if focus is moving to an element outside the container
-                // relatedTarget is the element receiving focus (null if moving outside the page)
-                if (!this.container.contains(event.relatedTarget)) {
-                    // Focus has completely left the container and its children
-                    this.abstraction.containerFocusWithin = false;
-                }
-
-                // If relatedTarget is still within container, containerFocusWithin stays true
-            },
-
-            /**
-             * Sets up event listeners for focus tracking on the container element
-             * Uses focusin/focusout events which bubble up from child elements
-             * Stores bound handlers for proper cleanup later
-             */
-            setupFocusTracking() {
-                // Bind handlers to preserve 'this' context when called as event listeners
-                // Without binding, 'this' would refer to the DOM element in the handler
-                const focusinHandler = this.handleFocusIn.bind(this);
-                const focusoutHandler = this.handleFocusOut.bind(this);
-
-                // Add event listeners for focus events that bubble up from children
-                // focusin/focusout bubble, unlike focus/blur which don't
-                this.container.addEventListener('focusin', focusinHandler);
-                this.container.addEventListener('focusout', focusoutHandler);
-
-                // Store bound handlers in eventListeners Map for later cleanup
-                // This allows proper removal of the exact same function references
-                this.eventListeners.set('focusin', focusinHandler);
-                this.eventListeners.set('focusout', focusoutHandler);
             },
 
             /**
@@ -2265,12 +2209,11 @@
                     }), 100, "_wakaPACResizeTimeout"),
 
                     /**
-                     * Handles global message processing for components with msgProc
+                     * Handles global message processing for components with eventProc
                      */
                     keyboard_message: (event) => {
-                        // Dispatch Win32-style message object
-                        this.dispatchEventToMsgProc(event, {
-                            type: event.type === 'keydown' ? 'MSG_KEYDOWN' : 'MSG_KEYUP',
+                        this.dispatchEventToEventProc(event, {
+                            type: event.type === 'keydown' ? 'EVENT_KEYDOWN' : 'EVENT_KEYUP',
                             wParam: event.keyCode,
                             lParam: 0,
                             key: event.key,
@@ -2279,6 +2222,64 @@
                             shiftKey: event.shiftKey,
                             target: event.target,
                             originalEvent: event
+                        });
+                    },
+
+                    /**
+                     * Handles global mouse events for components with eventProc
+                     */
+                    mouse_message: (event) => {
+                        // Determine mouse event type
+                        let msgType;
+
+                        if (event.type === 'mousedown') {
+                            if (event.button === 0) {
+                                msgType = 'EVENT_LBUTTONDOWN';
+                            } else if (event.button === 1) {
+                                msgType = 'EVENT_MBUTTONDOWN';
+                            } else if (event.button === 2) {
+                                msgType = 'EVENT_RBUTTONDOWN';
+                            }
+                        } else if (event.type === 'mouseup') {
+                            if (event.button === 0) {
+                                msgType = 'EVENT_LBUTTONUP';
+                            } else if (event.button === 1) {
+                                msgType = 'EVENT_MBUTTONUP';
+                            } else if (event.button === 2) {
+                                msgType = 'EVENT_RBUTTONUP';
+                            }
+                        }
+
+                        // Dispatch mouse event to eventProc
+                        this.dispatchEventToEventProc(event, {
+                            type: msgType, // etc
+                            wParam: event.button,  // 0=left, 1=middle, 2=right
+                            lParam: (event.clientY << 16) | event.clientX,  // Win32-style coordinates
+                            clientX: event.clientX,
+                            clientY: event.clientY,
+                            ctrlKey: event.ctrlKey,
+                            altKey: event.altKey,
+                            shiftKey: event.shiftKey,
+                            target: event.target,
+                            originalEvent: event
+                        });
+                    },
+
+                    focusin_message: (event) => {
+                        eachComponent(component => {
+                            if (component.container.contains(event.target) || component.container === event.target) {
+                                component.abstraction.containerFocus = Utils.isElementDirectlyFocused(component.container);
+                                component.abstraction.containerFocusWithin = Utils.isElementFocusWithin(component.container);
+                            }
+                        });
+                    },
+
+                    focusout_message: (event) => {
+                        eachComponent(component => {
+                            if (component.container.contains(event.target) || component.container === event.target) {
+                                component.abstraction.containerFocus = Utils.isElementDirectlyFocused(component.container);
+                                component.abstraction.containerFocusWithin = component.container.contains(event.relatedTarget);
+                            }
                         });
                     }
                 };
@@ -2290,6 +2291,10 @@
                 document.addEventListener('visibilitychange', handlers.visibility);
                 document.addEventListener('keydown', handlers.keyboard_message, true);
                 document.addEventListener('keyup', handlers.keyboard_message, true);
+                document.addEventListener('mousedown', handlers.mouse_message, true);
+                document.addEventListener('mouseup', handlers.mouse_message, true);
+                document.addEventListener('focusin', handlers.focusin_message, true);
+                document.addEventListener('focusout', handlers.focusout_message, true);
                 window.addEventListener('online', handlers.online);
                 window.addEventListener('offline', handlers.offline);
                 window.addEventListener('scroll', handlers.scroll);
@@ -2302,33 +2307,34 @@
             },
 
             /**
-             * Dispatch an event to MsgProc
+             * Dispatch an event to eventProc
              * @param event
              * @param message
              */
-            dispatchEventToMsgProc(event, message) {
+            dispatchEventToEventProc(event, message) {
                 const comps = window.PACRegistry?.components;
 
                 if (comps?.size) {
                     comps.forEach(component => {
                         if (
-                            component.original.msgProc &&
-                            typeof component.original.msgProc === 'function' &&
+                            component.original.eventProc &&
+                            typeof component.original.eventProc === 'function' &&
                             component.container.contains(event.target)
                         ) {
                             try {
-                                if (component.original.msgProc.call(component.abstraction, message) === true) {
-                                    event.preventDefault();
-                                    event.stopPropagation();
+                                if (component.original.eventProc.call(component.abstraction, message) === true) {
+                                    if (message.type !== 'EVENT_LBUTTONDOWN') {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                    }
                                 }
                             } catch (error) {
-                                console.error('Error in msgProc method:', error);
+                                console.error('Error in eventProc method:', error);
                             }
                         }
                     });
                 }
             },
-
 
             /**
              * Modern approach using Intersection Observer API.
@@ -4583,6 +4589,10 @@
                     document.removeEventListener('visibilitychange', window._wakaPACGlobalHandlers.visibility);
                     document.removeEventListener('keydown', window._wakaPACGlobalHandlers.keyboard_message, true);
                     document.removeEventListener('keyup', window._wakaPACGlobalHandlers.keyboard_message, true);
+                    document.removeEventListener('mousedown', window._wakaPACGlobalHandlers.mouse_message, true);
+                    document.removeEventListener('mouseup', window._wakaPACGlobalHandlers.mouse_message, true);
+                    document.removeEventListener('focusin', window._wakaPACGlobalHandlers.focusin_message, true);
+                    document.removeEventListener('focusout', window._wakaPACGlobalHandlers.focusout_message, true);
                     window.removeEventListener('online', window._wakaPACGlobalHandlers.online);
                     window.removeEventListener('offline', window._wakaPACGlobalHandlers.offline);
                     window.removeEventListener('scroll', window._wakaPACGlobalHandlers.scroll);
@@ -4668,18 +4678,8 @@
                     this.container?.removeEventListener(type, handler, true);
                 });
 
+                // Clear the event listener list
                 this.eventListeners?.clear();
-
-                // Remove focus event listeners and clear handlers
-                if (this.handleFocusIn) {
-                    this.container.removeEventListener('focusin', this.handleFocusIn);
-                    this.handleFocusIn = null;
-                }
-
-                if (this.handleFocusOut) {
-                    this.container.removeEventListener('focusout', this.handleFocusOut);
-                    this.handleFocusOut = null;
-                }
             },
 
             /**

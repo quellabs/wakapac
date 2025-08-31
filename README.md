@@ -718,18 +718,18 @@ WakaPAC provides a powerful message processing system inspired by Win32 window p
 
 ### Basic Message Processing
 
-Any component can implement a `msgProc` method to handle keyboard events in a Win32-style message loop pattern:
+Any component can implement a `eventProc` method to handle keyboard events in a Win32-style message loop pattern:
 
 ```javascript
 wakaPAC('#file-manager', {
     activePane: 'left',
 
-    msgProc(message) {
+    eventProc(message) {
         switch(message.type) {
-            case 'MSG_KEYDOWN':
+            case 'EVENT_KEYDOWN':
                 return this.handleKeyDown(message);
 
-            case 'MSG_KEYUP':
+            case 'EVENT_KEYUP':
                 return this.handleKeyUp(message);
 
             default:
@@ -763,11 +763,11 @@ wakaPAC('#file-manager', {
 
 ### Message Object Structure
 
-The message object passed to `msgProc` contains Win32-inspired properties:
+The message object passed to `eventProc` contains Win32-inspired properties:
 
 ```javascript
 {
-    type: 'MSG_KEYDOWN',     // Message type: MSG_KEYDOWN or MSG_KEYUP
+    type: 'EVENT_KEYDOWN',     // Message type: EVENT_KEYDOWN or EVENT_KEYUP
     wParam: 65,              // Key code (like Win32 wParam)
     lParam: 0,               // Reserved for future use (like Win32 lParam)
     key: 'a',                // Modern key name for convenience
@@ -785,9 +785,9 @@ Messages are only sent to components whose containers have keyboard focus.
 
 ```javascript
 wakaPAC('#editor', {
-    msgProc(message) {
+    eventProc(message) {
         // Process keyboard shortcuts for editor
-        if (message.type === 'MSG_KEYDOWN') {
+        if (message.type === 'EVENT_KEYDOWN') {
             if (message.ctrlKey) {
                 switch(message.key) {
                     case 's':
@@ -1217,7 +1217,7 @@ wakaPAC('#app', data, {
     updateMode: 'immediate',
 
     // Default delay for 'delayed' mode (ms)
-    delay: 300
+    delay: 300,
 });
 ```
 
