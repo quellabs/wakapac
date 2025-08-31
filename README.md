@@ -6,6 +6,8 @@ A modern reactivity library using the PAC pattern — a spiritual successor to K
 
 WakaPAC is a lightweight reactive framework built around the Presentation–Abstraction–Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies — no hacks, no virtual DOM, no build step.
 
+### What's PAC?
+
 **PAC (Presentation-Abstraction-Control)** is a hierarchical architectural pattern that creates a clean separation between:
 
 1. **Presentation**: Your HTML templates and DOM elements - what the user sees
@@ -83,6 +85,8 @@ Not for you if:
 
 ### Text Interpolation
 
+Text interpolation allows you to dynamically insert data into your HTML templates using mustache syntax ({{ }}). This enables you to create dynamic content that updates based on your application's state. 
+
 ```html
 <!-- Simple properties -->
 <p>Hello, {{name}}!</p>
@@ -95,6 +99,12 @@ Not for you if:
 
 <!-- Computed properties -->
 <p>Total: {{totalPrice}}</p>
+
+<!-- Arithmetic Operations -->
+<p>Total: ${{price * quantity}}</p>
+
+<!-- String Operations -->
+<p>Full Name: {{firstName + ' ' + lastName}}</p>
 ```
 
 ### Complete Binding Reference
@@ -155,14 +165,14 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <img data-pac-bind="src: imageUrl, alt: altText">
 <div data-pac-bind="id: dynamicId, role: userRole">
 
-    <!-- Data attributes -->
-    <div data-pac-bind="data-id: userId, data-category: itemCategory">
+<!-- Data attributes -->
+<div data-pac-bind="data-id: userId, data-category: itemCategory">
 
-        <!-- ARIA attributes -->
-        <button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
+<!-- ARIA attributes -->
+<button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
 
-            <!-- Multiple custom attributes -->
-            <div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
+<!-- Multiple custom attributes -->
+<div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
 ```
 
 #### Style and Appearance Bindings
@@ -172,11 +182,11 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <!-- Simple class binding -->
 <div data-pac-bind="class: statusClass">
 
-    <!-- Object syntax: conditional classes -->
-    <div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
+<!-- Object syntax: conditional classes -->
+<div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
 
-        <!-- Array of classes -->
-        <div data-pac-bind="class: [baseClass, conditionalClass]">
+<!-- Array of classes -->
+<div data-pac-bind="class: [baseClass, conditionalClass]">
 ```
 
 **`style`** - CSS style manipulation (supports object syntax)
@@ -184,11 +194,11 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <!-- Simple style binding -->
 <div data-pac-bind="style: dynamicStyleString">
 
-    <!-- Object syntax: multiple CSS properties -->
-    <div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
+<!-- Object syntax: multiple CSS properties -->
+<div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
 
-        <!-- CSS custom properties -->
-        <div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
+<!-- CSS custom properties -->
+<div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
 ```
 
 #### List Rendering Binding
@@ -546,7 +556,8 @@ wakaPAC('#file-manager', {
 For keyboard events:
 ```javascript
 {
-    type: 'EVENT_KEYDOWN',         // or EVENT_KEYUP
+    type:
+        'EVENT_KEYDOWN',               // or EVENT_KEYUP
         wParam: 65,                    // Key code
         lParam: 0,                     // Reserved
         key: 'a',                      // Modern key name
@@ -561,7 +572,8 @@ For keyboard events:
 For mouse events:
 ```javascript
 {
-    type: 'EVENT_LBUTTONDOWN',     // LBUTTON, MBUTTON, RBUTTON + DOWN/UP
+    type:
+        'EVENT_LBUTTONDOWN',           // LBUTTON, MBUTTON, RBUTTON + DOWN/UP
         wParam: 0,                     // Button: 0=left, 1=middle, 2=right
         lParam: 3435533,               // Packed coordinates
         clientX: 205,                  // X position
@@ -569,8 +581,8 @@ For mouse events:
         ctrlKey: false,                // Modifier states
         altKey: false,
         shiftKey: false,
-        target: HTMLElement,
-        originalEvent: Event
+        target: HTMLElement,           // Target element
+        originalEvent: Event           // Original DOM event
 }
 ```
 
