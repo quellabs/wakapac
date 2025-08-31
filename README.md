@@ -262,9 +262,6 @@ Event modifiers allow you to control how events behave by using the `data-pac-ev
 <!-- Close modal on Escape -->
 <div data-pac-bind="keyup: closeModal" data-pac-event="escape">
 
-<!-- One-time event -->
-<button data-pac-bind="click: initialize" data-pac-event="once">
-
 <!-- Multiple modifiers -->
 <form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
 ```
