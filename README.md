@@ -2,19 +2,45 @@
 
 A modern reactivity library using the PAC pattern — a spiritual successor to KnockoutJS, powered by Proxies.
 
-## Why WakaPAC?
+## Introduction
 
-Wakapac is a lightweight reactive framework built around the Presentation–Abstraction–Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies — no hacks, no virtual DOM, no build step.
+WakaPAC is a lightweight reactive framework built around the Presentation–Abstraction–Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies — no hacks, no virtual DOM, no build step.
 
-- **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes.
-- **Two-way reactivity** for objects `and` nested arrays.
-- **Win32-style** `eventProc` for low-level event handling when you want total control.
-- **Drop-in script file** — no bundler required.
-- **Hierarchical components** with parent–child notification.
+**PAC (Presentation-Abstraction-Control)** is a hierarchical architectural pattern that creates a clean separation between:
 
-## Quick Start
+1. **Presentation**: Your HTML templates and DOM elements - what the user sees
+2. **Abstraction**: Your data model and business logic - what your app knows
+3. **Control**: The reactive layer that mediates between presentation and abstraction - how they stay in sync
 
-### Installation
+Unlike MVC where models and views can talk directly, PAC uses the Control layer as a smart mediator that:
+- **Automatically syncs** data changes to the DOM
+- **Handles events** from the presentation layer
+- **Manages reactivity** and computed properties
+- **Coordinates communication** between components
+
+This results in more predictable data flow and easier debugging than traditional MVC patterns.
+
+### Why WakaPAC?
+
+- **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes
+- **Two-way reactivity** for objects and nested arrays
+- **Win32-style** `eventProc` for low-level event handling when you want total control
+- **Drop-in script file** — no bundler required
+- **Hierarchical components** with parent–child notification
+
+### Who It's For
+
+- You loved KnockoutJS, but wish it had modern reactivity
+- You want a small, drop-in framework without React/Vue's complexity
+- You come from Win32/desktop dev and want familiar PAC patterns
+- You're building internal tools, dashboards, or small-to-medium apps without needing a bundler
+
+Not for you if:
+- You need SSR or a giant ecosystem
+- You want JSX/TSX or TypeScript-first DX
+- You're building a massive SPA that already fits better in React/Vue
+
+## Installation
 
 ```html
 <!-- CDN -->
@@ -24,7 +50,7 @@ Wakapac is a lightweight reactive framework built around the Presentation–Abst
 <script src="wakapac.min.js"></script>
 ```
 
-### Quick Example
+## Quick Example
 
 ```html
 <!DOCTYPE html>
@@ -53,27 +79,29 @@ Wakapac is a lightweight reactive framework built around the Presentation–Abst
 </html>
 ```
 
-## PAC Architecture
+## Basic Features - Data Binding
 
-**PAC (Presentation-Abstraction-Control)** is a hierarchical architectural pattern that creates a clean separation between:
+### Text Interpolation
 
-1. **Presentation**: Your HTML templates and DOM elements - what the user sees
-2. **Abstraction**: Your data model and business logic - what your app knows
-3. **Control**: The reactive layer that mediates between presentation and abstraction - how they stay in sync
+```html
+<!-- Simple properties -->
+<p>Hello, {{name}}!</p>
 
-Unlike MVC where models and views can talk directly, PAC uses the Control layer as a smart mediator that:
-- **Automatically syncs** data changes to the DOM
-- **Handles events** from the presentation layer
-- **Manages reactivity** and computed properties
-- **Coordinates communication** between components
+<!-- Nested properties -->
+<p>User: {{user.name}} ({{user.age}})</p>
 
-This results in more predictable data flow and easier debugging than traditional MVC patterns.
+<!-- Ternary expressions -->
+<p>Status: {{user.age >= 18 ? 'Adult' : 'Minor'}}</p>
 
-## Complete Binding Reference
+<!-- Computed properties -->
+<p>Total: {{totalPrice}}</p>
+```
+
+### Complete Binding Reference
 
 WakaPAC provides comprehensive data binding capabilities through the `data-pac-bind` attribute. Here's the complete list of supported binding types:
 
-### Form Input Bindings
+#### Form Input Bindings
 
 **`value`** - Two-way binding for form inputs
 ```html
@@ -94,7 +122,7 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <input type="radio" name="theme" value="dark" data-pac-bind="value: selectedTheme">
 ```
 
-### Display Control Bindings
+#### Display Control Bindings
 
 **`visible`** - Show/hide with CSS display (element stays in DOM)
 ```html
@@ -112,7 +140,7 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 - **`visible`**: Fast toggling, preserving form values, CSS transitions
 - **`if`**: Better performance for large DOM trees, security-sensitive content
 
-### Attribute Bindings
+#### Attribute Bindings
 
 **`enable`** - Enable/disable form controls (reverse of disabled)
 ```html
@@ -120,7 +148,24 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <input data-pac-bind="enable: !isReadonly">
 ```
 
-### Style and Appearance Bindings
+**Custom attributes** - Any HTML attribute can be bound directly
+```html
+<!-- Standard attributes -->
+<input data-pac-bind="placeholder: hintText, title: tooltipText">
+<img data-pac-bind="src: imageUrl, alt: altText">
+<div data-pac-bind="id: dynamicId, role: userRole">
+
+<!-- Data attributes -->
+<div data-pac-bind="data-id: userId, data-category: itemCategory">
+
+<!-- ARIA attributes -->
+<button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
+
+<!-- Multiple custom attributes -->
+<div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
+```
+
+#### Style and Appearance Bindings
 
 **`class`** - CSS class manipulation (supports object syntax)
 ```html
@@ -146,24 +191,7 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
 ```
 
-**Custom attributes** - Any HTML attribute can be bound directly
-```html
-<!-- Standard attributes -->
-<input data-pac-bind="placeholder: hintText, title: tooltipText">
-<img data-pac-bind="src: imageUrl, alt: altText">
-<div data-pac-bind="id: dynamicId, role: userRole">
-
-<!-- Data attributes -->
-<div data-pac-bind="data-id: userId, data-category: itemCategory">
-
-<!-- ARIA attributes -->
-<button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
-
-<!-- Multiple custom attributes -->
-<div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
-```
-
-### List Rendering Binding
+#### List Rendering Binding
 
 **`foreach`** - Render lists with templates
 ```html
@@ -175,7 +203,7 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 </div>
 ```
 
-### Event Bindings
+#### Event Bindings
 
 All standard DOM events are supported:
 
@@ -210,147 +238,28 @@ All standard DOM events are supported:
 <input data-pac-bind="keydown: handleKeyDown" data-pac-modifiers="escape">
 ```
 
-### Advanced Binding Syntax
-
-WakaPAC supports **object syntax** for certain binding types, allowing you to bind multiple values or create conditional bindings in a single expression.
-
-#### Supported Object Syntax Bindings
-
-| Binding Type | Object Syntax | Example                                                         |
-|--------------|---------------|-----------------------------------------------------------------|
-| **`class`**  | ✅ Yes         | `class: { active: isActive, disabled: !enabled }`               |
-| **`style`**  | ✅ Yes         | `style: { color: 'red', backgroundColor: 'blue' }`              |
-| All others   | ❌ No          | Use direct binding: `title: tooltipText, placeholder: hintText` |
-
-#### Class Binding Examples
+#### Event Modifiers
 
 ```html
-<!-- Object syntax: multiple conditional classes -->
-<div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
+<!-- Prevent form submission redirect -->
+<form data-pac-bind="submit: handleSubmit" data-pac-modifiers="prevent">
 
-<!-- Simple string class binding -->
-<div data-pac-bind="class: dynamicClassName">
+<!-- Search on Enter key -->
+<input data-pac-bind="keyup: search" data-pac-modifiers="enter">
 
-<!-- Multiple class bindings -->
-<div data-pac-bind="class: baseClass, class: conditionalClass">
+<!-- Close modal on Escape -->
+<div data-pac-bind="keyup: closeModal" data-pac-modifiers="escape">
+
+<!-- One-time event -->
+<button data-pac-bind="click: initialize" data-pac-modifiers="once">
+
+<!-- Multiple modifiers -->
+<form data-pac-bind="submit: handleForm" data-pac-modifiers="prevent stop">
 ```
 
-```javascript
-wakaPAC('#app', {
-    isActive: true,
-    enabled: false,
-    hasError: false,
-    baseClass: 'btn',
-    conditionalClass: 'btn-primary',
-
-    // Result: class="btn active disabled"
-    // The 'active' class is applied because isActive is true
-    // The 'disabled' class is applied because !enabled is true 
-    // The 'error' class is NOT applied because hasError is false
-});
-```
-
-#### Style Binding Examples
-
-```html
-<!-- Object syntax: multiple CSS properties -->
-<div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
-
-<!-- CSS custom properties -->
-<div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize }">
-
-<!-- Simple string style binding -->
-<div data-pac-bind="style: inlineStyleString">
-
-<!-- Computed styles -->
-<div data-pac-bind="style: computedStyles">
-```
-
-```javascript
-wakaPAC('#app', {
-    textColor: 'red',
-    bgColor: 'lightblue',
-    primaryColor: '#007bff',
-    borderSize: '3px',
-    showElement: true,
-    inlineStyleString: 'font-weight: bold; margin: 10px;',
-
-    computed: {
-        computedStyles() {
-            return {
-                backgroundColor: this.isActive ? '#f0f0f0' : 'white',
-                opacity: this.loading ? 0.5 : 1,
-                transform: this.zoom > 1 ? 'scale(' + this.zoom + ')' : 'none',
-                // CSS custom properties work in computed styles too
-                '--dynamic-size': this.itemSize + 'px'
-            };
-        }
-    }
-});
-```
-
-#### Attribute Binding Examples
-
-Since WakaPAC supports direct attribute binding, you can bind any HTML attribute directly without needing a special `attr:` syntax:
-
-```html
-<!-- Standard HTML attributes -->
-<input data-pac-bind="placeholder: dynamicPlaceholder, title: helpText, maxlength: fieldLimit">
-<img data-pac-bind="src: imageSource, alt: imageDescription, width: imageWidth">
-<a data-pac-bind="href: linkUrl, target: linkTarget">
-
-<!-- Data attributes -->
-<div data-pac-bind="data-user-id: userId, data-role: userRole, data-category: itemType">
-
-<!-- ARIA accessibility attributes -->
-<button data-pac-bind="aria-label: buttonLabel, aria-expanded: menuOpen, aria-disabled: !isEnabled">
-
-<!-- Form attributes -->
-<input data-pac-bind="required: isRequired, readonly: !canEdit, min: minValue, max: maxValue">
-```
-
-```javascript
-wakaPAC('#form', {
-    dynamicPlaceholder: 'Enter your name here',
-    helpText: 'This field is required for registration',
-    fieldLimit: 50,
-    imageSource: '/uploads/profile.jpg',
-    imageDescription: 'User profile photo',
-    linkUrl: 'https://example.com',
-    linkTarget: '_blank',
-    userId: 'user-12345',
-    userRole: 'admin',
-    isEnabled: true,
-    isRequired: true,
-    canEdit: false
-});
-```
-
-## Data Binding
-
-### Text Interpolation
-
-```html
-<!-- Simple properties -->
-<p>Hello, {{name}}!</p>
-
-<!-- Nested properties -->
-<p>User: {{user.name}} ({{user.age}})</p>
-
-<!-- Ternary expressions -->
-<p>Status: {{user.age >= 18 ? 'Adult' : 'Minor'}}</p>
-
-<!-- Computed properties -->
-<p>Total: {{totalPrice}}</p>
-
-<!-- Browser properties -->
-<p>Viewport: {{browserViewportWidth}} x {{browserViewportHeight}}</p>
-<p data-pac-bind="visible:!browserVisible">Tab is hidden - updates paused</p>
-
-<!-- Container viewport properties -->
-<p>Container is {{containerVisible ? 'visible' : 'hidden'}} in viewport</p>
-<p>Container bounds: {{containerClientRect.left}}, {{containerClientRect.top}}</p>
-```
+**Available modifiers:**
+- **Keys**: `enter`, `escape`/`esc`, `space`, `tab`, `delete`/`del`, `up`, `down`, `left`, `right`
+- **Behavior**: `prevent`, `stop`, `once`
 
 ### Deep Reactivity
 
@@ -381,43 +290,7 @@ wakaPAC('#app', {
 });
 ```
 
-## Event Handling
-
-### Basic Events
-
-```html
-<button data-pac-bind="click: handleClick">Click me</button>
-<form data-pac-bind="submit: handleSubmit">
-    <input data-pac-bind="value: searchQuery">
-    <button type="submit">Search</button>
-</form>
-<input data-pac-bind="input: handleInput,focus: handleFocus">
-```
-
-### Event Modifiers
-
-```html
-<!-- Prevent form submission redirect -->
-<form data-pac-bind="submit: handleSubmit" data-pac-modifiers="prevent">
-
-    <!-- Search on Enter key -->
-    <input data-pac-bind="keyup: search" data-pac-modifiers="enter">
-
-    <!-- Close modal on Escape -->
-    <div data-pac-bind="keyup: closeModal" data-pac-modifiers="escape">
-
-        <!-- One-time event -->
-        <button data-pac-bind="click: initialize" data-pac-modifiers="once">
-
-            <!-- Multiple modifiers -->
-            <form data-pac-bind="submit: handleForm" data-pac-modifiers="prevent stop">
-```
-
-**Available modifiers:**
-- **Keys**: `enter`, `escape`/`esc`, `space`, `tab`, `delete`/`del`, `up`, `down`, `left`, `right`
-- **Behavior**: `prevent`, `stop`, `once`
-
-## Lists and For-Each
+### Lists and For-Each
 
 ```html
 <div data-pac-bind="foreach: todos" data-pac-item="todo" data-pac-index="index">
@@ -449,531 +322,7 @@ wakaPAC('#app', {
 });
 ```
 
-## Computed Properties
-
-Computed properties automatically recalculate when their dependencies change. Use them when you need a **derived value** that depends on other reactive properties.
-
-```javascript
-wakaPAC('#app', {
-    firstName: 'John',
-    lastName: 'Doe',
-    items: [{price: 10}, {price: 20}],
-
-    computed: {
-        // Simple computed property
-        fullName() {
-            return `${this.firstName} ${this.lastName}`;
-        },
-
-        // Array-dependent computed property
-        totalPrice() {
-            return this.items.reduce((sum, item) => sum + item.price, 0);
-        },
-
-        // Dependent on other computed properties
-        greeting() {
-            return `Hello, ${this.fullName}! Total: ${this.totalPrice}`;
-        },
-
-        // Complex computed property with conditional logic
-        shippingCost() {
-            return this.totalPrice > 50 ? 0 : 9.99;
-        }
-    }
-});
-```
-
-**Key characteristics:**
-- **Pure functions**: Should not have side effects
-- **Cached**: Only recalculate when dependencies change
-- **Return values**: Used in templates and other expressions
-- **Declarative**: Define what the value should be, not how to calculate it
-
-# Watchers
-
-Watchers execute code when reactive properties change. Use them when you need to **perform side effects** in response to data changes.
-
-## Simple Property Watchers
-
-Basic watchers monitor changes to individual properties on your component:
-
-```javascript
-wakaPAC('#app', {
-    searchQuery: '',
-    count: 0,
-    username: '',
-    isActive: false,
-
-    watch: {
-        // Watch a simple string property
-        searchQuery: function(newValue, oldValue) {
-            if (newValue.length > 2) {
-                this.performSearch(newValue);
-            }
-        },
-
-        // Watch a number property with multiple side effects
-        count: function(newCount, oldCount) {
-            if (newCount > 10) {
-                this.showWarning = true;
-            }
-
-            if (newCount % 5 === 0) {
-                this.saveProgress();
-            }
-        },
-
-        // Watch boolean property changes
-        isActive: function(isNowActive) {
-            if (isNowActive) {
-                this.startBackgroundSync();
-            } else {
-                this.stopBackgroundSync();
-            }
-        }
-    }
-});
-```
-
-## Deep Reactivity Watchers
-
-WakaPAC also supports **deep property watchers** that can observe changes in nested objects and arrays using powerful pattern matching. This lets you watch for changes deep within your data structure without having to set up individual watchers for every nested property.
-
-### Watching Nested Objects
-
-```javascript
-wakaPAC('#app', {
-    user: {
-        profile: {
-            name: 'John',
-            email: 'john@example.com'
-        },
-        settings: {
-            theme: 'dark',
-            notifications: true
-        }
-    },
-
-    watch: {
-        // Watch specific nested property
-        'user.profile.name': function(newName, oldName, fullPath) {
-            console.log('Name changed from ' + oldName + ' to ' + newName);
-            console.log('Full path: ' + fullPath); // "user.profile.name"
-            this.updateDisplayName();
-        },
-
-        // Watch any change to user.settings using wildcard
-        'user.settings.*': function(newValue, oldValue, fullPath) {
-            console.log('Settings changed at ' + fullPath);
-            this.saveUserSettings();
-        },
-
-        // Watch ANY change anywhere in user object
-        'user.**': function(newValue, oldValue, fullPath) {
-            console.log('User data changed at: ' + fullPath);
-            this.markUserAsModified();
-        }
-    }
-});
-```
-
-### Watching Arrays
-
-```javascript
-wakaPAC('#todo-app', {
-    todos: [
-        {id: 1, text: 'Learn WakaPAC', completed: false},
-        {id: 2, text: 'Build an app', completed: true}
-    ],
-
-    watch: {
-        // Watch when any todo's completed status changes
-        'todos.*.completed': function(newValue, oldValue, fullPath) {
-            console.log('Todo completion changed: ' + fullPath + ' = ' + newValue);
-            // fullPath will be something like "todos.0.completed"
-            
-            this.updateTodoCount();
-            this.saveToLocalStorage();
-        },
-
-        // Watch any change to any todo property
-        'todos.*.*': function(newValue, oldValue, fullPath) {
-            console.log('Todo property changed: ' + fullPath);
-            this.markAsModified();
-        }
-    },
-
-    updateTodoCount: function() {
-        const completed = this.todos.filter(function(t) { 
-            return t.completed; 
-        }).length;
-        
-        console.log(completed + ' of ' + this.todos.length + ' todos completed');
-    }
-});
-```
-
-## Pattern Reference
-
-| Pattern        | Matches                       | Example                                                 |
-|----------------|-------------------------------|---------------------------------------------------------|
-| `property`     | Direct property changes       | `'name'` → `obj.name = 'new'`                           |
-| `obj.property` | Specific nested property      | `'user.name'` → `obj.user.name = 'new'`                 |
-| `obj.*`        | Any direct child of obj       | `'user.*'` → `obj.user.anything = 'new'`                |
-| `obj.**`       | Any nested change in obj      | `'user.**'` → `obj.user.deep.nested = 'new'`            |
-| `arr.*.prop`   | Property in any array element | `'todos.*.completed'` → `obj.todos[0].completed = true` |
-
-## Watchers vs Computed Properties
-
-| Feature          | Computed Properties                | Watchers                               |
-|------------------|------------------------------------|----------------------------------------|
-| **Purpose**      | Calculate derived values           | Perform side effects                   |
-| **Return value** | Always returns a value             | No return value needed                 |
-| **Side effects** | Should avoid side effects          | Designed for side effects              |
-| **Usage**        | Use in templates: `{{computed}}`   | Execute code when data changes         |
-| **When to use**  | Need a value based on other values | Need to do something when data changes |
-
-## Browser Reactive Properties
-
-WakaPAC automatically provides reactive browser state properties that update when the browser environment changes. These are available in all components without any setup:
-
-### Available Properties
-
-**Network Status:**
-- **`browserOnline`**: `true` when the browser is online, `false` when offline
-- **`browserNetworkQuality`**: A reactive string property that provides network performance insights. Possible values: `'fast'`, `'slow'` and `'offline'`.
-
-**Page Visibility:**
-- **`browserVisible`**: `true` when the browser tab is active/visible, `false` when tab is hidden or minimized
-
-**Scroll Position:**
-- **`browserScrollX`**: How many pixels the page is scrolled horizontally (left/right)
-- **`browserScrollY`**: How many pixels the page is scrolled vertically (up/down)
-
-**Page Dimensions:**
-- **`browserViewportWidth`**: Width of the browser's content area (viewport) in pixels
-- **`browserViewportHeight`**: Height of the browser's content area (viewport) in pixels
-- **`browserDocumentWidth`**: Total width of the entire webpage content in pixels
-- **`browserDocumentHeight`**: Total height of the entire webpage content in pixels
-
-**Container Viewport Visibility:**
-- **`containerVisible`**: `true` when any part of the component's container is visible in the viewport
-- **`containerFullyVisible`**: `true` when the component's container is completely visible in the viewport
-- **`containerClientRect`**: Object containing the container's position and dimensions relative to the viewport
-- **`containerWidth`**: Width of the container element in pixels
-- **`containerHeight`**: Height of the container element in pixels
-
-**Container Focus State:**
-- **`containerFocus`**: `true` when the container element itself has direct focus (equivalent to CSS `:focus`)
-- **`containerFocusWithin`**: `true` when the container or any of its child elements has focus (equivalent to CSS `:focus-within`)
-
-> **Note:** `containerFocusWithin` is typically more useful as it tracks when users are actively interacting within the component, regardless of which specific child element has focus.
-
-### Understanding difference between viewport and document
-
-Think of it like looking through a window at a tall building:
-
-```
-┌─────────────────────┐ ← browserViewportHeight (800px)
-│   What you can see  │   The "viewport" - your browser window.
-│   right now         │   Changes when you resize browser window
-│                     │
-│   [Webpage Content] │
-├─────────────────────┤ ← You scroll down to see more...
-│   [More Content]    │
-│   [Even More]       │   browserDocumentHeight (2000px) 
-│   [Content Below]   │   The "building" - total webpage height
-│   [Footer]          │   Changes when content is added/removed
-└─────────────────────┘
-```
-
-### Container ClientRect Object
-
-The `containerClientRect` property contains detailed position and size information:
-
-```javascript
-// containerClientRect contains:
-{
-    top: 150,      // Distance from top of viewport
-    left: 50,      // Distance from left of viewport  
-    right: 850,    // Distance from left to right edge
-    bottom: 400,   // Distance from top to bottom edge
-    width: 800,    // Width of the container
-    height: 250,   // Height of the container
-    x: 50,         // Same as left
-    y: 150         // Same as top
-}
-```
-
-## Message Processing System
-
-WakaPAC provides a powerful message processing system inspired by Win32 window procedures. This allows components to handle all mouse and keyboard events in a centralized, procedural manner similar to traditional desktop application frameworks.
-
-### Basic Message Processing
-
-Any component can implement a `eventProc` method to handle keyboard events in a Win32-style message loop pattern:
-
-```javascript
-wakaPAC('#file-manager', {
-    activePane: 'left',
-
-    eventProc(message) {
-        switch(message.type) {
-            case 'EVENT_KEYDOWN':
-                break;
-
-            case 'EVENT_KEYUP':
-                break;
-
-            case 'EVENT_LBUTTONDOWN' :
-                break;
-        }
-    }
-});
-```
-
-### Message Object Structure
-
-The message object passed to `eventProc` contains Win32-inspired properties:
-
-```javascript
-{
-    type: 'EVENT_KEYDOWN',         // Message type: EVENT_KEYDOWN or EVENT_KEYUP
-    wParam: 65,                    // Key code (like Win32 wParam)
-    lParam: 0,                     // Reserved for future use (like Win32 lParam)
-    key: 'a',                      // Modern key name for convenience
-    ctrlKey: false,                // Modifier key states
-    altKey: false,
-    shiftKey: false,
-    target: HTMLElement,           // The DOM element that received the event
-    originalEvent: Event           // Original DOM event for edge cases
-}
-```
-
-```javascript
-{
-    type: 'EVENT_LBUTTONDOWN',     // EVENT_LBUTTONDOWN, EVENT_MBUTTONDOWN, EVENT_RBUTTONDOWN
-                                   // EVENT_LBUTTONUP, EVENT_MBUTTONUP, EVENT_RBUTTONUP
-    wParam: 0,                     // 0=left, 1=middle, 2=right
-    lParam: 3435533,               // Win32-style coordinates ((event.clientY << 16) | event.clientX)
-    clientX: 0,                    // X position
-    clientY: 0,                    // Y position
-    ctrlKey: false,                // Modifier key states
-    altKey: false,
-    shiftKey: false,
-    target: HTMLElement,           // The DOM element that received the event
-    originalEvent: Event           // Original DOM event for edge cases
-})
-```
-
-### Focus-Aware Message Routing
-
-Messages are only sent to components whose containers have keyboard focus.
-
-```javascript
-wakaPAC('#editor', {
-    eventProc(message) {
-        // Process keyboard shortcuts for editor
-        if (message.type === 'EVENT_KEYDOWN') {
-            if (message.ctrlKey) {
-                switch(message.key) {
-                    case 's':
-                        this.saveDocument();
-                        return true;
-                        
-                    case 'o':
-                        this.openDocument();
-                        return true;
-                }
-            }
-        }
-        
-        return false;
-    }
-});
-```
-
-### Focus State Properties
-
-WakaPAC automatically tracks focus state for each component:
-
-```html
-<div id="panel" tabindex="0">
-    <p>Focus state: {{containerFocus ? 'FOCUSED' : 'NOT FOCUSED'}}</p>
-    <p>Focus within: {{containerFocusWithin ? 'YES' : 'NO'}}</p>
-    <input type="text" placeholder="Type here">
-</div>
-```
-
-**Focus Properties:**
-- **`containerFocus`**: `true` when the container element itself has direct focus (CSS `:focus`)
-- **`containerFocusWithin`**: `true` when the container or any child element has focus (CSS `:focus-within`)
-
-**Making Elements Focusable:**
-```html
-<!-- Add tabindex to make divs focusable -->
-<div id="file-manager" tabindex="0" style="outline: none;">
-    <!-- Component content -->
-</div>
-```
-
-## Data Safety and Display Utilities
-
-WakaPAC provides built-in utility functions to help you safely handle and display data. These functions are available on all component instances and help prevent XSS attacks while providing consistent data formatting.
-
-### HTML Security Functions
-
-#### `escapeHTML(str)`
-Converts HTML special characters to their safe HTML entity equivalents to prevent XSS attacks.
-
-```javascript
-wakaPAC('#app', {
-    userInput: '<script>alert("hack")</script>',
-    safeComment: '',
-
-    saveComment() {
-        // Escape user input before storing or displaying
-        this.safeComment = this.escapeHTML(this.userInput);
-        // Result: "&lt;script&gt;alert(&quot;hack&quot;)&lt;/script&gt;"
-    },
-
-    computed: {
-        safeTitle() {
-            // Use in computed properties for safe dynamic content
-            return this.escapeHTML(this.user.title);
-        }
-    }
-});
-```
-
-**What gets escaped:**
-- `<` becomes `&lt;`
-- `>` becomes `&gt;`
-- `&` becomes `&amp;`
-- `"` becomes `&quot;`
-- `'` becomes `&#39;`
-
-**When to use:**
-- Before displaying user-generated content in HTML
-- When building dynamic HTML strings
-- Before setting innerHTML with user data
-- In computed properties that generate safe HTML
-
-#### `sanitizeUserInput(html)`
-Strips all HTML tags from user input and returns escaped plain text.
-
-```javascript
-wakaPAC('#app', {
-    userBio: '<p>Hello <strong>world</strong>!</p><script>alert("xss")</script>',
-    cleanBio: '',
-
-    cleanUserBio() {
-        // Strip all HTML tags and get safe plain text
-        this.cleanBio = this.sanitizeUserInput(this.userBio);
-        // Result: "Hello world!"
-    },
-
-    processComment(comment) {
-        // Clean user comments before storage
-        const cleaned = this.sanitizeUserInput(comment);
-        
-        this.comments.push({
-            text: cleaned,
-            timestamp: new Date()
-        });
-    }
-});
-```
-
-**What it does:**
-1. Removes all HTML tags (`<p>`, `<script>`, `<div>`, etc.)
-2. Extracts plain text content only
-3. Escapes any remaining special characters
-4. Returns safe text suitable for display
-
-**When to use:**
-- Processing user comments or posts
-- Cleaning pasted content from rich text editors
-- Before saving user input to databases
-- When you want plain text only, no HTML formatting
-
-### Data Display Function
-
-#### `formatValue(value)`
-Intelligently formats any value for display in templates or UI components.
-
-```javascript
-wakaPAC('#app', {
-    data: {
-        name: 'John',
-        age: null,
-        scores: [95, 87, 92],
-        profile: { city: 'New York', country: 'USA' },
-        isActive: true
-    },
-
-    showData() {
-        // Format different types of values
-        console.log(this.formatValue(this.data.name));    // "John"
-        console.log(this.formatValue(this.data.age));     // ""
-        console.log(this.formatValue(this.data.scores));  // "[3 items]"
-        console.log(this.formatValue(this.data.profile)); // JSON formatted object
-        console.log(this.formatValue(this.data.isActive)); // "true"
-    },
-
-    computed: {
-        displayItems() {
-            return this.items.map(item => ({
-                ...item,
-                // Format complex values for display
-                formattedData: this.formatValue(item.complexData)
-            }));
-        }
-    }
-});
-```
-
-**Formatting rules:**
-- **`null`/`undefined`**: Returns empty string `""`
-- **Strings/Numbers/Booleans**: Converts to string representation
-- **Arrays**: Returns `"[X items]"` format for easy scanning
-- **Objects**: Returns formatted JSON for debugging/display
-- **Functions**: Returns function name or `"[Function]"`
-
-**When to use:**
-- In templates when you're not sure of the data type: `{{formatValue(dynamicData)}}`
-- For debugging output in development
-- When displaying API responses of unknown structure
-- In admin interfaces showing database records
-
-## Non-Reactive Properties
-
-Use underscore prefix (`_`) for properties that shouldn't be reactive:
-
-```javascript
-wakaPAC('#map-app', {
-    // ✅ Reactive properties (trigger DOM updates)
-    tracking: false,
-    currentLocation: null,
-
-    // ✅ Non-reactive properties (no DOM updates, no circular references)
-    _map: null,
-    _markers: [],
-
-    startTracking() {
-        this.tracking = true; // Updates UI
-        this._map = L.map('map'); // Safe for complex objects
-    }
-});
-```
-
-**Use non-reactive properties for:**
-- External library instances (maps, charts, WebGL contexts)
-- Large datasets that never change
-- Objects with circular references
-- Configuration objects
-
-## Update Modes
+### Update Modes
 
 Control when form inputs update your data:
 
@@ -995,11 +344,144 @@ Control when form inputs update your data:
 - **Change**: Server validation, auto-save functionality
 - **Delayed**: Search autocomplete, API queries
 
-## Component Lifecycle
+## Browser Reactive Properties
 
-### Initialization Hook
+WakaPAC automatically provides reactive browser state properties that update when the browser environment changes. These are available in all components without any setup:
 
-WakaPAC provides an `init()` method that runs automatically after the component is fully initialized and all reactive properties are set up.
+### Available Properties
+
+**Network Status:**
+- **`browserOnline`**: `true` when the browser is online, `false` when offline
+- **`browserNetworkQuality`**: Network performance insights: `'fast'`, `'slow'` or `'offline'`
+
+**Page Visibility:**
+- **`browserVisible`**: `true` when the browser tab is active/visible, `false` when hidden
+
+**Scroll Position:**
+- **`browserScrollX`**: Horizontal scroll position in pixels
+- **`browserScrollY`**: Vertical scroll position in pixels
+
+**Page Dimensions:**
+- **`browserViewportWidth`**: Browser viewport width in pixels
+- **`browserViewportHeight`**: Browser viewport height in pixels
+- **`browserDocumentWidth`**: Total document width in pixels
+- **`browserDocumentHeight`**: Total document height in pixels
+
+**Container Viewport Visibility:**
+- **`containerVisible`**: `true` when any part of the container is visible in viewport
+- **`containerFullyVisible`**: `true` when container is completely visible in viewport
+- **`containerClientRect`**: Position and dimensions object relative to viewport
+- **`containerWidth`**: Container width in pixels
+- **`containerHeight`**: Container height in pixels
+
+**Container Focus State:**
+- **`containerFocus`**: `true` when container has direct focus (`:focus`)
+- **`containerFocusWithin`**: `true` when container or child has focus (`:focus-within`)
+
+### Usage Examples
+
+```html
+<!-- Browser properties in templates -->
+<p>Viewport: {{browserViewportWidth}} x {{browserViewportHeight}}</p>
+<p data-pac-bind="visible: !browserVisible">Tab is hidden - updates paused</p>
+<p>Container is {{containerVisible ? 'visible' : 'hidden'}} in viewport</p>
+```
+
+```javascript
+wakaPAC('#app', {
+    init() {
+        // Set initial document title based on visibility
+        document.title = this.browserVisible ? 'App Active' : 'App Paused';
+    },
+
+    watch: {
+        browserVisible(isVisible) {
+            document.title = isVisible ? 'App Active' : 'App Paused';
+        },
+
+        containerVisible(isVisible) {
+            if (isVisible) {
+                this.startAnimation();
+            } else {
+                this.pauseAnimation();
+            }
+        }
+    }
+});
+```
+
+## Advanced Features
+
+### Computed Properties
+
+Computed properties automatically recalculate when their dependencies change:
+
+```javascript
+wakaPAC('#app', {
+    firstName: 'John',
+    lastName: 'Doe',
+    items: [{price: 10}, {price: 20}],
+
+    computed: {
+        // Simple computed property
+        fullName() {
+            return `${this.firstName} ${this.lastName}`;
+        },
+
+        // Array-dependent computed property
+        totalPrice() {
+            return this.items.reduce((sum, item) => sum + item.price, 0);
+        },
+
+        // Complex computed property with conditional logic
+        shippingCost() {
+            return this.totalPrice > 50 ? 0 : 9.99;
+        }
+    }
+});
+```
+
+### Watchers
+
+Watchers execute code when reactive properties change:
+
+```javascript
+wakaPAC('#app', {
+    searchQuery: '',
+    user: {
+        profile: { name: 'John' },
+        settings: { theme: 'dark' }
+    },
+
+    watch: {
+        // Watch simple property
+        searchQuery(newValue, oldValue) {
+            if (newValue.length > 2) {
+                this.performSearch(newValue);
+            }
+        },
+
+        // Watch specific nested property
+        'user.profile.name'(newName, oldName, fullPath) {
+            console.log('Name changed from', oldName, 'to', newName);
+            this.updateDisplayName();
+        },
+
+        // Watch any change to user.settings using wildcard
+        'user.settings.*'(newValue, oldValue, fullPath) {
+            console.log('Settings changed at', fullPath);
+            this.saveUserSettings();
+        },
+
+        // Watch ANY change anywhere in user object
+        'user.**'(newValue, oldValue, fullPath) {
+            this.markUserAsModified();
+        }
+    }
+});
+```
+
+### Component Lifecycle
 
 ```javascript
 wakaPAC('#app', {
@@ -1007,14 +489,9 @@ wakaPAC('#app', {
     user: null,
 
     init() {
-        // This runs after component initialization
+        // Runs after component initialization
         console.log('Component is ready!');
-        console.log('Current message:', this.message);
-
-        // Perfect place for setup that depends on reactive properties
         document.title = `App - ${this.message}`;
-
-        // Load initial data
         this.loadUserData();
     },
 
@@ -1024,67 +501,90 @@ wakaPAC('#app', {
 });
 ```
 
-**When to use `init()`:**
-- Setting up external libraries that need reactive data
-- Making initial API calls
-- Setting document properties based on component state
-- Any setup that requires fully initialized reactive properties
+### EventProc - Win32-Style Message Processing
 
-**Execution order:**
-1. Reactive properties are created
-2. Computed properties are set up
-3. DOM bindings are established
-4. Initial DOM update occurs
-5. **`init()` is called**
-6. Component is ready for user interaction
+WakaPAC provides a powerful message processing system inspired by Win32 window procedures:
 
-### Common `init()` Patterns
-
-**External Library Integration:**
 ```javascript
-wakaPAC('#chart', {
-    chartData: [1, 2, 3, 4],
+wakaPAC('#file-manager', {
+    activePane: 'left',
 
-    init() {
-        // Initialize chart library with reactive data
-        this._chart = new Chart('#canvas', {
-            data: this.chartData
-        });
-    },
+    eventProc(message) {
+        switch(message.type) {
+            case 'EVENT_KEYDOWN':
+                if (message.ctrlKey) {
+                    switch(message.key) {
+                        case 's':
+                            this.saveDocument();
+                            return true;
+                            
+                        case 'o':
+                            this.openDocument();
+                            return true;
+                    }
+                }
+                break;
 
-    watch: {
-        chartData(newData) {
-            // Update chart when data changes
-            this._chart.updateData(newData);
+            case 'EVENT_LBUTTONDOWN':
+                console.log('Left click at', message.clientX, message.clientY);
+                break;
+
+            case 'EVENT_RBUTTONDOWN':
+                this.showContextMenu(message.clientX, message.clientY);
+                break;
         }
+        
+        return false;
     }
 });
 ```
 
-**Initial Setup with Browser Properties:**
+**Message Object Structure:**
+
+For keyboard events:
 ```javascript
-wakaPAC('#app', {
-    init() {
-        // Set initial document title based on visibility
-        document.title = this.browserVisible ? 'App Active' : 'App Paused';
-
-        // Start background processes if visible
-        if (this.browserVisible) {
-            this.startBackgroundSync();
-        }
-    },
-
-    watch: {
-        browserVisible(isVisible) {
-            document.title = isVisible ? 'App Active' : 'App Paused';
-        }
-    }
-});
+{
+    type: 'EVENT_KEYDOWN',         // or EVENT_KEYUP
+    wParam: 65,                    // Key code
+    lParam: 0,                     // Reserved
+    key: 'a',                      // Modern key name
+    ctrlKey: false,                // Modifier states
+    altKey: false,
+    shiftKey: false,
+    target: HTMLElement,           // Target element
+    originalEvent: Event           // Original DOM event
+}
 ```
 
-## Component Hierarchy
+For mouse events:
+```javascript
+{
+    type: 'EVENT_LBUTTONDOWN',     // LBUTTON, MBUTTON, RBUTTON + DOWN/UP
+    wParam: 0,                     // Button: 0=left, 1=middle, 2=right
+    lParam: 3435533,               // Packed coordinates
+    clientX: 205,                  // X position
+    clientY: 150,                  // Y position
+    ctrlKey: false,                // Modifier states
+    altKey: false,
+    shiftKey: false,
+    target: HTMLElement,
+    originalEvent: Event
+}
+```
 
-### Parent-Child Communication
+**Focus State Requirements:**
+Messages are only sent to components whose containers have keyboard focus. Make elements focusable:
+
+```html
+<!-- Add tabindex to make divs focusable -->
+<div id="file-manager" tabindex="0" style="outline: none;">
+    <!-- Component content -->
+</div>
+```
+
+### Component Hierarchy
+
+Parent-child communication system:
 
 ```javascript
 // Child to Parent (Notifications)
@@ -1126,7 +626,57 @@ const child = wakaPAC('#child-app', {
 });
 ```
 
-## Server Communication
+### Data Safety and Display Utilities
+
+Built-in utility functions for safe data handling:
+
+```javascript
+wakaPAC('#app', {
+    userInput: '<script>alert("hack")</script>',
+
+    saveComment() {
+        // Escape HTML to prevent XSS
+        this.safeComment = this.escapeHTML(this.userInput);
+        // Result: "&lt;script&gt;alert(&quot;hack&quot;)&lt;/script&gt;"
+    },
+
+    cleanUserBio() {
+        // Strip all HTML tags and get plain text
+        this.cleanBio = this.sanitizeUserInput(this.userInput);
+        // Result: "alert(hack)"
+    },
+
+    displayData() {
+        // Format any value for display
+        console.log(this.formatValue(null));        // ""
+        console.log(this.formatValue([1,2,3]));     // "[3 items]"
+        console.log(this.formatValue({a: 1}));      // JSON formatted
+    }
+});
+```
+
+### Non-Reactive Properties
+
+Use underscore prefix for properties that shouldn't trigger DOM updates:
+
+```javascript
+wakaPAC('#map-app', {
+    // Reactive properties (trigger DOM updates)
+    tracking: false,
+    currentLocation: null,
+
+    // Non-reactive properties (no DOM updates)
+    _map: null,
+    _markers: [],
+
+    startTracking() {
+        this.tracking = true; // Updates UI
+        this._map = L.map('map'); // Safe for complex objects
+    }
+});
+```
+
+### Server Communication
 
 ```javascript
 wakaPAC('#app', {
@@ -1150,13 +700,6 @@ wakaPAC('#app', {
         } finally {
             this.loading = false;
         }
-    },
-
-    async saveUser() {
-        await this.control('/api/user', {
-            method: 'POST',
-            data: this.user
-        });
     }
 });
 ```
@@ -1168,11 +711,6 @@ wakaPAC('#app', {
 ```javascript
 const component = wakaPAC(selector, abstraction, options);
 ```
-
-**Parameters:**
-- `selector`: CSS selector for container element
-- `abstraction`: Object with properties, methods, computed properties, watchers
-- `options`: Configuration object (optional)
 
 ### Core Methods
 
@@ -1187,7 +725,7 @@ component.readDOMValue(selector)
 component.writeDOMValue(selector, value)
 component.control(url, options)
 
-// Data safety and display utilities
+// Data utilities
 component.escapeHTML(str)
 component.sanitizeUserInput(html)
 component.formatValue(value)
@@ -1200,11 +738,8 @@ component.destroy()
 
 ```javascript
 wakaPAC('#app', data, {
-    // 'immediate', 'delayed', 'change'
-    updateMode: 'immediate',
-
-    // Default delay for 'delayed' mode (ms)
-    delay: 300,
+    updateMode: 'immediate',  // 'immediate', 'delayed', 'change'
+    delay: 300,              // Default delay for 'delayed' mode (ms)
 });
 ```
 
@@ -1217,40 +752,12 @@ wakaPAC('#app', data, {
 <input v-model="name">
 <button @click="handleClick">Click</button>
 <div v-if="isVisible">Content</div>
-<div v-show="isVisible">Content</div>
 
 <!-- WakaPAC -->
 <div>{{message}}</div>
 <input data-pac-bind="value: name">
 <button data-pac-bind="click: handleClick">Click</button>
 <div data-pac-bind="if: isVisible">Content</div>
-<div data-pac-bind="visible: isVisible">Content</div>
-```
-
-```javascript
-// Vue
-export default {
-    data() {
-        return { count: 0 }
-    },
-    computed: {
-        doubled() { return this.count * 2 }
-    },
-    watch: {
-        count(newVal) { console.log('Count changed') }
-    }
-}
-
-// WakaPAC
-wakaPAC('#app', {
-    count: 0,
-    computed: {
-        doubled() { return this.count * 2; }
-    },
-    watch: {
-        count(newVal) { console.log('Count changed'); }
-    }
-});
 ```
 
 ### From React
@@ -1259,20 +766,9 @@ wakaPAC('#app', {
 const [count, setCount] = useState(0);
 const increment = () => setCount(count + 1);
 
-useEffect(() => {
-    console.log('Count changed');
-}, [count]);
-
 // WakaPAC
 wakaPAC('#app', {
     count: 0,
-
-    watch: {
-        count() {
-            console.log('Count changed');
-        }
-    },
-
     increment() {
         this.count++; // Direct assignment
     }
@@ -1294,26 +790,9 @@ wakaPAC('#app', {
         fullName() {
             return this.firstName;
         }
-    },
-    watch: {
-        firstName(newVal) {
-            console.log('Name changed to:', newVal);
-        }
     }
 });
 ```
-
-## Who It’s For
-
-- You loved KnockoutJS, but wish it had modern reactivity.
-- You want a small, drop-in framework without React/Vue’s complexity.
-- You come from Win32/desktop dev and want familiar PAC patterns.
-- You’re building internal tools, dashboards, or small-to-medium apps without needing a bundler.
-
-Not for you if:
-- You need SSR or a giant ecosystem.
-- You want JSX/TSX or TypeScript-first DX.
-- You’re building a massive SPA that already fits better in React/Vue.
 
 ## License
 
