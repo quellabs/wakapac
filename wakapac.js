@@ -3782,7 +3782,7 @@
                     // Hide element: save current display and set to none
                     if (!element.hasAttribute('data-pac-hidden')) {
                         // Get the computed display style before we change it
-                        const currentDisplay = this.getComputedStyle(element).display;
+                        const currentDisplay = getComputedStyle(element).display;
 
                         // Only save the display value if it's not already 'none'
                         // (no point in saving 'none' as the original value)
