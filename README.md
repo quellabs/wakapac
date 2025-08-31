@@ -553,33 +553,31 @@ wakaPAC('#file-manager', {
 For keyboard events:
 ```javascript
 {
-    type:
-        'EVENT_KEYDOWN',               // or EVENT_KEYUP
-        wParam: 65,                    // Key code
-        lParam: 0,                     // Reserved
-        key: 'a',                      // Modern key name
-        ctrlKey: false,                // Modifier states
-        altKey: false,
-        shiftKey: false,
-        target: HTMLElement,           // Target element
-        originalEvent: Event           // Original DOM event
+    type:'EVENT_KEYDOWN',          // or EVENT_KEYUP
+    wParam: 65,                    // Key code
+    lParam: 0,                     // Reserved
+    key: 'a',                      // Modern key name
+    ctrlKey: false,                // Modifier states
+    altKey: false,
+    shiftKey: false,
+    target: HTMLElement,           // Target element
+    originalEvent: Event           // Original DOM event
 }
 ```
 
 For mouse events:
 ```javascript
 {
-    type:
-        'EVENT_LBUTTONDOWN',           // LBUTTON, MBUTTON, RBUTTON + DOWN/UP
-        wParam: 0,                     // Button: 0=left, 1=middle, 2=right
-        lParam: 3435533,               // Packed coordinates
-        clientX: 205,                  // X position
-        clientY: 150,                  // Y position
-        ctrlKey: false,                // Modifier states
-        altKey: false,
-        shiftKey: false,
-        target: HTMLElement,           // Target element
-        originalEvent: Event           // Original DOM event
+    type: 'EVENT_LBUTTONDOWN',     // LBUTTON, MBUTTON, RBUTTON + DOWN/UP
+    wParam: 0,                     // Button: 0=left, 1=middle, 2=right
+    lParam: 3435533,               // Packed coordinates
+    clientX: 205,                  // X position
+    clientY: 150,                  // Y position
+    ctrlKey: false,                // Modifier states
+    altKey: false,
+    shiftKey: false,
+    target: HTMLElement,           // Target element
+    originalEvent: Event           // Original DOM event
 }
 ```
 
@@ -660,7 +658,7 @@ wakaPAC('#app', {
     displayData() {
         // Format any value for display
         console.log(this.formatValue(null));        // ""
-        console.log(this.formatValue([1,2,3]));     // "[3 items]"
+        console.log(this.formatValue([1,2,3]));     // "[1,2,3]"
         console.log(this.formatValue({a: 1}));      // JSON formatted
     }
 });
