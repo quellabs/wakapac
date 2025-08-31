@@ -1,23 +1,16 @@
 # WakaPAC
 
-**WakaPAC** is a lightweight, powerful reactive JavaScript library that implements the **PAC (Presentation-Abstraction-Control)** architectural pattern. Inspired by Knockout.js with modern features from Vue and React.
+A modern reactivity library using the PAC pattern — a spiritual successor to KnockoutJS, powered by Proxies.
 
 ## Why WakaPAC?
 
-**🪶 Zero Build Complexity**
-- No webpack, vite, or toolchain required
-- Works directly in the browser with vanilla HTML/JS
-- Drop into existing projects without rewriting everything
+Wakapac is a lightweight reactive framework built around the Presentation–Abstraction–Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies — no hacks, no virtual DOM, no build step.
 
-**⚡ Modern Reactivity**
-- Write normal JavaScript objects instead of wrapping everything in observables
-- Deep reactivity for nested objects and arrays
-- Intelligent batching and performance optimizations
-
-**🎯 Clean Architecture**
-- PAC pattern provides better separation of concerns than MVC
-- Component hierarchy with parent-child communication
-- Expressive templates with Vue-like syntax
+- **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes.
+- **Two-way reactivity** for objects `and` nested arrays.
+- **Win32-style** `eventProc` for low-level event handling when you want total control.
+- **Drop-in script file** — no bundler required.
+- **Hierarchical components** with parent–child notification.
 
 ## Quick Start
 
@@ -31,7 +24,7 @@
 <script src="wakapac.min.js"></script>
 ```
 
-### Your First Component
+### Quick Example
 
 ```html
 <!DOCTYPE html>
@@ -1310,23 +1303,17 @@ wakaPAC('#app', {
 });
 ```
 
-## When to Choose WakaPAC
+## Who It’s For
 
-**✅ Perfect for:**
-- Projects that need zero build complexity
-- Rapid prototyping and legacy modernization
-- Complex single-page applications with clean architecture
-- Dashboard and admin interfaces
-- Data-heavy applications with reactive binding
-- Real-time applications where performance matters
-- Applications that need visibility-aware performance optimization
-- Lazy loading and performance optimization based on viewport visibility
-- Desktop-style applications requiring complex keyboard interaction patterns
+- You loved KnockoutJS, but wish it had modern reactivity.
+- You want a small, drop-in framework without React/Vue’s complexity.
+- You come from Win32/desktop dev and want familiar PAC patterns.
+- You’re building internal tools, dashboards, or small-to-medium apps without needing a bundler.
 
-**⚠️ Consider alternatives for:**
-- Server-side rendering requirements
-- Mobile app development
-- Teams requiring extensive TypeScript tooling
+Not for you if:
+- You need SSR or a giant ecosystem.
+- You want JSX/TSX or TypeScript-first DX.
+- You’re building a massive SPA that already fits better in React/Vue.
 
 ## License
 
