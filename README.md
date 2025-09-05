@@ -1,10 +1,10 @@
 # WakaPAC
 
-A modern reactivity library using the PAC pattern — a spiritual successor to KnockoutJS, powered by Proxies.
+A modern reactivity library using the PAC pattern â€" a spiritual successor to KnockoutJS, powered by Proxies.
 
 ## Introduction
 
-WakaPAC is a lightweight reactive framework built around the Presentation–Abstraction–Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies — no hacks, no virtual DOM, no build step.
+WakaPAC is a lightweight reactive framework built around the Presentationâ€"Abstractionâ€"Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies â€" no hacks, no virtual DOM, no build step.
 
 ### What's PAC?
 
@@ -27,8 +27,8 @@ This results in more predictable data flow and easier debugging than traditional
 - **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes
 - **Two-way reactivity** for objects and nested arrays
 - **Win32-style** `eventProc` for low-level event handling when you want total control
-- **Drop-in script file** — no bundler required
-- **Hierarchical components** with parent–child notification
+- **Drop-in script file** â€" no bundler required
+- **Hierarchical components** with parentâ€"child notification
 
 ### Who It's For
 
@@ -85,7 +85,7 @@ Not for you if:
 
 ### Text Interpolation
 
-Text interpolation allows you to dynamically insert data into your HTML templates using mustache syntax ({{ }}). This enables you to create dynamic content that updates based on your application's state. 
+Text interpolation allows you to dynamically insert data into your HTML templates using mustache syntax ({{ }}). This enables you to create dynamic content that updates based on your application's state.
 
 ```html
 <!-- Simple properties -->
@@ -687,14 +687,19 @@ wakaPAC('#map-app', {
 
 ### Server Communication
 
+The `control` method provides enhanced HTTP request handling:
+
 ```javascript
 wakaPAC('#app', {
     user: null,
     loading: false,
     error: null,
+    searchResults: [],
+    searchQuery: '',
 
     async loadUser() {
         this.loading = true;
+        this.error = null;
 
         try {
             await this.control('/api/user', {
@@ -709,6 +714,68 @@ wakaPAC('#app', {
         } finally {
             this.loading = false;
         }
+    },
+
+    async saveUser() {
+        await this.control('/api/user', {
+            method: 'PUT',
+            data: {
+                name: this.user.name,
+                email: this.user.email
+            },
+            onSuccess: (data) => {
+                console.log('User saved successfully');
+            }
+        });
+    }
+});
+```
+
+**Request Options:**
+
+- **`method`**: HTTP method (GET, POST, PUT, DELETE, etc.)
+- **`data`**: Request body data (automatically JSON-stringified)
+- **`headers`**: Additional HTTP headers
+- **`groupKey`**: Groups related requests for cancellation
+- **`latestOnly`**: Automatically uses URL as groupKey
+- **`ignoreAbort`**: Suppress AbortError when requests are cancelled
+- **`onSuccess(data, response)`**: Success callback
+- **`onError(error)`**: Error callback
+
+**Race Condition Prevention:**
+
+The `groupKey` and `latestOnly` options prevent race conditions:
+
+```javascript
+wakaPAC('#search-app', {
+    searchQuery: '',
+    searchResults: [],
+
+    // Search-as-you-type with WakaPAC reactive binding
+    watch: {
+        searchQuery(newQuery) {
+            if (newQuery.length < 2) {
+                return;
+            }
+            
+            this.control('/api/search', {
+                data: { query: newQuery },
+                groupKey: 'search', // Cancels previous searches
+                onSuccess: (results) => {
+                    this.searchResults = results;
+                }
+            });
+        }
+    },
+
+    // Profile loading without stale data
+    loadProfile(userId) {
+        this.control(`/api/users/${userId}`, {
+            latestOnly: true, // Cancels previous profile requests
+            onSuccess: (user) => {
+                this.currentUser = user;
+            }
+        });
     }
 });
 ```

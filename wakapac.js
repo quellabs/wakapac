@@ -4471,22 +4471,97 @@
             // === HTTP/SERIALIZATION SECTION ===
 
             /**
-             * Makes an HTTP request with PAC-specific headers and handling
-             * @param {string} url - URL to request
+             * Makes an HTTP request with request grouping and cancellation support
+             * @param {string} url - The URL to request
              * @param {Object} opts - Request options
-             * @returns {Promise} Promise that resolves with response data
+             * @param {string} [opts.method='GET'] - HTTP method
+             * @param {Object} [opts.headers] - Additional headers
+             * @param {*} [opts.data] - Request body data
+             * @param {string} [opts.groupKey] - Group key for request cancellation
+             * @param {boolean} [opts.latestOnly] - Use URL as groupKey automatically
+             * @param {boolean} [opts.ignoreAbort] - Suppress AbortError when cancelled
+             * @param {Function} [opts.onSuccess] - Success callback
+             * @param {Function} [opts.onError] - Error callback
              */
             makeHttpRequest(url, opts = {}) {
-                return fetch(url, {
-                    method: opts.method || 'GET',
-                    headers: Object.assign({
-                        'Content-Type': 'application/json',
-                        'X-PAC-Request': 'true'
-                    }, opts.headers || {}),
-                    body: opts.data ? JSON.stringify(opts.data) : undefined
-                })
-                    .then(response => response.json())
+                // Extract request configuration with defaults
+                const method = opts.method || 'GET';
+                const body = opts.data ? JSON.stringify(opts.data) : undefined;
+                const groupKey = opts.groupKey || (opts.latestOnly ? url : null);
+
+                // Set up headers with PAC-specific requirements
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'X-PAC-Request': 'true', // Custom header identifying PAC requests
+                    ...(opts.headers || {})
+                };
+
+                // Initialize request groups tracking if not already present
+                // This Map tracks active requests to enable cancellation of duplicate/outdated requests
+                if (!this._requestGroups) {
+                    this._requestGroups = new Map();
+                }
+
+                let token = 0; // Unique identifier for this specific request
+                let controller = null; // AbortController for request cancellation
+
+                // Handle request grouping and cancellation logic
+                if (groupKey) {
+                    // Check if there's already a request for this group
+                    const prev = this._requestGroups.get(groupKey);
+
+                    // Cancel previous request if it exists (implements "latest only" behavior)
+                    if (prev) {
+                        prev.controller.abort();
+                    }
+
+                    // Create new abort controller for this request
+                    controller = new AbortController();
+
+                    // Increment token to track request sequence
+                    token = prev ? prev.token + 1 : 1;
+
+                    // Store current request info for potential future cancellation
+                    this._requestGroups.set(groupKey, { token, controller });
+                }
+
+                // Build fetch options object
+                const fetchOpts = { method, headers, body };
+
+                // Attach abort signal if controller exists
+                if (controller) {
+                    fetchOpts.signal = controller.signal;
+                }
+
+                // Execute the HTTP request
+                return fetch(url, fetchOpts)
+                    .then(response => {
+                        // Check for HTTP errors
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+
+                        // Handle 204 No Content responses
+                        if (response.status === 204) {
+                            return undefined;
+                        }
+
+                        // Parse JSON response for successful requests
+                        return response.json();
+                    })
                     .then(data => {
+                        // Verify this response is still relevant (not superseded by newer request)
+                        if (groupKey) {
+                            const current = this._requestGroups.get(groupKey);
+
+                            // If token doesn't match, this response is stale - ignore it
+                            if (!current || current.token !== token) {
+                                return undefined;
+                            }
+                        }
+
+                        // Execute success callback if provided
+                        // Note: callback is bound to this.abstraction context
                         if (opts.onSuccess) {
                             opts.onSuccess.call(this.abstraction, data);
                         }
@@ -4494,10 +4569,18 @@
                         return data;
                     })
                     .catch(error => {
+                        // Handle aborted requests gracefully if ignoreAbort flag is set
+                        if (error.name === 'AbortError' && opts.ignoreAbort) {
+                            return undefined;
+                        }
+
+                        // Execute error callback if provided
+                        // Note: callback is bound to this.abstraction context
                         if (opts.onError) {
                             opts.onError.call(this.abstraction, error);
                         }
 
+                        // Re-throw error to maintain promise chain behavior
                         throw error;
                     });
             },
