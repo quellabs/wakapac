@@ -687,7 +687,7 @@ wakaPAC('#map-app', {
 
 ### Server Communication
 
-The `control` method provides enhanced HTTP request handling with automatic race condition prevention:
+The `control` method provides enhanced HTTP request handling:
 
 ```javascript
 wakaPAC('#app', {
@@ -719,33 +719,12 @@ wakaPAC('#app', {
     async saveUser() {
         await this.control('/api/user', {
             method: 'PUT',
-            data: { name: this.user.name, email: this.user.email },
+            data: {
+                name: this.user.name,
+                email: this.user.email
+            },
             onSuccess: (data) => {
                 console.log('User saved successfully');
-            }
-        });
-    },
-
-    // Search with automatic race condition prevention
-    async performSearch() {
-        if (!this.searchQuery.trim()) return;
-
-        await this.control('/api/search', {
-            method: 'POST',
-            data: { query: this.searchQuery },
-            groupKey: 'search', // Cancels previous search requests
-            onSuccess: (results) => {
-                this.searchResults = results;
-            }
-        });
-    },
-
-    // User profile updates - only show latest data
-    async loadUserProfile(userId) {
-        await this.control(`/api/users/${userId}`, {
-            latestOnly: true, // Uses URL as groupKey automatically
-            onSuccess: (user) => {
-                this.user = user;
             }
         });
     }
@@ -765,29 +744,40 @@ wakaPAC('#app', {
 
 **Race Condition Prevention:**
 
-The `groupKey` and `latestOnly` options prevent common UI bugs:
+The `groupKey` and `latestOnly` options prevent race conditions:
 
 ```javascript
-// Search-as-you-type without race conditions
-searchInput.addEventListener('input', (e) => {
-    this.control('/api/search', {
-        data: { query: e.target.value },
-        groupKey: 'search', // Cancels previous searches
-        onSuccess: (results) => {
-            this.searchResults = results;
-        }
-    });
-});
+wakaPAC('#search-app', {
+    searchQuery: '',
+    searchResults: [],
 
-// Profile loading without stale data
-function loadProfile(userId) {
-    this.control(`/api/users/${userId}`, {
-        latestOnly: true, // Cancels previous profile requests
-        onSuccess: (user) => {
-            this.currentUser = user;
+    // Search-as-you-type with WakaPAC reactive binding
+    watch: {
+        searchQuery(newQuery) {
+            if (newQuery.length < 2) {
+                return;
+            }
+            
+            this.control('/api/search', {
+                data: { query: newQuery },
+                groupKey: 'search', // Cancels previous searches
+                onSuccess: (results) => {
+                    this.searchResults = results;
+                }
+            });
         }
-    });
-}
+    },
+
+    // Profile loading without stale data
+    loadProfile(userId) {
+        this.control(`/api/users/${userId}`, {
+            latestOnly: true, // Cancels previous profile requests
+            onSuccess: (user) => {
+                this.currentUser = user;
+            }
+        });
+    }
+});
 ```
 
 ## API Reference
