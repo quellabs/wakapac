@@ -1,10 +1,10 @@
 # WakaPAC
 
-A modern reactivity library using the PAC pattern â€" a spiritual successor to KnockoutJS, powered by Proxies.
+A modern reactivity library using the PAC pattern — a spiritual successor to KnockoutJS, powered by Proxies.
 
 ## Introduction
 
-WakaPAC is a lightweight reactive framework built around the Presentationâ€"Abstractionâ€"Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies â€" no hacks, no virtual DOM, no build step.
+WakaPAC is a lightweight reactive framework built around the Presentation–Abstraction–Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies — no hacks, no virtual DOM, no build step.
 
 ### What's PAC?
 
@@ -27,8 +27,8 @@ This results in more predictable data flow and easier debugging than traditional
 - **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes
 - **Two-way reactivity** for objects and nested arrays
 - **Win32-style** `eventProc` for low-level event handling when you want total control
-- **Drop-in script file** â€" no bundler required
-- **Hierarchical components** with parentâ€"child notification
+- **Drop-in script file** - no bundler required
+- **Hierarchical components** with parent–child notification
 
 ### Who It's For
 
