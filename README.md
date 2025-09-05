@@ -30,15 +30,16 @@ This results in more predictable data flow and easier debugging than traditional
 - **Drop-in script file** - no bundler required
 - **Hierarchical components** with parent–child notification
 
-### Who It's For
+### Who WakaPAC is For
 
 - You loved KnockoutJS, but wish it had modern reactivity
 - You want a small, drop-in framework without React/Vue's complexity
 - You come from Win32/desktop dev and want familiar PAC patterns
 - You're building internal tools, dashboards, or small-to-medium apps without needing a bundler
 
-Not for you if:
-- You need SSR or a giant ecosystem
+### Not for you if
+
+- You need SSR
 - You want JSX/TSX or TypeScript-first DX
 - You're building a massive SPA that already fits better in React/Vue
 
