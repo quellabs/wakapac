@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>wakapac control() smoke test</title>
+    <style>
+        body {
+            font-family: sans-serif;
+                padding: 16px
+            }
+
+            pre {
+                background: #f6f6f6;
+                padding: 12px
+            }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <button data-pac-bind="click: fetchTodo">Fetch JSON</button>
+    <pre>{{output}}</pre>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const app = wakaPAC('#app', {
+        output: 'click "Fetch JSON"',
+
+        async fetchTodo() {
+            this.output = 'loading...';
+
+            try {
+                const data = await this.control('https://jsonplaceholder.typicode.com/todos/1', {
+                    responseType: 'json',
+                    timeout: 8000,
+                    latestOnly: true
+                });
+
+                this.output = JSON.stringify(data, null, 2);
+            } catch (err) {
+                this.output = 'Error: ' + (err && err.message ? err.message : String(err));
+            }
+        }
+    });
+</script>
+</body>
+</html>
