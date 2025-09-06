@@ -4100,7 +4100,11 @@
                 // Process each data item and its corresponding DOM element
                 array.forEach((item, index) => {
                     const element = existingElements[index];
-                    if (!element) return; // Safety check - should not happen in content-only updates
+
+                    // Safety check - should not happen in content-only updates
+                    if (!element) {
+                        return;
+                    }
 
                     // Create context variables for this specific foreach item
                     // This makes the item data available to binding expressions as variables
@@ -4129,7 +4133,9 @@
                         // Examples: "class: { completed: todo.completed }", "checked: todo.completed"
                         ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
                             // Skip nested foreach bindings - they're handled separately
-                            if (type === 'foreach') return;
+                            if (type === 'foreach') {
+                                return;
+                            }
 
                             // Create a temporary binding object for evaluation
                             // This reuses the existing binding infrastructure
@@ -4484,7 +4490,18 @@
              * @param {Function} [opts.onError] - Error callback
              * @param {number} [opts.timeout=30000] - Request timeout in milliseconds
              * @param {Function} [opts.validateStatus] - Custom status validation function
-             * @param {Function} [opts.onProgress] - Progress callback for uploads
+             * @param {Function} [opts.onProgress] - Progress callback for uploads (not supported with fetch)
+             * @param {string} [opts.responseType='auto'] - Response type: 'json', 'text', 'blob', 'response', 'auto'
+             * @param {Function} [opts.urlNormalizer] - Function to normalize URLs for grouping
+             * @param {string} [opts.credentials] - Fetch credentials option
+             * @param {string} [opts.mode] - Fetch mode option
+             * @param {string} [opts.cache] - Fetch cache option
+             * @param {string} [opts.redirect] - Fetch redirect option
+             * @param {string} [opts.referrer] - Fetch referrer option
+             * @param {string} [opts.integrity] - Fetch integrity option
+             * @param {boolean} [opts.keepalive] - Fetch keepalive option
+             * @param {string} [opts.priority] - Fetch priority option
+             * @param {string} [opts.baseUrl] - Base URL for URL normalization
              */
             makeHttpRequest(url, opts = {}) {
                 // Extract and validate configuration
@@ -4495,6 +4512,7 @@
                     this._requestGroups = new Map();
                 }
 
+                // Setup request state and immediately register to prevent race conditions
                 const requestState = this.setupRequestState(config);
 
                 // Create timeout promise for request timeout handling
@@ -4506,7 +4524,7 @@
                 const fetchPromise = this.executeFetch(config, requestState)
                     .then(response => this.processResponse(response, config, requestState))
                     .then(data => this.handleSuccess(data, config, requestState))
-                    .catch(error => this.handleError(error, config));
+                    .catch(error => this.handleError(error, config, requestState));
 
                 // Race between fetch and timeout (if timeout is enabled)
                 const finalPromise = timeoutPromise ?
@@ -4532,42 +4550,218 @@
                     throw new Error('URL must be a non-empty string');
                 }
 
+                // Validate required fields
+                this.validateCallbacks(opts);
+                this.validateAbortControls(opts);
+
+                // Process method and body
+                const { method, body } = this.normalizeMethodAndBody(opts);
+
+                // Build headers
+                const headers = this.buildHeaders(opts, body);
+
+                // Build fetch passthrough options
+                const fetchOptions = this.buildFetchPassthrough(opts);
+
+                // Determine group key - explicit groupKey takes precedence (even if falsy)
+                const groupKey = opts.groupKey ?? (opts.latestOnly ? this.getGroupKeyFromUrl(url, opts) : null);
+
                 return {
                     url,
-                    // Normalize HTTP method to uppercase for consistency
-                    method: (opts.method || 'GET').toUpperCase(),
-
-                    // Merge default headers with user-provided headers
-                    // Default Content-Type is JSON, X-PAC-Request identifies our requests
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-PAC-Request': 'true',
-                        ...(opts.headers || {})
-                    },
-
-                    // Only stringify data if present (avoids "undefined" in body)
-                    body: opts.data ? JSON.stringify(opts.data) : undefined,
-
-                    // Group key for request cancellation - can be explicit or derived from URL
-                    groupKey: opts.groupKey || (opts.latestOnly ? url : null),
-
-                    // Timeout configuration with sensible defaults and bounds
-                    timeout: Math.max(0, parseInt(opts.timeout) || 30000), // Default 30s, minimum 0
-
-                    // Boolean flags with explicit coercion
+                    method,
+                    headers,
+                    body,
+                    groupKey,
+                    fetchOptions,
+                    timeout: Math.max(0, parseInt(opts.timeout) || 30000),
                     ignoreAbort: !!opts.ignoreAbort,
-
-                    // HTTP status validation function - default accepts 2xx status codes
-                    validateStatus: opts.validateStatus || ((status) => status >= 200 && status < 300),
-
-                    // Callback functions (can be undefined)
+                    validateStatus: opts.validateStatus || ((response) => response.ok),
+                    responseType: opts.responseType || 'auto',
                     onSuccess: opts.onSuccess,
                     onError: opts.onError,
-                    onProgress: opts.onProgress, // For future upload progress support
-
-                    // External abort controller support
+                    onProgress: opts.onProgress,
                     abortController: opts.abortController
                 };
+            },
+
+            /**
+             * Validates callback functions and other options.
+             * @param {Object} opts - Request options
+             * @throws {Error} If validation fails
+             */
+            validateCallbacks(opts) {
+                const validators = [
+                    ['onSuccess', opts.onSuccess],
+                    ['onError', opts.onError],
+                    ['onProgress', opts.onProgress],
+                    ['urlNormalizer', opts.urlNormalizer]
+                ];
+
+                validators.forEach(([name, fn]) => {
+                    if (fn && typeof fn !== 'function') {
+                        throw new Error(`${name} must be a function`);
+                    }
+                });
+            },
+
+            /**
+             * Validates abort controller and signal options.
+             * @param {Object} opts - Request options
+             * @throws {Error} If validation fails
+             */
+            validateAbortControls(opts) {
+                if (opts.abortController && typeof opts.abortController.abort !== 'function') {
+                    throw new Error('abortController must have an abort method');
+                }
+            },
+
+            /**
+             * Normalizes HTTP method and processes request body.
+             * @param {Object} opts - Request options
+             * @returns {Object} Object with method and body properties
+             */
+            normalizeMethodAndBody(opts) {
+                const method = (opts.method || 'GET').toUpperCase();
+                const methodsWithoutBody = ['GET', 'HEAD'];
+                const shouldHaveBody = !methodsWithoutBody.includes(method);
+
+                let body;
+                if (opts.data !== undefined && shouldHaveBody) {
+                    body = this.processRequestBody(opts.data);
+                } else if (opts.data !== undefined && !shouldHaveBody) {
+                    console.warn(`Method ${method} should not have a body. Data will be ignored.`);
+                }
+
+                return { method, body };
+            },
+
+            /**
+             * Processes request body based on data type.
+             * @param {*} data - Request data
+             * @returns {*} Processed body
+             */
+            processRequestBody(data) {
+                if (data instanceof FormData) {
+                    return data;
+                } else if (data instanceof Blob || data instanceof ArrayBuffer) {
+                    return data;
+                } else if (typeof data === 'string') {
+                    return data;
+                } else {
+                    return JSON.stringify(data);
+                }
+            },
+
+            /**
+             * Builds normalized headers object with proper content types.
+             * @param {Object} opts - Request options
+             * @param {*} body - Request body (used to determine content type)
+             * @returns {Object} Headers object with canonical casing
+             */
+            buildHeaders(opts, body) {
+                // Create Headers object for canonical casing
+                const headers = new Headers();
+                headers.set('X-PAC-Request', 'true');
+
+                // Add content type based on body type (only when body exists)
+                if (body !== undefined) {
+                    if (body instanceof FormData) {
+                        // Don't set Content-Type for FormData - let browser set boundary
+                    } else if (body instanceof Blob || body instanceof ArrayBuffer) {
+                        headers.set('Content-Type', 'application/octet-stream');
+                    } else if (typeof body === 'string') {
+                        headers.set('Content-Type', 'text/plain; charset=utf-8');
+                    } else {
+                        headers.set('Content-Type', 'application/json; charset=utf-8');
+                    }
+                }
+
+                // Add Accept header if not provided by user
+                const userHeaders = opts.headers || {};
+                const hasAccept = Object.keys(userHeaders).some(key => key.toLowerCase() === 'accept');
+
+                if (!hasAccept) {
+                    headers.set('Accept', 'application/json, text/plain, */*');
+                }
+
+                // Add user headers (they override defaults)
+                Object.entries(userHeaders).forEach(([key, value]) => {
+                    headers.set(key, value);
+                });
+
+                // Return headers
+                return headers;
+            },
+
+            /**
+             * Builds fetch passthrough options object.
+             * @param {Object} opts - Request options
+             * @returns {Object} Fetch options to pass through
+             */
+            buildFetchPassthrough(opts) {
+                const fetchOptions = {};
+                const passthroughKeys = [
+                    'credentials', 'mode', 'cache', 'redirect', 'referrer',
+                    'referrerPolicy', 'integrity', 'keepalive', 'priority'
+                ];
+
+                passthroughKeys.forEach(key => {
+                    if (opts[key] !== undefined) {
+                        fetchOptions[key] = opts[key];
+                    }
+                });
+
+                return fetchOptions;
+            },
+
+            /**
+             * Gets group key from URL for latestOnly option.
+             * @param {string} url - Request URL
+             * @param {Object} opts - Request options
+             * @returns {string} Group key
+             */
+            getGroupKeyFromUrl(url, opts) {
+                if (opts.urlNormalizer) {
+                    return opts.urlNormalizer(url);
+                } else {
+                    return this.normalizeUrlForGrouping(url, opts.baseUrl);
+                }
+            },
+
+            /**
+             * Basic URL normalization for grouping requests.
+             * Removes hash and sorts query parameters for consistent grouping.
+             * @param {string} url - URL to normalize
+             * @param {string} [baseUrl] - Base URL for normalization
+             * @returns {string} Normalized URL for grouping
+             */
+            normalizeUrlForGrouping(url, baseUrl) {
+                try {
+                    let defaultBase;
+
+                    if (typeof globalThis !== 'undefined' && globalThis.location) {
+                        defaultBase = baseUrl || globalThis.location.origin;
+                    } else {
+                        defaultBase = baseUrl || 'http://localhost';
+                    }
+
+                    // Remove hash and sort query parameters
+                    const urlObj = new URL(url, defaultBase);
+                    urlObj.hash = '';
+                    const params = new URLSearchParams(urlObj.search);
+                    const sortedParams = new URLSearchParams();
+
+                    [...params.keys()].sort().forEach(key => {
+                        params.getAll(key).sort().forEach(value => {
+                            sortedParams.append(key, value);
+                        });
+                    });
+
+                    urlObj.search = sortedParams.toString();
+                    return urlObj.toString();
+                } catch {
+                    return url;
+                }
             },
 
             /**
@@ -4577,198 +4771,210 @@
              * @returns {Object} Request state with token and controller
              */
             setupRequestState(config) {
-                // Use provided abort controller or create new one
+                const controller = this.createCombinedController(config);
                 let token = 0;
-                let controller = config.abortController || new AbortController();
 
                 if (config.groupKey) {
-                    // Get any existing request in this group
                     const prev = this._requestGroups.get(config.groupKey);
 
                     if (prev) {
-                        // Cancel the previous request in this group
-                        prev.controller.abort();
-
-                        // Increment token to identify this as a newer request
+                        if (prev.controller && !prev.controller.signal.aborted) {
+                            prev.controller.abort();
+                        }
                         token = prev.token + 1;
                     } else {
-                        // First request in this group
                         token = 1;
                     }
 
-                    // Store this request as the current one for this group
-                    return { token, controller, groupKey: config.groupKey };
+                    this._requestGroups.set(config.groupKey, { token, controller });
                 }
 
-                return { token, controller };
+                return { token, controller, groupKey: config.groupKey };
+            },
+
+            /**
+             * Creates a controller combining internal and external controllers.
+             * @param {Object} config - Request configuration
+             * @returns {Object} Combined controller
+             */
+            createCombinedController(config) {
+                if (config.abortController) {
+                    return config.abortController;
+                } else {
+                    return new AbortController();
+                }
             },
 
             /**
              * Creates a timeout promise that rejects after specified milliseconds.
-             * Also sets up proper cleanup to avoid memory leaks from hanging timeouts.
              * @param {number} timeout - Timeout in milliseconds
              * @param {AbortController} controller - Controller to abort on timeout
              * @returns {Promise} Promise that rejects on timeout
              */
             createTimeoutPromise(timeout, controller) {
                 return new Promise((_, reject) => {
-                    // Set up timeout to abort request and reject promise
+                    if (controller.signal.aborted) {
+                        reject(this.createTaggedCancellationError('Request was cancelled before timeout', 'timeout'));
+                        return;
+                    }
+
                     const timeoutId = setTimeout(() => {
-                        controller.abort();
-                        reject(new Error(`Request timeout after ${timeout}ms`));
+                        if (!controller.signal.aborted) {
+                            controller.abort();
+                            reject(this.createTaggedCancellationError(`Request timeout after ${timeout}ms`, 'timeout'));
+                        }
                     }, timeout);
 
-                    // Clear timeout if request completes before timeout
-                    // This prevents the timeout from firing after request completion
-                    controller.signal.addEventListener('abort', () => {
-                        clearTimeout(timeoutId);
-                    });
+                    controller.signal.addEventListener('abort', () => clearTimeout(timeoutId), { once: true });
                 });
             },
 
             /**
              * Executes the fetch request with the provided configuration.
-             * Simple wrapper around the native fetch API with abort signal support.
              * @param {Object} config - Request configuration
              * @param {Object} requestState - Current request state
              * @returns {Promise<Response>} Fetch response
              */
             async executeFetch(config, requestState) {
-                // Store in registry only when we're about to start
-                if (requestState.groupKey) {
-                    this._requestGroups.set(requestState.groupKey, {
-                        token: requestState.token,
-                        controller: requestState.controller
-                    });
+                if (requestState.controller.signal.aborted) {
+                    throw this.createTaggedCancellationError('Request was cancelled before execution', 'cancelled');
                 }
 
-                // Check supersession before starting
-                if (config.groupKey && !this.isRequestCurrent(config.groupKey, requestState.token)) {
-                    throw new Error('Request superseded before start');
-                }
-                
-                // Execute the actual HTTP request
-                const response = await fetch(config.url, {
+                const fetchOptions = {
                     method: config.method,
                     headers: config.headers,
                     body: config.body,
-                    signal: requestState.controller.signal
-                });
+                    signal: requestState.controller.signal,
+                    ...config.fetchOptions
+                };
 
-                // Check again immediately after fetch completes
-                if (config.groupKey && !this.isRequestCurrent(config.groupKey, requestState.token)) {
-                    throw new Error('Request superseded during execution');
+                try {
+                    return await fetch(config.url, fetchOptions);
+                } catch (e) {
+                    if (e.name === 'TypeError' && !requestState.controller.signal.aborted) {
+                        e.network = true;
+                    }
+
+                    throw e;
                 }
-
-                // Return response
-                return response;
             },
 
             /**
              * Processes the HTTP response, validating status and parsing content.
-             * Handles request supersession check and various response formats.
              * @param {Response} response - Fetch API response object
              * @param {Object} config - Request configuration
              * @param {Object} requestState - Current request state
              * @returns {Promise<any>} Parsed response data
-             * @throws {Error} If response is invalid or request was superseded
              */
             async processResponse(response, config, requestState) {
-                // Check if this request has been superseded by a newer one in the same group
-                // This prevents processing responses from cancelled requests
-                if (config.groupKey && !this.isRequestCurrent(config.groupKey, requestState.token)) {
-                    throw new Error('Request superseded by newer request');
+                if (requestState.controller.signal.aborted) {
+                    throw this.createTaggedCancellationError('Request was cancelled during processing', 'cancelled');
                 }
 
-                // Validate HTTP status code using provided validator function
-                if (!config.validateStatus(response.status)) {
-                    // Get error details from response body (safely, with length limit)
+                if (!config.validateStatus(response)) {
                     const errorText = await this.safeGetResponseText(response);
                     throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
                 }
 
-                // Handle 204 No Content responses (valid response with no body)
-                if (response.status === 204) {
+                if (config.method === 'HEAD' || [204, 205, 304].includes(response.status)) {
                     return undefined;
                 }
 
-                // Parse response content based on Content-Type header
-                return this.parseResponse(response);
+                return this.parseResponse(response, config.responseType);
             },
 
             /**
-             * Safely parses response based on content type header.
-             * Handles JSON, text, and binary responses appropriately.
+             * Parses response based on specified response type with broadened JSON detection.
              * @param {Response} response - Fetch API response object
+             * @param {string} responseType - Desired response type
              * @returns {Promise<any>} Parsed response data
-             * @throws {Error} If parsing fails
              */
-            async parseResponse(response) {
-                // Get content type header (fallback to empty string if missing)
-                const contentType = response.headers.get('content-type') || '';
-
+            async parseResponse(response, responseType) {
                 try {
-                    // Parse based on content type
-                    if (contentType.includes('application/json')) {
-                        return await response.json();
-                    } else if (contentType.includes('text/')) {
-                        return await response.text();
-                    } else {
-                        // For binary data (images, files, etc.), return the response object
-                        // Consumer can call .blob(), .arrayBuffer(), etc. as needed
-                        return response;
+                    switch (responseType) {
+                        case 'json':
+                            return await response.json();
+
+                        case 'text':
+                            return await response.text();
+
+                        case 'blob':
+                            return await response.blob();
+
+                        case 'response':
+                            return response;
+
+                        default:
+                            return this.autoParseResponse(response);
                     }
                 } catch (error) {
-                    // Provide context for parsing failures
-                    throw new Error(`Failed to parse response: ${error.message}`);
+                    throw new Error(`Failed to parse response as ${responseType}: ${error.message}`);
                 }
+            },
+
+            /**
+             * Auto-parses response with broadened JSON detection.
+             * @param {Response} response - Fetch API response object
+             * @returns {Promise<any>} Parsed response data
+             */
+            async autoParseResponse(response) {
+                const contentType = response.headers.get('content-type') || '';
+                const contentLength = response.headers.get('content-length');
+
+                if (contentLength === '0') {
+                    return undefined;
+                }
+
+                if (/json|\+json/i.test(contentType)) {
+                    const t = await response.text();
+                    return t.trim() ? JSON.parse(t) : undefined;
+                }
+
+                if (/^text\//i.test(contentType)) {
+                    return response.text();
+                }
+
+                return response.blob();
             },
 
             /**
              * Safely extracts response text for error reporting.
-             * Limits text length to prevent memory issues with large error responses.
              * @param {Response} response - Fetch API response object
              * @returns {Promise<string|null>} Response text or null if extraction fails
              */
             async safeGetResponseText(response) {
                 try {
-                    // Clone response to avoid consuming the original stream
+                    if (response.bodyUsed) return null;
                     const clone = response.clone();
                     const text = await clone.text();
-                    // Limit error message length to prevent console spam
                     return text.substring(0, 200);
                 } catch {
-                    // If text extraction fails, return null rather than throwing
-                    // This is for error reporting, so shouldn't cause additional errors
                     return null;
                 }
             },
 
             /**
              * Handles successful response processing.
-             * Executes success callback and performs final supersession check.
              * @param {any} data - Parsed response data
              * @param {Object} config - Request configuration
              * @param {Object} requestState - Current request state
-             * @returns {any} Response data (or undefined if superseded)
+             * @returns {any} Response data
              */
             handleSuccess(data, config, requestState) {
-                // Final check if request is still current (race condition protection)
-                if (config.groupKey && !this.isRequestCurrent(config.groupKey, requestState.token)) {
-                    // Return undefined for superseded requests rather than throwing
-                    // This prevents promise rejection for expected cancellations
-                    return undefined;
+                if (requestState.controller.signal.aborted) {
+                    if (config.ignoreAbort) {
+                        return undefined;
+                    } else {
+                        throw this.createTaggedCancellationError('Request was cancelled', 'cancelled');
+                    }
                 }
 
-                // Execute success callback if provided
                 if (config.onSuccess) {
                     try {
-                        // Call with proper 'this' context (this.abstraction)
-                        config.onSuccess.call(this.abstraction, data);
+                        const context = this.abstraction || this;
+                        config.onSuccess.call(context, data);
                     } catch (callbackError) {
-                        // Log callback errors but don't fail the request
-                        // The data was successfully retrieved, callback failure shouldn't break the chain
-                        console.error('Error in success callback:', callbackError);
+                        console.error(callbackError);
                     }
                 }
 
@@ -4777,64 +4983,72 @@
 
             /**
              * Handles request errors including network failures, timeouts, and aborts.
-             * Executes error callback and manages special error cases.
              * @param {Error} error - The error that occurred
              * @param {Object} config - Request configuration
-             * @throws {Error} Re-throws the error to maintain promise chain behavior
+             * @param {Object} requestState - Current request state
+             * @returns {any|throws} Returns undefined for ignored cancellations, otherwise re-throws
              */
-            handleError(error, config) {
-                // Handle the ignoreAbort flag for graceful cancellation
-                if (error.name === 'AbortError' && config.ignoreAbort) {
-                    // Return undefined instead of rejecting for ignored aborts
-                    // This allows callers to treat cancellation as a non-error case
+            handleError(error, config, requestState) {
+                const isCancellation = this.isCancellationError(error);
+
+                if (isCancellation && config.ignoreAbort) {
                     return undefined;
                 }
 
-                // Execute error callback if provided
                 if (config.onError) {
                     try {
-                        // Call with proper 'this' context
-                        config.onError.call(this.abstraction, error);
+                        const context = this.abstraction || this;
+                        config.onError.call(context, error);
                     } catch (callbackError) {
-                        // Log callback errors to prevent silent failures
-                        console.error('Error in error callback:', callbackError);
+                        console.error(callbackError);
                     }
                 }
 
-                // Re-throw to maintain promise chain behavior
-                // This ensures calling code can still catch and handle errors
                 throw error;
             },
 
             /**
-             * Checks if a request is still the current/active request in its group.
-             * Used to prevent processing responses from superseded requests.
-             * @param {string} groupKey - The group key to check
-             * @param {number} token - The request token to validate
-             * @returns {boolean} True if this request is still current
+             * Helper to create tagged cancellation errors consistently.
+             * @param {string} message - Error message
+             * @param {string} type - Cancellation type
+             * @returns {Error} Tagged cancellation error
              */
-            isRequestCurrent(groupKey, token) {
-                // Fetch group key
-                const current = this._requestGroups.get(groupKey);
+            createTaggedCancellationError(message, type) {
+                const error = new Error(message);
+                error.name = 'CancellationError';
+                error.cancellationType = type;
+                return error;
+            },
 
-                // Request is current if the group exists and tokens match
-                return current && current.token === token && !current.controller.signal.aborted;
+            /**
+             * Helper to detect cancellation errors deterministically.
+             * @param {Error} error - Error to check
+             * @returns {boolean} True if error represents cancellation
+             */
+            isCancellationError(error) {
+                return error.name === 'AbortError' ||
+                    error.name === 'CancellationError' ||
+                    (error.cancellationType &&
+                        ['timeout', 'cancelled', 'superseded'].includes(error.cancellationType));
             },
 
             /**
              * Cleans up request tracking to prevent memory leaks.
-             * Only removes the group entry if this request is still the current one.
-             * @param {string} groupKey - The group key to clean up (may be null)
+             * @param {string} groupKey - The group key to clean up
              * @param {number} token - The request token for validation
              */
             cleanupRequest(groupKey, token) {
-                if (groupKey) {
-                    // Fetch group key
-                    const current = this._requestGroups.get(groupKey);
+                if (!groupKey) {
+                    return;
+                }
 
-                    // Only clean up if this request is still the current one
-                    // This prevents newer requests from being cleaned up by older ones
-                    if (!current || current.token === token) {
+                const current = this._requestGroups.get(groupKey);
+
+                if (current) {
+                    if (current.token === token) {
+                        this._requestGroups.delete(groupKey);
+                    } else if (current.token < token) {
+                        console.warn(`Cleaning up stale request entry for ${groupKey}`);
                         this._requestGroups.delete(groupKey);
                     }
                 }
