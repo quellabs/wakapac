@@ -4577,11 +4577,10 @@
              * @returns {Object} Request state with token and controller
              */
             setupRequestState(config) {
-                let token = 0;
                 // Use provided abort controller or create new one
+                let token = 0;
                 let controller = config.abortController || new AbortController();
 
-                // Handle request grouping for automatic cancellation
                 if (config.groupKey) {
                     // Get any existing request in this group
                     const prev = this._requestGroups.get(config.groupKey);
@@ -4598,7 +4597,7 @@
                     }
 
                     // Store this request as the current one for this group
-                    this._requestGroups.set(config.groupKey, { token, controller });
+                    return { token, controller, groupKey: config.groupKey };
                 }
 
                 return { token, controller };
@@ -4619,7 +4618,7 @@
                         reject(new Error(`Request timeout after ${timeout}ms`));
                     }, timeout);
 
-                    // Critical: Clear timeout if request completes before timeout
+                    // Clear timeout if request completes before timeout
                     // This prevents the timeout from firing after request completion
                     controller.signal.addEventListener('abort', () => {
                         clearTimeout(timeoutId);
@@ -4635,16 +4634,34 @@
              * @returns {Promise<Response>} Fetch response
              */
             async executeFetch(config, requestState) {
-                // Build fetch options from config
-                const fetchOptions = {
+                // Store in registry only when we're about to start
+                if (requestState.groupKey) {
+                    this._requestGroups.set(requestState.groupKey, {
+                        token: requestState.token,
+                        controller: requestState.controller
+                    });
+                }
+
+                // Check supersession before starting
+                if (config.groupKey && !this.isRequestCurrent(config.groupKey, requestState.token)) {
+                    throw new Error('Request superseded before start');
+                }
+                
+                // Execute the actual HTTP request
+                const response = await fetch(config.url, {
                     method: config.method,
                     headers: config.headers,
                     body: config.body,
                     signal: requestState.controller.signal
-                };
+                });
 
-                // Execute the actual HTTP request
-                return await fetch(config.url, fetchOptions);
+                // Check again immediately after fetch completes
+                if (config.groupKey && !this.isRequestCurrent(config.groupKey, requestState.token)) {
+                    throw new Error('Request superseded during execution');
+                }
+
+                // Return response
+                return response;
             },
 
             /**
@@ -4801,7 +4818,7 @@
                 const current = this._requestGroups.get(groupKey);
 
                 // Request is current if the group exists and tokens match
-                return current && current.token === token;
+                return current && current.token === token && !current.controller.signal.aborted;
             },
 
             /**
@@ -4817,7 +4834,7 @@
 
                     // Only clean up if this request is still the current one
                     // This prevents newer requests from being cleaned up by older ones
-                    if (current && current.token === token) {
+                    if (!current || current.token === token) {
                         this._requestGroups.delete(groupKey);
                     }
                 }
