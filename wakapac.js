@@ -2168,6 +2168,7 @@
                      */
                     connectionChange: () => {
                         const quality = Utils.detectNetworkQuality();
+
                         eachComponent(c => {
                             c.abstraction.browserNetworkQuality = quality;
                         });
