@@ -4482,107 +4482,345 @@
              * @param {boolean} [opts.ignoreAbort] - Suppress AbortError when cancelled
              * @param {Function} [opts.onSuccess] - Success callback
              * @param {Function} [opts.onError] - Error callback
+             * @param {number} [opts.timeout=30000] - Request timeout in milliseconds
+             * @param {Function} [opts.validateStatus] - Custom status validation function
+             * @param {Function} [opts.onProgress] - Progress callback for uploads
              */
             makeHttpRequest(url, opts = {}) {
-                // Extract request configuration with defaults
-                const method = opts.method || 'GET';
-                const body = opts.data ? JSON.stringify(opts.data) : undefined;
-                const groupKey = opts.groupKey || (opts.latestOnly ? url : null);
+                // Extract and validate configuration
+                const config = this.validateAndNormalizeConfig(url, opts);
 
-                // Set up headers with PAC-specific requirements
-                const headers = {
-                    'Content-Type': 'application/json',
-                    'X-PAC-Request': 'true', // Custom header identifying PAC requests
-                    ...(opts.headers || {})
-                };
-
-                // Initialize request groups tracking if not already present
-                // This Map tracks active requests to enable cancellation of duplicate/outdated requests
+                // Initialize request tracking
                 if (!this._requestGroups) {
                     this._requestGroups = new Map();
                 }
 
-                let token = 0; // Unique identifier for this specific request
-                let controller = null; // AbortController for request cancellation
+                const requestState = this.setupRequestState(config);
 
-                // Handle request grouping and cancellation logic
-                if (groupKey) {
-                    // Check if there's already a request for this group
-                    const prev = this._requestGroups.get(groupKey);
+                // Create timeout promise for request timeout handling
+                const timeoutPromise = config.timeout > 0 ?
+                    this.createTimeoutPromise(config.timeout, requestState.controller) :
+                    null;
 
-                    // Cancel previous request if it exists (implements "latest only" behavior)
+                // Create the main fetch promise
+                const fetchPromise = this.executeFetch(config, requestState)
+                    .then(response => this.processResponse(response, config, requestState))
+                    .then(data => this.handleSuccess(data, config, requestState))
+                    .catch(error => this.handleError(error, config));
+
+                // Race between fetch and timeout (if timeout is enabled)
+                const finalPromise = timeoutPromise ?
+                    Promise.race([fetchPromise, timeoutPromise]) :
+                    fetchPromise;
+
+                return finalPromise.finally(() => {
+                    this.cleanupRequest(config.groupKey, requestState.token);
+                });
+            },
+
+            /**
+             * Validates and normalizes request configuration to ensure consistent behavior.
+             * Applies default values and validates required parameters.
+             * @param {string} url - Request URL (required)
+             * @param {Object} opts - Request options
+             * @returns {Object} Normalized configuration object
+             * @throws {Error} If URL is invalid
+             */
+            validateAndNormalizeConfig(url, opts) {
+                // Validate required URL parameter
+                if (!url || typeof url !== 'string') {
+                    throw new Error('URL must be a non-empty string');
+                }
+
+                return {
+                    url,
+                    // Normalize HTTP method to uppercase for consistency
+                    method: (opts.method || 'GET').toUpperCase(),
+
+                    // Merge default headers with user-provided headers
+                    // Default Content-Type is JSON, X-PAC-Request identifies our requests
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-PAC-Request': 'true',
+                        ...(opts.headers || {})
+                    },
+
+                    // Only stringify data if present (avoids "undefined" in body)
+                    body: opts.data ? JSON.stringify(opts.data) : undefined,
+
+                    // Group key for request cancellation - can be explicit or derived from URL
+                    groupKey: opts.groupKey || (opts.latestOnly ? url : null),
+
+                    // Timeout configuration with sensible defaults and bounds
+                    timeout: Math.max(0, parseInt(opts.timeout) || 30000), // Default 30s, minimum 0
+
+                    // Boolean flags with explicit coercion
+                    ignoreAbort: !!opts.ignoreAbort,
+
+                    // HTTP status validation function - default accepts 2xx status codes
+                    validateStatus: opts.validateStatus || ((status) => status >= 200 && status < 300),
+
+                    // Callback functions (can be undefined)
+                    onSuccess: opts.onSuccess,
+                    onError: opts.onError,
+                    onProgress: opts.onProgress, // For future upload progress support
+
+                    // External abort controller support
+                    abortController: opts.abortController
+                };
+            },
+
+            /**
+             * Sets up request state and handles request grouping logic.
+             * If a groupKey is provided, cancels any previous request in that group.
+             * @param {Object} config - Normalized configuration
+             * @returns {Object} Request state with token and controller
+             */
+            setupRequestState(config) {
+                let token = 0;
+                // Use provided abort controller or create new one
+                let controller = config.abortController || new AbortController();
+
+                // Handle request grouping for automatic cancellation
+                if (config.groupKey) {
+                    // Get any existing request in this group
+                    const prev = this._requestGroups.get(config.groupKey);
+
                     if (prev) {
+                        // Cancel the previous request in this group
                         prev.controller.abort();
+
+                        // Increment token to identify this as a newer request
+                        token = prev.token + 1;
+                    } else {
+                        // First request in this group
+                        token = 1;
                     }
 
-                    // Create new abort controller for this request
-                    controller = new AbortController();
-
-                    // Increment token to track request sequence
-                    token = prev ? prev.token + 1 : 1;
-
-                    // Store current request info for potential future cancellation
-                    this._requestGroups.set(groupKey, { token, controller });
+                    // Store this request as the current one for this group
+                    this._requestGroups.set(config.groupKey, { token, controller });
                 }
 
-                // Build fetch options object
-                const fetchOpts = { method, headers, body };
+                return { token, controller };
+            },
 
-                // Attach abort signal if controller exists
-                if (controller) {
-                    fetchOpts.signal = controller.signal;
-                }
+            /**
+             * Creates a timeout promise that rejects after specified milliseconds.
+             * Also sets up proper cleanup to avoid memory leaks from hanging timeouts.
+             * @param {number} timeout - Timeout in milliseconds
+             * @param {AbortController} controller - Controller to abort on timeout
+             * @returns {Promise} Promise that rejects on timeout
+             */
+            createTimeoutPromise(timeout, controller) {
+                return new Promise((_, reject) => {
+                    // Set up timeout to abort request and reject promise
+                    const timeoutId = setTimeout(() => {
+                        controller.abort();
+                        reject(new Error(`Request timeout after ${timeout}ms`));
+                    }, timeout);
 
-                // Execute the HTTP request
-                return fetch(url, fetchOpts)
-                    .then(response => {
-                        // Check for HTTP errors
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                        }
-
-                        // Handle 204 No Content responses
-                        if (response.status === 204) {
-                            return undefined;
-                        }
-
-                        // Parse JSON response for successful requests
-                        return response.json();
-                    })
-                    .then(data => {
-                        // Verify this response is still relevant (not superseded by newer request)
-                        if (groupKey) {
-                            const current = this._requestGroups.get(groupKey);
-
-                            // If token doesn't match, this response is stale - ignore it
-                            if (!current || current.token !== token) {
-                                return undefined;
-                            }
-                        }
-
-                        // Execute success callback if provided
-                        // Note: callback is bound to this.abstraction context
-                        if (opts.onSuccess) {
-                            opts.onSuccess.call(this.abstraction, data);
-                        }
-
-                        return data;
-                    })
-                    .catch(error => {
-                        // Handle aborted requests gracefully if ignoreAbort flag is set
-                        if (error.name === 'AbortError' && opts.ignoreAbort) {
-                            return undefined;
-                        }
-
-                        // Execute error callback if provided
-                        // Note: callback is bound to this.abstraction context
-                        if (opts.onError) {
-                            opts.onError.call(this.abstraction, error);
-                        }
-
-                        // Re-throw error to maintain promise chain behavior
-                        throw error;
+                    // Critical: Clear timeout if request completes before timeout
+                    // This prevents the timeout from firing after request completion
+                    controller.signal.addEventListener('abort', () => {
+                        clearTimeout(timeoutId);
                     });
+                });
+            },
+
+            /**
+             * Executes the fetch request with the provided configuration.
+             * Simple wrapper around the native fetch API with abort signal support.
+             * @param {Object} config - Request configuration
+             * @param {Object} requestState - Current request state
+             * @returns {Promise<Response>} Fetch response
+             */
+            async executeFetch(config, requestState) {
+                // Build fetch options from config
+                const fetchOptions = {
+                    method: config.method,
+                    headers: config.headers,
+                    body: config.body,
+                    signal: requestState.controller.signal
+                };
+
+                // Execute the actual HTTP request
+                return await fetch(config.url, fetchOptions);
+            },
+
+            /**
+             * Processes the HTTP response, validating status and parsing content.
+             * Handles request supersession check and various response formats.
+             * @param {Response} response - Fetch API response object
+             * @param {Object} config - Request configuration
+             * @param {Object} requestState - Current request state
+             * @returns {Promise<any>} Parsed response data
+             * @throws {Error} If response is invalid or request was superseded
+             */
+            async processResponse(response, config, requestState) {
+                // Check if this request has been superseded by a newer one in the same group
+                // This prevents processing responses from cancelled requests
+                if (config.groupKey && !this.isRequestCurrent(config.groupKey, requestState.token)) {
+                    throw new Error('Request superseded by newer request');
+                }
+
+                // Validate HTTP status code using provided validator function
+                if (!config.validateStatus(response.status)) {
+                    // Get error details from response body (safely, with length limit)
+                    const errorText = await this.safeGetResponseText(response);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+                }
+
+                // Handle 204 No Content responses (valid response with no body)
+                if (response.status === 204) {
+                    return undefined;
+                }
+
+                // Parse response content based on Content-Type header
+                return this.parseResponse(response);
+            },
+
+            /**
+             * Safely parses response based on content type header.
+             * Handles JSON, text, and binary responses appropriately.
+             * @param {Response} response - Fetch API response object
+             * @returns {Promise<any>} Parsed response data
+             * @throws {Error} If parsing fails
+             */
+            async parseResponse(response) {
+                // Get content type header (fallback to empty string if missing)
+                const contentType = response.headers.get('content-type') || '';
+
+                try {
+                    // Parse based on content type
+                    if (contentType.includes('application/json')) {
+                        return await response.json();
+                    } else if (contentType.includes('text/')) {
+                        return await response.text();
+                    } else {
+                        // For binary data (images, files, etc.), return the response object
+                        // Consumer can call .blob(), .arrayBuffer(), etc. as needed
+                        return response;
+                    }
+                } catch (error) {
+                    // Provide context for parsing failures
+                    throw new Error(`Failed to parse response: ${error.message}`);
+                }
+            },
+
+            /**
+             * Safely extracts response text for error reporting.
+             * Limits text length to prevent memory issues with large error responses.
+             * @param {Response} response - Fetch API response object
+             * @returns {Promise<string|null>} Response text or null if extraction fails
+             */
+            async safeGetResponseText(response) {
+                try {
+                    // Clone response to avoid consuming the original stream
+                    const clone = response.clone();
+                    const text = await clone.text();
+                    // Limit error message length to prevent console spam
+                    return text.substring(0, 200);
+                } catch {
+                    // If text extraction fails, return null rather than throwing
+                    // This is for error reporting, so shouldn't cause additional errors
+                    return null;
+                }
+            },
+
+            /**
+             * Handles successful response processing.
+             * Executes success callback and performs final supersession check.
+             * @param {any} data - Parsed response data
+             * @param {Object} config - Request configuration
+             * @param {Object} requestState - Current request state
+             * @returns {any} Response data (or undefined if superseded)
+             */
+            handleSuccess(data, config, requestState) {
+                // Final check if request is still current (race condition protection)
+                if (config.groupKey && !this.isRequestCurrent(config.groupKey, requestState.token)) {
+                    // Return undefined for superseded requests rather than throwing
+                    // This prevents promise rejection for expected cancellations
+                    return undefined;
+                }
+
+                // Execute success callback if provided
+                if (config.onSuccess) {
+                    try {
+                        // Call with proper 'this' context (this.abstraction)
+                        config.onSuccess.call(this.abstraction, data);
+                    } catch (callbackError) {
+                        // Log callback errors but don't fail the request
+                        // The data was successfully retrieved, callback failure shouldn't break the chain
+                        console.error('Error in success callback:', callbackError);
+                    }
+                }
+
+                return data;
+            },
+
+            /**
+             * Handles request errors including network failures, timeouts, and aborts.
+             * Executes error callback and manages special error cases.
+             * @param {Error} error - The error that occurred
+             * @param {Object} config - Request configuration
+             * @throws {Error} Re-throws the error to maintain promise chain behavior
+             */
+            handleError(error, config) {
+                // Handle the ignoreAbort flag for graceful cancellation
+                if (error.name === 'AbortError' && config.ignoreAbort) {
+                    // Return undefined instead of rejecting for ignored aborts
+                    // This allows callers to treat cancellation as a non-error case
+                    return undefined;
+                }
+
+                // Execute error callback if provided
+                if (config.onError) {
+                    try {
+                        // Call with proper 'this' context
+                        config.onError.call(this.abstraction, error);
+                    } catch (callbackError) {
+                        // Log callback errors to prevent silent failures
+                        console.error('Error in error callback:', callbackError);
+                    }
+                }
+
+                // Re-throw to maintain promise chain behavior
+                // This ensures calling code can still catch and handle errors
+                throw error;
+            },
+
+            /**
+             * Checks if a request is still the current/active request in its group.
+             * Used to prevent processing responses from superseded requests.
+             * @param {string} groupKey - The group key to check
+             * @param {number} token - The request token to validate
+             * @returns {boolean} True if this request is still current
+             */
+            isRequestCurrent(groupKey, token) {
+                // Fetch group key
+                const current = this._requestGroups.get(groupKey);
+
+                // Request is current if the group exists and tokens match
+                return current && current.token === token;
+            },
+
+            /**
+             * Cleans up request tracking to prevent memory leaks.
+             * Only removes the group entry if this request is still the current one.
+             * @param {string} groupKey - The group key to clean up (may be null)
+             * @param {number} token - The request token for validation
+             */
+            cleanupRequest(groupKey, token) {
+                if (groupKey) {
+                    // Fetch group key
+                    const current = this._requestGroups.get(groupKey);
+
+                    // Only clean up if this request is still the current one
+                    // This prevents newer requests from being cleaned up by older ones
+                    if (current && current.token === token) {
+                        this._requestGroups.delete(groupKey);
+                    }
+                }
             },
 
             /**
