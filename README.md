@@ -688,22 +688,22 @@ wakaPAC('#map-app', {
 
 ### Server Communication
 
-The `control` method provides enhanced HTTP request handling:
+The `control` method provides enhanced HTTP request handling with comprehensive options for modern web applications:
+
+#### Basic Usage
 
 ```javascript
 wakaPAC('#app', {
     user: null,
     loading: false,
     error: null,
-    searchResults: [],
-    searchQuery: '',
 
     async loadUser() {
         this.loading = true;
         this.error = null;
 
         try {
-            await this.control('/api/user', {
+            const userData = await this.control('/api/user', {
                 method: 'GET',
                 onSuccess: (data) => {
                     this.user = data;
@@ -715,71 +715,163 @@ wakaPAC('#app', {
         } finally {
             this.loading = false;
         }
-    },
-
-    async saveUser() {
-        await this.control('/api/user', {
-            method: 'PUT',
-            data: {
-                name: this.user.name,
-                email: this.user.email
-            },
-            onSuccess: (data) => {
-                console.log('User saved successfully');
-            }
-        });
     }
 });
 ```
 
-**Request Options:**
+#### Complete Options Reference
 
-- **`method`**: HTTP method (GET, POST, PUT, DELETE, etc.)
-- **`data`**: Request body data (automatically JSON-stringified)
-- **`headers`**: Additional HTTP headers
-- **`groupKey`**: Groups related requests for cancellation
-- **`latestOnly`**: Automatically uses URL as groupKey
-- **`ignoreAbort`**: Suppress AbortError when requests are cancelled
-- **`onSuccess(data, response)`**: Success callback
-- **`onError(error)`**: Error callback
+##### Core Request Options
 
-**Race Condition Prevention:**
+- **`method`** (`string`, default: `'GET'`): HTTP method (GET, POST, PUT, DELETE, PATCH, etc.)
+- **`data`** (`any`): Request body data - automatically JSON-stringified for objects, supports FormData, Blob, ArrayBuffer, and strings
+- **`headers`** (`Object`): Additional HTTP headers to include with the request
+- **`timeout`** (`number`, default: `30000`): Request timeout in milliseconds (0 = no timeout)
 
-The `groupKey` and `latestOnly` options prevent race conditions:
+##### Response Handling Options
+
+- **`responseType`** (`string`, default: `'auto'`): How to parse the response
+    - `'json'` - Parse as JSON
+    - `'text'` - Return as plain text
+    - `'blob'` - Return as Blob object
+    - `'response'` - Return raw Response object
+    - `'auto'` - Auto-detect based on Content-Type header
+
+- **`validateStatus`** (`function`): Custom response validation function
+  ```javascript
+  validateStatus: (response) => response.status < 400
+  ```
+
+##### Callback Options
+
+- **`onSuccess`** (`function`): Called when request succeeds
+  ```javascript
+  onSuccess: (data, response) => {
+      console.log('Success:', data);
+  }
+  ```
+
+- **`onError`** (`function`): Called when request fails
+  ```javascript
+  onError: (error) => {
+      console.error('Request failed:', error.message);
+  }
+  ```
+
+- **`onProgress`** (`function`): Progress callback for uploads (note: limited support with fetch API)
+
+##### Request Grouping and Cancellation
+
+- **`groupKey`** (`string`): Groups related requests - new requests cancel previous ones in the same group
+- **`latestOnly`** (`boolean`): Automatically uses URL as groupKey for race condition prevention
+- **`ignoreAbort`** (`boolean`): Suppress AbortError exceptions when requests are cancelled
+- **`abortController`** (`AbortController`): External abort controller for manual cancellation
+
+##### Advanced Fetch Options
+
+You can include any standard fetch API option directly in your request object:
 
 ```javascript
-wakaPAC('#search-app', {
-    searchQuery: '',
-    searchResults: [],
+await this.control('/api/data', {
+    method: 'GET',
+    credentials: 'include',  // Standard fetch option
+    mode: 'cors',            // Standard fetch option
+    cache: 'no-cache'        // Standard fetch option
+});
+```
 
-    // Search-as-you-type with WakaPAC reactive binding
-    watch: {
-        searchQuery(newQuery) {
-            if (newQuery.length < 2) {
-                return;
-            }
-            
-            this.control('/api/search', {
-                data: { query: newQuery },
-                groupKey: 'search', // Cancels previous searches
-                onSuccess: (results) => {
-                    this.searchResults = results;
-                }
-            });
-        }
-    },
+Available options:
 
-    // Profile loading without stale data
-    loadProfile(userId) {
-        this.control(`/api/users/${userId}`, {
-            latestOnly: true, // Cancels previous profile requests
-            onSuccess: (user) => {
-                this.currentUser = user;
-            }
-        });
+- **`credentials`** (`string`): Request credentials mode
+    - `'omit'` - Never send credentials
+    - `'same-origin'` - Send credentials for same-origin requests
+    - `'include'` - Always send credentials
+
+- **`mode`** (`string`): Request mode
+    - `'cors'` - Allow cross-origin requests
+    - `'no-cors'` - Restrict to simple cross-origin requests
+    - `'same-origin'` - Only allow same-origin requests
+
+- **`cache`** (`string`): Cache mode
+    - `'default'` - Use browser's default cache behavior
+    - `'no-store'` - Never cache
+    - `'reload'` - Always fetch from network
+    - `'no-cache'` - Validate cache before use
+    - `'force-cache'` - Use cache if available
+    - `'only-if-cached'` - Only use cache, fail if not cached
+
+- **`redirect`** (`string`): Redirect handling
+    - `'follow'` - Follow redirects automatically
+    - `'error'` - Treat redirects as errors
+    - `'manual'` - Handle redirects manually
+
+- **`referrer`** (`string`): Referrer URL or `'no-referrer'`
+- **`referrerPolicy`** (`string`): Referrer policy
+- **`integrity`** (`string`): Subresource integrity value
+- **`keepalive`** (`boolean`): Keep connection alive after page unload
+- **`priority`** (`string`): Request priority (`'high'`, `'low'`, `'auto'`)
+
+#### Common Use Cases
+
+##### File Upload
+```javascript
+// FormData upload
+const formData = new FormData();
+formData.append('file', file);
+await this.control('/api/upload', {
+    method: 'POST',
+    data: formData
+});
+```
+
+##### Search with Race Condition Prevention
+```javascript
+// Prevents stale search results
+this.control('/api/search', {
+    data: { query: this.searchQuery },
+    latestOnly: true,
+    onSuccess: (results) => {
+        this.searchResults = results;
     }
 });
 ```
+
+##### Custom Response Validation
+```javascript
+// Accept 304 as success
+await this.control('/api/data', {
+    validateStatus: (response) => response.ok || response.status === 304
+});
+```
+
+##### Request with Timeout and Headers
+```javascript
+await this.control('/api/save', {
+    method: 'PUT',
+    data: this.formData,
+    timeout: 10000,
+    headers: {
+        'Authorization': `Bearer ${this.token}`
+    }
+});
+```
+
+##### Binary Data Download
+```javascript
+const blob = await this.control('/api/file.pdf', {
+    responseType: 'blob'
+});
+```
+
+#### Best Practices
+
+1. **Use `latestOnly: true`** for search-as-you-type and dynamic content loading
+2. **Set appropriate timeouts** based on expected response times
+3. **Use `groupKey`** for related requests that should cancel each other
+4. **Handle `ignoreAbort: true`** for background requests that shouldn't show errors when cancelled
+5. **Validate responses** with custom `validateStatus` functions for APIs with non-standard error codes
+6. **Use FormData** for file uploads to preserve proper content types
+7. **Set proper CORS options** for cross-origin requests
 
 ## API Reference
 
