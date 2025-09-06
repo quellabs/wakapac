@@ -190,7 +190,6 @@
                 keysA.every(k => Object.hasOwn(b, k) && this.isEqual(a[k], b[k]));
         },
 
-
         /**
          * Checks if a string represents a DOM event type
          * @param {string} type - Event type to test
