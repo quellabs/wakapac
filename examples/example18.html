@@ -19,12 +19,16 @@
 
 <div id="app">
     <button data-pac-bind="click: fetchTodo">Fetch JSON</button>
-    <pre>{{output}}</pre>
+
+    <div data-pac-bind="foreach: todos" data-pac-item="todo">
+        <pre>{{todo}}</pre>
+    </div>
 </div>
 
 <script src="../wakapac.js"></script>
 <script>
     const app = wakaPAC('#app', {
+        todos: [],
         output: 'click "Fetch JSON"',
 
         async fetchTodo() {
@@ -37,7 +41,7 @@
                     latestOnly: true
                 });
 
-                this.output = JSON.stringify(data, null, 2);
+                this.todos.push(JSON.stringify(data, null, 2));
             } catch (err) {
                 this.output = 'Error: ' + (err && err.message ? err.message : String(err));
             }
