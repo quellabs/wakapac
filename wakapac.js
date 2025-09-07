@@ -2359,6 +2359,8 @@
                 // Get scroll measurements
                 const scrollX = this.container.scrollLeft;
                 const scrollY = this.container.scrollTop;
+                const clientWidth = this.container.clientWidth;
+                const clientHeight = this.container.clientHeight;
                 const scrollContentWidth = this.container.scrollWidth;
                 const scrollContentHeight = this.container.scrollHeight;
 
@@ -2378,8 +2380,8 @@
                 Object.assign(this.abstraction.containerScrollWindow, {
                     top: scrollY,
                     left: scrollX,
-                    right: scrollContentWidth,
-                    bottom: scrollContentHeight,
+                    right: scrollX + clientWidth,
+                    bottom: scrollY + clientHeight,
                     x: scrollX,
                     y: scrollY
                 });
