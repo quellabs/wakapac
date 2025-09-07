@@ -2228,6 +2228,9 @@
                             browserScrollX: window.scrollX,
                             browserScrollY: window.scrollY
                         });
+
+                        // Update container dimensions on resize
+                        c.updateContainerVisibility();
                     }), 100, "_wakaPACResizeTimeout"),
 
                     /**
