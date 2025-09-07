@@ -881,33 +881,76 @@ const blob = await this.control('/api/file.pdf', {
 
 ## API Reference
 
-### Creating Components
+### Internal Methods (Available as `this.methodName()` within component)
+
+These methods are only accessible within component methods and provide core functionality for data binding, utilities, and component communication:
 
 ```javascript
-const component = wakaPAC(selector, abstraction, options);
-```
-
-### Core Methods
-
-```javascript
-// Communication
-component.notifyParent(type, data)
-component.notifyChildren(command, data)
-component.notifyChild(selector, command, data)
-
 // DOM interaction
-component.readDOMValue(selector)
-component.writeDOMValue(selector, value)
-component.control(url, options)
+this.readDOMValue(selector)           // Reads current value from DOM element
+this.writeDOMValue(selector, value)   // Sets value to DOM element
 
-// Data utilities
-component.escapeHTML(str)
-component.sanitizeUserInput(html)
-component.formatValue(value)
+// Data utilities  
+this.formatValue(value)               // Formats any value for display
+this.escapeHTML(str)                  // Escapes HTML entities to prevent XSS
+this.sanitizeUserInput(html)          // Strips HTML tags and returns plain text
 
-// Lifecycle
-component.destroy()
+// Component communication
+this.notifyParent(type, data)         // Send message to parent component
+this.notifyChildren(command, data)    // Broadcast message to all child components
+this.notifyChild(selector, cmd, data) // Send message to specific child component
 ```
+
+### External Methods (Available on component instance)
+
+These methods are available when you have a reference to the component instance:
+
+```javascript
+// Lifecycle management (external only)
+component.destroy()                   // Destroys component and cleans up resources
+```
+
+**Usage Example:**
+```javascript
+const app = wakaPAC('#app', { /* ... */ });
+
+// Later, when component is no longer needed
+app.destroy();
+```
+
+### Dual-Access Methods (Available both internally and externally)
+
+These methods are available as `this.methodName()` inside the component and `component.methodName()` outside:
+
+```javascript
+// HTTP requests
+control(url, options)                 // Makes HTTP requests with enhanced features
+
+// DOM utilities
+getElementPosition(elementOrId)       // Gets global position of element in document
+```
+
+### Method Availability Reference
+
+| Method                 | Internal (`this.`) | External (`component.`) | Purpose                                   |
+|------------------------|:------------------:|:-----------------------:|-------------------------------------------|
+| `readDOMValue()`       |         ✅          |            ❌            | Read values from form elements and DOM    |
+| `writeDOMValue()`      |         ✅          |            ❌            | Set values to form elements and DOM       |
+| `formatValue()`        |         ✅          |            ❌            | Format values for display in templates    |
+| `escapeHTML()`         |         ✅          |            ❌            | Escape HTML to prevent XSS attacks        |
+| `sanitizeUserInput()`  |         ✅          |            ❌            | Strip HTML tags from user input           |
+| `notifyParent()`       |         ✅          |            ❌            | Send messages up the component hierarchy  |
+| `notifyChildren()`     |         ✅          |            ❌            | Broadcast to all child components         |
+| `notifyChild()`        |         ✅          |            ❌            | Send message to specific child            |
+| `control()`            |         ✅          |            ✅            | Make HTTP requests with advanced features |
+| `getElementPosition()` |         ✅          |            ✅            | Get element's global document position    |
+| `destroy()`            |         ❌          |            ✅            | Clean up component and free resources     |
+
+### Access Patterns Summary
+
+- **Internal-only methods**: Core component functionality that should only be used within the component's own methods
+- **External-only methods**: Lifecycle management that external code needs to control
+- **Dual-access methods**: Utilities that are useful both within components and in external application logic
 
 ### Configuration Options
 
