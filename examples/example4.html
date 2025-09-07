@@ -20,7 +20,7 @@
             this.notifyChild('#child-component', 'updateMessage', 'Hello from parent!');
         },
 
-        onChildUpdate(type, data, child) {
+        receiveFromChild(type, data, child) {
             if (type === 'messageChanged') {
                 this.message = `Child says: ${data.message}`;
             }
