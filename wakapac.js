@@ -5715,19 +5715,25 @@
     // Initialize global registry
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
 
-    // Event-driven hierarchy resolution
+    // Set up event-driven hierarchy resolution (singleton)
     if (!window._wakaPACHierarchyListener) {
         window._wakaPACHierarchyListener = true;
 
         document.addEventListener('pac:component-ready', () => {
-            // Debounce hierarchy re-evaluation to handle multiple components created quickly
+            // Clear any existing timeout to debounce multiple rapid component creations
             clearTimeout(window._wakaPACHierarchyTimeout);
+
             window._wakaPACHierarchyTimeout = setTimeout(() => {
+                console.log('Resolving hierarchy for', window.PACRegistry.components.size, 'components');
+
+                // Clear hierarchy cache
+                window.PACRegistry.hierarchyCache = new WeakMap();
+
                 // Re-establish hierarchy for all components
                 window.PACRegistry.components.forEach(component => {
                     component.establishHierarchy();
                 });
-            }, 10); // Short delay to batch multiple registrations
+            }, 20);
         });
     }
 
