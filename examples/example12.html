@@ -210,7 +210,7 @@
                 activityLog: [],
                 
                 // Handle updates from child components
-                onChildUpdate: function(type, data, child) {
+                receiveFromChild: function(type, data, child) {
                     if (type === 'childMessage') {
                         this.messageCount++;
                         this.status = `Received message from ${data.childName}`;

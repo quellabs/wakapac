@@ -1,52 +1,401 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8"/>
-    <title>wakapac control() smoke test</title>
+    <title>WakaPAC Scroll Position Example - Wrapper Container</title>
     <style>
         body {
-            font-family: sans-serif;
-                padding: 16px
-            }
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
 
-            pre {
-                background: #f6f6f6;
-                padding: 12px
-            }
+        .app-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        h1 {
+            background: #2c3e50;
+            color: white;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .scrollable {
+            height: 300px;
+            overflow-y: auto;
+            border: 2px solid #34495e;
+        }
+
+        .metrics {
+            position: sticky;
+            top: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            z-index: 10;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 2px 0;
+        }
+
+        .status-indicators {
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            margin: 1px 3px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .content-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #ecf0f1;
+            background: white;
+        }
+
+        .content-item:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .item-meta {
+            font-size: 11px;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+
+        .controls {
+            padding: 20px;
+            background: #ecf0f1;
+            text-align: center;
+        }
+
+        .btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #2980b9;
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        .debug-info {
+            padding: 15px 20px;
+            background: #2c3e50;
+            color: #ecf0f1;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .debug-row {
+            margin: 3px 0;
+        }
+
+        .app-debug {
+            padding: 10px 20px;
+            background: #34495e;
+            color: white;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            border-top: 1px solid #2c3e50;
+        }
     </style>
 </head>
 <body>
 
-<div id="app">
-    <button data-pac-bind="click: fetchTodo">Fetch JSON</button>
+<!-- App wrapper container - manages hierarchy and communication -->
+<div id="app" class="app-container">
+    <h1>WakaPAC Scroll Position - Hierarchical Architecture</h1>
 
-    <div data-pac-bind="foreach: todos" data-pac-item="todo">
-        <pre>{{todo}}</pre>
+    <!-- Scrollable Container - child component -->
+    <div id="scrollable" class="scrollable">
+        <div class="metrics">
+            <div class="metric-row">
+                <span>Scroll Position:</span>
+                <span>{{containerScrollY}}px ({{scrollPercentFormatted}}%)</span>
+            </div>
+            <div class="metric-row">
+                <span>Content Size:</span>
+                <span>{{containerScrollContentHeight}}px</span>
+            </div>
+            <div class="metric-row">
+                <span>Visible Area:</span>
+                <span>{{containerHeight}}px</span>
+            </div>
+            <div class="metric-row">
+                <span>Max Scroll:</span>
+                <span>{{maxScrollY}}px</span>
+            </div>
+
+            <div class="status-indicators">
+                <span data-pac-bind="visible: isAtTop" class="status-badge" style="background: #27ae60;">AT TOP</span>
+                <span data-pac-bind="visible: isNearTop" class="status-badge" style="background: #f39c12;">NEAR TOP</span>
+                <span data-pac-bind="visible: isInMiddle" class="status-badge" style="background: #3498db;">MIDDLE</span>
+                <span data-pac-bind="visible: isNearBottom" class="status-badge" style="background: #e67e22;">NEAR BOTTOM</span>
+                <span data-pac-bind="visible: isAtBottom" class="status-badge" style="background: #e74c3c;">AT BOTTOM</span>
+            </div>
+        </div>
+
+        <div data-pac-bind="foreach: items" data-pac-item="item" data-pac-index="index">
+            <div class="content-item">
+                <strong>{{item.title}}</strong>
+                <p>{{item.content}}</p>
+                <div class="item-meta">
+                    Item {{index}} | Current scroll: {{containerScrollY}}px ({{scrollPercentFormatted}}%)
+                </div>
+            </div>
+        </div>
+
+        <div class="debug-info">
+            <div class="debug-row"><strong>Scroll Container Debug:</strong></div>
+            <div class="debug-row">Scroll events fired: {{scrollEventCount}}</div>
+            <div class="debug-row">Last update: {{lastScrollUpdate}}</div>
+            <div class="debug-row">Is scrollable: {{containerIsScrollable}}</div>
+            <div class="debug-row">Items count: {{items.length}}</div>
+            <div class="debug-row">Commands received: {{commandsReceived}}</div>
+        </div>
+    </div>
+
+    <!-- Controls Container - child component -->
+    <div id="controls" class="controls">
+        <div style="margin-bottom: 10px; font-size: 11px; color: #666;">
+            Control Panel | Commands sent: {{commandsSent}}
+        </div>
+
+        <button data-pac-bind="click: scrollToTop" class="btn">Top (0%)</button>
+        <button data-pac-bind="click: scrollTo25" class="btn">25%</button>
+        <button data-pac-bind="click: scrollTo50" class="btn">50%</button>
+        <button data-pac-bind="click: scrollTo75" class="btn">75%</button>
+        <button data-pac-bind="click: scrollToBottom" class="btn">Bottom (100%)</button>
+        <br>
+        <button data-pac-bind="click: addItems" class="btn">Add Items</button>
+        <button data-pac-bind="click: removeItems" class="btn">Remove Items</button>
+        <button data-pac-bind="click: logMetrics" class="btn">Log Metrics</button>
+    </div>
+
+    <!-- App-level debug info -->
+    <div class="app-debug">
+        <strong>App Container Debug:</strong>
+        Messages routed: {{messagesRouted}}
     </div>
 </div>
 
 <script src="../wakapac.js"></script>
 <script>
+    // App wrapper container - coordinates child components
     const app = wakaPAC('#app', {
-        todos: [],
-        output: 'click "Fetch JSON"',
+        messagesRouted: 0,
 
-        async fetchTodo() {
-            this.output = 'loading...';
+        // Handle updates from child components
+        receiveFromChild(type, data, child) {
+            this.messagesRouted++;
 
-            try {
-                const data = await this.control('https://jsonplaceholder.typicode.com/todos/1', {
-                    responseType: 'json',
-                    timeout: 8000,
-                    latestOnly: true
-                });
-
-                this.todos.push(JSON.stringify(data, null, 2));
-            } catch (err) {
-                this.output = 'Error: ' + (err && err.message ? err.message : String(err));
+            // Route commands between children
+            if (type === 'scroll-command') {
+                this.notifyChild('#scrollable', data.command, data.payload);
             }
         }
     });
+
+    // Scrollable container - handles content and scroll state
+    const scrollContainer = wakaPAC('#scrollable', {
+        items: [
+            { title: 'Hierarchical Architecture', content: 'This example demonstrates proper WakaPAC component hierarchy with a wrapper container managing child communication.' },
+            { title: 'Automatic Parent Detection', content: 'WakaPAC automatically detects parent-child relationships based on DOM nesting and establishes communication channels.' },
+            { title: 'Built-in Scroll Properties', content: 'This container uses the framework\'s native containerScrollY, containerScrollContentHeight, and other scroll properties.' },
+            { title: 'Two-Way Binding', content: 'Scroll position can be read and written through reactive properties that sync with the DOM automatically.' },
+            { title: 'Component Messaging', content: 'Commands from the control panel are routed through the parent app container to maintain proper encapsulation.' },
+            { title: 'Computed Properties', content: 'Scroll percentage and position indicators are calculated automatically using computed properties.' },
+            { title: 'Event Handling', content: 'Scroll events are debounced and processed efficiently to maintain smooth performance.' },
+            { title: 'Status Detection', content: 'The framework can detect when you\'re at the top, bottom, or in various zones of the scrollable content.' },
+            { title: 'Dynamic Content', content: 'Add or remove items to see how the scroll metrics adapt to changing content height.' },
+            { title: 'Clean Architecture', content: 'This pattern scales well for complex applications with multiple interacting components.' }
+        ],
+
+        scrollEventCount: 0,
+        lastScrollUpdate: 'Never',
+        commandsReceived: 0,
+
+        computed: {
+            maxScrollY() {
+                return Math.max(0, this.containerScrollContentHeight - this.containerHeight);
+            },
+
+            scrollPercent() {
+                const percentage = (this.containerScrollY / this.maxScrollY) * 100;
+                return Math.min(Math.max(0, percentage), 100);
+            },
+
+            scrollPercentFormatted() {
+                return this.scrollPercent.toFixed(1);
+            },
+
+            isAtTop() {
+                return this.containerScrollY <= 5;
+            },
+
+            isAtBottom() {
+                return this.containerScrollY >= this.maxScrollY - 5;
+            },
+
+            isNearTop() {
+                return this.scrollPercent > 5 && this.scrollPercent <= 25;
+            },
+
+            isNearBottom() {
+                return this.scrollPercent >= 75 && this.scrollPercent < 95;
+            },
+
+            isInMiddle() {
+                return this.scrollPercent > 25 && this.scrollPercent < 75;
+            }
+        },
+
+        watch: {
+            containerScrollY(newY, oldY) {
+                this.scrollEventCount++;
+                this.lastScrollUpdate = new Date().toLocaleTimeString();
+
+                if (Math.abs(newY - oldY) > 10) {
+                    console.log(`Scroll position changed: ${oldY}px → ${newY}px`);
+                }
+            },
+
+            containerScrollContentHeight(newHeight, oldHeight) {
+                console.log(`Content height changed: ${oldHeight}px → ${newHeight}px`);
+            }
+        },
+
+        // Handle commands from parent (routed from control panel)
+        receiveFromParent(command, data) {
+            this.commandsReceived++;
+
+            switch (command) {
+                case 'scroll-to-top':
+                    this.containerScrollY = 0;
+                    break;
+                case 'scroll-to-percent':
+                    this.containerScrollY = this.maxScrollY * (data.percent / 100);
+                    break;
+                case 'scroll-to-bottom':
+                    this.containerScrollY = this.maxScrollY;
+                    break;
+                case 'add-items':
+                    this.addItems();
+                    break;
+                case 'remove-items':
+                    this.removeItems();
+                    break;
+                case 'log-metrics':
+                    this.logMetrics();
+                    break;
+            }
+        },
+
+        addItems() {
+            const newItems = [
+                { title: `New Item ${this.items.length + 1}`, content: 'This is dynamically added content to test scroll behavior with changing content height.' },
+                { title: `New Item ${this.items.length + 2}`, content: 'Notice how the scroll metrics automatically update when content is added.' },
+                { title: `New Item ${this.items.length + 3}`, content: 'The maximum scroll position recalculates based on the new content height.' }
+            ];
+            this.items.push(...newItems);
+        },
+
+        removeItems() {
+            if (this.items.length > 3) {
+                const removed = this.items.splice(-3, 3);
+            }
+        },
+
+        logMetrics() {
+            console.log('Current scroll metrics:', {
+                scrollY: this.containerScrollY,
+                contentHeight: this.containerScrollContentHeight,
+                visibleHeight: this.containerHeight,
+                maxScroll: this.maxScrollY,
+                scrollPercent: this.scrollPercentFormatted + '%',
+                isScrollable: this.containerIsScrollable,
+                totalEvents: this.scrollEventCount
+            });
+        }
+    });
+
+    // Control panel container - handles UI controls
+    const controlPanel = wakaPAC('#controls', {
+        commandsSent: 0,
+
+        // Send scroll commands through parent
+        scrollToTop() {
+            this.sendScrollCommand('scroll-to-top');
+        },
+
+        scrollTo25() {
+            this.sendScrollCommand('scroll-to-percent', { percent: 25 });
+        },
+
+        scrollTo50() {
+            this.sendScrollCommand('scroll-to-percent', { percent: 50 });
+        },
+
+        scrollTo75() {
+            this.sendScrollCommand('scroll-to-percent', { percent: 75 });
+        },
+
+        scrollToBottom() {
+            this.sendScrollCommand('scroll-to-bottom');
+        },
+
+        addItems() {
+            this.sendScrollCommand('add-items');
+        },
+
+        removeItems() {
+            this.sendScrollCommand('remove-items');
+        },
+
+        logMetrics() {
+            this.sendScrollCommand('log-metrics');
+        },
+
+        // Helper method to send commands via parent
+        sendScrollCommand(command, payload = null) {
+            this.commandsSent++;
+
+            // Send update to parent, which will route to scroll container
+            this.notifyParent('scroll-command', {
+                command: command,
+                payload: payload
+            });
+        }
+    });
 </script>
+
 </body>
 </html>

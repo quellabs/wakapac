@@ -842,7 +842,7 @@
             }
         },
 
-        onChildUpdate(eventType, data, childPAC) {
+        receiveFromChild(eventType, data, childPAC) {
             const childId = childPAC.container.id;
             logMessage('child', `Received from ${childId}: ${eventType}`, data);
 
@@ -973,7 +973,7 @@
         currentTheme: 'light',
         masterValue: 50,
 
-        onChildUpdate(eventType, data, childPAC) {
+        receiveFromChild(eventType, data, childPAC) {
             const childId = childPAC.container.id;
             logMessage('parent', `Received from ${childId}: ${eventType}`, data);
             this.updateChildrenCount();
