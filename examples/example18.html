@@ -249,10 +249,8 @@
             },
 
             scrollPercent() {
-                if (!this.containerIsScrollable || this.maxScrollY === 0) {
-                    return 0;
-                }
-                return (this.containerScrollY / this.maxScrollY) * 100;
+                const percentage = (this.containerScrollY / this.maxScrollY) * 100;
+                return Math.min(Math.max(0, percentage), 100);
             },
 
             scrollPercentFormatted() {
