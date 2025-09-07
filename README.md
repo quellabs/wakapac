@@ -378,9 +378,17 @@ WakaPAC automatically provides reactive browser state properties that update whe
 **Container Viewport Visibility:**
 - **`containerVisible`**: `true` when any part of the container is visible in viewport
 - **`containerFullyVisible`**: `true` when container is completely visible in viewport
-- **`containerClientRect`**: Position and dimensions object relative to viewport
+- **`containerClientRect`**: Position and dimensions object relative to viewport (DOMRect)
 - **`containerWidth`**: Container width in pixels
 - **`containerHeight`**: Container height in pixels
+
+**Container Scroll Properties:**
+- **`containerIsScrollable`**: `true` if container can scroll in any direction
+- **`containerScrollX`**: Current horizontal scroll position in pixels (can be set programmatically)
+- **`containerScrollY`**: Current vertical scroll position in pixels (can be set programmatically)
+- **`containerScrollContentWidth`**: Total scrollable content width (scrollWidth)
+- **`containerScrollContentHeight`**: Total scrollable content height (scrollHeight)
+- **`containerScrollWindow`**: Object containing scroll measurements (DOMRect)
 
 **Container Focus State:**
 - **`containerFocus`**: `true` when container has direct focus (`:focus`)
