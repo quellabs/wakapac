@@ -4218,10 +4218,6 @@
                     return Object.entries(value).filter(([k, v]) => v && k.trim()).map(([k]) => k.trim());
                 }
 
-                if (Array.isArray(value)) {
-                    return value.filter(c => typeof c === 'string' && c.trim()).map(c => c.trim());
-                }
-
                 if (typeof value === 'string') {
                     return value.trim().split(/\s+/).filter(Boolean);
                 }

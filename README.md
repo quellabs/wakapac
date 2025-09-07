@@ -185,9 +185,6 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 
 <!-- Object syntax: conditional classes -->
 <div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
-
-<!-- Array of classes -->
-<div data-pac-bind="class: [baseClass, conditionalClass]">
 ```
 
 **`style`** - CSS style manipulation (supports object syntax)
