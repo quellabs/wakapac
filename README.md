@@ -910,14 +910,6 @@ These methods are available when you have a reference to the component instance:
 component.destroy()                   // Destroys component and cleans up resources
 ```
 
-**Usage Example:**
-```javascript
-const app = wakaPAC('#app', { /* ... */ });
-
-// Later, when component is no longer needed
-app.destroy();
-```
-
 ### Dual-Access Methods (Available both internally and externally)
 
 These methods are available as `this.methodName()` inside the component and `component.methodName()` outside:
