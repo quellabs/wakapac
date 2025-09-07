@@ -1,10 +1,10 @@
 # WakaPAC
 
-A modern reactivity library using the PAC pattern — a spiritual successor to KnockoutJS, powered by Proxies.
+A full-featured application library built on the PAC pattern — bringing KnockoutJS-style simplicity to modern web apps.
 
 ## Introduction
 
-WakaPAC is a lightweight reactive library built around the Presentation–Abstraction–Control (PAC) pattern. It combines the declarative simplicity of KnockoutJS with the modern power of JavaScript Proxies — no hacks, no virtual DOM, no build step.
+WakaPAC is a complete application foundation built around the Presentation–Abstraction–Control (PAC) pattern. It provides everything needed for reactive web applications in a single 50KB library - no build tools, no dependency management, no ecosystem complexity.
 
 ### What's PAC?
 
@@ -26,16 +26,17 @@ This results in more predictable data flow and easier debugging than traditional
 
 - **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes
 - **Two-way reactivity** for objects and nested arrays
-- **Win32-style** `eventProc` for low-level event handling when you want total control
 - **Drop-in script file** - no bundler required
+- **Win32-style** `eventProc` for low-level event handling when you want total control
 - **Hierarchical components** with parent–child notification
+- **Everything included** - reactivity, HTTP utilities, component communication, and browser state tracking in one library
+- **No ecosystem complexity** - one script file provides what typically requires multiple React/Vue packages
 
 ### Who WakaPAC is For
 
-- You loved KnockoutJS, but wish it had modern reactivity
-- You want a small, drop-in library without React/Vue's complexity
-- You come from Win32/desktop dev and want familiar PAC patterns
-- You're building internal tools, dashboards, or small-to-medium apps without needing a bundler
+- You want KnockoutJS-style simplicity with modern JavaScript power
+- You need a complete solution without the complexity of React/Vue ecosystems
+- You're building applications that need comprehensive functionality in a single library
 
 ### Not for you if
 
