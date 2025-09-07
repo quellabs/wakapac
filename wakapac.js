@@ -2870,16 +2870,29 @@
              * @returns {Object} The created binding element object for further manipulation
              */
             createForeachBinding(element, target) {
+                // Guard to prevent same element binding twice
+                if (typeof element.__pacForeachBound !== 'undefined' && element.__pacForeachTarget === target) {
+                    return element.__pacForeachBinding;
+                }
+
+                // Fetch templateHtml
+                const templateHtml = element.innerHTML;
+
                 // Create the binding object with foreach-specific configuration
                 const bindingElement = this.createBinding('foreach', element, {
                     target: target,
                     collection: target,
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
-                    template: element.innerHTML,
+                    template: templateHtml,
                     previous: [],
                     fingerprints: null
                 });
+
+                // Create guard
+                element.__pacForeachBound = true;
+                element.__pacForeachTarget = target;
+                element.__pacForeachBinding = bindingElement;
 
                 // Clear the element content since we'll populate it dynamically
                 // The original template is preserved in bindingElement.template
@@ -3301,11 +3314,11 @@
              */
             createForeachItemElement(template) {
                 // Create a temporary container to parse the HTML template string
-                const tempContainer = document.createElement('tbody');
+                const tempContainer = document.createElement('template');
                 tempContainer.innerHTML = template.trim();
-
+                
                 // Convert NodeList to Array for easier manipulation
-                const childNodes = Array.from(tempContainer.childNodes);
+                const childNodes = Array.from(tempContainer.content.childNodes);
 
                 // If there's exactly one top-level element, use it directly (no wrapper)
                 // This optimizes the DOM structure by avoiding unnecessary wrapper elements
@@ -4278,6 +4291,7 @@
              * @returns {void}
              */
             rebuildForeachContent(binding, array, foreachVars) {
+                // Fetch container
                 const container = binding.element;
 
                 // Clear existing content completely - destroys all child elements and their bindings
@@ -5719,14 +5733,12 @@
     if (!window._wakaPACHierarchyListener) {
         window._wakaPACHierarchyListener = true;
 
+        // Listen for pac:component-ready events
         document.addEventListener('pac:component-ready', () => {
             // Clear any existing timeout to debounce multiple rapid component creations
             clearTimeout(window._wakaPACHierarchyTimeout);
-
             window._wakaPACHierarchyTimeout = setTimeout(() => {
-                console.log('Resolving hierarchy for', window.PACRegistry.components.size, 'components');
-
-                // Clear hierarchy cache
+                    // Clear hierarchy cache
                 window.PACRegistry.hierarchyCache = new WeakMap();
 
                 // Re-establish hierarchy for all components
