@@ -918,6 +918,9 @@ These methods are available as `this.methodName()` inside the component and `com
 // HTTP requests
 control(url, options)                 // Makes HTTP requests with enhanced features
 
+// Serialize to JSON
+toJSON()
+
 // DOM utilities
 getElementPosition(elementOrId)       // Gets global position of element in document
 ```
@@ -936,6 +939,7 @@ getElementPosition(elementOrId)       // Gets global position of element in docu
 | `notifyChild()`        |         ✅          |            ❌            | Send message to specific child            |
 | `control()`            |         ✅          |            ✅            | Make HTTP requests with advanced features |
 | `getElementPosition()` |         ✅          |            ✅            | Get element's global document position    |
+| `toJSON()`             |         ✅          |            ✅            | Convert container contents to JSON        |
 | `destroy()`            |         ❌          |            ✅            | Clean up component and free resources     |
 
 ### Access Patterns Summary

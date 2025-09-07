@@ -2006,37 +2006,86 @@
                 // Add communication and utility methods to the reactive object
                 // These methods provide the reactive object with capabilities for:
                 Object.assign(reactive, {
-                    // Parent-child component communication
+                    /**
+                     * Sends a notification to the parent component
+                     * @param {string} type - Type of notification
+                     * @param {*} data - Data to send with the notification
+                     */
                     notifyParent: (type, data) => this.notifyParent(type, data),
 
-                    // Broadcasting messages to all child components
+                    /**
+                     * Sends a command to all child components
+                     * @param {string} cmd - Command to send
+                     * @param {*} data - Data to send with the command
+                     */
                     notifyChildren: (cmd, data) => this.notifyChildren(cmd, data),
 
-                    // Sending targeted messages to a specific child component
+                    /**
+                     * Sends a command to a specific child component
+                     * @param {string|Function} selector - Selector to find the target child
+                     * @param {string} cmd - Command to send
+                     * @param {*} data - Data to send with the command
+                     */
                     notifyChild: (selector, cmd, data) => this.notifyChild(selector, cmd, data),
 
-                    // Serializing the reactive object to JSON (excluding non-serializable properties)
+                    /**
+                     * Serializing the reactive object to JSON (excluding non-serializable properties)
+                     * @returns {{}}
+                     */
                     toJSON: () => this.serializeToJSON(),
 
-                    // Making HTTP requests with built-in error handling and response processing
+                    /**
+                     * Makes an HTTP request with PAC-specific headers and handling
+                     * @param {string} url - URL to request
+                     * @param {Object} opts - Request options
+                     * @returns {Promise} Promise that resolves with response data
+                     */
                     control: (url, opts = {}) => this.makeHttpRequest(url, opts),
 
-                    // Reads DOM state from a specific element and stores it in a data model property
+                    /**
+                     * Reads DOM state from a specific element and stores it in a data model property
+                     * @param {string} elementSelector - CSS selector or ID to find the element
+                     * @returns {boolean|boolean|*|string|string}
+                     */
                     readDOMValue: (elementSelector) => control.readDOMValue(elementSelector),
 
-                    // Sets a value to a DOM element (input, select, textarea, etc.)
+                    /**
+                     * Sets a value to a DOM element (input, select, textarea, etc.)
+                     * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
+                     * @param {string|boolean} value - The value to set (string for most inputs, boolean for checkboxes)
+                     * @returns {boolean} True if value was set successfully, false otherwise
+                     */
                     writeDOMValue: (elementOrSelector, value) => control.writeDOMValue(elementOrSelector, value),
 
-                    // Formats a value for display in text content or UI elements
+                    /**
+                     * Formats a value for display in text content or UI elements
+                     * Handles null/undefined, objects, arrays, and primitives appropriately
+                     * @param {*} value - Value to format for display
+                     * @returns {string} Human-readable formatted string
+                     */
                     formatValue: (value) => Utils.formatValue(value),
 
-                    // Escapes HTML entities to prevent XSS when displaying user input
+                    /**
+                     * Escapes HTML entities to prevent XSS when displaying user input
+                     * Converts <, >, &, quotes to their HTML entity equivalents
+                     * @param {string} str - String to escape HTML entities in
+                     * @returns {string} HTML-safe escaped string
+                     */
                     escapeHTML: (str) => Utils.escapeHTML(str),
 
-                    // Strips all HTML tags from user input to get plain text
+                    /**
+                     * Strips all HTML tags from user input to get plain text
+                     * Use this for user-generated content that should not contain HTML
+                     * @param {string} html - HTML string to sanitize
+                     * @returns {string} Plain text with all HTML tags removed
+                     */
                     sanitizeUserInput: (html) => Utils.sanitizeUserInput(html),
 
-                    // Fetch (global) element position
+                    /**
+                     * Gets the global position of an element within the document
+                     * @param {string|Element} elementOrId - Element ID or DOM element
+                     * @returns {Object|null} Position object with x, y properties or null if not found
+                     */
                     getElementPosition: (elementOrId) => Utils.getElementPosition(elementOrId)
                 });
 
@@ -5596,6 +5645,12 @@
                  * @returns {Promise} Promise that resolves with response data
                  */
                 control: (url, opts = {}) => control.makeHttpRequest(url, opts),
+
+                /**
+                 * Serializing the reactive object to JSON (excluding non-serializable properties)
+                 * @returns {{}}
+                 */
+                toJSON: () => control.serializeToJSON(),
 
                 /**
                  * Gets the global position of an element within the document
