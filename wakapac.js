@@ -882,7 +882,7 @@
             '||': 1, '&&': 2,
             '===': 6, '!==': 6, '==': 6, '!=': 6,
             '<': 7, '>': 7, '<=': 7, '>=': 7,
-            '+': 8, '-': 8, '*': 9, '/': 9,
+            '+': 8, '-': 8, '*': 9, '/': 9, '%': 9,
             '!': 10, 'unary-': 10, 'unary+': 10
         },
 
@@ -890,7 +890,8 @@
             '||': 'logical', '&&': 'logical',
             '===': 'comparison', '!==': 'comparison', '==': 'comparison', '!=': 'comparison',
             '>=': 'comparison', '<=': 'comparison', '>': 'comparison', '<': 'comparison',
-            '+': 'arithmetic', '-': 'arithmetic', '*': 'arithmetic', '/': 'arithmetic'
+            '+': 'arithmetic', '-': 'arithmetic', '*': 'arithmetic', '/': 'arithmetic',
+            '%': 'arithmetic'
         },
 
         /**
@@ -1035,7 +1036,7 @@
                 }
 
                 // Single character operators
-                if ('+-*/<>!?:'.includes(char)) {
+                if ('+-*/<>!?:%'.includes(char)) {
                     const precedence = this.getOperatorPrecedence(char);
 
                     let type;
@@ -1619,6 +1620,9 @@
                 case '/':
                     return Number(left) / Number(right);
 
+                case '%':
+                    return Number(left) % Number(right);
+
                 case '===':
                     return left === right;
 
@@ -2084,11 +2088,26 @@
                     browserDocumentWidth: document.documentElement.scrollWidth,
                     browserDocumentHeight: document.documentElement.scrollHeight,
 
+                    // Container scroll properties
+                    containerIsScrollable: false,           // Can scroll in any direction
+                    containerScrollX: 0,                    // Current horizontal scroll position
+                    containerScrollY: 0,                    // Current vertical scroll position
+                    containerScrollContentWidth: 0,         // Total scrollable content width (scrollWidth)
+                    containerScrollContentHeight: 0,        // Total scrollable content height (scrollHeight)
+                    containerScrollWindow: {
+                        top: 0,        // scrollTop
+                        left: 0,       // scrollLeft
+                        right: 0,      // scrollWidth
+                        bottom: 0,     // scrollHeight
+                        x: 0,          // scrollLeft (alias)
+                        y: 0           // scrollTop (alias)
+                    },
+
                     // Per-container viewport visibility properties
                     containerFocus: Utils.isElementDirectlyFocused(this.container),
                     containerFocusWithin: Utils.isElementFocusWithin(this.container),
-                    containerVisible: Utils.isElementVisible(container),
-                    containerFullyVisible: Utils.isElementFullyVisible(container),
+                    containerVisible: Utils.isElementVisible(this.container),
+                    containerFullyVisible: Utils.isElementFullyVisible(this.container),
                     containerClientRect: {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0},
                     containerWidth: 0,
                     containerHeight: 0
@@ -2097,10 +2116,29 @@
                 // Create reactive properties for all properties
                 Object.entries(props).forEach(([k, v]) => this.createReactiveProperty(reactive, k, v));
 
+                // Set initial scroll values directly to prevent reactivity
+                reactive.containerScrollX = this.container.scrollLeft;
+                reactive.containerScrollY = this.container.scrollTop;
+                reactive.containerScrollContentWidth = this.container.scrollWidth;
+                reactive.containerScrollContentHeight = this.container.scrollHeight;
+                reactive.containerIsScrollable = this.container.scrollWidth > reactive.containerWidth || this.container.scrollHeight > reactive.containerHeight;
+
+                Object.assign(reactive.containerScrollWindow, {
+                    top: this.container.scrollTop,
+                    left: this.container.scrollLeft,
+                    right: this.container.scrollWidth,
+                    bottom: this.container.scrollHeight,
+                    x: this.container.scrollLeft,
+                    y: this.container.scrollTop
+                });
+
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
                 // regardless of how many components use browser properties
                 this.setupGlobalBrowserListeners();
+
+                // Set up container-specific scroll tracking
+                this.setupContainerScrollTracking();
             },
 
             /**
@@ -2309,6 +2347,71 @@
             },
 
             /**
+             * Sets up scroll event tracking for the container element with debounced handling.
+             * Creates an optimized scroll listener that updates container scroll state at ~60fps
+             * to prevent performance issues during rapid scroll events.
+             *
+             * @memberof {Object} - The parent class/object containing this method
+             * @method setupContainerScrollTracking
+             * @returns {void}
+             */
+            setupContainerScrollTracking() {
+                // Create debounced scroll handler for this container
+                const debouncedScrollHandler = this.debounce(() => {
+                    this.updateContainerScrollState();
+                }, 16); // ~60fps
+
+                // Add scroll listener to this container
+                this.container.addEventListener('scroll', debouncedScrollHandler, { passive: true });
+
+                // Store reference for cleanup
+                this.containerScrollHandler = debouncedScrollHandler;
+            },
+
+            // Add new method to update container scroll state
+            updateContainerScrollState() {
+                // Get scroll measurements
+                const scrollX = this.container.scrollLeft;
+                const scrollY = this.container.scrollTop;
+                const scrollContentWidth = this.container.scrollWidth;
+                const scrollContentHeight = this.container.scrollHeight;
+
+                // Calculate scrollable state (use existing containerWidth/Height for visible dimensions)
+                const isScrollable = scrollContentWidth > this.abstraction.containerWidth ||
+                    scrollContentHeight > this.abstraction.containerHeight;
+
+                // Update individual properties
+                this.abstraction.containerScrollX = scrollX;
+                this.abstraction.containerScrollY = scrollY;
+                this.abstraction.containerScrollContentWidth = scrollContentWidth;
+                this.abstraction.containerScrollContentHeight = scrollContentHeight;
+                this.abstraction.containerIsScrollable = isScrollable;
+
+                // Update scroll window object
+                Object.assign(this.abstraction.containerScrollWindow, {
+                    top: scrollY,
+                    left: scrollX,
+                    right: scrollContentWidth,
+                    bottom: scrollContentHeight,
+                    x: scrollX,
+                    y: scrollY
+                });
+            },
+
+            // Add debounce utility method
+            debounce(func, wait) {
+                let timeout;
+                return function executedFunction(...args) {
+                    const later = () => {
+                        clearTimeout(timeout);
+                        func(...args);
+                    };
+                    clearTimeout(timeout);
+                    timeout = setTimeout(later, wait);
+                };
+            },
+
+            /**
              * Dispatch an event to eventProc
              * @param event
              * @param message
@@ -2429,6 +2532,13 @@
                         // Capture the previous value for change detection and watchers
                         const oldValue = value;
 
+                        // Special handling for scroll properties
+                        if (key === 'containerScrollX' && this.container) {
+                            this.container.scrollLeft = newValue;
+                        } else if (key === 'containerScrollY' && this.container) {
+                            this.container.scrollTop = newValue;
+                        }
+
                         // Determine if we're dealing with objects that might need deep comparison
                         const isObject = Utils.isReactive(value) || Utils.isReactive(newValue);
 
@@ -2466,7 +2576,8 @@
              * @param {string} [changePath] - Full path of the change (for deep watchers)
              */
             triggerWatcher(property, newValue, oldValue, changePath = null) {
-                if (!this.original.watch) {
+                // Guard missing abstraction
+                if (!this.abstraction || !this.original.watch) {
                     return;
                 }
 
@@ -3741,8 +3852,18 @@
 
             /**
              * Central change notification hub - all property changes flow through here
+             * @param propertyPath
+             * @param newValue
+             * @param changeType
+             * @param metadata
              */
             notifyChange(propertyPath, newValue, changeType, metadata = {}) {
+                // Guard against calls during initialization when abstraction is not yet set
+                if (!this.abstraction) {
+                    return;
+                }
+
+                // Fetch the property path
                 const rootProperty = propertyPath.split('.')[0];
 
                 // 1. Update watchers (immediate)
@@ -4520,7 +4641,7 @@
                 const fetchPromise = this.executeFetch(config, requestState)
                     .then(response => this.processResponse(response, config, requestState))
                     .then(data => this.handleSuccess(data, config, requestState))
-                    .catch(error => this.handleError(error, config, requestState));
+                    .catch(error => this.handleError(error, config));
 
                 // Race between fetch and timeout (if timeout is enabled)
                 const finalPromise = timeoutPromise ?
@@ -5057,10 +5178,9 @@
              * Handles request errors including network failures, timeouts, and aborts.
              * @param {Error} error - The error that occurred
              * @param {Object} config - Request configuration
-             * @param {Object} requestState - Current request state
              * @returns {any|throws} Returns undefined for ignored cancellations, otherwise re-throws
              */
-            handleError(error, config, requestState) {
+            handleError(error, config) {
                 const isCancellation = this.isCancellationError(error);
 
                 if (isCancellation && config.ignoreAbort) {
@@ -5324,6 +5444,12 @@
 
                 // Clear the event listener list
                 this.eventListeners?.clear();
+
+                // Clean up container scroll listener
+                if (this.containerScrollHandler) {
+                    this.container?.removeEventListener('scroll', this.containerScrollHandler);
+                    this.containerScrollHandler = null;
+                }
             },
 
             /**
@@ -5571,23 +5697,10 @@
         // making it discoverable by other components and external code
         window.PACRegistry.register(selector, control);
 
-        // Establish parent-child relationships for this component by traversing
-        // the DOM hierarchy and linking it to any parent PAC components
-        control.establishHierarchy();
-
-        // Re-establish hierarchy for existing components
-        // Iterate through all previously registered components to update their
-        // hierarchical relationships, as the new component may now serve as
-        // a parent to existing orphaned components
-        window.PACRegistry.components.forEach(component => {
-            // Skip the current component (already processed) and components
-            // that already have established parent relationships
-            if (component !== control && !component.parent) {
-                // Attempt to find and establish parent-child relationships
-                // for components that were previously orphaned
-                component.establishHierarchy();
-            }
-        });
+        // Signal that a new component is ready to set proper hierarchies
+        document.dispatchEvent(new CustomEvent('pac:component-ready', {
+            detail: { component: control, selector: selector }
+        }));
 
         // Return the public API for immediate use
         // This allows the caller to interact with the component through
@@ -5601,6 +5714,22 @@
 
     // Initialize global registry
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
+
+    // Event-driven hierarchy resolution
+    if (!window._wakaPACHierarchyListener) {
+        window._wakaPACHierarchyListener = true;
+
+        document.addEventListener('pac:component-ready', () => {
+            // Debounce hierarchy re-evaluation to handle multiple components created quickly
+            clearTimeout(window._wakaPACHierarchyTimeout);
+            window._wakaPACHierarchyTimeout = setTimeout(() => {
+                // Re-establish hierarchy for all components
+                window.PACRegistry.components.forEach(component => {
+                    component.establishHierarchy();
+                });
+            }, 10); // Short delay to batch multiple registrations
+        });
+    }
 
     // Export to global scope
     window.wakaPAC = wakaPAC;
