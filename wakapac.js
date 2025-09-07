@@ -3416,8 +3416,23 @@
 
                         // Set up two-way binding for form inputs if we're in a foreach context
                         if (parentBinding && (type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
-                            const propertyPath = PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
-                            this.setupInputElement(el, propertyPath, type);
+                            // Fetch the context
+                            const item = contextVars[parentBinding.itemName];
+
+                            // Find ALL array properties that contain this exact item object
+                            const sourceArray = Object.keys(this.abstraction).find(key => {
+                                const arr = this.abstraction[key];
+                                return Array.isArray(arr) && arr.includes(item);
+                            });
+
+                            if (sourceArray) {
+                                const sourceIndex = this.abstraction[sourceArray].indexOf(item);
+                                const propertyPath = PropertyPath.buildNestedPropertyPath(target, contextVars, sourceArray, sourceIndex);
+                                this.setupInputElement(el, propertyPath, type);
+                            } else {
+                                const propertyPath = PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
+                                this.setupInputElement(el, propertyPath, type);
+                            }
                         }
 
                         // Handle event bindings specially if we're in foreach context
