@@ -4,6 +4,7 @@
 <div id="counter" tabindex="0" style="border: 1px solid #ccc; padding: 20px; outline: none;">
     <p>Count: {{count}}</p>
     <p>Focus: {{containerFocusWithin ? 'YES' : 'NO'}}</p>
+    <p>Viewport: {{browserViewportWidth}} x {{browserViewportHeight}}</p>
     <button data-pac-bind="click: increment">+</button>
     <button data-pac-bind="click: decrement">-</button>
 </div>
