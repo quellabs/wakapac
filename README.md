@@ -606,7 +606,7 @@ const child = wakaPAC('#child-app', {
 
 // Parent receives notifications
 const parent = wakaPAC('#parent-app', {
-    onChildUpdate(eventType, data, childPAC) {
+    receiveFromChild(eventType, data, childPAC) {
         if (eventType === 'alert') {
             console.log('Alert:', data.message);
         }

@@ -214,17 +214,12 @@
         messagesRouted: 0,
 
         // Handle updates from child components
-        receiveUpdate(type, data, child) {
-            console.log('App received update:', type, 'from child:', child.container.id);
+        receiveFromChild(type, data, child) {
             this.messagesRouted++;
 
             // Route commands between children
             if (type === 'scroll-command') {
-                // Find the scroll container child and send it the command
-                const scrollChild = this.findChildBySelector('#scrollable');
-                if (scrollChild) {
-                    scrollChild.receiveFromParent(data.command, data.payload);
-                }
+                this.notifyChild('#scrollable', data.command, data.payload);
             }
         }
     });
@@ -302,7 +297,6 @@
 
         // Handle commands from parent (routed from control panel)
         receiveFromParent(command, data) {
-            console.log('Scroll container received command:', command, data);
             this.commandsReceived++;
 
             switch (command) {
@@ -334,13 +328,11 @@
                 { title: `New Item ${this.items.length + 3}`, content: 'The maximum scroll position recalculates based on the new content height.' }
             ];
             this.items.push(...newItems);
-            console.log(`Added ${newItems.length} items. Total: ${this.items.length}`);
         },
 
         removeItems() {
             if (this.items.length > 3) {
                 const removed = this.items.splice(-3, 3);
-                console.log(`Removed ${removed.length} items. Total: ${this.items.length}`);
             }
         },
 
@@ -396,7 +388,6 @@
 
         // Helper method to send commands via parent
         sendScrollCommand(command, payload = null) {
-            console.log('Control panel sending command:', command, payload);
             this.commandsSent++;
 
             // Send update to parent, which will route to scroll container

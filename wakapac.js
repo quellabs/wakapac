@@ -2109,28 +2109,12 @@
                     containerVisible: Utils.isElementVisible(this.container),
                     containerFullyVisible: Utils.isElementFullyVisible(this.container),
                     containerClientRect: {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0},
-                    containerWidth: 0,
-                    containerHeight: 0
+                    containerWidth: this.container.clientWidth,
+                    containerHeight: this.container.clientHeight
                 };
 
                 // Create reactive properties for all properties
                 Object.entries(props).forEach(([k, v]) => this.createReactiveProperty(reactive, k, v));
-
-                // Set initial scroll values directly to prevent reactivity
-                reactive.containerScrollX = this.container.scrollLeft;
-                reactive.containerScrollY = this.container.scrollTop;
-                reactive.containerScrollContentWidth = this.container.scrollWidth;
-                reactive.containerScrollContentHeight = this.container.scrollHeight;
-                reactive.containerIsScrollable = this.container.scrollWidth > reactive.containerWidth || this.container.scrollHeight > reactive.containerHeight;
-
-                Object.assign(reactive.containerScrollWindow, {
-                    top: this.container.scrollTop,
-                    left: this.container.scrollLeft,
-                    right: this.container.scrollWidth,
-                    bottom: this.container.scrollHeight,
-                    x: this.container.scrollLeft,
-                    y: this.container.scrollTop
-                });
 
                 // Set up global event listeners to keep these properties synchronized
                 // Uses singleton pattern to ensure listeners are only attached once per page
@@ -2350,12 +2334,14 @@
              * Sets up scroll event tracking for the container element with debounced handling.
              * Creates an optimized scroll listener that updates container scroll state at ~60fps
              * to prevent performance issues during rapid scroll events.
-             *
              * @memberof {Object} - The parent class/object containing this method
              * @method setupContainerScrollTracking
              * @returns {void}
              */
             setupContainerScrollTracking() {
+                // First time setup
+                requestAnimationFrame(() => this.updateContainerScrollState());
+
                 // Create debounced scroll handler for this container
                 const debouncedScrollHandler = this.debounce(() => {
                     this.updateContainerScrollState();
@@ -2377,7 +2363,8 @@
                 const scrollContentHeight = this.container.scrollHeight;
 
                 // Calculate scrollable state (use existing containerWidth/Height for visible dimensions)
-                const isScrollable = scrollContentWidth > this.abstraction.containerWidth ||
+                const isScrollable =
+                    scrollContentWidth > this.abstraction.containerWidth ||
                     scrollContentHeight > this.abstraction.containerHeight;
 
                 // Update individual properties
@@ -2529,15 +2516,15 @@
 
                     // Setter: Handle value changes with full reactive capabilities
                     set: (newValue) => {
-                        // Capture the previous value for change detection and watchers
-                        const oldValue = value;
-
                         // Special handling for scroll properties
                         if (key === 'containerScrollX' && this.container) {
                             this.container.scrollLeft = newValue;
                         } else if (key === 'containerScrollY' && this.container) {
                             this.container.scrollTop = newValue;
                         }
+
+                        // Capture the previous value for change detection and watchers
+                        const oldValue = value;
 
                         // Determine if we're dealing with objects that might need deep comparison
                         const isObject = Utils.isReactive(value) || Utils.isReactive(newValue);
@@ -4543,8 +4530,8 @@
              */
             receiveUpdate(type, data, child) {
                 // If abstraction layer has a child update handler, call it
-                if (this.abstraction.onChildUpdate) {
-                    this.abstraction.onChildUpdate(type, data, child);
+                if (this.abstraction.receiveFromChild) {
+                    this.abstraction.receiveFromChild(type, data, child);
                 }
 
                 // Dispatch a custom DOM event to allow external listeners to respond
@@ -4598,7 +4585,7 @@
             notifyChild(selector, cmd, data) {
                 // Find the first child whose container element matches the selector
                 const child = Array.from(this.children).find(c => c.container.matches(selector));
-
+                
                 // If matching child found and has receiveFromParent method, send the command
                 if (child && child.receiveFromParent) {
                     child.receiveFromParent(cmd, data);
