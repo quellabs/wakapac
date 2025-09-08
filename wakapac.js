@@ -3395,8 +3395,21 @@
                         return;
                     }
 
-                    // Default case: evaluate expression and apply result
-                    const context = Object.assign({}, this.abstraction, foreachVars || {});
+                    // Determine correct context
+                    let context;
+
+                    if (binding.element._pacForeachItem !== undefined) {
+                        const foreachContext = {
+                            [binding.element._pacForeachItemName]: binding.element._pacForeachItem,
+                            [binding.element._pacForeachIndexName]: binding.element._pacForeachIndex
+                        };
+
+                        context = Object.assign({}, this.abstraction, foreachContext);
+                    } else {
+                        context = Object.assign({}, this.abstraction, foreachVars || {});
+                    }
+
+                    // Call handler
                     const parsed = this.getParsedExpression(binding);
                     handler(context, ExpressionParser.evaluate(parsed, context));
 
@@ -3513,26 +3526,51 @@
 
                 // Process each element's bindings
                 bindingElements.forEach(el => {
-                    // Fetch the data-pac-bind attribute. If it has none, skip it
+                    // Store foreach context on the element for later use
+                    if (parentBinding && parentBinding.type === 'foreach') {
+                        el._pacForeachItem = contextVars[parentBinding.itemName];
+                        el._pacForeachIndex = contextVars[parentBinding.indexName];
+                        el._pacForeachItemName = parentBinding.itemName;
+                        el._pacForeachIndexName = parentBinding.indexName;
+                    }
+
                     const bindingString = el.getAttribute('data-pac-bind');
 
                     if (!bindingString) {
                         return;
                     }
 
-                    // Parse and process the bind
+                    // Parse and process each binding
                     ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
-                        // Handle nested foreach - existing code
+                        // Skip nested foreach bindings - they're handled separately
                         if (type === 'foreach') {
                             return;
                         }
 
-                        // Set up two-way binding for form inputs if we're in a foreach context
-                        if (parentBinding && (type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
-                            // Fetch the context
-                            const item = contextVars[parentBinding.itemName];
+                        // Handle event bindings
+                        if (Utils.isEventType(type)) {
+                            if (parentBinding) {
+                                // For foreach elements, attach direct event listeners with context
+                                this.handleEventBinding(
+                                    el, type, target,
+                                    contextVars[parentBinding.itemName],
+                                    contextVars[parentBinding.indexName]
+                                );
+                            } else {
+                                // For non-foreach elements, use the standard binding system
+                                const binding = this.createBinding('event', el, {
+                                    eventType: type,
+                                    method: target,
+                                    target: target
+                                });
+                                this.bindings.set(binding.id, binding);
+                            }
+                            return;
+                        }
 
-                            // Find ALL array properties that contain this exact item object
+                        // Handle two-way data binding for form inputs in foreach context
+                        if (parentBinding && (type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
+                            const item = contextVars[parentBinding.itemName];
                             const sourceArray = Object.keys(this.abstraction).find(key => {
                                 const arr = this.abstraction[key];
                                 return Array.isArray(arr) && arr.includes(item);
@@ -3546,20 +3584,11 @@
                                 const propertyPath = PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
                                 this.setupInputElement(el, propertyPath, type);
                             }
-                        }
-
-                        // Handle event bindings specially if we're in foreach context
-                        if (Utils.isEventType(type) && parentBinding) {
-                            this.handleEventBinding(
-                                el, type, target,
-                                contextVars[parentBinding.itemName],
-                                contextVars[parentBinding.indexName]
-                            );
 
                             return;
                         }
 
-                        // Handle all other bindings using existing infrastructure
+                        // Handle all other bindings (class, style, visible, etc.) using temporary binding evaluation
                         const tempBinding = this.createEvaluationBinding(el, type, target);
                         this.updateBinding(tempBinding, null, contextVars);
                     });
@@ -4363,6 +4392,10 @@
                         return;
                     }
 
+                    // Update stored foreach context
+                    element._pacForeachItem = item;
+                    element._pacForeachIndex = index;
+
                     // Create context variables for this specific foreach item
                     // This makes the item data available to binding expressions as variables
                     const itemContext = Object.assign({}, foreachVars || {}, {
@@ -4441,9 +4474,6 @@
                     // Set up attribute bindings (class, style, events, etc.) for the new element
                     this.processAttributeBindingsForElement(itemElement, itemContext, binding);
 
-                    // Process event bindings for dynamic elements
-                    this.processEventBindingsForElement(itemElement, itemContext);
-
                     // Add the configured element to the fragment
                     fragment.appendChild(itemElement);
                 });
@@ -4451,46 +4481,6 @@
                 // Add all new elements to the DOM in a single operation
                 // This minimizes layout recalculations and improves performance
                 container.appendChild(fragment);
-            },
-
-            /**
-             * Processes event bindings for a DOM element and its descendants, creating binding
-             * objects for all elements that have event-type data attributes.
-             * @param {HTMLElement} element - The root DOM element to process for event bindings
-             * @param {Object} [itemContext] - Context object from parent foreach loop, used for
-             *                                 scoped method execution within iteration contexts
-             * @returns {void}
-             */
-            processEventBindingsForElement(element, itemContext) {
-                // Get the root element plus all nested elements that have binding attributes
-                const elementsWithBindings = [element, ...element.querySelectorAll('[data-pac-bind]')];
-
-                elementsWithBindings.forEach(el => {
-                    // Extract the binding configuration string from the data attribute
-                    const bindingString = el.getAttribute('data-pac-bind');
-
-                    // Skip elements without binding strings
-                    if (!bindingString) {
-                        return;
-                    }
-
-                    // Parse the binding string into individual binding configurations
-                    ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
-                        // Check if this binding type represents an event (e.g., 'click', 'submit', etc.)
-                        if (Utils.isEventType(type)) {
-                            // Create a new event binding object with all necessary metadata
-                            const binding = this.createBinding('event', el, {
-                                eventType: type,            // The DOM event type (click, submit, etc.)
-                                method: target,             // The method name to call when event fires
-                                target: target,             // Redundant with method - consider removing
-                                foreachContext: itemContext // Context from parent foreach loop for scoped execution
-                            });
-
-                            // Store the binding in the central registry using its unique ID
-                            this.bindings.set(binding.id, binding);
-                        }
-                    });
-                });
             },
 
             /**
