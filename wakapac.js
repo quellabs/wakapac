@@ -4881,35 +4881,35 @@
              * @returns {Object} Object with method and body properties
              */
             normalizeMethodAndBody(opts) {
+                // Fetch method
                 const method = (opts.method || 'GET').toUpperCase();
-                const methodsWithoutBody = ['GET', 'HEAD'];
-                const shouldHaveBody = !methodsWithoutBody.includes(method);
 
+                // GET and HEAD don't use body data
+                if (['GET', 'HEAD'].includes(method)) {
+                    if (opts.data !== undefined) {
+                        console.warn(`Method ${method} should not have a body. Data will be ignored.`);
+                    }
+
+                    return { method };
+                }
+
+                // For other methods, process body data
                 let body;
-                if (opts.data !== undefined && shouldHaveBody) {
-                    body = this.processRequestBody(opts.data);
-                } else if (opts.data !== undefined && !shouldHaveBody) {
-                    console.warn(`Method ${method} should not have a body. Data will be ignored.`);
+
+                if (opts.data !== undefined) {
+                    if (
+                        typeof opts.data !== 'object' ||
+                        (opts.data instanceof FormData) ||
+                        (opts.data instanceof Blob) ||
+                        (opts.data instanceof ArrayBuffer)
+                    ) {
+                        body = JSON.stringify(opts.data);
+                    } else {
+                        body = opts.data;
+                    }
                 }
 
                 return { method, body };
-            },
-
-            /**
-             * Processes request body based on data type.
-             * @param {*} data - Request data
-             * @returns {*} Processed body
-             */
-            processRequestBody(data) {
-                if (data instanceof FormData) {
-                    return data;
-                } else if (data instanceof Blob || data instanceof ArrayBuffer) {
-                    return data;
-                } else if (typeof data === 'string') {
-                    return data;
-                } else {
-                    return JSON.stringify(data);
-                }
             },
 
             /**
