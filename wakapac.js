@@ -3264,6 +3264,20 @@
                     this.unparsedBindings.forEach(b => collect(b, property));
                 });
 
+                // For foreach bindings, force rebuild when global properties change
+                relevantBindings.forEach(binding => {
+                    if (binding.type === 'foreach') {
+                        // Check if any pending update is NOT the collection itself
+                        const hasGlobalPropertyChange = Array.from(this.pendingUpdates).some(prop => prop !== binding.collection);
+
+                        if (hasGlobalPropertyChange) {
+                            // Force a complete rebuild by clearing the fingerprints
+                            binding.fingerprints = null;
+                            binding.previous = null;
+                        }
+                    }
+                });
+
                 // Execute updates for all collected bindings
                 relevantBindings.forEach(b => this.updateBinding(b, null, null));
 
