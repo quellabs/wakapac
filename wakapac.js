@@ -3832,7 +3832,15 @@
                         if (typeof method === 'function') {
                             try {
                                 // Execute the bound method with proper context and pass the event
-                                method.call(this.abstraction, event);
+                                if (binding.foreachContext) {
+                                    // Use stored foreach context
+                                    method.call(this.abstraction,
+                                        binding.foreachContext[binding.foreachContext.itemName],
+                                        binding.foreachContext[binding.foreachContext.indexName],
+                                        event);
+                                } else {
+                                    method.call(this.abstraction, event);
+                                }
                             } catch (error) {
                                 // Log any errors that occur during method execution
                                 console.error('Error executing event handler \'' + binding.method + '\':', error);
@@ -4433,6 +4441,9 @@
                     // Set up attribute bindings (class, style, events, etc.) for the new element
                     this.processAttributeBindingsForElement(itemElement, itemContext, binding);
 
+                    // Process event bindings for dynamic elements
+                    this.processEventBindingsForElement(itemElement, itemContext);
+
                     // Add the configured element to the fragment
                     fragment.appendChild(itemElement);
                 });
@@ -4440,6 +4451,46 @@
                 // Add all new elements to the DOM in a single operation
                 // This minimizes layout recalculations and improves performance
                 container.appendChild(fragment);
+            },
+
+            /**
+             * Processes event bindings for a DOM element and its descendants, creating binding
+             * objects for all elements that have event-type data attributes.
+             * @param {HTMLElement} element - The root DOM element to process for event bindings
+             * @param {Object} [itemContext] - Context object from parent foreach loop, used for
+             *                                 scoped method execution within iteration contexts
+             * @returns {void}
+             */
+            processEventBindingsForElement(element, itemContext) {
+                // Get the root element plus all nested elements that have binding attributes
+                const elementsWithBindings = [element, ...element.querySelectorAll('[data-pac-bind]')];
+
+                elementsWithBindings.forEach(el => {
+                    // Extract the binding configuration string from the data attribute
+                    const bindingString = el.getAttribute('data-pac-bind');
+
+                    // Skip elements without binding strings
+                    if (!bindingString) {
+                        return;
+                    }
+
+                    // Parse the binding string into individual binding configurations
+                    ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
+                        // Check if this binding type represents an event (e.g., 'click', 'submit', etc.)
+                        if (Utils.isEventType(type)) {
+                            // Create a new event binding object with all necessary metadata
+                            const binding = this.createBinding('event', el, {
+                                eventType: type,            // The DOM event type (click, submit, etc.)
+                                method: target,             // The method name to call when event fires
+                                target: target,             // Redundant with method - consider removing
+                                foreachContext: itemContext // Context from parent foreach loop for scoped execution
+                            });
+
+                            // Store the binding in the central registry using its unique ID
+                            this.bindings.set(binding.id, binding);
+                        }
+                    });
+                });
             },
 
             /**
