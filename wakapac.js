@@ -1977,6 +1977,10 @@
                 // proper dependency resolution
                 this.setupComputedProperties(reactive);
 
+                // Add hierarchy properties as reactive
+                this.createReactiveProperty(reactive, 'childrenCount', 0);
+                this.createReactiveProperty(reactive, 'hasParent', false);
+
                 // Set up regular properties by iterating through the original object
                 Object.keys(this.original).forEach(key => {
                     // Only process own properties, skip inherited ones and the 'computed' key
@@ -4631,6 +4635,12 @@
                         this.children.add(child);
                     }
                 });
+
+                // Update reactive hierarchy properties
+                if (this.abstraction) {
+                    this.abstraction.childrenCount = this.children.size;
+                    this.abstraction.hasParent = this.parent !== null;
+                }
             },
 
             /**
@@ -5671,34 +5681,6 @@
                  * Destroys the component and cleans up resources
                  */
                 destroy: () => control.destroy()
-            });
-
-            // Define read-only introspection properties
-            // These provide access to internal state without allowing modification
-            Object.defineProperties(api, {
-                /**
-                 * Gets the parent component (read-only)
-                 */
-                parent: {
-                    get: () => control.parent,
-                    enumerable: true // Make property visible in for...in loops and Object.keys()
-                },
-
-                /**
-                 * Gets an array of child components (read-only)
-                 */
-                children: {
-                    get: () => Array.from(control.children), // Convert Set to Array for easier consumption
-                    enumerable: true
-                },
-
-                /**
-                 * Gets the DOM container element (read-only)
-                 */
-                container: {
-                    get: () => control.container,
-                    enumerable: true
-                }
             });
 
             return api;

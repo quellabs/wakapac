@@ -366,8 +366,8 @@ WakaPAC automatically provides reactive browser state properties that update whe
 - **`browserVisible`**: `true` when the browser tab is active/visible, `false` when hidden
 
 **Scroll Position:**
-- **`browserScrollX`**: Horizontal scroll position in pixels
-- **`browserScrollY`**: Vertical scroll position in pixels
+- **`browserScrollX`**: Horizontal scroll position in pixels (can be set programmatically)
+- **`browserScrollY`**: Vertical scroll position in pixels (can be set programmatically)
 
 **Page Dimensions:**
 - **`browserViewportWidth`**: Browser viewport width in pixels
@@ -393,6 +393,10 @@ WakaPAC automatically provides reactive browser state properties that update whe
 **Container Focus State:**
 - **`containerFocus`**: `true` when container has direct focus (`:focus`)
 - **`containerFocusWithin`**: `true` when container or child has focus (`:focus-within`)
+
+**Component Hierarchy Properties:**
+- **`childrenCount`**: Number of direct child PAC components (read-only, reactive)
+- **`hasParent`**: `true` if this component has a parent PAC component, `false` if it's a root component
 
 ### Usage Examples
 

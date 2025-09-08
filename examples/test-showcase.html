@@ -969,14 +969,12 @@
     const parentPAC = wakaPAC('#parent-app', {
         parentStatus: 'low',
         parentStatusText: 'System Active',
-        childrenCount: 0,
         currentTheme: 'light',
         masterValue: 50,
 
         receiveFromChild(eventType, data, childPAC) {
             const childId = childPAC.container.id;
             logMessage('parent', `Received from ${childId}: ${eventType}`, data);
-            this.updateChildrenCount();
 
             switch(eventType) {
                 case 'taskCompleted':
@@ -1029,10 +1027,6 @@
                     this.parentStatusText = 'Child reset completed';
                     break;
             }
-        },
-
-        updateChildrenCount() {
-            this.childrenCount = parentPAC.children.length;
         },
 
         coordinateAllChildren() {
@@ -1110,21 +1104,6 @@
     logMessage('parent', 'Parent PAC Unit initialized');
     logMessage('child', 'Child PAC Unit initialized');
     logMessage('grandchild', 'Grandchild PAC Unit initialized');
-
-    setTimeout(() => {
-        parentPAC.updateChildrenCount();
-    }, 50);
-
-    setTimeout(() => {
-        logMessage('parent', `Hierarchy established - Parent has ${parentPAC.children.length} children`);
-        logMessage('child', `Child parent: ${childPAC.parent ? 'Connected' : 'None'}`);
-        logMessage('grandchild', `Grandchild parent: ${grandchildPAC.parent ? 'Connected' : 'None'}`);
-    }, 100);
-
-    setTimeout(() => {
-        logMessage('parent', 'Auto-demo: Activating grandchild and setting initial state');
-        parentPAC.notifyChildren('activate', { task: 'Demo task', priority: 'normal' });
-    }, 2000);
 </script>
 
 </body>
