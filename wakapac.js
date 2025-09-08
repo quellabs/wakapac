@@ -4607,34 +4607,30 @@
              */
             establishHierarchy() {
                 // Get the hierarchical relationship data for this component's container
-                // from the global registry
                 const {parent, children} = window.PACRegistry.getHierarchy(this.container);
 
                 // Handle parent relationship establishment
                 if (parent && this.parent !== parent) {
-                    // Update this component's parent reference
                     this.parent = parent;
-                    
-                    // Add this component to the parent's children collection
                     parent.children.add(this);
                 }
 
+                // Clear existing children first to remove stale references
+                this.children.clear();
+
                 // Handle children relationship establishment
                 children.forEach(child => {
-                    // Only process children that aren't already properly linked
-                    if (child.parent !== this) {
-                        // If the child already has a different parent, remove it from
-                        // that parent's children collection first
-                        if (child.parent) {
-                            child.parent.children.delete(child);
-                        }
-
-                        // Set this component as the child's parent
-                        child.parent = this;
-
-                        // Add the child to this component's children collection
-                        this.children.add(child);
+                    // If the child already has a different parent, remove it from
+                    // that parent's children collection first
+                    if (child.parent && child.parent !== this) {
+                        child.parent.children.delete(child);
                     }
+
+                    // Set this component as the child's parent
+                    child.parent = this;
+
+                    // Add the child to this component's children collection
+                    this.children.add(child);
                 });
 
                 // Update reactive hierarchy properties
