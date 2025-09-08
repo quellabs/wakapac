@@ -4614,19 +4614,25 @@
             },
 
             /**
-             * Updates parent relationship, handling transitions cleanly
+             * Updates parent relationship - only sets parent reference
+             * Children sets are managed by updateChildrenRelationships
              * @param {Object|null} newParent - New parent component or null
              */
             updateParentRelationship(newParent) {
-                // Remove from old parent if changing
-                if (this.parent && this.parent !== newParent) {
+                // Do nothing when parent did not change
+                if (this.parent === newParent) {
+                    return;
+                }
+
+                // Remove from old parent's children set
+                if (this.parent) {
                     this.parent.children.delete(this);
                 }
 
                 // Set new parent
                 this.parent = newParent;
 
-                // Ensure we're in parent's children set
+                // Add to its children set
                 if (newParent) {
                     newParent.children.add(this);
                 }
