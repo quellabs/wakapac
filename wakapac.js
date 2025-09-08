@@ -3364,54 +3364,47 @@
              */
             updateBinding(binding, property, foreachVars = null) {
                 try {
-                    // Handler lookup table for all binding types
-                    const handlers = {
-                        // Special handlers that don't need context evaluation
-                        text: () => this.applyTextBinding(binding, property, foreachVars),
-                        foreach: () => this.applyForeachBinding(binding, property, foreachVars),
-                        event: () => {},
+                    // Build context with proper precedence
+                    const context = Object.assign({}, this.abstraction);
 
-                        // Default handlers that need context evaluation
-                        attribute: (ctx, val) => this.applyAttributeBinding(binding, val),
-                        input: (ctx, val) => this.applyInputBinding(binding, val),
-                        checked: (ctx, val) => this.applyCheckedBinding(binding, val),
-                        visible: (ctx, val) => this.applyVisibilityBinding(binding, val),
-                        conditional: (ctx, val) => this.applyConditionalBinding(binding, val),
-                        class: (ctx, val) => this.applyClassBinding(binding, val),
-                        style: (ctx, val) => this.applyStyleBinding(binding, val)
-                    };
-
-                    // Get the appropriate handler for this binding type
-                    const handler = handlers[binding.type];
-
-                    // Skip unknown binding types silently
-                    if (!handler) {
-                        return;
+                    if (foreachVars) {
+                        Object.assign(context, foreachVars);
                     }
-
-                    // Special cases that manage their own expression evaluation and context
-                    if (binding.type === 'text' || binding.type === 'foreach' || binding.type === 'event') {
-                        handler();
-                        return;
-                    }
-
-                    // Determine correct context
-                    let context;
 
                     if (binding.element._pacForeachItem !== undefined) {
-                        const foreachContext = {
-                            [binding.element._pacForeachItemName]: binding.element._pacForeachItem,
-                            [binding.element._pacForeachIndexName]: binding.element._pacForeachIndex
-                        };
-
-                        context = Object.assign({}, this.abstraction, foreachContext);
-                    } else {
-                        context = Object.assign({}, this.abstraction, foreachVars || {});
+                        context[binding.element._pacForeachItemName] = binding.element._pacForeachItem;
+                        context[binding.element._pacForeachIndexName] = binding.element._pacForeachIndex;
                     }
 
-                    // Call handler
+                    // Handle special cases
+                    switch (binding.type) {
+                        case 'text':
+                            return this.applyTextBinding(binding, property, foreachVars);
+
+                        case 'foreach':
+                            return this.applyForeachBinding(binding, property, foreachVars);
+
+                        case 'event':
+                            return;
+                    }
+
+                    // Handle expression-based bindings
                     const parsed = this.getParsedExpression(binding);
-                    handler(context, ExpressionParser.evaluate(parsed, context));
+                    const value = ExpressionParser.evaluate(parsed, context);
+
+                    // Dispatch to appropriate handler
+                    const handlers = {
+                        attribute: () => this.applyAttributeBinding(binding, value),
+                        input: () => this.applyInputBinding(binding, value),
+                        checked: () => this.applyCheckedBinding(binding, value),
+                        visible: () => this.applyVisibilityBinding(binding, value),
+                        conditional: () => this.applyConditionalBinding(binding, value),
+                        class: () => this.applyClassBinding(binding, value),
+                        style: () => this.applyStyleBinding(binding, value)
+                    };
+
+                    // Call the handler
+                    handlers[binding.type]?.();
 
                 } catch (error) {
                     console.error('Error updating ' + binding.type + ' binding:', error);

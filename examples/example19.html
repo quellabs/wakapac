@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakaPAC Reactive Tabulator</title>
+    <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+    <style>
+        .pac-tabulator {
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .pac-tab-bar {
+            background-color: black;
+            display: flex;
+            padding: 0;
+            margin: 0;
+        }
+
+        .pac-tab-button {
+            cursor: pointer;
+            border: none;
+            padding: 8px 16px;
+            background-color: #000;
+            color: white;
+            font-family: inherit;
+            font-size: 15px;
+            display: inline-block;
+        }
+
+        .pac-active-tab {
+            background-color: #f44336 !important;
+            color: white !important;
+        }
+
+        .pac-tab-button:hover {
+            background-color: #333;
+        }
+
+        .pac-active-tab:hover {
+            background-color: #f44336 !important;
+            color: white !important;
+        }
+
+        .pac-tab-content {
+            min-height: 200px;
+            padding: 16px;
+            background-color: white;
+            color: black;
+        }
+
+        .pac-status-bar {
+            background-color: black;
+            border-top: 1px solid #333;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+<div class="w3-container w3-margin">
+    <h2>WakaPAC Reactive Tabulator</h2>
+
+    <div id="tabulator-demo" class="pac-tabulator">
+        <!-- Tab Navigation -->
+        <div class="pac-tab-bar">
+            <div data-pac-bind="foreach: tabs"
+                 data-pac-item="tab"
+                 data-pac-index="tabIndex"
+                 style="display: contents;">
+                <button class="pac-tab-button"
+                        data-pac-bind="click: selectTab, class: { 'pac-active-tab': tabIndex === activeTabIndex }">
+                    {{tab.label}}
+                </button>
+            </div>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="pac-tab-content">
+            <h3>{{activeTab.title}}</h3>
+            <p>{{activeTab.content}}</p>
+
+            <!-- Form Content -->
+            <div data-pac-bind="if: activeTab.type === 'form'">
+                <div class="w3-margin-top">
+                    <label class="w3-text-grey">Sample Input:</label>
+                    <input data-pac-bind="value: activeTab.sampleInput"
+                           class="w3-input w3-border w3-round"
+                           type="text"
+                           placeholder="Type something...">
+                    <p class="w3-text-grey w3-small">
+                        You typed: <strong>{{activeTab.sampleInput}}</strong>
+                    </p>
+                </div>
+            </div>
+
+            <!-- List Content -->
+            <div data-pac-bind="if: activeTab.type === 'list'">
+                <ul class="w3-ul w3-border">
+                    <li data-pac-bind="foreach: activeTab.items"
+                        data-pac-item="item"
+                        class="w3-hover-light-grey">
+                        <span data-pac-bind="class: { 'w3-text-red': item.important }">
+                            {{item.text}}
+                        </span>
+                        <button data-pac-bind="click: toggleImportant"
+                                class="w3-button w3-small w3-round w3-right">
+                            <span data-pac-bind="if: item.important">★</span>
+                            <span data-pac-bind="if: !item.important">☆</span>
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="pac-status-bar">
+            <span>
+                Active: <strong>{{activeTab.label}}</strong>
+                ({{activeTabIndex + 1}}/{{tabs.length}})
+            </span>
+            <button data-pac-bind="click: addTab"
+                    class="w3-button w3-small w3-green">
+                Add Tab
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        wakaPAC('#tabulator-demo', {
+            activeTabIndex: 0,
+
+            tabs: [
+                {
+                    label: 'Home',
+                    title: 'Welcome Home',
+                    content: 'This is the home tab with reactive content updates.',
+                    type: 'content'
+                },
+                {
+                    label: 'Profile',
+                    title: 'User Profile',
+                    content: 'Manage your profile settings:',
+                    type: 'form',
+                    sampleInput: 'Type here...'
+                },
+                {
+                    label: 'Tasks',
+                    title: 'Task Management',
+                    content: 'Interactive task list:',
+                    type: 'list',
+                    items: [
+                        { text: 'Review WakaPAC integration', important: true },
+                        { text: 'Update documentation', important: false },
+                        { text: 'Test tabulator component', important: true }
+                    ]
+                }
+            ],
+
+            computed: {
+                activeTab() {
+                    return this.tabs[this.activeTabIndex] || this.tabs[0];
+                }
+            },
+
+            selectTab(tab, tabIndex, event) {
+                this.activeTabIndex = tabIndex;
+            },
+
+            addTab() {
+                this.tabs.push({
+                    label: `Tab ${this.tabs.length + 1}`,
+                    title: `Dynamic Tab ${this.tabs.length + 1}`,
+                    content: 'This tab was added dynamically.',
+                    type: 'content'
+                });
+                this.activeTabIndex = this.tabs.length - 1;
+            },
+
+            toggleImportant(item) {
+                item.important = !item.important;
+            },
+        });
+    });
+</script>
+
+</body>
+</html>
