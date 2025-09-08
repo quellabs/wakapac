@@ -68,8 +68,6 @@
     <h2>WakaPAC Reactive Tabulator</h2>
 
     <div id="tabulator-demo" class="pac-tabulator">
-        <div>Debug: {{debugInfo}}</div>
-
         <!-- Tab Navigation -->
         <div class="pac-tab-bar">
             <div data-pac-bind="foreach: tabs"
@@ -172,10 +170,6 @@
                 activeTab() {
                     return this.tabs[this.activeTabIndex] || this.tabs[0];
                 },
-                debugInfo() {
-                    console.log('activeTabIndex:', this.activeTabIndex);
-                    return `activeTabIndex: ${this.activeTabIndex}`;
-                }
             },
 
             selectTab(tab, tabIndex, event) {

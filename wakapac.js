@@ -2857,7 +2857,7 @@
                 const parsedExpression = ExpressionParser.parseExpression(binding.target);
 
                 // Only do indexing work if not already done
-                if (!binding.isIndexed) {
+                if (!binding.isIndexed && !binding.isTemporary) {
                     const dependencies = parsedExpression.dependencies || [];
 
                     // Index this binding under each dependency
@@ -3577,7 +3577,7 @@
                         }
 
                         // Handle all other bindings using existing infrastructure
-                        const tempBinding = this.createEvaluationBinding(el, type, target);
+                        const tempBinding = this.createEvaluationBinding(el, type, target, true);
                         this.updateBinding(tempBinding, null, contextVars);
                     });
                 });
@@ -3588,9 +3588,10 @@
              * @param {HTMLElement} element - Target element
              * @param {string} type - Binding type
              * @param {string} target - Target expression
+             * @param temporary
              * @returns {Object} Lightweight binding object
              */
-            createEvaluationBinding(element, type, target) {
+            createEvaluationBinding(element, type, target, temporary) {
                 // Determine the actual binding type to use
                 // Falls back to 'attribute' for any unmapped types (custom attributes)
                 const bindingType = BINDING_TYPE_MAP[type] || 'attribute';
@@ -3603,7 +3604,8 @@
                     target: target,
                     attribute: bindingType === 'attribute' ? type : null,
                     parsedExpression: null,
-                    dependencies: null
+                    dependencies: null,
+                    isTemporary: temporary
                 };
             },
 
@@ -4405,11 +4407,29 @@
 
                             // Create a temporary binding object for evaluation
                             // This reuses the existing binding infrastructure
-                            const tempBinding = this.createEvaluationBinding(el, type, target);
+                            const tempBinding = this.createEvaluationBinding(el, type, target, true);
 
                             // Update the binding using existing update pipeline with item context
                             // The itemContext provides access to the current item's data
                             this.updateBinding(tempBinding, null, itemContext);
+
+                            // IMMEDIATE CLEANUP: Remove the temporary binding right after use
+                            console.log('Cleaned up temporary binding:', tempBinding.id);
+                            
+                            if (tempBinding.dependencies) {
+                                tempBinding.dependencies.forEach(dep => {
+                                    const indexSet = this.bindingIndex.get(dep);
+                                    if (indexSet && indexSet.has(tempBinding)) {
+                                        indexSet.delete(tempBinding);
+                                        if (indexSet.size === 0) {
+                                            this.bindingIndex.delete(dep);
+                                        }
+                                    }
+                                });
+                            }
+
+                            this.unparsedBindings?.delete(tempBinding);
+                            this.bindings.delete(tempBinding.id);
                         });
                     });
                 });
