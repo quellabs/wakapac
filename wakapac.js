@@ -5262,7 +5262,10 @@
              */
             async safeGetResponseText(response) {
                 try {
-                    if (response.bodyUsed) return null;
+                    if (response.bodyUsed) {
+                        return null;
+                    }
+
                     const clone = response.clone();
                     const text = await clone.text();
                     return text.substring(0, 200);
@@ -5343,10 +5346,18 @@
              * @returns {boolean} True if error represents cancellation
              */
             isCancellationError(error) {
-                return error.name === 'AbortError' ||
-                    error.name === 'CancellationError' ||
-                    (error.cancellationType &&
-                        ['timeout', 'cancelled', 'superseded'].includes(error.cancellationType));
+                // Standard cancellation error names
+                if (error.name === 'AbortError' || error.name === 'CancellationError') {
+                    return true;
+                }
+
+                // Custom cancellation types
+                if (error.cancellationType) {
+                    const cancellationTypes = ['timeout', 'cancelled', 'superseded'];
+                    return cancellationTypes.includes(error.cancellationType);
+                }
+
+                return false;
             },
 
             /**
@@ -5361,13 +5372,15 @@
 
                 const current = this._requestGroups.get(groupKey);
 
-                if (current) {
-                    if (current.token === token) {
-                        this._requestGroups.delete(groupKey);
-                    } else if (current.token < token) {
-                        console.warn(`Cleaning up stale request entry for ${groupKey}`);
-                        this._requestGroups.delete(groupKey);
-                    }
+                if (!current) {
+                    return;
+                }
+
+                if (current.token === token) {
+                    this._requestGroups.delete(groupKey);
+                } else if (current.token < token) {
+                    console.warn(`Cleaning up stale request entry for ${groupKey}`);
+                    this._requestGroups.delete(groupKey);
                 }
             },
 
@@ -5700,7 +5713,7 @@
             // Clear any existing timeout to debounce multiple rapid component creations
             clearTimeout(window._wakaPACHierarchyTimeout);
             window._wakaPACHierarchyTimeout = setTimeout(() => {
-                    // Clear hierarchy cache
+                // Clear hierarchy cache
                 window.PACRegistry.hierarchyCache = new WeakMap();
 
                 // Re-establish hierarchy for all components
