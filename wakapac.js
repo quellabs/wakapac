@@ -4614,6 +4614,7 @@
                 if (parent && this.parent !== parent) {
                     // Update this component's parent reference
                     this.parent = parent;
+                    
                     // Add this component to the parent's children collection
                     parent.children.add(this);
                 }
