@@ -2964,6 +2964,154 @@
             },
 
             /**
+             * Creates a standard binding with common default properties that most binding types share.
+             * This method consolidates the repetitive pattern found across multiple binding creation methods:
+             * setting target, parsedExpression to null, dependencies to null, and merging extra configuration.
+             * @param {string} bindingType - The type of binding to create (e.g., 'visible', 'class', 'style', 'attribute')
+             * @param {HTMLElement} element - The DOM element this binding will be attached to
+             * @param {string} target - The property path or expression that this binding will watch/evaluate
+             * @param {Object} [extraConfig={}] - Additional configuration properties specific to the binding type
+             * @param {string} [extraConfig.attribute] - For attribute bindings, the HTML attribute name to modify
+             * @param {string} [extraConfig.eventType] - For event bindings, the DOM event type to listen for
+             * @param {string} [extraConfig.method] - For event bindings, the method name to call when event fires
+             * @param {string} [extraConfig.updateMode] - For input bindings, when to update ('immediate', 'delayed', 'change')
+             * @param {number} [extraConfig.delay] - For delayed input bindings, milliseconds to wait before updating
+             * @param {HTMLElement} [extraConfig.originalParent] - For conditional bindings, parent element for restoration
+             * @param {Node} [extraConfig.originalNextSibling] - For conditional bindings, sibling for proper insertion
+             * @param {boolean} [extraConfig.isRendered] - For conditional bindings, current visibility state
+             * @returns {Object} The created binding object with unified structure and provided configuration
+             */
+            createStandardBinding(bindingType, element, target, extraConfig = {}) {
+                return this.createBinding(bindingType, element, {
+                    target: target,
+                    parsedExpression: null,  // Populated lazily during first evaluation for performance
+                    dependencies: null,      // Discovered automatically when expression is first parsed
+                    ...extraConfig           // Merge binding-specific configuration properties
+                });
+            },
+
+            /**
+             * Creates a visibility binding to show/hide elements based on data
+             * @param {HTMLElement} element - The DOM element to control visibility
+             * @param {string} target - The target property path that determines visibility
+             * @returns {Object} The created visibility binding object
+             */
+            createVisibilityBinding(element, target) {
+                return this.createStandardBinding('visible', element, target);
+            },
+
+            /**
+             * Creates a class binding
+             * @param element
+             * @param target
+             * @returns {{id: string, type: string, element: Element}}
+             */
+            createClassBinding: function (element, target) {
+                return this.createStandardBinding('class', element, target);
+            },
+
+            /**
+             * Creates a style binding for dynamic CSS styling
+             * @param {HTMLElement} element - The DOM element to bind styles to
+             * @param {string} target - The style expression or property name to bind
+             * @returns {Object} The created binding object with element reference and metadata
+             */
+            createStyleBinding(element, target) {
+                return this.createStandardBinding('style', element, target);
+            },
+
+            /**
+             * Creates an attribute binding between a DOM element attribute and a target value
+             * @param {Element} element - The DOM element whose attribute will be bound
+             * @param {string} attributeName - The name of the attribute to bind (e.g., 'class', 'disabled', 'value')
+             * @param {string} target - The target property or expression that will provide the attribute value
+             * @returns {Object} The created attribute binding object with target, attribute, parsedExpression, and dependencies properties
+             */
+            createAttributeBinding(element, attributeName, target) {
+                return this.createStandardBinding('attribute', element, target, {
+                    attribute: attributeName
+                });
+            },
+
+            /**
+             * Creates a conditional "if" binding that renders/removes DOM elements based on data values
+             * @param {HTMLElement} element - The DOM element to conditionally render
+             * @param {string} target - The data property name to watch (may include '!' for negation)
+             * @returns {Object} The created binding object with conditional rendering configuration
+             */
+            createConditionalBinding(element, target) {
+                return this.createStandardBinding('conditional', element, target, {
+                    placeholder: null,
+                    originalParent: element.parentNode,
+                    originalNextSibling: element.nextSibling,
+                    isRendered: true
+                });
+            },
+
+            /**
+             * Creates an event binding between a DOM element and a target method
+             * @param {Element} element - The DOM element to bind the event to
+             * @param {string} eventType - The type of event to listen for (e.g., 'click', 'change', 'input')
+             * @param {string|Function} target - The target method name or function to execute when the event occurs
+             * @returns {Object} The created event binding object
+             */
+            createEventBinding(element, eventType, target) {
+                return this.createStandardBinding('event', element, target, {
+                    eventType: eventType,
+                    method: target
+                });
+            },
+
+            /**
+             * Creates a value binding for form elements
+             * @param {HTMLElement} element - The DOM element to bind
+             * @param {string} target - The target property path for binding
+             * @returns {Object} The created input binding object
+             */
+            createValueBinding(element, target) {
+                // Add attributes to element
+                this.setupInputElement(element, target);
+
+                // Create an input binding
+                return this.createInputBinding(element, target);
+            },
+
+            /**
+             * Creates a checkbox/radio checked binding with special handling for radio buttons
+             * @param {HTMLElement} element - The checkbox or radio input element
+             * @param {string} target - The target property path for the checked state
+             * @returns {Object} The created checked binding object
+             * @throws {Warning} Logs warning if used with radio buttons (should use value binding instead)
+             */
+            createCheckedBinding(element, target) {
+                if (element.type === 'radio') {
+                    console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
+                    this.setupInputElement(element, target);
+                    return this.createInputBinding(element, target);
+                }
+
+                this.setupInputElement(element, target, 'checked');
+
+                return this.createStandardBinding('checked', element, target, {
+                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
+                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
+                });
+            },
+
+            /**
+             * Creates an input value binding with configurable update behavior
+             * @param {HTMLElement} element - The input element to bind
+             * @param {string} target - The target property path for two-way binding
+             * @returns {Object} The created input binding object with update configuration
+             */
+            createInputBinding(element, target) {
+                return this.createStandardBinding('input', element, target, {
+                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
+                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
+                });
+            },
+
+            /**
              * Creates a foreach binding for rendering dynamic lists of data
              * @param {HTMLElement} element - The DOM element that will contain the rendered list
              * @param {string|Array} target - The data source (property path or array) to iterate over
@@ -3000,151 +3148,6 @@
 
                 // Return the binding for potential chaining or further configuration
                 return bindingElement;
-            },
-
-            /**
-             * Creates a conditional "if" binding that renders/removes DOM elements based on data values
-             * @param {HTMLElement} element - The DOM element to conditionally render
-             * @param {string} target - The data property name to watch (may include '!' for negation)
-             * @returns {Object} The created binding object with conditional rendering configuration
-             */
-            createConditionalBinding(element, target) {
-                return this.createBinding('conditional', element, {
-                    target: target,
-                    parsedExpression: null,
-                    dependencies: null,
-                    placeholder: null,
-                    originalParent: element.parentNode,
-                    originalNextSibling: element.nextSibling,
-                    isRendered: true
-                });
-            },
-
-            /**
-             * Creates a value binding for form elements
-             * @param {HTMLElement} element - The DOM element to bind
-             * @param {string} target - The target property path for binding
-             * @returns {Object} The created input binding object
-             */
-            createValueBinding(element, target) {
-                // Add attributes to element
-                this.setupInputElement(element, target);
-
-                // Create an input binding
-                return this.createInputBinding(element, target);
-            },
-
-            /**
-             * Creates a visibility binding to show/hide elements based on data
-             * @param {HTMLElement} element - The DOM element to control visibility
-             * @param {string} target - The target property path that determines visibility
-             * @returns {Object} The created visibility binding object
-             */
-            createVisibilityBinding(element, target) {
-                return this.createBinding('visible', element, {
-                    target: target,
-                    parsedExpression: null,
-                    dependencies: null
-                });
-            },
-
-            /**
-             * Creates an input value binding with configurable update behavior
-             * @param {HTMLElement} element - The input element to bind
-             * @param {string} target - The target property path for two-way binding
-             * @returns {Object} The created input binding object with update configuration
-             */
-            createInputBinding(element, target) {
-                return this.createBinding('input', element, {
-                    target: target,
-                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
-                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
-                });
-            },
-
-            /**
-             * Creates a checkbox/radio checked binding with special handling for radio buttons
-             * @param {HTMLElement} element - The checkbox or radio input element
-             * @param {string} target - The target property path for the checked state
-             * @returns {Object} The created checked binding object
-             * @throws {Warning} Logs warning if used with radio buttons (should use value binding instead)
-             */
-            createCheckedBinding(element, target) {
-                // Special case for radio buttons
-                if (element.type === 'radio') {
-                    console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
-                    this.setupInputElement(element, target);
-                    return this.createInputBinding(element, target);
-                }
-
-                // Setup input element
-                this.setupInputElement(element, target, 'checked');
-
-                // Create the binding
-                return this.createBinding('checked', element, {
-                    target: target,
-                    updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
-                    delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
-                });
-            },
-
-            /**
-             * Creates a class binding
-             * @param element
-             * @param target
-             * @returns {{id: string, type: string, element: Element}}
-             */
-            createClassBinding: function (element, target) {
-                return this.createBinding('class', element, {
-                    target: target,
-                    parsedExpression: null,
-                    dependencies: null
-                });
-            },
-
-            /**
-             * Creates an event binding between a DOM element and a target method
-             * @param {Element} element - The DOM element to bind the event to
-             * @param {string} eventType - The type of event to listen for (e.g., 'click', 'change', 'input')
-             * @param {string|Function} target - The target method name or function to execute when the event occurs
-             * @returns {Object} The created event binding object
-             */
-            createEventBinding(element, eventType, target) {
-                return this.createBinding('event', element, {
-                    eventType: eventType,
-                    method: target,
-                    target: target
-                });
-            },
-
-            /**
-             * Creates an attribute binding between a DOM element attribute and a target value
-             * @param {Element} element - The DOM element whose attribute will be bound
-             * @param {string} attributeName - The name of the attribute to bind (e.g., 'class', 'disabled', 'value')
-             * @param {string} target - The target property or expression that will provide the attribute value
-             * @returns {Object} The created attribute binding object with target, attribute, parsedExpression, and dependencies properties
-             */
-            createAttributeBinding(element, attributeName, target) {
-                return this.createBinding('attribute', element, {
-                    target: target,
-                    attribute: attributeName,
-                    parsedExpression: null,
-                    dependencies: null
-                });
-            },
-
-            /**
-             * Creates a style binding for dynamic CSS styling
-             * @param {HTMLElement} element - The DOM element to bind styles to
-             * @param {string} target - The style expression or property name to bind
-             * @returns {Object} The created binding object with element reference and metadata
-             */
-            createStyleBinding(element, target) {
-                return this.createBinding('style', element, {
-                    target: target,                // The style expression to evaluate
-                    parsedExpression: null,        // Will be populated when first parsed
-                    dependencies: null             // Will track what data this binding depends on
-                });
             },
 
             /**
