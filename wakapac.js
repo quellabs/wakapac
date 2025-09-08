@@ -4606,37 +4606,57 @@
              * Establishes parent-child relationships in component hierarchy
              */
             establishHierarchy() {
-                // Get the hierarchical relationship data for this component's container
-                const {parent, children} = window.PACRegistry.getHierarchy(this.container);
+                const { parent, children } = window.PACRegistry.getHierarchy(this.container);
 
-                // Handle parent relationship establishment
-                if (parent && this.parent !== parent) {
-                    this.parent = parent;
-                    parent.children.add(this);
+                this.updateParentRelationship(parent);
+                this.updateChildrenRelationships(children);
+                this.updateReactiveProperties();
+            },
+
+            /**
+             * Updates parent relationship, handling transitions cleanly
+             * @param {Object|null} newParent - New parent component or null
+             */
+            updateParentRelationship(newParent) {
+                // Remove from old parent if changing
+                if (this.parent && this.parent !== newParent) {
+                    this.parent.children.delete(this);
                 }
 
-                // Clear existing children first to remove stale references
+                // Set new parent
+                this.parent = newParent;
+
+                // Ensure we're in parent's children set
+                if (newParent) {
+                    newParent.children.add(this);
+                }
+            },
+
+            /**
+             * Rebuilds children relationships from current DOM hierarchy
+             * @param {Array} currentChildren - Children found in DOM
+             */
+            updateChildrenRelationships(currentChildren) {
                 this.children.clear();
 
-                // Handle children relationship establishment
-                children.forEach(child => {
-                    // If the child already has a different parent, remove it from
-                    // that parent's children collection first
+                currentChildren.forEach(child => {
+                    // Remove child from previous parent if different
                     if (child.parent && child.parent !== this) {
                         child.parent.children.delete(child);
                     }
 
-                    // Set this component as the child's parent
                     child.parent = this;
-
-                    // Add the child to this component's children collection
                     this.children.add(child);
                 });
+            },
 
-                // Update reactive hierarchy properties
+            /**
+             * Updates reactive hierarchy properties
+             */
+            updateReactiveProperties() {
                 if (this.abstraction) {
                     this.abstraction.childrenCount = this.children.size;
-                    this.abstraction.hasParent = this.parent !== null;
+                    this.abstraction.hasParent = !!this.parent;
                 }
             },
 
