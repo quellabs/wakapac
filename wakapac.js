@@ -5383,20 +5383,15 @@
                 // Computed properties are derived values and shouldn't be serialized
                 const computedProps = this.original.computed ? Object.keys(this.original.computed) : [];
 
-                // Define internal method names that should be excluded from serialization
-                // These are component lifecycle and communication methods, not data
-                const methodNames = ['notifyParent', 'notifyChildren', 'notifyChild', 'findChild', 'toJSON'];
-
                 // Iterate through all properties in the component's abstraction layer
                 Object.keys(this.abstraction).forEach(key => {
                     const value = this.abstraction[key];
 
                     // Include property in serialization only if it meets all criteria:
                     if (value !== undefined &&              // Has a defined value
-                        typeof value !== 'function' &&     // Is not a function
-                        !computedProps.includes(key) &&     // Is not a computed property
-                        !methodNames.includes(key)) {       // Is not an internal method
-
+                        typeof value !== 'function' &&      // Is not a function
+                        !computedProps.includes(key)        // Is not a computed property
+                    ) {
                         // Add the property to our serialized result
                         result[key] = value;
                     }
