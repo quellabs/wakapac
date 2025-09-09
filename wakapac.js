@@ -437,56 +437,154 @@
         },
 
         /**
-         * Sets a nested property value (e.g., "todos.0.completed" = true)
-         * @param {Object} control
-         * @param {string} propertyPath - Dot-separated property path
+         * Sets a nested property value using dot notation
+         * @param {Object} control - The control object containing abstraction and dependencies
+         * @param {string} propertyPath - Dot-separated property path (e.g., "todos.0.completed")
          * @param {*} value - Value to set
+         * @returns {boolean} True if the property was successfully set, false otherwise
+         */
+        /**
+         * Sets a value at the specified nested property path within a control's abstraction layer.
+         * Uses dot notation to traverse object hierarchy and automatically triggers change
+         * notifications when the value differs from the existing value.
+         *
+         * @example
+         * // Set a simple property
+         * set(control, "name", "John");
+         *
+         * // Set a nested property
+         * set(control, "user.profile.age", 25);
+         *
+         * // Set an array element
+         * set(control, "todos.0.completed", true);
+         *
+         * @param {Object} control - Control object containing abstraction layer and dependencies
+         * @param {Object} control.abstraction - The data object to modify
+         * @param {string} propertyPath - Dot-separated path to the target property.
+         *                                Supports nested objects and array indices (e.g., "todos.0.completed")
+         * @param {*} value - The value to assign to the target property
+         * @returns {boolean} Returns true if the property was successfully set and the path was valid,
+         *                   false if the path is invalid, unreachable, or if an error occurred
+         * @throws {Error} Logs error to console if propertyPath is invalid but does not throw
          */
         set(control, propertyPath, value) {
-            // Split the property path into individual parts (e.g., "todos.0.completed" → ["todos", "0", "completed"])
+            // Input validation: ensure propertyPath is a non-empty string
+            // Prevents runtime errors from split() and provides early failure feedback
+            if (!propertyPath || typeof propertyPath !== 'string') {
+                console.error('Invalid property path provided');
+                return false;
+            }
+
+            // Split the dot-notation path into individual property keys
+            // Example: "user.profile.name" becomes ["user", "profile", "name"]
             const parts = propertyPath.split('.');
 
-            // Simple property (no nesting)
-            // If there's only one part, we're setting a top-level property directly
+            // Optimization: handle direct property access without traversal overhead
+            // This covers the majority of simple property assignments
             if (parts.length === 1) {
+                // Capture current value for change detection comparison
+                const oldValue = control.abstraction[propertyPath];
+
+                // Direct assignment to top-level property
                 control.abstraction[propertyPath] = value;
-                return;
+
+                // Only fire change events if the value actually changed
+                // Prevents unnecessary re-renders and cascade effects
+                this.triggerChangeIfNeeded(control, propertyPath, value, oldValue);
+                return true;
             }
 
-            // We need to traverse through all parts except the last one to reach the parent
-            // Check if this is a computed property path by checking if the first part is a computed property
-            const firstPart = parts[0];
-            const isComputedPropertyPath = control.deps && control.deps.has(firstPart) && control.deps.get(firstPart).fn;
+            // Complex path: navigate through nested object hierarchy
+            // navigateToParent() walks the path and returns the immediate parent
+            // of the target property along with validation status
+            const { parent, targetKey, isValid } = this.navigateToParent(control.abstraction, parts);
 
-            let current = control.abstraction;
-            let pathExists = true;
+            // Path validation failed
+            if (!isValid) {
+                return false;
+            }
 
-            for (let i = 0; i < parts.length - 1; i++) {
-                current = current[parts[i]];
+            // At this point we have a valid parent object and target key
+            // Capture the existing value before modification for change detection
+            const oldValue = parent[targetKey];
 
-                if (!current || typeof current !== 'object') {
+            // Perform the actual assignment
+            parent[targetKey] = value;
+
+            // Trigger change notifications only if the value actually changed
+            // Uses the full original path for context in change handlers
+            this.triggerChangeIfNeeded(control, propertyPath, value, oldValue);
+
+            return true;
+        },
+
+        /**
+         * Navigates to the parent object of the target property
+         * @param {Object} root - Root object to start navigation from
+         * @param {string[]} parts - Array of property path parts (e.g., ['user', 'profile', 'name'])
+         * @returns {Object} Object containing parent, targetKey, and validity status
+         */
+        navigateToParent(root, parts) {
+            // Handle edge case: empty parts array
+            if (!parts || parts.length === 0) {
+                console.error('Cannot navigate: parts array is empty');
+                return { parent: null, targetKey: null, isValid: false };
+            }
+
+            // Handle edge case: single part (target is direct property of root)
+            if (parts.length === 1) {
+                return {
+                    parent: root,
+                    targetKey: parts[0],
+                    isValid: true
+                };
+            }
+
+            // Navigate through all parts except the last one (which is the target property)
+            const pathParts = parts.slice(0, -1);
+
+            // Traverse the object path to find the parent of the target property
+            let current = root;
+
+            for (let i = 0; i < pathParts.length; i++) {
+                const part = pathParts[i];
+
+                // Check if current step in path exists and is a valid object
+                if (current[part] == null || typeof current[part] !== 'object') {
+                    // Build the failed path for detailed error reporting
                     const failedPath = parts.slice(0, i + 1).join('.');
-                    console.error(`Cannot set property: ${propertyPath} - path not found at '${failedPath}'`);
-                    pathExists = false;
-                    break;
+                    console.error(`Cannot set property: path '${failedPath}' does not exist or is not an object`);
+                    return { parent: null, targetKey: null, isValid: false };
                 }
+
+                // Move deeper into the object hierarchy
+                current = current[part];
             }
 
-            if (!pathExists) {
-                return;
-            }
+            // Return the parent object and the key for the target property
+            return {
+                parent: current,                    // The object that contains the target property
+                targetKey: parts[parts.length - 1], // The final property name to be accessed/modified
+                isValid: true                       // Indicates successful navigation
+            };
+        },
 
-            const targetProperty = parts[parts.length - 1];
-            const oldValue = current[targetProperty];
-            current[targetProperty] = value;
+        /**
+         * Triggers change notification if the property is computed
+         * @param {Object} control - The control object
+         * @param {string} propertyPath - Full property path
+         * @param {*} newValue - New value that was set
+         * @param {*} oldValue - Previous value
+         */
+        triggerChangeIfNeeded(control, propertyPath, newValue, oldValue) {
+            const rootProperty = propertyPath.split('.')[0];
+            const isComputedProperty = control.deps?.has(rootProperty) && control.deps.get(rootProperty)?.fn;
 
-            // Only trigger reactive change detection for computed property paths
-            // Foreach context paths (like "todo.completed") shouldn't trigger this
-            if (isComputedPropertyPath) {
-                control.notifyChange(propertyPath, value, 'nested-set', {
+            if (isComputedProperty) {
+                control.notifyChange(propertyPath, newValue, 'nested-set', {
                     oldValue,
                     nestedPath: propertyPath,
-                    newValue: value
+                    newValue
                 });
             }
         },
@@ -3170,14 +3268,10 @@
              * @throws {Warning} Logs warning if used with radio buttons (should use value binding instead)
              */
             createCheckedBinding(element, target) {
-                if (element.type === 'radio') {
-                    console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
-                    this.setupInputElement(element, target);
-                    return this.createInputBinding(element, target);
-                }
-
+                // Creates an input value binding with configurable update behavior
                 this.setupInputElement(element, target, 'checked');
 
+                // Sets up check binding
                 return this.createBaseBinding('checked', element, target, {
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
