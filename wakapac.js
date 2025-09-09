@@ -430,19 +430,27 @@
 
         /**
          * Safely resolves a nested property path
-         * @param {Object} obj - Object to traverse
+         * @param {Object} context - Object to traverse
          * @param {string} path - Property path
          * @returns {*} Resolved value or undefined
          */
-        get(obj, path) {
-            if (!path) {
-                return obj;
+        get(context, path) {
+            if (context == null) {
+                return undefined;
             }
 
-            return path.split('.').reduce((current, segment) => {
-                if (current == null) return undefined;
-                return (segment in current) ? current[segment] : undefined;
-            }, obj);
+            const parts = Array.isArray(path) ? path : String(path).split('.');
+
+            let current = context;
+            for (const segment of parts) {
+                if (current == null) {
+                    return undefined;
+                }
+
+                current = (segment in current) ? current[segment] : undefined;
+            }
+
+            return current;
         },
 
         /**
@@ -451,30 +459,6 @@
          * @param {string} propertyPath - Dot-separated property path (e.g., "todos.0.completed")
          * @param {*} value - Value to set
          * @returns {boolean} True if the property was successfully set, false otherwise
-         */
-        /**
-         * Sets a value at the specified nested property path within a control's abstraction layer.
-         * Uses dot notation to traverse object hierarchy and automatically triggers change
-         * notifications when the value differs from the existing value.
-         *
-         * @example
-         * // Set a simple property
-         * set(control, "name", "John");
-         *
-         * // Set a nested property
-         * set(control, "user.profile.age", 25);
-         *
-         * // Set an array element
-         * set(control, "todos.0.completed", true);
-         *
-         * @param {Object} control - Control object containing abstraction layer and dependencies
-         * @param {Object} control.abstraction - The data object to modify
-         * @param {string} propertyPath - Dot-separated path to the target property.
-         *                                Supports nested objects and array indices (e.g., "todos.0.completed")
-         * @param {*} value - The value to assign to the target property
-         * @returns {boolean} Returns true if the property was successfully set and the path was valid,
-         *                   false if the path is invalid, unreachable, or if an error occurred
-         * @throws {Error} Logs error to console if propertyPath is invalid but does not throw
          */
         set(control, propertyPath, value) {
             // Input validation: ensure propertyPath is a non-empty string
@@ -1661,6 +1645,20 @@
             }
 
             throw new Error(message + ` at token: ${JSON.stringify(this.peek())}`);
+        },
+
+        lookupInScopeChain(ctx, name) {
+            let cur = ctx;
+
+            while (cur && cur !== Object.prototype) {
+                if (Object.prototype.hasOwnProperty.call(cur, name)) {
+                    return cur[name];
+                }
+
+                cur = Object.getPrototypeOf(cur);
+            }
+
+            return undefined;
         },
 
         /**
