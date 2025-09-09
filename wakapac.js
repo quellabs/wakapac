@@ -89,7 +89,7 @@
             const descendants = Array.from(element.querySelectorAll(selector));
             return element.matches(selector) ? [element, ...descendants] : descendants;
         },
-        
+
         /**
          * Determines if a value should be made reactive using Proxy mechanism
          * Simple values (primitives) are handled separately and don't need Proxy
@@ -437,8 +437,8 @@
         },
 
         /**
-         * Sets a nested property value using dot notation (e.g., "todos.0.completed" = true)
-         * @param {Object} control - The control object containing the abstraction
+         * Sets a nested property value (e.g., "todos.0.completed" = true)
+         * @param {Object} control
          * @param {string} propertyPath - Dot-separated property path
          * @param {*} value - Value to set
          */
@@ -463,26 +463,17 @@
 
                 // Check if the current path exists - if not, we can't set the property
                 if (!current || typeof current !== 'object') {
-                    const failedPath = parts.slice(0, i + 1).join('.');
-                    console.error(`Cannot set property: ${propertyPath} - path not found at '${failedPath}'`);
+                    console.warn('Cannot set property: ' + propertyPath + ' - path not found at \'' + parts.slice(0, i + 1).join('.') + '\'');
                     return;
                 }
             }
 
             // Set the final property
             // Extract the last part of the path (the actual property name to set)
-            const targetProperty = parts[parts.length - 1];
-            const oldValue = current[targetProperty];
+            const finalProperty = parts[parts.length - 1];
 
             // Set the value on the parent object we navigated to
-            current[targetProperty] = value;
-
-            // Trigger change detection on the root property
-            control.notifyChange(parts[0], control.abstraction[parts[0]], 'nested-set', {
-                oldValue,
-                nestedPath: propertyPath,
-                newValue: value
-            });
+            current[finalProperty] = value;
         },
 
         /**
@@ -2759,11 +2750,10 @@
 
             /**
              * Finds and creates text interpolation bindings {{property}}
-             * @param {Element} [container] - Optional container to search within, defaults to this.container
              */
-            setupTextBindings(container = null) {
+            setupTextBindings() {
                 // Single pass to collect all text nodes
-                const textNodes = Utils.getTextNodesFromElement(container || this.container);
+                const textNodes = Utils.getTextNodesFromElement(this.container);
 
                 // Process collected nodes
                 textNodes.forEach(node => {
@@ -2788,22 +2778,13 @@
 
             /**
              * Finds and creates attribute bindings data-pac-bind="..."
-             * @param {Element} [container] - Optional container to search within, defaults to this.container
              */
-            setupAttributeBindings(container = null) {
-                // Use provided container or default to component container
-                const searchContainer = container || this.container;
-
+            setupAttributeBindings() {
                 // Find all elements in the container that have data-pac-bind attributes
-                const elements = searchContainer.querySelectorAll('[data-pac-bind]');
+                const elements = this.container.querySelectorAll('[data-pac-bind]');
 
                 // Process each element with binding attributes
                 Array.from(elements).forEach(element => {
-                    // Skip elements that already have a bind
-                    if (element._pacBindingsCreated) {
-                        return;
-                    }
-
                     // Get the binding string (e.g., "value:selectedItem,foreach:items")
                     const bindingString = element.getAttribute('data-pac-bind');
 
@@ -2822,9 +2803,6 @@
                             this.bindings.set(binding.id, binding);
                         }
                     });
-
-                    // Flag that a bind was created
-                    element._pacBindingsCreated = true;
                 });
             },
 
@@ -4350,25 +4328,32 @@
                     return;
                 }
 
+                // Fetch container
                 const container = binding.element;
+
+                // Create evaluation context by merging abstraction data with parent foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
+
+                // Evaluate the binding expression to get the current array value
                 const arrayValue = ExpressionParser.evaluate(binding.parsedExpression, context);
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
 
-                // Clear existing content completely - this removes old bindings
+                // Clear existing content completely - destroys all child elements and their bindings
                 container.innerHTML = '';
 
                 // Use DocumentFragment for efficient DOM manipulation
+                // This allows building the entire structure in memory before adding to DOM
                 const fragment = document.createDocumentFragment();
 
                 // Create DOM elements for each item in the array
                 array.forEach((item, index) => {
+                    // Create new DOM element from the stored template HTML
                     const itemElement = this.createForeachItemElement(binding.template);
 
                     // Create context variables for this foreach item
                     const itemContext = Object.assign({}, foreachVars || {}, {
-                        [binding.itemName]: item,
-                        [binding.indexName]: index
+                        [binding.itemName]: item,      // e.g., 'todo' -> current todo object
+                        [binding.indexName]: index     // e.g., 'index' -> current position
                     });
 
                     // Set up text interpolation for the new element
@@ -4377,14 +4362,12 @@
                     // Set up attribute bindings (class, style, events, etc.) for the new element
                     this.processElementAttributeBindings(itemElement, itemContext, binding);
 
-                    // Detect and create reactive bindings for form inputs
-                    this.setupTextBindings(itemElement);
-                    this.setupAttributeBindings(itemElement);
-
-                    // Append element
+                    // Add the configured element to the fragment
                     fragment.appendChild(itemElement);
                 });
 
+                // Add all new elements to the DOM in a single operation
+                // This minimizes layout recalculations and improves performance
                 container.appendChild(fragment);
             },
 
