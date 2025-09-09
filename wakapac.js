@@ -4269,7 +4269,15 @@
                 const element = binding.element;
 
                 // Remove previously applied classes
-                this.clearPreviousClasses(element);
+                const previousClasses = element.dataset.pacPreviousClasses;
+
+                if (previousClasses) {
+                    previousClasses.split(' ').forEach(cls => {
+                        if (cls.trim()) {
+                            element.classList.remove(cls.trim());
+                        }
+                    });
+                }
 
                 // Determine new classes to apply
                 const newClasses = this.parseClassValue(value);
@@ -4377,22 +4385,6 @@
                 // Add all new elements to the DOM in a single operation
                 // This minimizes layout recalculations and improves performance
                 container.appendChild(fragment);
-            },
-
-            /**
-             * Remove all previously applied classes from the element
-             * @param {HTMLElement} element - The target DOM element
-             */
-            clearPreviousClasses(element) {
-                const previousClasses = element.dataset.pacPreviousClasses;
-
-                if (previousClasses) {
-                    previousClasses.split(' ').forEach(cls => {
-                        if (cls.trim()) {
-                            element.classList.remove(cls.trim());
-                        }
-                    });
-                }
             },
 
             /**
