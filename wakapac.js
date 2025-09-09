@@ -79,6 +79,18 @@
      */
     const Utils = {
 
+        createScopedContext(parentScope, localVars) {
+            const scope = Object.create(parentScope || null);
+
+            if (localVars && typeof localVars === 'object') {
+                for (const key of Object.keys(localVars)) {
+                    scope[key] = localVars[key];
+                }
+            }
+
+            return scope;
+        },
+
         /**
          * Query all elements with the given selector, including the element self
          * @param element
@@ -428,11 +440,8 @@
             }
 
             return path.split('.').reduce((current, segment) => {
-                if (current && Object.prototype.hasOwnProperty.call(current, segment)) {
-                    return current[segment];
-                } else {
-                    return undefined;
-                }
+                if (current == null) return undefined;
+                return (segment in current) ? current[segment] : undefined;
             }, obj);
         },
 
@@ -3712,7 +3721,7 @@
                 const textNodes = Utils.getTextNodesFromElement(element);
 
                 // Create evaluation context
-                const context = Object.assign({}, this.abstraction, contextVars);
+                const context = Utils.createScopedContext(this.abstraction, contextVars);
 
                 // Process each text node that contains interpolation patterns
                 textNodes.forEach(textNode => {
@@ -3775,7 +3784,7 @@
              */
             processElementAttributeBindings(element, contextVars, parentBinding) {
                 // Merge abstraction data with context variables to create evaluation context
-                const context = Object.assign({}, this.abstraction, contextVars);
+                const context = Utils.createScopedContext(this.abstraction, contextVars);
 
                 // Find all descendant elements with binding attributes
                 const bindingElements = Utils.queryElementsIncludingSelf(element, '[data-pac-bind]');
@@ -3827,7 +3836,7 @@
                 // Handle two-way binding for form controls within foreach loops
                 if (type === 'value' || type === 'checked') {
                     // Create evaluation context by merging global scope with loop-specific variables
-                    const context = { ...this.abstraction, ...contextVars };
+                    const context = Utils.createScopedContext(this.abstraction, contextVars);
 
                     // Parse and evaluate the target expression to get initial value
                     const currentValue = ExpressionParser.evaluate(ExpressionParser.parseExpression(target), context);
@@ -3841,6 +3850,8 @@
 
                     // Establish the two-way binding connection for form input synchronization
                     this.setupInputElement(el, resolvedPath, type);
+
+                    // Done
                     return true;
                 }
 
@@ -4441,9 +4452,9 @@
                 // Create evaluation context - merge abstraction with optional context
                 // If contextVars provided, merge them with the base abstraction object
                 // Otherwise, just use the abstraction object as-is
-                const context = contextVars ?
-                    Object.assign({}, this.abstraction, contextVars) :
-                    this.abstraction;
+                const context = contextVars
+                    ? Utils.createScopedContext(this.abstraction, contextVars)
+                    : this.abstraction;
 
                 // Use the shared interpolation utility to process template strings
                 // This handles variable substitution within the original text template
@@ -4504,7 +4515,7 @@
                 const dataSource = this.findDataSource(binding);
 
                 // Create evaluation context by merging data source with parent foreach variables
-                const context = Object.assign({}, dataSource, foreachVars || {});
+                const context = Utils.createScopedContext(dataSource, foreachVars || {});
 
                 // Parse and evaluate the binding expression on-demand
                 const parsed = ExpressionParser.parseExpression(binding.target || binding.collection);
@@ -4526,7 +4537,7 @@
                         const itemElement = this.createForeachItemElement(binding.template);
 
                         // Create context variables for this foreach item
-                        const itemContext = Object.assign({}, foreachVars || {}, {
+                        const itemContext = Utils.createScopedContext(context, {
                             [binding.itemName]: item,
                             [binding.indexName]: index
                         });
