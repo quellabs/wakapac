@@ -80,6 +80,17 @@
     const Utils = {
 
         /**
+         * Query all elements with the given selector, including the element self
+         * @param element
+         * @param selector
+         * @returns {unknown[]}
+         */
+        queryElementsIncludingSelf(element, selector) {
+            const descendants = Array.from(element.querySelectorAll(selector));
+            return element.matches(selector) ? [element, ...descendants] : descendants;
+        },
+        
+        /**
          * Determines if a value should be made reactive using Proxy mechanism
          * Simple values (primitives) are handled separately and don't need Proxy
          * @param {*} value - Value to test
@@ -2885,7 +2896,7 @@
                 tempDiv.innerHTML = template;
 
                 // Find all elements that have data binding attributes
-                const elementsWithBindings = tempDiv.querySelectorAll('[data-pac-bind]');
+                const elementsWithBindings = Utils.queryElementsIncludingSelf(tempDiv, '[data-pac-bind]');
 
                 // Process each element with data bindings
                 elementsWithBindings.forEach(element => {
@@ -3652,13 +3663,7 @@
                 const context = Object.assign({}, this.abstraction, contextVars);
 
                 // Find all descendant elements with binding attributes
-                let bindingElements = element.querySelectorAll('[data-pac-bind]');
-
-                // Include the root element itself if it has bindings
-                // This ensures we don't miss bindings on the container element
-                if (element.hasAttribute('data-pac-bind')) {
-                    bindingElements = [element, ...bindingElements];
-                }
+                const bindingElements = Utils.queryElementsIncludingSelf(element, '[data-pac-bind]');
 
                 // Process each element that has binding attributes
                 bindingElements.forEach(el => {
