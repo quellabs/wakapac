@@ -3634,85 +3634,107 @@
             },
 
             /**
-             * Processes attribute bindings for an element using existing binding infrastructure
-             * @param {HTMLElement} element - Element to process attribute bindings on
-             * @param {Object} contextVars - Context variables for expression evaluation
-             * @param {Object} parentBinding - Parent binding context for nested scenarios
+             * Processes attribute bindings for a given element and its descendants.
+             *
+             * This method handles data binding by:
+             * 1. Creating a combined context from abstraction data and contextVars
+             * 2. Finding all elements with data-pac-bind attributes (including the root element)
+             * 3. Parsing binding strings and evaluating expressions
+             * 4. Updating element properties based on binding results
+             *
+             * @param {Element} element - The root element to process bindings for
+             * @param {Object} contextVars - Additional context variables to merge with abstraction
+             * @param {Object} [parentBinding] - Optional parent binding context for nested scenarios
+             * @returns {void}
              */
             processAttributeBindingsForElement(element, contextVars, parentBinding) {
-                // Find all elements with data-pac-bind attributes (including root element)
-                let bindingElements = Array.from(element.querySelectorAll('[data-pac-bind]'));
+                // Merge abstraction data with context variables to create evaluation context
+                const context = Object.assign({}, this.abstraction, contextVars);
 
+                // Find all descendant elements with binding attributes
+                let bindingElements = element.querySelectorAll('[data-pac-bind]');
+
+                // Include the root element itself if it has bindings
+                // This ensures we don't miss bindings on the container element
                 if (element.hasAttribute('data-pac-bind')) {
-                    bindingElements.push(element);
+                    bindingElements = [element, ...bindingElements];
                 }
 
-                // Process each element's bindings
+                // Process each element that has binding attributes
                 bindingElements.forEach(el => {
-                    // Fetch the data-pac-bind attribute. If it has none, skip it
+                    // Get the binding string from the data-pac-bind attribute
                     const bindingString = el.getAttribute('data-pac-bind');
 
+                    // Skip elements without binding strings (defensive programming)
                     if (!bindingString) {
                         return;
                     }
 
-                    // Parse and process the bind
-                    ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
-                        // Handle nested foreach - existing code
-                        if (type === 'foreach') {
-                            return;
-                        }
-
-                        // Set up two-way binding for form inputs if we're in a foreach context
-                        if (parentBinding && (type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
-                            // Fetch the context
-                            const item = contextVars[parentBinding.itemName];
-
-                            // Find ALL array properties that contain this exact item object
-                            const sourceArray = Object.keys(this.abstraction).find(key => {
-                                const arr = this.abstraction[key];
-                                return Array.isArray(arr) && arr.includes(item);
-                            });
-
-                            if (sourceArray) {
-                                const sourceIndex = this.abstraction[sourceArray].indexOf(item);
-                                const propertyPath = PropertyPath.buildNestedPropertyPath(target, contextVars, sourceArray, sourceIndex);
-                                this.setupInputElement(el, propertyPath, type);
-                            } else {
-                                const propertyPath = PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
-                                this.setupInputElement(el, propertyPath, type);
-                            }
-                        }
-
-                        // Handle event bindings specially if we're in foreach context
-                        if (Utils.isEventType(type) && parentBinding) {
-                            this.handleEventBinding(
-                                el, type, target,
-                                contextVars[parentBinding.itemName],
-                                contextVars[parentBinding.indexName]
-                            );
-
-                            return;
-                        }
-
-                        // Instead of creating temporary bindings, evaluate directly
-                        ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
-                            if (type === 'foreach') {
-                                return;
+                    // Parse the binding string to extract individual binding definitions
+                    // Filter out 'foreach' bindings as they're handled separately
+                    ExpressionParser.parseBindingString(bindingString)
+                        .filter(({type}) => type !== 'foreach')
+                        .forEach(({type, target}) => {
+                            // Handle parent binding context if present
+                            // This allows for nested binding scenarios with inherited context
+                            if (parentBinding && this.handleParentBindingContext(el, type, target, contextVars, parentBinding)) {
+                                return; // Skip further processing if parent context handled it
                             }
 
-                            // Direct evaluation without temporary binding
-                            const context = Object.assign({}, this.abstraction, contextVars);
+                            // Parse the target expression (e.g., "user.name" or "items[0].title")
                             const parsed = ExpressionParser.parseExpression(target);
+
+                            // Evaluate the parsed expression against the current context
                             const value = ExpressionParser.evaluate(parsed, context);
 
-                            // Apply the binding directly using existing application methods
+                            // Apply the binding by updating the element's property/attribute
                             this.updateBindingDirect(el, type, value);
                         });
-                    });
                 });
             },
 
+            /**
+             * Processes bindings within foreach loop contexts, handling two-way data binding
+             * and event delegation for dynamically generated elements
+             * @param {HTMLElement} el - DOM element to bind
+             * @param {string} type - Binding type ('value', 'checked', 'click', etc.)
+             * @param {string} target - Property path or expression to bind to
+             * @param {Object} contextVars - Loop variables (item, index, etc.)
+             * @param {Object} parentBinding - Foreach binding metadata
+             * @returns {boolean} Whether the binding was successfully handled
+             */
+            handleParentBindingContext(el, type, target, contextVars, parentBinding) {
+                // Handle two-way binding for form controls within foreach loops
+                if ((type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
+                    const item = contextVars[parentBinding.itemName];
+
+                    // Locate the source array in the data model that contains this item
+                    // This is needed to build the correct property path for updates
+                    const sourceArray = Object.keys(this.abstraction).find(key =>
+                        Array.isArray(this.abstraction[key]) && this.abstraction[key].includes(item)
+                    );
+
+                    // Build property path: either array[index].property or fallback to collection context
+                    const propertyPath = sourceArray
+                        ? PropertyPath.buildNestedPropertyPath(target, contextVars, sourceArray, this.abstraction[sourceArray].indexOf(item))
+                        : PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
+
+                    // Initialize element with current data value before establishing binding
+                    const context = { ...this.abstraction, ...contextVars };
+                    const currentValue = ExpressionParser.evaluate(ExpressionParser.parseExpression(target), context);
+                    this.updateBindingDirect(el, type, currentValue);
+                    this.setupInputElement(el, propertyPath, type);
+                    return true;
+                }
+
+                // Delegate event handlers with access to current loop item and index
+                if (Utils.isEventType(type)) {
+                    this.handleEventBinding(el, type, target, contextVars[parentBinding.itemName], contextVars[parentBinding.indexName]);
+                    return true;
+                }
+
+                return false;
+            },
 
             /**
              * Applies style binding to a DOM element
