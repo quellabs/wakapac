@@ -3312,10 +3312,11 @@
                     return existingBinding;
                 }
 
+                // CRITICAL FIX: Capture the template BEFORE any processing
                 // Extract configuration from element attributes with sensible defaults
                 const itemName = element.getAttribute('data-pac-item') || 'item';    // Variable name for current item
                 const indexName = element.getAttribute('data-pac-index') || 'index'; // Variable name for current index
-                const template = element.innerHTML;                                              // Preserve original content as template
+                const template = element.innerHTML.trim();                           // Preserve original content as template
 
                 // Create the binding object with foreach-specific properties
                 const bindingElement = this.createBinding('foreach', element, {
@@ -3327,7 +3328,7 @@
                     previous: []             // Cache of previous collection state for diff optimization
                 });
 
-                // Clear the element's content since it will be populated dynamically
+                // Clear the element's content AFTER capturing the template
                 // The original innerHTML is preserved in the template property above
                 element.innerHTML = '';
 
