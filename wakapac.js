@@ -4485,37 +4485,16 @@
                     return;
                 }
 
-                // CRITICAL FIX: If this binding has no template, find one that does (search globally)
-                if (!binding.template || binding.template.length === 0) {
-                    // Search across ALL components in the registry
-                    let bindingWithTemplate = null;
+                // Ensure we have a valid template to work with
+                binding = this.findBindingWithTemplate(binding);
 
-                    if (window.PACRegistry && window.PACRegistry.components) {
-                        window.PACRegistry.components.forEach(component => {
-                            if (bindingWithTemplate) return; // Found one already
-
-                            const found = Array.from(component.bindings.values()).find(b =>
-                                b.type === 'foreach' &&
-                                b.collection === binding.collection &&
-                                b.template &&
-                                b.template.length > 0
-                            );
-
-                            if (found) {
-                                bindingWithTemplate = found;
-                            }
-                        });
-                    }
-
-                    if (bindingWithTemplate) {
-                        binding = bindingWithTemplate;
-                    } else {
-                        return;
-                    }
+                if (!binding) {
+                    return;
                 }
 
                 // Fetch container
                 const container = binding.element;
+
                 if (!container) {
                     console.error('FOREACH: No container element found');
                     return;
@@ -4579,6 +4558,41 @@
                         console.error('FOREACH: Error creating element for item', index, error);
                     }
                 });
+            },
+
+            /**
+             * Finds a binding with a valid template, either using the current binding or searching globally.
+             * If the current binding has no template, searches all components for a matching binding with template.
+             * @param {Object} binding - The binding object to check/find template for
+             * @returns {Object|null} Binding object with valid template, or null if none found
+             */
+            findBindingWithTemplate(binding) {
+                // Return current binding if it already has a template
+                if (binding.template && binding.template.length > 0) {
+                    return binding;
+                }
+
+                // Search across ALL components in the registry for a binding with template
+                let bindingWithTemplate = null;
+
+                if (window.PACRegistry && window.PACRegistry.components) {
+                    window.PACRegistry.components.forEach(component => {
+                        if (bindingWithTemplate) return; // Found one already
+
+                        const found = Array.from(component.bindings.values()).find(b =>
+                            b.type === 'foreach' &&
+                            b.collection === binding.collection &&
+                            b.template &&
+                            b.template.length > 0
+                        );
+
+                        if (found) {
+                            bindingWithTemplate = found;
+                        }
+                    });
+                }
+
+                return bindingWithTemplate;
             },
 
             /**
