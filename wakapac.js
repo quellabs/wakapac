@@ -454,112 +454,55 @@
         },
 
         /**
-         * Sets a nested property value using dot notation
-         * @param {Object} control - The control object containing abstraction and dependencies
-         * @param {string} propertyPath - Dot-separated property path (e.g., "todos.0.completed")
-         * @param {*} value - Value to set
-         * @returns {boolean} True if the property was successfully set, false otherwise
+         * Sets a nested property value using dot notation, with prototype-chain awareness.
+         * Reads always see inherited values, but writes go to the nearest owner
+         * in the chain or fall back to the base parent object.
+         * @param {Object} control - Object containing the abstraction and dependencies
+         * @param {string} propertyPath - Dot-separated path (e.g. "activeTab.sampleInput")
+         * @param {*} value - Value to assign
+         * @returns {boolean} True if assignment succeeded, false otherwise
          */
         set(control, propertyPath, value) {
-            // Input validation: ensure propertyPath is a non-empty string
-            // Prevents runtime errors from split() and provides early failure feedback
-            if (!propertyPath || typeof propertyPath !== 'string') {
-                console.error('Invalid property path provided');
+            // Validate input path
+            if (typeof propertyPath !== 'string' || propertyPath.length === 0) {
                 return false;
             }
 
-            // Split the dot-notation path into individual property keys
-            // Example: "user.profile.name" becomes ["user", "profile", "name"]
+            // Split into parts and separate the final property key
             const parts = propertyPath.split('.');
+            const key = parts.pop();
+            const parentPath = parts.join('.');
 
-            // Optimization: handle direct property access without traversal overhead
-            // This covers the majority of simple property assignments
-            if (parts.length === 1) {
-                // Capture current value for change detection comparison
-                const oldValue = control.abstraction[propertyPath];
+            // Resolve the parent object using chain-aware get()
+            const parent = parts.length
+                ? PropertyPath.get(control.abstraction, parentPath)
+                : control.abstraction;
 
-                // Direct assignment to top-level property
-                control.abstraction[propertyPath] = value;
-
-                // Only fire change events if the value actually changed
-                // Prevents unnecessary re-renders and cascade effects
-                this.triggerChangeIfNeeded(control, propertyPath, value, oldValue);
-                return true;
-            }
-
-            // Complex path: navigate through nested object hierarchy
-            // navigateToParent() walks the path and returns the immediate parent
-            // of the target property along with validation status
-            const { parent, targetKey, isValid } = this.navigateToParent(control.abstraction, parts);
-
-            // Path validation failed
-            if (!isValid) {
+            if (parent == null) {
                 return false;
             }
 
-            // At this point we have a valid parent object and target key
-            // Capture the existing value before modification for change detection
-            const oldValue = parent[targetKey];
+            // Walk up the prototype chain to find the closest object that *owns* this key
+            let target = parent;
+            while (target && !Object.prototype.hasOwnProperty.call(target, key)) {
+                target = Object.getPrototypeOf(target);
+            }
 
-            // Perform the actual assignment
-            parent[targetKey] = value;
+            // If no owner found, write directly on the resolved parent
+            if (!target) {
+                target = parent;
+            }
 
-            // Trigger change notifications only if the value actually changed
-            // Uses the full original path for context in change handlers
+            // Save old value for change detection
+            const oldValue = target[key];
+
+            // Assign new value
+            target[key] = value;
+
+            // Fire change notifications if value actually changed
             this.triggerChangeIfNeeded(control, propertyPath, value, oldValue);
 
             return true;
-        },
-
-        /**
-         * Navigates to the parent object of the target property
-         * @param {Object} root - Root object to start navigation from
-         * @param {string[]} parts - Array of property path parts (e.g., ['user', 'profile', 'name'])
-         * @returns {Object} Object containing parent, targetKey, and validity status
-         */
-        navigateToParent(root, parts) {
-            // Handle edge case: empty parts array
-            if (!parts || parts.length === 0) {
-                console.error('Cannot navigate: parts array is empty');
-                return { parent: null, targetKey: null, isValid: false };
-            }
-
-            // Handle edge case: single part (target is direct property of root)
-            if (parts.length === 1) {
-                return {
-                    parent: root,
-                    targetKey: parts[0],
-                    isValid: true
-                };
-            }
-
-            // Navigate through all parts except the last one (which is the target property)
-            const pathParts = parts.slice(0, -1);
-
-            // Traverse the object path to find the parent of the target property
-            let current = root;
-
-            for (let i = 0; i < pathParts.length; i++) {
-                const part = pathParts[i];
-
-                // Check if current step in path exists and is a valid object
-                if (current[part] == null || typeof current[part] !== 'object') {
-                    // Build the failed path for detailed error reporting
-                    const failedPath = parts.slice(0, i + 1).join('.');
-                    console.error(`Cannot set property: path '${failedPath}' does not exist or is not an object`);
-                    return { parent: null, targetKey: null, isValid: false };
-                }
-
-                // Move deeper into the object hierarchy
-                current = current[part];
-            }
-
-            // Return the parent object and the key for the target property
-            return {
-                parent: current,                    // The object that contains the target property
-                targetKey: parts[parts.length - 1], // The final property name to be accessed/modified
-                isValid: true                       // Indicates successful navigation
-            };
         },
 
         /**
