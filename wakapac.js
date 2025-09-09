@@ -2849,6 +2849,7 @@
 
             /**
              * Ensures binding is indexed for efficient lookups (lazy indexing)
+             * FIXED: For foreach bindings, also analyzes template dependencies
              * @param {Object} binding - The binding object
              * @returns {Object} Parsed expression object
              */
@@ -2858,7 +2859,14 @@
 
                 // Only do indexing work if not already done
                 if (!binding.isIndexed) {
-                    const dependencies = parsedExpression.dependencies || [];
+                    let dependencies = parsedExpression.dependencies || [];
+
+                    //  For foreach bindings, also extract dependencies from the template
+                    if (binding.type === 'foreach' && binding.template) {
+                        const templateDependencies = this.extractTemplateDependencies(binding.template);
+                        const allDeps = new Set([...dependencies, ...templateDependencies]);
+                        dependencies = Array.from(allDeps);
+                    }
 
                     // Index this binding under each dependency
                     dependencies.forEach(dep => {
@@ -2874,6 +2882,63 @@
                 }
 
                 return parsedExpression;
+            },
+
+            /**
+             * FIXED: Extracts property dependencies from foreach template HTML
+             * @param {string} template - HTML template string
+             * @returns {string[]} Array of property names referenced in template
+             */
+            extractTemplateDependencies(template) {
+                const dependencies = new Set();
+
+                // Extract text interpolation dependencies {{property}} or {{object.property}}
+                const textMatches = template.match(/\{\{\s*([^}]+)\s*\}\}/g);
+
+                if (textMatches) {
+                    textMatches.forEach(match => {
+                        const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
+                        try {
+                            const parsed = ExpressionParser.parseExpression(expression);
+                            if (parsed && parsed.dependencies) {
+                                parsed.dependencies.forEach(dep => dependencies.add(dep));
+                            }
+                        } catch (error) {
+                            // Skip invalid expressions
+                            console.warn('Could not parse template expression:', expression);
+                        }
+                    });
+                }
+
+                // Extract data-pac-bind dependencies using a more robust approach
+                // Parse the template as DOM to properly extract attribute values
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = template;
+
+                // Find all elements with data-pac-bind attributes
+                const elementsWithBindings = tempDiv.querySelectorAll('[data-pac-bind]');
+
+                elementsWithBindings.forEach(element => {
+                    const bindingString = element.getAttribute('data-pac-bind');
+                    if (bindingString && bindingString.trim()) {
+                        try {
+                            const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+                            bindingPairs.forEach(({target}) => {
+                                if (target && target.trim()) {
+                                    const parsed = ExpressionParser.parseExpression(target);
+                                    if (parsed && parsed.dependencies) {
+                                        parsed.dependencies.forEach(dep => dependencies.add(dep));
+                                    }
+                                }
+                            });
+                        } catch (error) {
+                            // Skip invalid binding strings
+                            console.warn('Could not parse binding string:', bindingString);
+                        }
+                    }
+                });
+
+                return Array.from(dependencies);
             },
 
             /**
