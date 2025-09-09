@@ -2828,7 +2828,7 @@
                     // Templates can reference properties that aren't in the main expression
                     if (binding.type === 'foreach' && binding.template) {
                         // Extract the dependencies
-                        const templateDeps = this.extractTemplateDependencies(binding.template);
+                        const templateDeps = this.extractCombinedTemplateDependencies(binding.template);
 
                         // Merge with existing dependencies, removing duplicates
                         dependencies = [...new Set([...dependencies, ...templateDeps])];
@@ -2887,7 +2887,7 @@
              * @param {string} template - HTML template string containing data-pac-bind attributes
              * @returns {Set<string>} Set of unique dependency names referenced in binding expressions
              */
-            extractDataBindingDependencies(template) {
+            extractAttributeBindingDependencies(template) {
                 // Initialize set to store unique dependency names
                 const dependencies = new Set();
 
@@ -2939,9 +2939,9 @@
              * @param {string} template - HTML template string
              * @returns {string[]} Array of property names referenced in template
              */
-            extractTemplateDependencies(template) {
+            extractCombinedTemplateDependencies(template) {
                 const textDependencies = this.extractTextInterpolationDependencies(template);
-                const bindingDependencies = this.extractDataBindingDependencies(template);
+                const bindingDependencies = this.extractAttributeBindingDependencies(template);
                 const allDependencies = new Set([...textDependencies, ...bindingDependencies]);
 
                 return Array.from(allDependencies);
@@ -3052,7 +3052,7 @@
              * @param {boolean} [extraConfig.isRendered] - For conditional bindings, current visibility state
              * @returns {Object} The created binding object with unified structure and provided configuration
              */
-            createStandardBinding(bindingType, element, target, extraConfig = {}) {
+            createBaseBinding(bindingType, element, target, extraConfig = {}) {
                 return this.createBinding(bindingType, element, {
                     target: target,
                     parsedExpression: null,  // Populated lazily during first evaluation for performance
@@ -3068,7 +3068,7 @@
              * @returns {Object} The created visibility binding object
              */
             createVisibilityBinding(element, target) {
-                return this.createStandardBinding('visible', element, target);
+                return this.createBaseBinding('visible', element, target);
             },
 
             /**
@@ -3078,7 +3078,7 @@
              * @returns {{id: string, type: string, element: Element}}
              */
             createClassBinding: function (element, target) {
-                return this.createStandardBinding('class', element, target);
+                return this.createBaseBinding('class', element, target);
             },
 
             /**
@@ -3088,7 +3088,7 @@
              * @returns {Object} The created binding object with element reference and metadata
              */
             createStyleBinding(element, target) {
-                return this.createStandardBinding('style', element, target);
+                return this.createBaseBinding('style', element, target);
             },
 
             /**
@@ -3099,7 +3099,7 @@
              * @returns {Object} The created attribute binding object with target, attribute, parsedExpression, and dependencies properties
              */
             createAttributeBinding(element, attributeName, target) {
-                return this.createStandardBinding('attribute', element, target, {
+                return this.createBaseBinding('attribute', element, target, {
                     attribute: attributeName
                 });
             },
@@ -3111,7 +3111,7 @@
              * @returns {Object} The created binding object with conditional rendering configuration
              */
             createConditionalBinding(element, target) {
-                return this.createStandardBinding('conditional', element, target, {
+                return this.createBaseBinding('conditional', element, target, {
                     placeholder: null,
                     originalParent: element.parentNode,
                     originalNextSibling: element.nextSibling,
@@ -3127,7 +3127,7 @@
              * @returns {Object} The created event binding object
              */
             createEventBinding(element, eventType, target) {
-                return this.createStandardBinding('event', element, target, {
+                return this.createBaseBinding('event', element, target, {
                     eventType: eventType,
                     method: target
                 });
@@ -3163,7 +3163,7 @@
 
                 this.setupInputElement(element, target, 'checked');
 
-                return this.createStandardBinding('checked', element, target, {
+                return this.createBaseBinding('checked', element, target, {
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
                 });
@@ -3176,7 +3176,7 @@
              * @returns {Object} The created input binding object with update configuration
              */
             createInputBinding(element, target) {
-                return this.createStandardBinding('input', element, target, {
+                return this.createBaseBinding('input', element, target, {
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
                 });
@@ -3658,7 +3658,7 @@
              * @param {Object} [parentBinding] - Optional parent binding context for nested scenarios
              * @returns {void}
              */
-            processAttributeBindingsForElement(element, contextVars, parentBinding) {
+            processElementAttributeBindings(element, contextVars, parentBinding) {
                 // Merge abstraction data with context variables to create evaluation context
                 const context = Object.assign({}, this.abstraction, contextVars);
 
@@ -3682,7 +3682,7 @@
                         .forEach(({type, target}) => {
                             // Handle parent binding context if present
                             // This allows for nested binding scenarios with inherited context
-                            if (parentBinding && this.handleParentBindingContext(el, type, target, contextVars, parentBinding)) {
+                            if (parentBinding && this.processForeachChildBinding(el, type, target, contextVars, parentBinding)) {
                                 return; // Skip further processing if parent context handled it
                             }
 
@@ -3708,7 +3708,7 @@
              * @param {Object} parentBinding - Foreach binding metadata
              * @returns {boolean} Whether the binding was successfully handled
              */
-            handleParentBindingContext(el, type, target, contextVars, parentBinding) {
+            processForeachChildBinding(el, type, target, contextVars, parentBinding) {
                 // Handle two-way binding for form controls within foreach loops
                 if ((type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
                     const item = contextVars[parentBinding.itemName];
@@ -3889,7 +3889,7 @@
 
                 // Apply modifiers and check if event should continue processing
                 // Returns false if a modifier (like .prevent) should halt execution
-                if (!this.applyEventModifiers(event, modifiers)) {
+                if (!this.validateEventModifiers(event, modifiers)) {
                     return;
                 }
 
@@ -3955,7 +3955,7 @@
              * @param {string[]} modifiers - Array of modifier strings to check against
              * @returns {boolean} - True if event matches modifiers, false otherwise
              */
-            applyEventModifiers(event, modifiers) {
+            validateEventModifiers(event, modifiers) {
                 let hasKeyConstraints = false;
                 let keyConstraintsMet = false;
 
@@ -4075,7 +4075,7 @@
 
                 // 4. Bubble to root if this is a nested change
                 if (propertyPath !== rootProperty) {
-                    this.bubbleChangeNotification(rootProperty, this.abstraction[rootProperty], 'nested-change', {
+                    this.propagateNestedChange(rootProperty, this.abstraction[rootProperty], 'nested-change', {
                         nestedPath: propertyPath,
                         newValue,
                         oldValue: metadata.oldValue
@@ -4084,16 +4084,30 @@
             },
 
             /**
-             * Renamed from notifyParentChange - bubbles nested changes to root property listeners
+             * Propagates nested property changes up to the root property level.
+             * When a deeply nested value changes (e.g., obj.a.b.c), this method ensures
+             * that watchers and computed properties observing the root object are notified.
+             * @param {string} rootProperty - The name of the root property that contains the nested change
+             * @param {*} rootValue - The current value of the root property after the nested change
+             * @param {string} changeType - Type of change operation ('set', 'delete', 'push', etc.)
+             * @param {Object} metadata - Additional context about the change
+             * @param {*} metadata.oldValue - The previous value before the change
+             * @param {string} metadata.nestedPath - Dot-notation path to the nested property that changed
+             * @param {*} [metadata.newValue] - The new nested value (for reference)
+             * @param {number} [metadata.depth] - Nesting depth of the change
              */
-            bubbleChangeNotification(rootProperty, rootValue, changeType, metadata) {
-                // Trigger root property watcher with full context
+            propagateNestedChange(rootProperty, rootValue, changeType, metadata) {
+                // Trigger watchers for the root property when nested values change
+                // This ensures parent object watchers receive notifications about deep changes
+                // with context about what specifically changed within the nested structure
                 this.triggerWatcher(rootProperty, rootValue, metadata.oldValue, metadata.nestedPath);
 
-                // Update computed properties that depend on root
+                // Recompute any derived values that depend on this root property
+                // Nested changes can affect computed properties that observe the parent object
                 this.updateComputedProperties(rootProperty);
 
-                // Schedule root property updates
+                // Queue the root property for batch updates to prevent excessive re-renders
+                // The scheduler will handle timing and deduplication of multiple nested changes
                 this.scheduleUpdate(rootProperty, rootValue);
             },
 
@@ -4354,7 +4368,7 @@
                     this.processTextBindingsForElement(itemElement, itemContext);
 
                     // Set up attribute bindings (class, style, events, etc.) for the new element
-                    this.processAttributeBindingsForElement(itemElement, itemContext, binding);
+                    this.processElementAttributeBindings(itemElement, itemContext, binding);
 
                     // Add the configured element to the fragment
                     fragment.appendChild(itemElement);
