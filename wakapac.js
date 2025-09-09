@@ -903,7 +903,6 @@
          * Cache for parsed expressions to avoid re-parsing
          * @type {Map<string, Object>}
          */
-        cache: new Map(),
         tokens: [],
         currentToken: 0,
 
@@ -953,12 +952,6 @@
          * @returns {Object|null} Parsed AST node or null if unparseable
          */
         parseExpression(expression) {
-            // Limit cache
-            if (this.cache.size > 1000) {
-                const firstKey = this.cache.keys().next().value;
-                this.cache.delete(firstKey);
-            }
-
             // Handle already parsed objects
             if (typeof expression === 'object' && expression !== null) {
                 if (expression.dependencies) {
@@ -971,11 +964,6 @@
 
             // Remove whitespace around expression
             expression = String(expression).trim();
-
-            // Check cache first
-            if (this.cache.has(expression)) {
-                return this.cache.get(expression);
-            }
 
             // Tokenize and parse
             try {
@@ -994,7 +982,6 @@
                 }
 
                 // Cache the result
-                this.cache.set(expression, result);
                 return result;
             } catch (error) {
                 // Use the parser's own error enhancement method
