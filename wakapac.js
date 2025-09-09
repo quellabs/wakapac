@@ -79,6 +79,13 @@
      */
     const Utils = {
 
+        /**
+         * Creates a new scope object that inherits from the given parent scope
+         * and optionally extends it with local variables.
+         * @param {Object|null} parentScope - The parent scope to inherit from.
+         * @param {Object<string, any>} [localVars] - An object containing local variables
+         * @returns {Object} The newly created scope object
+         */
         createScopedContext(parentScope, localVars) {
             const scope = Object.create(parentScope || null);
 
