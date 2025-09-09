@@ -2178,11 +2178,11 @@
                     browserDocumentHeight: document.documentElement.scrollHeight,
 
                     // Container scroll properties
-                    containerIsScrollable: false,           // Can scroll in any direction
-                    containerScrollX: 0,                    // Current horizontal scroll position
-                    containerScrollY: 0,                    // Current vertical scroll position
-                    containerScrollContentWidth: 0,         // Total scrollable content width (scrollWidth)
-                    containerScrollContentHeight: 0,        // Total scrollable content height (scrollHeight)
+                    containerIsScrollable: false,                                // Can scroll in any direction
+                    containerScrollX: this.container.scrollLeft,                 // Current horizontal scroll position
+                    containerScrollY: this.container.scrollTop,                  // Current vertical scroll position
+                    containerScrollContentWidth: this.container.scrollWidth,     // Total scrollable content width
+                    containerScrollContentHeight: this.container.scrollHeight,   // Total scrollable content height
                     containerScrollWindow: {
                         top: 0,        // scrollTop
                         left: 0,       // scrollLeft

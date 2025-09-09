@@ -250,7 +250,7 @@
 
             scrollPercent() {
                 const percentage = (this.containerScrollY / this.maxScrollY) * 100;
-                return Math.min(Math.max(0, percentage), 100);
+                return isNaN(percentage) ? 0 : Math.min(Math.max(0, percentage), 100);
             },
 
             scrollPercentFormatted() {
