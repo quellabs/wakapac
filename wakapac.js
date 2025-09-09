@@ -4485,47 +4485,100 @@
                     return;
                 }
 
+                // CRITICAL FIX: If this binding has no template, find one that does (search globally)
+                if (!binding.template || binding.template.length === 0) {
+                    // Search across ALL components in the registry
+                    let bindingWithTemplate = null;
+
+                    if (window.PACRegistry && window.PACRegistry.components) {
+                        window.PACRegistry.components.forEach(component => {
+                            if (bindingWithTemplate) return; // Found one already
+
+                            const found = Array.from(component.bindings.values()).find(b =>
+                                b.type === 'foreach' &&
+                                b.collection === binding.collection &&
+                                b.template &&
+                                b.template.length > 0
+                            );
+
+                            if (found) {
+                                bindingWithTemplate = found;
+                            }
+                        });
+                    }
+
+                    if (bindingWithTemplate) {
+                        binding = bindingWithTemplate;
+                    } else {
+                        return;
+                    }
+                }
+
                 // Fetch container
                 const container = binding.element;
+                if (!container) {
+                    console.error('FOREACH: No container element found');
+                    return;
+                }
 
-                // Create evaluation context by merging abstraction data with parent foreach variables
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
+                // Find the correct data source
+                let dataSource = this.abstraction;
+                const targetProperty = binding.target || binding.collection;
 
-                // Evaluate the binding expression to get the current array value
-                const arrayValue = ExpressionParser.evaluate(binding.parsedExpression, context);
+                if (!(targetProperty in this.abstraction)) {
+                    // Look for the property in child components
+                    for (const child of this.children) {
+                        if (child.abstraction && targetProperty in child.abstraction) {
+                            dataSource = child.abstraction;
+                            break;
+                        }
+                    }
+
+                    // If still not found, search globally
+                    if (!(targetProperty in dataSource) && window.PACRegistry) {
+                        window.PACRegistry.components.forEach(component => {
+                            if (component.abstraction && targetProperty in component.abstraction) {
+                                dataSource = component.abstraction;
+                            }
+                        });
+                    }
+                }
+
+                // Create evaluation context by merging data source with parent foreach variables
+                const context = Object.assign({}, dataSource, foreachVars || {});
+
+                // Parse and evaluate the binding expression on-demand
+                const parsed = ExpressionParser.parseExpression(binding.target || binding.collection);
+                const arrayValue = ExpressionParser.evaluate(parsed, context);
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
 
-                // Clear existing content completely - destroys all child elements and their bindings
+                // If we still have no items or no template, exit
+                if (array.length === 0 || !binding.template || binding.template.length === 0) {
+                    container.innerHTML = '';
+                    return;
+                }
+
+                // Clear existing content
                 container.innerHTML = '';
 
-                // Use DocumentFragment for efficient DOM manipulation
-                // This allows building the entire structure in memory before adding to DOM
-                const fragment = document.createDocumentFragment();
-
-                // Create DOM elements for each item in the array
+                // Create elements
                 array.forEach((item, index) => {
-                    // Create new DOM element from the stored template HTML
-                    const itemElement = this.createForeachItemElement(binding.template);
+                    try {
+                        const itemElement = this.createForeachItemElement(binding.template);
 
-                    // Create context variables for this foreach item
-                    const itemContext = Object.assign({}, foreachVars || {}, {
-                        [binding.itemName]: item,      // e.g., 'todo' -> current todo object
-                        [binding.indexName]: index     // e.g., 'index' -> current position
-                    });
+                        const itemContext = Object.assign({}, foreachVars || {}, {
+                            [binding.itemName]: item,
+                            [binding.indexName]: index
+                        });
 
-                    // Set up text interpolation for the new element
-                    this.processTextBindingsForElement(itemElement, itemContext);
+                        this.processTextBindingsForElement(itemElement, itemContext);
+                        this.processElementAttributeBindings(itemElement, itemContext, binding);
 
-                    // Set up attribute bindings (class, style, events, etc.) for the new element
-                    this.processElementAttributeBindings(itemElement, itemContext, binding);
-
-                    // Add the configured element to the fragment
-                    fragment.appendChild(itemElement);
+                        container.appendChild(itemElement);
+                    } catch (error) {
+                        console.error('FOREACH: Error creating element for item', index, error);
+                    }
                 });
-
-                // Add all new elements to the DOM in a single operation
-                // This minimizes layout recalculations and improves performance
-                container.appendChild(fragment);
             },
 
             /**
