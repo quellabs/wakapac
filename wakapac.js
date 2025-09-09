@@ -4501,27 +4501,7 @@
                 }
 
                 // Find the correct data source
-                let dataSource = this.abstraction;
-                const targetProperty = binding.target || binding.collection;
-
-                if (!(targetProperty in this.abstraction)) {
-                    // Look for the property in child components
-                    for (const child of this.children) {
-                        if (child.abstraction && targetProperty in child.abstraction) {
-                            dataSource = child.abstraction;
-                            break;
-                        }
-                    }
-
-                    // If still not found, search globally
-                    if (!(targetProperty in dataSource) && window.PACRegistry) {
-                        window.PACRegistry.components.forEach(component => {
-                            if (component.abstraction && targetProperty in component.abstraction) {
-                                dataSource = component.abstraction;
-                            }
-                        });
-                    }
-                }
+                const dataSource = this.findDataSource(binding);
 
                 // Create evaluation context by merging data source with parent foreach variables
                 const context = Object.assign({}, dataSource, foreachVars || {});
@@ -4531,68 +4511,38 @@
                 const arrayValue = ExpressionParser.evaluate(parsed, context);
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
 
-                // If we still have no items or no template, exit
-                if (array.length === 0 || !binding.template || binding.template.length === 0) {
-                    container.innerHTML = '';
-                    return;
-                }
-
                 // Clear existing content
                 container.innerHTML = '';
+
+                // If we have no items or no template, exit
+                if (array.length === 0 || !binding.template || binding.template.length === 0) {
+                    return;
+                }
 
                 // Create elements
                 array.forEach((item, index) => {
                     try {
+                        // Create new DOM element from the stored template HTML
                         const itemElement = this.createForeachItemElement(binding.template);
 
+                        // Create context variables for this foreach item
                         const itemContext = Object.assign({}, foreachVars || {}, {
                             [binding.itemName]: item,
                             [binding.indexName]: index
                         });
 
+                        // Set up text interpolation for the new element
                         this.processTextBindingsForElement(itemElement, itemContext);
+
+                        // Set up attribute bindings (class, style, events, etc.) for the new element
                         this.processElementAttributeBindings(itemElement, itemContext, binding);
 
+                        // Add the configured element to the fragment
                         container.appendChild(itemElement);
                     } catch (error) {
                         console.error('FOREACH: Error creating element for item', index, error);
                     }
                 });
-            },
-
-            /**
-             * Finds a binding with a valid template, either using the current binding or searching globally.
-             * If the current binding has no template, searches all components for a matching binding with template.
-             * @param {Object} binding - The binding object to check/find template for
-             * @returns {Object|null} Binding object with valid template, or null if none found
-             */
-            findBindingWithTemplate(binding) {
-                // Return current binding if it already has a template
-                if (binding.template && binding.template.length > 0) {
-                    return binding;
-                }
-
-                // Search across ALL components in the registry for a binding with template
-                let bindingWithTemplate = null;
-
-                if (window.PACRegistry && window.PACRegistry.components) {
-                    window.PACRegistry.components.forEach(component => {
-                        if (bindingWithTemplate) return; // Found one already
-
-                        const found = Array.from(component.bindings.values()).find(b =>
-                            b.type === 'foreach' &&
-                            b.collection === binding.collection &&
-                            b.template &&
-                            b.template.length > 0
-                        );
-
-                        if (found) {
-                            bindingWithTemplate = found;
-                        }
-                    });
-                }
-
-                return bindingWithTemplate;
             },
 
             /**
@@ -4884,6 +4834,76 @@
                 if (child && child.receiveFromParent) {
                     child.receiveFromParent(cmd, data);
                 }
+            },
+
+            /*
+             * Finds a binding with a valid template, either using the current binding or searching globally.
+             * If the current binding has no template, searches all components for a matching binding with template.
+             * @param {Object} binding - The binding object to check/find template for
+             * @returns {Object|null} Binding object with valid template, or null if none found
+             */
+            findBindingWithTemplate(binding) {
+                // Return current binding if it already has a template
+                if (binding.template && binding.template.length > 0) {
+                    return binding;
+                }
+
+                // Search across ALL components in the registry for a binding with template
+                let bindingWithTemplate = null;
+
+                if (window.PACRegistry && window.PACRegistry.components) {
+                    window.PACRegistry.components.forEach(component => {
+                        // Found one already
+                        if (bindingWithTemplate) {
+                            return;
+                        }
+
+                        const found = Array.from(component.bindings.values()).find(b =>
+                            b.type === 'foreach' &&
+                            b.collection === binding.collection &&
+                            b.template &&
+                            b.template.length > 0
+                        );
+
+                        if (found) {
+                            bindingWithTemplate = found;
+                        }
+                    });
+                }
+
+                return bindingWithTemplate;
+            },
+
+            /**
+             * Finds the data source object containing the target property for this binding.
+             * Searches in order: current abstraction → child components → global registry.
+             * @param {Object} binding - The binding object containing target/collection property
+             * @returns {Object} Data source object containing the property
+             */
+            findDataSource(binding) {
+                let dataSource = this.abstraction;
+                const targetProperty = binding.target || binding.collection;
+
+                if (!(targetProperty in this.abstraction)) {
+                    // Look for the property in child components
+                    for (const child of this.children) {
+                        if (child.abstraction && targetProperty in child.abstraction) {
+                            dataSource = child.abstraction;
+                            break;
+                        }
+                    }
+
+                    // If still not found, search globally
+                    if (!(targetProperty in dataSource) && window.PACRegistry) {
+                        window.PACRegistry.components.forEach(component => {
+                            if (component.abstraction && targetProperty in component.abstraction) {
+                                dataSource = component.abstraction;
+                            }
+                        });
+                    }
+                }
+
+                return dataSource;
             },
 
             // === HTTP/SERIALIZATION SECTION ===
