@@ -2798,25 +2798,41 @@
             /**
              * Builds an index of bindings by property for efficient lookups
              */
-            buildBindingIndex() {
-                // Clear any existing index to start fresh
+            /**
+             * Builds an index of bindings by property for efficient lookups
+             * SIMPLIFIED: Parse and index immediately, no lazy loading
+             */
+            buildBindingIndex: function() {
                 this.bindingIndex.clear();
 
-                // Initialize a new set to track bindings that haven't been parsed yet
-                this.unparsedBindings = new Set();
-
-                // Iterate through all bindings in the collection
-                this.bindings.forEach(binding => {
-                    // Check if the binding has a target property defined
+                this.bindings.forEach(function(binding) {
                     if (binding.target) {
-                        // Add bindings with targets to the unparsed set
-                        // These will be processed later to build the actual index
-                        this.unparsedBindings.add(binding);
-                    }
+                        // Parse expression immediately
+                        binding.parsedExpression = ExpressionParser.parseExpression(binding.target);
+                        var dependencies = binding.parsedExpression.dependencies || [];
 
-                    // Note: Bindings without targets are implicitly ignored
-                    // as they cannot be indexed or used for lookups
-                });
+                        // For foreach bindings, also extract template dependencies
+                        if (binding.type === 'foreach' && binding.template) {
+                            var templateDependencies = this.extractTemplateDependencies(binding.template);
+                            var allDeps = dependencies.concat(templateDependencies);
+                            // Remove duplicates
+                            dependencies = allDeps.filter(function(dep, index) {
+                                return allDeps.indexOf(dep) === index;
+                            });
+                        }
+
+                        // Index under each dependency
+                        dependencies.forEach(function(dep) {
+                            if (!this.bindingIndex.has(dep)) {
+                                this.bindingIndex.set(dep, new Set());
+                            }
+                            this.bindingIndex.get(dep).add(binding);
+                        }.bind(this));
+
+                        // Store dependencies on binding for reference
+                        binding.dependencies = dependencies;
+                    }
+                }.bind(this));
             },
 
             // === BINDING CREATION SECTION ===
@@ -3258,7 +3274,7 @@
 
             /**
              * Processes all pending DOM updates in a single batch.
-             * This:
+             *
              *  1. Collects all bindings that need updating (from both parsed and unparsed sources).
              *  2. Ensures unparsed bindings are parsed before being updated.
              *  3. Executes all updates in a single pass.
@@ -3267,67 +3283,73 @@
              * @returns {void}
              */
             flushUpdates() {
-                // Exit early if no updates are pending
                 if (!this.pendingUpdates) {
                     return;
                 }
 
-                /** @type {Set} bindings scheduled for update */
+                const relevantBindings = this.collectRelevantBindings();
+                this.handleForeachBindingUpdates(relevantBindings);
+                this.executeBindingUpdates(relevantBindings);
+                this.resetPendingState();
+            },
+
+            /**
+             * Collects all bindings that need updating based on pending property changes.
+             * @returns {Set} Set of bindings that require updates
+             */
+            collectRelevantBindings() {
                 const relevantBindings = new Set();
 
-                /**
-                 * Ensures a binding is parsed and checks whether it needs an update.
-                 * If yes, adds it to the relevant set.
-                 * @param {object} binding - The binding to check
-                 * @param {string} property - The property that triggered the check
-                 */
-                const collect = (binding, property) => {
-                    // Parse binding expression if not already parsed
-                    if (!binding.parsedExpression) {
-                        this.getParsedExpression(binding);
-                        this.unparsedBindings.delete(binding);
-                    }
-
-                    // Add binding if it should be updated for this property
-                    if (this.shouldUpdateBinding(binding, property)) {
-                        relevantBindings.add(binding);
-                    }
-                };
-
-                // Iterate through all properties that have pending updates
                 this.pendingUpdates.forEach(property => {
-                    if (property === 'activeTabIndex') {
-                        const bindings = Array.from(this.bindingIndex.get(property) || []);
-                        console.log('Bindings found for activeTabIndex:',
-                            bindings.map(b => ({id: b.id, type: b.type, target: b.target})));
-                    }
+                    const bindingsForProperty = this.bindingIndex.get(property) || [];
 
-                    // Collect from bindings already indexed by property
-                    (this.bindingIndex.get(property) || []).forEach(b => collect(b, property));
-
-                    // Also check all unparsed bindings against this property
-                    this.unparsedBindings.forEach(b => collect(b, property));
-                });
-
-                // For foreach bindings, force rebuild when global properties change
-                relevantBindings.forEach(binding => {
-                    if (binding.type === 'foreach') {
-                        // Check if any pending update is NOT the collection itself
-                        const hasGlobalPropertyChange = Array.from(this.pendingUpdates).some(prop => prop !== binding.collection);
-
-                        if (hasGlobalPropertyChange) {
-                            // Force a complete rebuild by clearing the fingerprints
-                            binding.fingerprints = null;
-                            binding.previous = null;
+                    bindingsForProperty.forEach(binding => {
+                        if (this.shouldUpdateBinding(binding, property)) {
+                            relevantBindings.add(binding);
                         }
-                    }
+                    });
                 });
 
-                // Execute updates for all collected bindings
-                relevantBindings.forEach(b => this.updateBinding(b, null, null));
+                return relevantBindings;
+            },
 
-                // Reset pending state after successful batch update
-                this.pendingUpdates = this.pendingValues = null;
+            /**
+             * Forces rebuild of foreach bindings when global properties change.
+             * @param {Set} relevantBindings - Set of bindings to check and potentially reset
+             */
+            handleForeachBindingUpdates(relevantBindings) {
+                relevantBindings.forEach(binding => {
+                    if (binding.type !== 'foreach') {
+                        return;
+                    }
+
+                    const hasGlobalPropertyChange = Array.from(this.pendingUpdates)
+                        .some(prop => prop !== binding.collection);
+
+                    if (hasGlobalPropertyChange) {
+                        binding.fingerprints = null;
+                        binding.previous = null;
+                    }
+                });
+            },
+
+            /**
+             * Executes updates for all collected bindings.
+             * @param {Set} relevantBindings - Set of bindings to update
+             */
+            executeBindingUpdates(relevantBindings) {
+                relevantBindings.forEach(binding => {
+                    this.updateBinding(binding, null, null);
+                });
+            },
+
+            /**
+             * Resets the pending update state.
+             * @returns {void} No return value
+             */
+            resetPendingState() {
+                this.pendingUpdates = null;
+                this.pendingValues = null;
             },
 
             /**
@@ -3424,43 +3446,38 @@
              * @param {Object|null} [foreachVars=null] - Additional variables from foreach loop context
              * @throws {Error} Logs errors to console if binding evaluation or application fails
              */
-            updateBinding(binding, property, foreachVars = null) {
+            updateBinding: function(binding, property, foreachVars) {
                 try {
-                    // Handler lookup table for all binding types
-                    const handlers = {
-                        // Special handlers that don't need context evaluation
-                        text: () => this.applyTextBinding(binding, property, foreachVars),
-                        foreach: () => this.applyForeachBinding(binding, property, foreachVars),
-                        event: () => {},
+                    var handlers = {
+                        text: function() { this.applyTextBinding(binding, property, foreachVars); }.bind(this),
+                        foreach: function() { this.applyForeachBinding(binding, property, foreachVars); }.bind(this),
+                        event: function() {}, // no-op
 
-                        // Default handlers that need context evaluation
-                        attribute: (ctx, val) => this.applyAttributeBinding(binding, val),
-                        input: (ctx, val) => this.applyInputBinding(binding, val),
-                        checked: (ctx, val) => this.applyCheckedBinding(binding, val),
-                        visible: (ctx, val) => this.applyVisibilityBinding(binding, val),
-                        conditional: (ctx, val) => this.applyConditionalBinding(binding, val),
-                        class: (ctx, val) => this.applyClassBinding(binding, val),
-                        style: (ctx, val) => this.applyStyleBinding(binding, val)
+                        // These all use the parsed expression that's already available
+                        attribute: function(ctx, val) { this.applyAttributeBinding(binding, val); }.bind(this),
+                        input: function(ctx, val) { this.applyInputBinding(binding, val); }.bind(this),
+                        checked: function(ctx, val) { this.applyCheckedBinding(binding, val); }.bind(this),
+                        visible: function(ctx, val) { this.applyVisibilityBinding(binding, val); }.bind(this),
+                        conditional: function(ctx, val) { this.applyConditionalBinding(binding, val); }.bind(this),
+                        'class': function(ctx, val) { this.applyClassBinding(binding, val); }.bind(this),
+                        style: function(ctx, val) { this.applyStyleBinding(binding, val); }.bind(this)
                     };
 
-                    // Get the appropriate handler for this binding type
-                    const handler = handlers[binding.type];
-
-                    // Skip unknown binding types silently
+                    var handler = handlers[binding.type];
                     if (!handler) {
                         return;
                     }
 
-                    // Special cases that manage their own expression evaluation and context
+                    // Special cases that manage their own evaluation
                     if (binding.type === 'text' || binding.type === 'foreach' || binding.type === 'event') {
                         handler();
                         return;
                     }
 
-                    // Default case: evaluate expression and apply result
+                    // Default case: use pre-parsed expression
                     const context = Object.assign({}, this.abstraction, foreachVars || {});
-                    const parsed = this.getParsedExpression(binding);
-                    handler(context, ExpressionParser.evaluate(parsed, context));
+                    const value = ExpressionParser.evaluate(binding.parsedExpression, context);
+                    handler(context, value);
 
                 } catch (error) {
                     console.error('Error updating ' + binding.type + ' binding:', error);
@@ -4353,9 +4370,8 @@
                 // Create evaluation context by merging abstraction data with parent foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
 
-                // Parse and evaluate the binding expression to get the current array value
-                const parsed = this.getParsedExpression(binding);
-                const arrayValue = ExpressionParser.evaluate(parsed, context);
+                // evaluate the binding expression to get the current array value
+                const arrayValue = ExpressionParser.evaluate(binding.parsedExpression, context);
 
                 // Ensure we have a valid array to work with (handle null/undefined gracefully)
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
