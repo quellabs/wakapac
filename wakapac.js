@@ -3446,7 +3446,7 @@
                     visible: this.applyVisibilityBinding,
                     class: this.applyClassBinding,
                     style: this.applyStyleBinding,
-                    checked: this.applyCheckedBinding,
+                    checked: this.applyInputBinding,
                     input: this.applyInputBinding,
                     value: this.applyInputBinding,
                     attribute: this.applyAttributeBinding
@@ -3481,7 +3481,7 @@
                         // Default handlers that need context evaluation
                         attribute: (ctx, val) => this.applyAttributeBinding(binding, val),
                         input: (ctx, val) => this.applyInputBinding(binding, val),
-                        checked: (ctx, val) => this.applyCheckedBinding(binding, val),
+                        checked: (ctx, val) => this.applyInputBinding(binding, val),
                         visible: (ctx, val) => this.applyVisibilityBinding(binding, val),
                         conditional: (ctx, val) => this.applyConditionalBinding(binding, val),
                         class: (ctx, val) => this.applyClassBinding(binding, val),
@@ -3535,12 +3535,9 @@
                         this.applyStyleBinding(tempBinding, value);
                         break;
 
-                    case 'checked':
-                        this.applyCheckedBinding(tempBinding, value);
-                        break;
-
                     case 'input':
                     case 'value':
+                    case 'checked':
                         this.applyInputBinding(tempBinding, value);
                         break;
 
@@ -4224,39 +4221,26 @@
             /**
              * Apply input binding to element
              * @param {Object} binding
-             * @param value - The value to set
+             * @param {*} value
              */
             applyInputBinding(binding, value) {
                 const element = binding.element;
+                const type = (element.getAttribute('type') || '').toLowerCase();
+                const stringValue = String(value ?? '');
 
-                // For radio buttons, we check if the element's value matches the property value
-                if (element.type === 'radio') {
-                    this.applyRadioBinding(element, value);
+                if (type === 'radio') {
+                    element.checked = (element.value === stringValue);
                     return;
                 }
 
-                // For everything else directly set the value
-                if (element.value !== String(value || '')) {
-                    element.value = value || '';
+                if (type === 'checkbox') {
+                    element.checked = Boolean(value);
+                    return;
                 }
-            },
 
-            /**
-             * Applies checked state to a radio element
-             * @param {HTMLElement} element - The target DOM element
-             * @param {boolean} value
-             */
-            applyRadioBinding(element, value) {
-                element.checked = (element.value === String(value || ''));
-            },
-
-            /**
-             * Applies checked state to any element except radio
-             * @param {Object} binding - The binding
-             * @param {boolean} value - Whether the element should be checked
-             */
-            applyCheckedBinding(binding, value) {
-                binding.element.checked = !!value;
+                if ('value' in element && element.value !== stringValue) {
+                    element.value = stringValue;
+                }
             },
 
             /**
