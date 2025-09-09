@@ -2857,7 +2857,7 @@
                 const parsedExpression = ExpressionParser.parseExpression(binding.target);
 
                 // Only do indexing work if not already done
-                if (!binding.isIndexed && !binding.isTemporary) {
+                if (!binding.isIndexed) {
                     const dependencies = parsedExpression.dependencies || [];
 
                     // Index this binding under each dependency
@@ -3257,6 +3257,12 @@
 
                 // Iterate through all properties that have pending updates
                 this.pendingUpdates.forEach(property => {
+                    if (property === 'activeTabIndex') {
+                        const bindings = Array.from(this.bindingIndex.get(property) || []);
+                        console.log('Bindings found for activeTabIndex:',
+                            bindings.map(b => ({id: b.id, type: b.type, target: b.target})));
+                    }
+
                     // Collect from bindings already indexed by property
                     (this.bindingIndex.get(property) || []).forEach(b => collect(b, property));
 
@@ -3576,37 +3582,61 @@
                             return;
                         }
 
-                        // Handle all other bindings using existing infrastructure
-                        const tempBinding = this.createEvaluationBinding(el, type, target, true);
-                        this.updateBinding(tempBinding, null, contextVars);
+                        // Instead of creating temporary bindings, evaluate directly
+                        ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
+                            if (type === 'foreach') {
+                                return;
+                            }
+
+                            // Direct evaluation without temporary binding
+                            const context = Object.assign({}, this.abstraction, contextVars);
+                            const parsed = ExpressionParser.parseExpression(target);
+                            const value = ExpressionParser.evaluate(parsed, context);
+
+                            // Apply the binding directly using existing application methods
+                            this.applyBindingDirectly(el, type, value);
+                        });
                     });
                 });
             },
 
             /**
-             * Creates lightweight binding for evaluation - works with existing binding system
+             * Applies a binding directly without creating a binding object
              * @param {HTMLElement} element - Target element
              * @param {string} type - Binding type
-             * @param {string} target - Target expression
-             * @param temporary
-             * @returns {Object} Lightweight binding object
+             * @param {*} value - Evaluated value
              */
-            createEvaluationBinding(element, type, target, temporary) {
-                // Determine the actual binding type to use
-                // Falls back to 'attribute' for any unmapped types (custom attributes)
-                const bindingType = BINDING_TYPE_MAP[type] || 'attribute';
-                const bindingId = 'eval_' + Date.now() + '_' + (Math.random() * 10000 | 0);
+            applyBindingDirectly(element, type, value) {
+                const tempBinding = { element, type, attribute: type };
 
-                return {
-                    id: bindingId,
-                    type: bindingType,
-                    element: element,
-                    target: target,
-                    attribute: bindingType === 'attribute' ? type : null,
-                    parsedExpression: null,
-                    dependencies: null,
-                    isTemporary: temporary
-                };
+                switch (type) {
+                    case 'visible':
+                        this.applyVisibilityBinding(tempBinding, value);
+                        break;
+
+                    case 'class':
+                        this.applyClassBinding(tempBinding, value);
+                        break;
+
+                    case 'style':
+                        this.applyStyleBinding(tempBinding, value);
+                        break;
+
+                    case 'checked':
+                        this.applyCheckedBinding(tempBinding, value);
+                        break;
+
+                    case 'input':
+                    case 'value':
+                        this.applyInputBinding(tempBinding, value);
+                        break;
+
+                    default:
+                        // Attribute binding
+                        tempBinding.attribute = type;
+                        this.applyAttributeBinding(tempBinding, value);
+                        break;
+                }
             },
 
             /**
@@ -4397,39 +4427,19 @@
                             return;
                         }
 
-                        // Parse the binding string and update each individual binding
-                        // Examples: "class: { completed: todo.completed }", "checked: todo.completed"
+                        // Instead of creating temporary bindings, evaluate directly
                         ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
-                            // Skip nested foreach bindings - they're handled separately
                             if (type === 'foreach') {
                                 return;
                             }
 
-                            // Create a temporary binding object for evaluation
-                            // This reuses the existing binding infrastructure
-                            const tempBinding = this.createEvaluationBinding(el, type, target, true);
+                            // Direct evaluation without temporary binding
+                            const context = Object.assign({}, this.abstraction, foreachVars);
+                            const parsed = ExpressionParser.parseExpression(target);
+                            const value = ExpressionParser.evaluate(parsed, context);
 
-                            // Update the binding using existing update pipeline with item context
-                            // The itemContext provides access to the current item's data
-                            this.updateBinding(tempBinding, null, itemContext);
-
-                            // IMMEDIATE CLEANUP: Remove the temporary binding right after use
-                            console.log('Cleaned up temporary binding:', tempBinding.id);
-                            
-                            if (tempBinding.dependencies) {
-                                tempBinding.dependencies.forEach(dep => {
-                                    const indexSet = this.bindingIndex.get(dep);
-                                    if (indexSet && indexSet.has(tempBinding)) {
-                                        indexSet.delete(tempBinding);
-                                        if (indexSet.size === 0) {
-                                            this.bindingIndex.delete(dep);
-                                        }
-                                    }
-                                });
-                            }
-
-                            this.unparsedBindings?.delete(tempBinding);
-                            this.bindings.delete(tempBinding.id);
+                            // Apply the binding directly using existing application methods
+                            this.applyBindingDirectly(el, type, value);
                         });
                     });
                 });
