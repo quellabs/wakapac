@@ -453,27 +453,42 @@
                 return;
             }
 
-            // Navigate to the parent object
             // We need to traverse through all parts except the last one to reach the parent
+            // Check if this is a computed property path by checking if the first part is a computed property
+            const firstPart = parts[0];
+            const isComputedPropertyPath = control.deps && control.deps.has(firstPart) && control.deps.get(firstPart).fn;
+
             let current = control.abstraction;
+            let pathExists = true;
 
             for (let i = 0; i < parts.length - 1; i++) {
-                // Move deeper into the nested structure using the current part as a key
                 current = current[parts[i]];
 
-                // Check if the current path exists - if not, we can't set the property
                 if (!current || typeof current !== 'object') {
-                    console.warn('Cannot set property: ' + propertyPath + ' - path not found at \'' + parts.slice(0, i + 1).join('.') + '\'');
-                    return;
+                    const failedPath = parts.slice(0, i + 1).join('.');
+                    console.error(`Cannot set property: ${propertyPath} - path not found at '${failedPath}'`);
+                    pathExists = false;
+                    break;
                 }
             }
 
-            // Set the final property
-            // Extract the last part of the path (the actual property name to set)
-            const finalProperty = parts[parts.length - 1];
+            if (!pathExists) {
+                return;
+            }
 
-            // Set the value on the parent object we navigated to
-            current[finalProperty] = value;
+            const targetProperty = parts[parts.length - 1];
+            const oldValue = current[targetProperty];
+            current[targetProperty] = value;
+
+            // Only trigger reactive change detection for computed property paths
+            // Foreach context paths (like "todo.completed") shouldn't trigger this
+            if (isComputedPropertyPath) {
+                control.notifyChange(propertyPath, value, 'nested-set', {
+                    oldValue,
+                    nestedPath: propertyPath,
+                    newValue: value
+                });
+            }
         },
 
         /**
@@ -3189,34 +3204,40 @@
              * @returns {Object} The created binding element object for further manipulation
              */
             createForeachBinding(element, target) {
-                // Guard to prevent same element binding twice
-                if (typeof element.__pacForeachBound !== 'undefined' && element.__pacForeachTarget === target) {
-                    return element.__pacForeachBinding;
+                // Check if this element already has a foreach binding for this target
+                // This prevents duplicate bindings which could cause rendering conflicts
+                const existingBinding = Array.from(this.bindings.values())
+                    .find(b =>
+                        b.element === element &&         // Same DOM element
+                        b.type === 'foreach' &&          // Same binding type
+                        b.collection === target          // Same collection target
+                    );
+
+                // If duplicate binding exists, return existing instead of creating new
+                if (existingBinding) {
+                    return existingBinding;
                 }
 
-                // Fetch templateHtml
-                const templateHtml = element.innerHTML;
+                // Extract configuration from element attributes with sensible defaults
+                const itemName = element.getAttribute('data-pac-item') || 'item';    // Variable name for current item
+                const indexName = element.getAttribute('data-pac-index') || 'index'; // Variable name for current index
+                const template = element.innerHTML;                                              // Preserve original content as template
 
-                // Create the binding object with foreach-specific configuration
+                // Create the binding object with foreach-specific properties
                 const bindingElement = this.createBinding('foreach', element, {
-                    target: target,
-                    collection: target,
-                    itemName: element.getAttribute('data-pac-item') || 'item',
-                    indexName: element.getAttribute('data-pac-index') || 'index',
-                    template: templateHtml,
-                    previous: []
+                    target: target,          // Property path to watch for changes
+                    collection: target,      // Collection to iterate over (same as target)
+                    itemName: itemName,      // Template variable name for each item
+                    indexName: indexName,    // Template variable name for item index
+                    template: template,      // HTML template to render for each item
+                    previous: []             // Cache of previous collection state for diff optimization
                 });
 
-                // Create guard
-                element.__pacForeachBound = true;
-                element.__pacForeachTarget = target;
-                element.__pacForeachBinding = bindingElement;
-
-                // Clear the element content since we'll populate it dynamically
-                // The original template is preserved in bindingElement.template
+                // Clear the element's content since it will be populated dynamically
+                // The original innerHTML is preserved in the template property above
                 element.innerHTML = '';
 
-                // Return the binding for potential chaining or further configuration
+                // Return the created binding for potential further configuration
                 return bindingElement;
             },
 
@@ -3230,6 +3251,15 @@
              * @returns {void}
              */
             setupInputElement(element, property, bindingType = 'value') {
+                // Check if element is already bound to prevent conflicts
+                const existingProperty = element.getAttribute('data-pac-property');
+                const existingType = element.getAttribute('data-pac-binding-type');
+
+                if (existingProperty || existingType) {
+                    console.warn(`Element already has PAC binding: ${existingProperty}:${existingType}. Skipping new binding: ${property}:${bindingType}`);
+                    return;
+                }
+
                 const attrs = {
                     'data-pac-property': property,
                     'data-pac-binding-type': bindingType,
@@ -3643,13 +3673,6 @@
 
             /**
              * Processes attribute bindings for a given element and its descendants.
-             *
-             * This method handles data binding by:
-             * 1. Creating a combined context from abstraction data and contextVars
-             * 2. Finding all elements with data-pac-bind attributes (including the root element)
-             * 3. Parsing binding strings and evaluating expressions
-             * 4. Updating element properties based on binding results
-             *
              * @param {Element} element - The root element to process bindings for
              * @param {Object} contextVars - Additional context variables to merge with abstraction
              * @param {Object} [parentBinding] - Optional parent binding context for nested scenarios
@@ -3707,70 +3730,74 @@
              */
             processForeachChildBinding(el, type, target, contextVars, parentBinding) {
                 // Handle two-way binding for form controls within foreach loops
-                if ((type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
+                if (type === 'value' || type === 'checked') {
+                    // Create evaluation context by merging global scope with loop-specific variables
+                    const context = { ...this.abstraction, ...contextVars };
+
+                    // Parse and evaluate the target expression to get initial value
+                    const currentValue = ExpressionParser.evaluate(ExpressionParser.parseExpression(target), context);
+
+                    // Set the initial display value on the DOM element
+                    this.updateBindingDirect(el, type, currentValue);
+
+                    // Resolve the actual property path for bidirectional binding updates
+                    // This converts relative paths (like "item.name") to absolute paths (like "users.0.name")
+                    const resolvedPath = this.resolveForeachPropertyPath(target, contextVars, parentBinding);
+
+                    // Establish the two-way binding connection for form input synchronization
+                    this.setupInputElement(el, resolvedPath, type);
+                    return true;
+                }
+
+                // Handle event delegation for dynamic elements
+                if (Utils.isEventType(type)) {
+                    // Set up event handlers with proper context binding
+                    // Pass the current item and index for event handler context
+                    this.handleEventBinding(
+                        el,
+                        type,
+                        target,
+                        contextVars[parentBinding.itemName],    // Current loop item
+                        contextVars[parentBinding.indexName]    // Current loop index
+                    );
+
+                    return true;
+                }
+
+                // Binding type not handled by foreach-specific logic
+                return false;
+            },
+
+            // === CONTEXT ===
+
+            /* Resolves relative property paths within foreach contexts to absolute paths
+             * for proper data binding. Handles both nested object properties and root-level properties.
+             * @param {string} target - The property path expression to resolve
+             * @param {Object} contextVars - Loop context variables (item, index, etc.)
+             * @param {Object} parentBinding - Parent foreach binding metadata containing collection info
+             * @returns {string} Absolute property path for data binding
+             */
+            resolveForeachPropertyPath(target, contextVars, parentBinding) {
+                // Check if this is a nested property path (e.g., "item.name", "item.address.street")
+                if (PropertyPath.isNested(target, contextVars)) {
+                    // Get the current item from the loop context
                     const item = contextVars[parentBinding.itemName];
 
-                    // Locate the source array in the data model that contains this item
-                    // This is needed to build the correct property path for updates
+                    // Find the source array in the abstraction that contains this item
+                    // This handles cases where multiple arrays exist in the data model
                     const sourceArray = Object.keys(this.abstraction).find(key =>
                         Array.isArray(this.abstraction[key]) && this.abstraction[key].includes(item)
                     );
 
-                    // Build property path: either array[index].property or fallback to collection context
-                    const propertyPath = sourceArray
-                        ? PropertyPath.buildNestedPropertyPath(target, contextVars, sourceArray, this.abstraction[sourceArray].indexOf(item))
-                        : PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
-
-                    // Initialize element with current data value before establishing binding
-                    const context = { ...this.abstraction, ...contextVars };
-                    const currentValue = ExpressionParser.evaluate(ExpressionParser.parseExpression(target), context);
-                    this.updateBindingDirect(el, type, currentValue);
-                    this.setupInputElement(el, propertyPath, type);
-                    return true;
+                    // Build the absolute path: use found source array or fall back to parent collection
+                    const collection = sourceArray || parentBinding.collection;
+                    const index = sourceArray ? this.abstraction[sourceArray].indexOf(item) : contextVars[parentBinding.indexName];
+                    return PropertyPath.buildNestedPropertyPath(target, contextVars, collection, index);
                 }
 
-                // Delegate event handlers with access to current loop item and index
-                if (Utils.isEventType(type)) {
-                    this.handleEventBinding(el, type, target, contextVars[parentBinding.itemName], contextVars[parentBinding.indexName]);
-                    return true;
-                }
-
-                return false;
-            },
-
-            /**
-             * Applies style binding to a DOM element
-             * @param {Object} binding - The binding
-             * @param {Object|string} value - The style value(s) to apply
-             */
-            applyStyleBinding(binding, value) {
-                // Fetch the element
-                const element = binding.element;
-
-                // Object syntax: { color: 'red', fontSize: '16px' }
-                // Check if value is an object (preferred object syntax)
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    // Iterate through each style property in the object
-                    Object.keys(value).forEach(styleProp => {
-                        // Only set non-null/undefined values to avoid clearing styles accidentally
-                        if (value[styleProp] != null) {
-                            // Check if this is a CSS custom property (starts with --)
-                            if (styleProp.startsWith('--')) {
-                                element.style.setProperty(styleProp, value[styleProp]); // CSS custom properties
-                            } else {
-                                element.style[styleProp] = value[styleProp]; // regular CSS properties
-                            }
-                        }
-                    });
-
-                    return;
-                }
-
-                // String syntax: "color: red; font-size: 16px;"
-                // Set the entire CSS text at once (less efficient but backwards compatible)
-                if (typeof value === 'string') {
-                    element.style.cssText = value;
-                }
+                // For root-level properties (e.g., "activeTab.sampleInput"), return as-is
+                // These don't need path resolution since they're not relative to the loop item
+                return target;
             },
 
             // === EVENT HANDLING SECTION ===
@@ -4269,6 +4296,41 @@
                 // Apply new classes and store for next time
                 newClasses.forEach(cls => element.classList.add(cls));
                 element.dataset.pacPreviousClasses = newClasses.join(' ');
+            },
+
+            /**
+             * Applies style binding to a DOM element
+             * @param {Object} binding - The binding
+             * @param {Object|string} value - The style value(s) to apply
+             */
+            applyStyleBinding(binding, value) {
+                // Fetch the element
+                const element = binding.element;
+
+                // Object syntax: { color: 'red', fontSize: '16px' }
+                // Check if value is an object (preferred object syntax)
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Iterate through each style property in the object
+                    Object.keys(value).forEach(styleProp => {
+                        // Only set non-null/undefined values to avoid clearing styles accidentally
+                        if (value[styleProp] != null) {
+                            // Check if this is a CSS custom property (starts with --)
+                            if (styleProp.startsWith('--')) {
+                                element.style.setProperty(styleProp, value[styleProp]); // CSS custom properties
+                            } else {
+                                element.style[styleProp] = value[styleProp]; // regular CSS properties
+                            }
+                        }
+                    });
+
+                    return;
+                }
+
+                // String syntax: "color: red; font-size: 16px;"
+                // Set the entire CSS text at once (less efficient but backwards compatible)
+                if (typeof value === 'string') {
+                    element.style.cssText = value;
+                }
             },
 
             /**
