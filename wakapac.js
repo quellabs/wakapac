@@ -1897,7 +1897,6 @@
 
             // Reactivity and caching
             deps: new Map(),
-            expressionCache: new Map(),
             lastValues: new Map(),
 
             // Update management
@@ -5577,7 +5576,6 @@
                 // Clear all cached data structures
                 // Releases memory held by computed values and expression caches
                 this.deps.clear();
-                this.expressionCache.clear();
                 this.lastValues.clear();
 
                 // Clear all binding-related data structures
