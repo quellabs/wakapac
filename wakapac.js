@@ -34,12 +34,6 @@
     ];
 
     /**
-     * Binding map
-     * @type {{visible: string, checked: string, value: string, class: string, style: string}}
-     */
-    const BINDING_TYPE_MAP = {"visible": "visible", "checked": "checked", "value": "input", "class": "class", "style": "style"};
-
-    /**
      * Array mutation methods that trigger reactivity updates
      * @constant {string[]}
      */
@@ -910,7 +904,6 @@
          * @type {Map<string, Object>}
          */
         cache: new Map(),
-        bindingCache: new Map(),
         tokens: [],
         currentToken: 0,
 
@@ -1756,10 +1749,6 @@
          * @returns {Array} Array of binding pairs
          */
         parseBindingString(bindingString) {
-            if (this.bindingCache.has(bindingString)) {
-                return this.bindingCache.get(bindingString);
-            }
-
             const pairs = [];
             let current = '';
             let inQuotes = false;
@@ -1802,7 +1791,6 @@
             }
 
             this.addBindingPairIfValid(current, pairs);
-            this.bindingCache.set(bindingString, pairs);
             return pairs;
         },
 
