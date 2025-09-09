@@ -2797,81 +2797,130 @@
 
             /**
              * Builds an index of bindings by property for efficient lookups
+             * Creates a mapping from property names to the bindings that depend on them
+             * @returns {void}
              */
-            /**
-             * Builds an index of bindings by property for efficient lookups
-             * SIMPLIFIED: Parse and index immediately, no lazy loading
-             */
-            buildBindingIndex: function() {
+            buildBindingIndex() {
+                // Clear existing index to rebuild from scratch
                 this.bindingIndex.clear();
 
-                this.bindings.forEach(function(binding) {
-                    if (binding.target) {
-                        // Parse expression immediately
-                        binding.parsedExpression = ExpressionParser.parseExpression(binding.target);
-                        var dependencies = binding.parsedExpression.dependencies || [];
+                this.bindings.forEach((binding) => {
+                    // Skip bindings without targets - they have no dependencies to track
+                    if (!binding.target) {
+                        return;
+                    }
 
-                        // For foreach bindings, also extract template dependencies
-                        if (binding.type === 'foreach' && binding.template) {
-                            var templateDependencies = this.extractTemplateDependencies(binding.template);
-                            var allDeps = dependencies.concat(templateDependencies);
-                            // Remove duplicates
-                            dependencies = allDeps.filter(function(dep, index) {
-                                return allDeps.indexOf(dep) === index;
-                            });
+                    // Parse the binding expression to extract its dependencies
+                    binding.parsedExpression = ExpressionParser.parseExpression(binding.target);
+                    let dependencies = binding.parsedExpression.dependencies || [];
+
+                    // Templates can reference properties that aren't in the main expression
+                    if (binding.type === 'foreach' && binding.template) {
+                        // Extract the dependencies
+                        const templateDeps = this.extractTemplateDependencies(binding.template);
+
+                        // Merge with existing dependencies, removing duplicates
+                        dependencies = [...new Set([...dependencies, ...templateDeps])];
+                    }
+
+                    // Index each dependency - create reverse mapping from property to bindings
+                    dependencies.forEach((dep) => {
+                        // Initialize set for this property if it doesn't exist
+                        if (!this.bindingIndex.has(dep)) {
+                            this.bindingIndex.set(dep, new Set());
                         }
 
-                        // Index under each dependency
-                        dependencies.forEach(function(dep) {
-                            if (!this.bindingIndex.has(dep)) {
-                                this.bindingIndex.set(dep, new Set());
-                            }
-                            this.bindingIndex.get(dep).add(binding);
-                        }.bind(this));
+                        // Add this binding to the set of bindings that depend on this property
+                        this.bindingIndex.get(dep).add(binding);
+                    });
 
-                        // Store dependencies on binding for reference
-                        binding.dependencies = dependencies;
-                    }
-                }.bind(this));
+                    // Store final dependencies on the binding for later use
+                    binding.dependencies = dependencies;
+                });
             },
 
             // === BINDING CREATION SECTION ===
 
             /**
-             * Ensures binding is indexed for efficient lookups (lazy indexing)
-             * FIXED: For foreach bindings, also analyzes template dependencies
-             * @param {Object} binding - The binding object
-             * @returns {Object} Parsed expression object
+             * Extracts dependencies from text interpolation patterns like {{property}} or {{object.property}}
+             * @param {string} template - HTML template string
+             * @returns {Set<string>} Set of property names referenced in text interpolations
              */
-            getParsedExpression(binding) {
-                // Get cached parsed expression (ExpressionParser handles caching)
-                const parsedExpression = ExpressionParser.parseExpression(binding.target);
+            extractTextInterpolationDependencies(template) {
+                const dependencies = new Set();
+                const textMatches = template.match(/\{\{\s*([^}]+)\s*\}\}/g);
 
-                // Only do indexing work if not already done
-                if (!binding.isIndexed) {
-                    let dependencies = parsedExpression.dependencies || [];
+                if (textMatches) {
+                    textMatches.forEach(match => {
+                        const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
 
-                    //  For foreach bindings, also extract dependencies from the template
-                    if (binding.type === 'foreach' && binding.template) {
-                        const templateDependencies = this.extractTemplateDependencies(binding.template);
-                        const allDeps = new Set([...dependencies, ...templateDependencies]);
-                        dependencies = Array.from(allDeps);
-                    }
+                        try {
+                            const parsed = ExpressionParser.parseExpression(expression);
 
-                    // Index this binding under each dependency
-                    dependencies.forEach(dep => {
-                        if (!this.bindingIndex.has(dep)) {
-                            this.bindingIndex.set(dep, new Set());
+                            if (parsed && parsed.dependencies) {
+                                parsed.dependencies.forEach(dep => dependencies.add(dep));
+                            }
+                        } catch (error) {
+                            console.warn('Could not parse template expression:', expression);
                         }
-
-                        this.bindingIndex.get(dep).add(binding);
                     });
-
-                    binding.isIndexed = true;
-                    binding.dependencies = dependencies;
                 }
 
-                return parsedExpression;
+                return dependencies;
+            },
+
+            /**
+             * Extracts all data binding dependencies from a template string.
+             * Parses data-pac-bind attributes to identify which data properties
+             * the template relies on for dynamic content binding.
+             * @param {string} template - HTML template string containing data-pac-bind attributes
+             * @returns {Set<string>} Set of unique dependency names referenced in binding expressions
+             */
+            extractDataBindingDependencies(template) {
+                // Initialize set to store unique dependency names
+                const dependencies = new Set();
+
+                // Create temporary DOM element to parse HTML template safely
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = template;
+
+                // Find all elements that have data binding attributes
+                const elementsWithBindings = tempDiv.querySelectorAll('[data-pac-bind]');
+
+                // Process each element with data bindings
+                elementsWithBindings.forEach(element => {
+                    // Extract the binding configuration string
+                    const bindingString = element.getAttribute('data-pac-bind');
+
+                    // Skip empty or whitespace-only binding strings
+                    if (bindingString && bindingString.trim()) {
+                        try {
+                            // Parse the binding string into target-value pairs
+                            // Example: "text: user.name; visible: user.isActive" -> [{target: "text", value: "user.name"}, ...]
+                            const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+
+                            // Extract dependencies from each binding pair
+                            bindingPairs.forEach(({target}) => {
+                                // Skip empty target expressions
+                                if (target && target.trim()) {
+                                    // Parse the target expression to extract variable dependencies
+                                    const parsed = ExpressionParser.parseExpression(target);
+
+                                    // Add all discovered dependencies to our set
+                                    if (parsed && parsed.dependencies) {
+                                        parsed.dependencies.forEach(dep => dependencies.add(dep));
+                                    }
+                                }
+                            });
+                        } catch (error) {
+                            // Log parsing errors without breaking the entire process
+                            console.warn('Could not parse binding string:', bindingString);
+                        }
+                    }
+                });
+
+                // Return the complete set of unique dependencies
+                return dependencies;
             },
 
             /**
@@ -2880,56 +2929,11 @@
              * @returns {string[]} Array of property names referenced in template
              */
             extractTemplateDependencies(template) {
-                const dependencies = new Set();
+                const textDependencies = this.extractTextInterpolationDependencies(template);
+                const bindingDependencies = this.extractDataBindingDependencies(template);
+                const allDependencies = new Set([...textDependencies, ...bindingDependencies]);
 
-                // Extract text interpolation dependencies {{property}} or {{object.property}}
-                const textMatches = template.match(/\{\{\s*([^}]+)\s*\}\}/g);
-
-                if (textMatches) {
-                    textMatches.forEach(match => {
-                        const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
-                        try {
-                            const parsed = ExpressionParser.parseExpression(expression);
-                            if (parsed && parsed.dependencies) {
-                                parsed.dependencies.forEach(dep => dependencies.add(dep));
-                            }
-                        } catch (error) {
-                            // Skip invalid expressions
-                            console.warn('Could not parse template expression:', expression);
-                        }
-                    });
-                }
-
-                // Extract data-pac-bind dependencies using a more robust approach
-                // Parse the template as DOM to properly extract attribute values
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = template;
-
-                // Find all elements with data-pac-bind attributes
-                const elementsWithBindings = tempDiv.querySelectorAll('[data-pac-bind]');
-
-                elementsWithBindings.forEach(element => {
-                    const bindingString = element.getAttribute('data-pac-bind');
-                    if (bindingString && bindingString.trim()) {
-                        try {
-                            const bindingPairs = ExpressionParser.parseBindingString(bindingString);
-                            bindingPairs.forEach(({target}) => {
-                                if (target && target.trim()) {
-                                    const parsed = ExpressionParser.parseExpression(target);
-                                    
-                                    if (parsed && parsed.dependencies) {
-                                        parsed.dependencies.forEach(dep => dependencies.add(dep));
-                                    }
-                                }
-                            });
-                        } catch (error) {
-                            // Skip invalid binding strings
-                            console.warn('Could not parse binding string:', bindingString);
-                        }
-                    }
-                });
-
-                return Array.from(dependencies);
+                return Array.from(allDependencies);
             },
 
             /**
@@ -3245,11 +3249,6 @@
                     return true;
                 }
 
-                // For lazy-parsed expressions, parse them now if needed
-                if (binding.target && !binding.dependencies) {
-                    this.getParsedExpression(binding);
-                }
-
                 // Expression dependencies
                 return !!(binding.dependencies && binding.dependencies.includes(changedProperty));
             },
@@ -3431,6 +3430,20 @@
 
             // === BINDING UPDATE SECTION ===
 
+            getBindingHandler(type) {
+                const handlers = {
+                    visible: this.applyVisibilityBinding,
+                    class: this.applyClassBinding,
+                    style: this.applyStyleBinding,
+                    checked: this.applyCheckedBinding,
+                    input: this.applyInputBinding,
+                    value: this.applyInputBinding,
+                    attribute: this.applyAttributeBinding
+                };
+
+                return handlers[type] || this.applyAttributeBinding;
+            },
+
             /**
              * Updates a data binding by evaluating its expression and applying the result to the bound element.
              * This method serves as the central dispatcher for all binding types, handling expression evaluation
@@ -3480,7 +3493,8 @@
 
                     // Default case: evaluate expression and apply result
                     const context = Object.assign({}, this.abstraction, foreachVars || {});
-                    const parsed = this.getParsedExpression(binding);
+                    const parsed = ExpressionParser.parseExpression(binding.target);
+
                     handler(context, ExpressionParser.evaluate(parsed, context));
 
                 } catch (error) {
