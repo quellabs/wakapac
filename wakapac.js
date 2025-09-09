@@ -2875,7 +2875,7 @@
             },
 
             /**
-             * FIXED: Extracts property dependencies from foreach template HTML
+             * Extracts property dependencies from foreach template HTML
              * @param {string} template - HTML template string
              * @returns {string[]} Array of property names referenced in template
              */
@@ -2916,6 +2916,7 @@
                             bindingPairs.forEach(({target}) => {
                                 if (target && target.trim()) {
                                     const parsed = ExpressionParser.parseExpression(target);
+                                    
                                     if (parsed && parsed.dependencies) {
                                         parsed.dependencies.forEach(dep => dependencies.add(dep));
                                     }
@@ -3188,8 +3189,7 @@
                     itemName: element.getAttribute('data-pac-item') || 'item',
                     indexName: element.getAttribute('data-pac-index') || 'index',
                     template: templateHtml,
-                    previous: [],
-                    fingerprints: null
+                    previous: []
                 });
 
                 // Create guard
@@ -3327,7 +3327,6 @@
                         .some(prop => prop !== binding.collection);
 
                     if (hasGlobalPropertyChange) {
-                        binding.fingerprints = null;
                         binding.previous = null;
                     }
                 });
@@ -3446,41 +3445,85 @@
              * @param {Object|null} [foreachVars=null] - Additional variables from foreach loop context
              * @throws {Error} Logs errors to console if binding evaluation or application fails
              */
-            updateBinding: function(binding, property, foreachVars) {
+            updateBinding(binding, property, foreachVars = null) {
                 try {
-                    var handlers = {
-                        text: function() { this.applyTextBinding(binding, property, foreachVars); }.bind(this),
-                        foreach: function() { this.applyForeachBinding(binding, property, foreachVars); }.bind(this),
-                        event: function() {}, // no-op
+                    // Handler lookup table for all binding types
+                    const handlers = {
+                        // Special handlers that don't need context evaluation
+                        text: () => this.applyTextBinding(binding, property, foreachVars),
+                        foreach: () => this.applyForeachBinding(binding, property, foreachVars),
+                        event: () => {},
 
-                        // These all use the parsed expression that's already available
-                        attribute: function(ctx, val) { this.applyAttributeBinding(binding, val); }.bind(this),
-                        input: function(ctx, val) { this.applyInputBinding(binding, val); }.bind(this),
-                        checked: function(ctx, val) { this.applyCheckedBinding(binding, val); }.bind(this),
-                        visible: function(ctx, val) { this.applyVisibilityBinding(binding, val); }.bind(this),
-                        conditional: function(ctx, val) { this.applyConditionalBinding(binding, val); }.bind(this),
-                        'class': function(ctx, val) { this.applyClassBinding(binding, val); }.bind(this),
-                        style: function(ctx, val) { this.applyStyleBinding(binding, val); }.bind(this)
+                        // Default handlers that need context evaluation
+                        attribute: (ctx, val) => this.applyAttributeBinding(binding, val),
+                        input: (ctx, val) => this.applyInputBinding(binding, val),
+                        checked: (ctx, val) => this.applyCheckedBinding(binding, val),
+                        visible: (ctx, val) => this.applyVisibilityBinding(binding, val),
+                        conditional: (ctx, val) => this.applyConditionalBinding(binding, val),
+                        class: (ctx, val) => this.applyClassBinding(binding, val),
+                        style: (ctx, val) => this.applyStyleBinding(binding, val)
                     };
 
-                    var handler = handlers[binding.type];
+                    // Get the appropriate handler for this binding type
+                    const handler = handlers[binding.type];
+
+                    // Skip unknown binding types silently
                     if (!handler) {
                         return;
                     }
 
-                    // Special cases that manage their own evaluation
+                    // Special cases that manage their own expression evaluation and context
                     if (binding.type === 'text' || binding.type === 'foreach' || binding.type === 'event') {
                         handler();
                         return;
                     }
 
-                    // Default case: use pre-parsed expression
+                    // Default case: evaluate expression and apply result
                     const context = Object.assign({}, this.abstraction, foreachVars || {});
-                    const value = ExpressionParser.evaluate(binding.parsedExpression, context);
-                    handler(context, value);
+                    const parsed = this.getParsedExpression(binding);
+                    handler(context, ExpressionParser.evaluate(parsed, context));
 
                 } catch (error) {
                     console.error('Error updating ' + binding.type + ' binding:', error);
+                }
+            },
+
+            /**
+             * Applies a binding directly without creating a binding object
+             * @param {HTMLElement} element - Target element
+             * @param {string} type - Binding type
+             * @param {*} value - Evaluated value
+             */
+            updateBindingDirect(element, type, value) {
+                const tempBinding = { element, type, attribute: type };
+
+                switch (type) {
+                    case 'visible':
+                        this.applyVisibilityBinding(tempBinding, value);
+                        break;
+
+                    case 'class':
+                        this.applyClassBinding(tempBinding, value);
+                        break;
+
+                    case 'style':
+                        this.applyStyleBinding(tempBinding, value);
+                        break;
+
+                    case 'checked':
+                        this.applyCheckedBinding(tempBinding, value);
+                        break;
+
+                    case 'input':
+                    case 'value':
+                        this.applyInputBinding(tempBinding, value);
+                        break;
+
+                    default:
+                        // Attribute binding
+                        tempBinding.attribute = type;
+                        this.applyAttributeBinding(tempBinding, value);
+                        break;
                 }
             },
 
@@ -3650,125 +3693,12 @@
                             const value = ExpressionParser.evaluate(parsed, context);
 
                             // Apply the binding directly using existing application methods
-                            this.applyBindingDirectly(el, type, value);
+                            this.updateBindingDirect(el, type, value);
                         });
                     });
                 });
             },
 
-            /**
-             * Applies a binding directly without creating a binding object
-             * @param {HTMLElement} element - Target element
-             * @param {string} type - Binding type
-             * @param {*} value - Evaluated value
-             */
-            applyBindingDirectly(element, type, value) {
-                const tempBinding = { element, type, attribute: type };
-
-                switch (type) {
-                    case 'visible':
-                        this.applyVisibilityBinding(tempBinding, value);
-                        break;
-
-                    case 'class':
-                        this.applyClassBinding(tempBinding, value);
-                        break;
-
-                    case 'style':
-                        this.applyStyleBinding(tempBinding, value);
-                        break;
-
-                    case 'checked':
-                        this.applyCheckedBinding(tempBinding, value);
-                        break;
-
-                    case 'input':
-                    case 'value':
-                        this.applyInputBinding(tempBinding, value);
-                        break;
-
-                    default:
-                        // Attribute binding
-                        tempBinding.attribute = type;
-                        this.applyAttributeBinding(tempBinding, value);
-                        break;
-                }
-            },
-
-            /**
-             * Generates fingerprints for change detection
-             * @param {Array} array - Array to generate fingerprints for
-             * @returns {Array} Array of fingerprint objects
-             */
-            generateFingerprints(array) {
-                return array.map((item, index) => ({
-                    index,
-                    id: this.getItemId(item),
-                    hash: this.generateItemHash(item)
-                }));
-            },
-
-            /**
-             * Gets stable identifier for an item
-             * @param {*} item - Item to get identifier for
-             * @returns {string|*} Stable identifier
-             */
-            getItemId(item) {
-                if (!item || typeof item !== 'object') {
-                    return item;
-                }
-
-                if (item.id !== undefined) {
-                    return item.id;
-                }
-
-                return 'hash_' + this.generateItemHash(item);
-            },
-
-            /**
-             * Generates hash for deep content comparison
-             * @param {*} item - Item to hash
-             * @param visited
-             * @returns {string} Hash string
-             */
-            generateItemHash(item, visited = new WeakSet()) {
-                if (item === null || item === undefined) {
-                    return 'null';
-                }
-
-                if (typeof item !== 'object') {
-                    return typeof item + ':' + item;
-                }
-
-                if (visited.has(item)) {
-                    return 'circular';
-                }
-
-                visited.add(item);
-
-                const sortedEntries = Object.entries(item)
-                    .sort(([a], [b]) => a.localeCompare(b))
-                    .map(([key, value]) => key + ':' + this.generateItemHash(value, visited));
-
-                return this.hashString(sortedEntries.join('|'));
-            },
-
-            /**
-             * Simple string hash function
-             * @param {string} str - String to hash
-             * @returns {string} Hash value as base36 string
-             */
-            hashString(str) {
-                let hash = 0;
-
-                for (let i = 0; i < str.length; i++) {
-                    const char = str.charCodeAt(i);
-                    hash = ((hash << 5) - hash) + char;
-                    hash = hash & hash;
-                }
-
-                return hash.toString(36);
-            },
 
             /**
              * Applies style binding to a DOM element
@@ -3978,12 +3908,6 @@
                 return modifiersAttr ? modifiersAttr.trim().split(/\s+/).filter(m => m.length > 0) : [];
             },
 
-            /**
-             * Applies event modifiers to validate if event should trigger
-             * @param {Event} event - The keyboard/mouse event to validate
-             * @param {string[]} modifiers - Array of modifier strings to check against
-             * @returns {boolean} - True if event matches modifiers, false otherwise
-             */
             /**
              * Applies event modifiers to validate if event should trigger
              * @param {Event} event - The keyboard/mouse event to validate
@@ -4340,22 +4264,12 @@
 
             /**
              * Applies foreach binding updates using a smart skip system that minimizes DOM manipulation.
-             *
-             * This method implements a three-path update strategy:
-             * 1. No changes: Skip update entirely
-             * 2. Content-only changes: Refresh bindings on existing DOM elements (performance optimization)
-             * 3. Structural changes: Full DOM rebuild (fallback for complex changes)
-             *
-             * The fingerprinting system detects the type of change by comparing item IDs and content hashes
-             * between the previous and current array states.
-             *
              * @param {Object} binding - The foreach binding configuration object
              * @param {string} binding.collection - Name of the collection property being rendered
              * @param {string} binding.template - HTML template string for each item
              * @param {string} binding.itemName - Variable name for the current item (e.g., 'item', 'todo')
              * @param {string} binding.indexName - Variable name for the current index (e.g., 'index', 'i')
              * @param {Array} binding.previous - Previously rendered array state for change detection
-             * @param {Array} binding.fingerprints - Hashes of the previous array state for comparison
              * @param {HTMLElement} binding.element - DOM container element to render items into
              * @param {string|null} property - The specific property that changed (null for force update)
              * @param {Object|null} foreachVars - Additional context variables from parent foreach loops
@@ -4367,149 +4281,15 @@
                     return;
                 }
 
+                // Fetch container
+                const container = binding.element;
+
                 // Create evaluation context by merging abstraction data with parent foreach variables
                 const context = Object.assign({}, this.abstraction, foreachVars || {});
 
-                // evaluate the binding expression to get the current array value
+                // Evaluate the binding expression to get the current array value
                 const arrayValue = ExpressionParser.evaluate(binding.parsedExpression, context);
-
-                // Ensure we have a valid array to work with (handle null/undefined gracefully)
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
-                const forceUpdate = binding.previous === null; // Initial render flag
-
-                // Generate fingerprints for change detection using existing fingerprinting system
-                // Each fingerprint contains: { index, id, hash } for tracking item identity and content
-                const currentFingerprints = this.generateFingerprints(array);
-                const previousFingerprints = binding.fingerprints || [];
-
-                // Detect content-only changes: same items in same positions but different properties
-                // This is the key optimization for cases like checkbox changes (todo.completed = true)
-                const hasContentOnlyChanges = this.hasContentOnlyChanges(previousFingerprints, currentFingerprints);
-
-                // PATH 1: No changes detected - skip update entirely
-                if (!forceUpdate && Utils.isEqual(currentFingerprints, previousFingerprints)) {
-                    // Update cached state but don't touch the DOM
-                    binding.previous = [...array];
-                    return;
-                }
-
-                // Update cached state for future comparisons
-                binding.fingerprints = currentFingerprints;
-                binding.previous = [...array];
-
-                // PATH 2: Content-only changes - refresh bindings without DOM reconstruction
-                // This path handles property changes like todo.completed, user.name, etc.
-                // Keeps existing DOM elements and just updates their bindings for performance
-                if (hasContentOnlyChanges && !forceUpdate) {
-                    this.refreshForeachElementBindings(binding, array, foreachVars);
-                    return;
-                }
-
-                // PATH 3: Structural changes - complete DOM rebuild
-                // This handles additions, removals, reorderings, and initial renders
-                // More expensive but necessary when the array structure changes
-                this.rebuildForeachContent(binding, array, foreachVars);
-            },
-
-            /**
-             * Determines if changes are content-only (same array structure, different item properties).
-             * @param {Array} oldFingerprints - Previous array fingerprints from last update
-             * @param {Array} newFingerprints - Current array fingerprints from this update
-             * @returns {boolean} True if changes are content-only and can use optimized update path
-             */
-            hasContentOnlyChanges(oldFingerprints, newFingerprints) {
-                // Structural change: Array length changed (items added or removed)
-                if (oldFingerprints.length !== newFingerprints.length) {
-                    return false;
-                }
-
-                // Structural change: Items reordered (same IDs but different positions)
-                // Check each position to ensure the same item ID is still there
-                for (let i = 0; i < oldFingerprints.length; i++) {
-                    if (!oldFingerprints[i] || !newFingerprints[i] ||
-                        oldFingerprints[i].id !== newFingerprints[i].id) {
-                        return false;
-                    }
-                }
-
-                // Content change detection: At least one item must have different content
-                // If hashes are identical, no properties changed so no update needed
-                return oldFingerprints.some((oldFp, i) =>
-                    oldFp.hash !== newFingerprints[i].hash
-                );
-            },
-
-            /**
-             * Refreshes data bindings on existing DOM elements without rebuilding the DOM structure.
-             * @param {Object} binding - The foreach binding being updated
-             * @param {Array} array - Current array of data items to bind
-             * @param {Object|null} foreachVars - Parent foreach context variables
-             * @returns {void}
-             */
-            refreshForeachElementBindings(binding, array, foreachVars) {
-                const container = binding.element;
-                const existingElements = Array.from(container.children);
-
-                // Process each data item and its corresponding DOM element
-                array.forEach((item, index) => {
-                    const element = existingElements[index];
-
-                    // Safety check - should not happen in content-only updates
-                    if (!element) {
-                        return;
-                    }
-
-                    // Create context variables for this specific foreach item
-                    // This makes the item data available to binding expressions as variables
-                    const itemContext = Object.assign({}, foreachVars || {}, {
-                        [binding.itemName]: item,      // e.g., 'todo' -> { id: 1, text: '...', completed: true }
-                        [binding.indexName]: index     // e.g., 'index' -> 0, 1, 2, ...
-                    });
-
-                    // Update text content using interpolation ({{todo.text}}, {{index}}, etc.)
-                    this.processTextBindingsForElement(element, itemContext);
-
-                    // Find all elements with attribute bindings within this foreach item
-                    // This includes the root element itself and any nested elements
-                    const elementsWithBindings = [element, ...element.querySelectorAll('[data-pac-bind]')]
-                        .filter(el => el.hasAttribute('data-pac-bind'));
-
-                    // Process each element's bindings to refresh their state
-                    elementsWithBindings.forEach(el => {
-                        const bindingString = el.getAttribute('data-pac-bind');
-
-                        if (!bindingString) {
-                            return;
-                        }
-
-                        // Instead of creating temporary bindings, evaluate directly
-                        ExpressionParser.parseBindingString(bindingString).forEach(({type, target}) => {
-                            if (type === 'foreach') {
-                                return;
-                            }
-
-                            // Direct evaluation without temporary binding
-                            const context = Object.assign({}, this.abstraction, foreachVars);
-                            const parsed = ExpressionParser.parseExpression(target);
-                            const value = ExpressionParser.evaluate(parsed, context);
-
-                            // Apply the binding directly using existing application methods
-                            this.applyBindingDirectly(el, type, value);
-                        });
-                    });
-                });
-            },
-
-            /**
-             * Rebuilds the entire foreach content by destroying existing DOM and creating new elements.
-             * @param {Object} binding - The foreach binding being rebuilt
-             * @param {Array} array - Current array of data items to render
-             * @param {Object|null} foreachVars - Parent foreach context variables
-             * @returns {void}
-             */
-            rebuildForeachContent(binding, array, foreachVars) {
-                // Fetch container
-                const container = binding.element;
 
                 // Clear existing content completely - destroys all child elements and their bindings
                 container.innerHTML = '';
