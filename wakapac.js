@@ -3660,11 +3660,13 @@
             },
 
             /**
-             * Processes text interpolation bindings for an element by reusing existing text binding logic
+             * Processes text interpolation bindings for an element by creating reactive bindings
+             * that update when dependencies change, even in foreach contexts
              * @param {HTMLElement} element - The DOM element to process text bindings on
              * @param {Object} contextVars - Context variables for expression evaluation
+             * @param {Object} [parentBinding] - Parent foreach binding for dependency tracking
              */
-            processTextBindingsForElement(element, contextVars) {
+            processTextBindingsForElement(element, contextVars, parentBinding = null) {
                 // Collect all text nodes first to avoid modifying the tree while traversing
                 const textNodes = Utils.getTextNodesFromElement(element);
 
@@ -3678,9 +3680,46 @@
 
                     // Only process nodes that have interpolation patterns
                     if (/\{\{\s*[^}]+\s*}}/.test(originalText)) {
-                        textNode.textContent = this.processTextInterpolation(originalText, context);
+                        // Create a reactive text binding for this node
+                        this.createReactiveTextBinding(textNode, originalText, context, contextVars, parentBinding);
                     }
                 });
+            },
+
+            /**
+             * Creates a reactive text binding that updates when dependencies change
+             * @param {Text} textNode - The text node to bind
+             * @param {string} originalText - Original text with interpolation patterns
+             * @param {Object} context - Evaluation context
+             * @param {Object} contextVars - Context variables (item, index, etc.)
+             * @param {Object} parentBinding - Parent foreach binding
+             */
+            createReactiveTextBinding(textNode, originalText, context, contextVars, parentBinding) {
+                // Extract dependencies from the text interpolations
+                const dependencies = this.extractTextInterpolationDependencies(originalText);
+
+                // Create a unique binding for this text node
+                const binding = this.createBinding('text', textNode, {
+                    target: null, // No single target, multiple interpolations
+                    originalText: originalText,
+                    contextVars: contextVars,
+                    parentBinding: parentBinding,
+                    dependencies: Array.from(dependencies)
+                });
+
+                // Store the binding
+                this.bindings.set(binding.id, binding);
+
+                // Index the binding by its dependencies
+                dependencies.forEach(dep => {
+                    if (!this.bindingIndex.has(dep)) {
+                        this.bindingIndex.set(dep, new Set());
+                    }
+                    this.bindingIndex.get(dep).add(binding);
+                });
+
+                // Perform initial text replacement
+                textNode.textContent = this.processTextInterpolation(originalText, context);
             },
 
             /**
@@ -4397,12 +4436,18 @@
                 // Get reference to the DOM text node that will be updated
                 const textNode = binding.element;
 
-                // Create evaluation context - merge abstraction with optional context
-                // If contextVars provided, merge them with the base abstraction object
-                // Otherwise, just use the abstraction object as-is
-                const context = contextVars
-                    ? Utils.createScopedContext(this.abstraction, contextVars)
-                    : this.abstraction;
+                // Determine the evaluation context
+                let context;
+
+                if (binding.contextVars && binding.parentBinding) {
+                    // This is a foreach text binding - merge contexts properly
+                    context = Utils.createScopedContext(this.abstraction, binding.contextVars);
+                } else {
+                    // Regular text binding - use provided context or abstraction
+                    context = contextVars
+                        ? Utils.createScopedContext(this.abstraction, contextVars)
+                        : this.abstraction;
+                }
 
                 // Use the shared interpolation utility to process template strings
                 // This handles variable substitution within the original text template
@@ -4491,7 +4536,7 @@
                         });
 
                         // Set up text interpolation for the new element
-                        this.processTextBindingsForElement(itemElement, itemContext);
+                        this.processTextBindingsForElement(itemElement, itemContext, binding);
 
                         // Set up attribute bindings (class, style, events, etc.) for the new element
                         this.processElementAttributeBindings(itemElement, itemContext, binding);
