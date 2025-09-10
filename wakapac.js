@@ -80,6 +80,40 @@
     const Utils = {
 
         /**
+         * Creates a new scope object that inherits from the given parent scope
+         * and optionally extends it with local variables and context metadata.
+         * @param {string} contextType - The type of context being created ('foreach', 'component', etc.)
+         * @param {Object|null} parentScope - The parent scope to inherit from.
+         * @param {Object<string, any>} [localVars] - An object containing local variables
+         * @returns {Object} The newly created scope object with context metadata
+         */
+        createScopedContext(contextType, parentScope, localVars) {
+            // Parameter validity
+            if (!localVars && !contextType) {
+                return parentScope;
+            }
+
+            // Create new scope
+            const scope = Object.create(parentScope || null);
+
+            // Store context type metadata
+            Object.defineProperty(scope, '_contextType', {
+                value: contextType,
+                writable: false,
+                enumerable: false,
+                configurable: false
+            });
+
+            // Add local variables if provided
+            if (localVars && typeof localVars === 'object') {
+                Object.assign(scope, localVars);
+            }
+
+            // Return scope
+            return scope;
+        },
+
+        /**
          * Query all elements with the given selector, including the element self
          * @param element
          * @param selector
@@ -418,62 +452,99 @@
 
         /**
          * Safely resolves a nested property path
-         * @param {Object} obj - Object to traverse
+         * @param {Object} context - Object to traverse
          * @param {string} path - Property path
          * @returns {*} Resolved value or undefined
          */
-        get(obj, path) {
-            if (!path) {
-                return obj;
+        get(context, path) {
+            if (context == null) {
+                return undefined;
             }
 
-            return path.split('.').reduce((current, segment) => {
-                if (current && Object.prototype.hasOwnProperty.call(current, segment)) {
-                    return current[segment];
-                } else {
+            const parts = Array.isArray(path) ? path : String(path).split('.');
+
+            let current = context;
+            for (const segment of parts) {
+                if (current == null) {
                     return undefined;
                 }
-            }, obj);
+
+                current = (segment in current) ? current[segment] : undefined;
+            }
+
+            return current;
         },
 
         /**
-         * Sets a nested property value (e.g., "todos.0.completed" = true)
-         * @param {Object} control
-         * @param {string} propertyPath - Dot-separated property path
-         * @param {*} value - Value to set
+         * Sets a nested property value using dot notation, with prototype-chain awareness.
+         * Reads always see inherited values, but writes go to the nearest owner
+         * in the chain or fall back to the base parent object.
+         * @param {Object} control - Object containing the abstraction and dependencies
+         * @param {string} propertyPath - Dot-separated path (e.g. "activeTab.sampleInput")
+         * @param {*} value - Value to assign
+         * @returns {boolean} True if assignment succeeded, false otherwise
          */
         set(control, propertyPath, value) {
-            // Split the property path into individual parts (e.g., "todos.0.completed" → ["todos", "0", "completed"])
+            // Validate input path
+            if (typeof propertyPath !== 'string' || propertyPath.length === 0) {
+                return false;
+            }
+
+            // Split into parts and separate the final property key
             const parts = propertyPath.split('.');
+            const key = parts.pop();
+            const parentPath = parts.join('.');
 
-            // Simple property (no nesting)
-            // If there's only one part, we're setting a top-level property directly
-            if (parts.length === 1) {
-                control.abstraction[propertyPath] = value;
-                return;
+            // Resolve the parent object using chain-aware get()
+            const parent = parts.length
+                ? PropertyPath.get(control.abstraction, parentPath)
+                : control.abstraction;
+
+            if (parent == null) {
+                return false;
             }
 
-            // Navigate to the parent object
-            // We need to traverse through all parts except the last one to reach the parent
-            let current = control.abstraction;
-
-            for (let i = 0; i < parts.length - 1; i++) {
-                // Move deeper into the nested structure using the current part as a key
-                current = current[parts[i]];
-
-                // Check if the current path exists - if not, we can't set the property
-                if (!current || typeof current !== 'object') {
-                    console.warn('Cannot set property: ' + propertyPath + ' - path not found at \'' + parts.slice(0, i + 1).join('.') + '\'');
-                    return;
-                }
+            // Walk up the prototype chain to find the closest object that *owns* this key
+            let target = parent;
+            while (target && !Object.prototype.hasOwnProperty.call(target, key)) {
+                target = Object.getPrototypeOf(target);
             }
 
-            // Set the final property
-            // Extract the last part of the path (the actual property name to set)
-            const finalProperty = parts[parts.length - 1];
+            // If no owner found, write directly on the resolved parent
+            if (!target) {
+                target = parent;
+            }
 
-            // Set the value on the parent object we navigated to
-            current[finalProperty] = value;
+            // Save old value for change detection
+            const oldValue = target[key];
+
+            // Assign new value
+            target[key] = value;
+
+            // Fire change notifications if value actually changed
+            this.triggerChangeIfNeeded(control, propertyPath, value, oldValue);
+
+            return true;
+        },
+
+        /**
+         * Triggers change notification if the property is computed
+         * @param {Object} control - The control object
+         * @param {string} propertyPath - Full property path
+         * @param {*} newValue - New value that was set
+         * @param {*} oldValue - Previous value
+         */
+        triggerChangeIfNeeded(control, propertyPath, newValue, oldValue) {
+            const rootProperty = propertyPath.split('.')[0];
+            const isComputedProperty = control.deps?.has(rootProperty) && control.deps.get(rootProperty)?.fn;
+
+            if (isComputedProperty) {
+                control.notifyChange(propertyPath, newValue, 'nested-set', {
+                    oldValue,
+                    nestedPath: propertyPath,
+                    newValue
+                });
+            }
         },
 
         /**
@@ -1539,6 +1610,20 @@
             }
 
             throw new Error(message + ` at token: ${JSON.stringify(this.peek())}`);
+        },
+
+        lookupInScopeChain(ctx, name) {
+            let cur = ctx;
+
+            while (cur && cur !== Object.prototype) {
+                if (Object.prototype.hasOwnProperty.call(cur, name)) {
+                    return cur[name];
+                }
+
+                cur = Object.getPrototypeOf(cur);
+            }
+
+            return undefined;
         },
 
         /**
@@ -3155,14 +3240,10 @@
              * @throws {Warning} Logs warning if used with radio buttons (should use value binding instead)
              */
             createCheckedBinding(element, target) {
-                if (element.type === 'radio') {
-                    console.warn('Radio buttons should use data-pac-bind="value:property", not "checked:property"');
-                    this.setupInputElement(element, target);
-                    return this.createInputBinding(element, target);
-                }
-
+                // Creates an input value binding with configurable update behavior
                 this.setupInputElement(element, target, 'checked');
 
+                // Sets up check binding
                 return this.createBaseBinding('checked', element, target, {
                     updateMode: element.getAttribute('data-pac-update-mode') || this.config.updateMode,
                     delay: parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay
@@ -3189,34 +3270,41 @@
              * @returns {Object} The created binding element object for further manipulation
              */
             createForeachBinding(element, target) {
-                // Guard to prevent same element binding twice
-                if (typeof element.__pacForeachBound !== 'undefined' && element.__pacForeachTarget === target) {
-                    return element.__pacForeachBinding;
+                // Check if this element already has a foreach binding for this target
+                // This prevents duplicate bindings which could cause rendering conflicts
+                const existingBinding = Array.from(this.bindings.values())
+                    .find(b =>
+                        b.element === element &&         // Same DOM element
+                        b.type === 'foreach' &&          // Same binding type
+                        b.collection === target          // Same collection target
+                    );
+
+                // If duplicate binding exists, return existing instead of creating new
+                if (existingBinding) {
+                    return existingBinding;
                 }
 
-                // Fetch templateHtml
-                const templateHtml = element.innerHTML;
+                // Capture the template BEFORE any processing
+                // Extract configuration from element attributes with sensible defaults
+                const itemName = element.getAttribute('data-pac-item') || 'item';    // Variable name for current item
+                const indexName = element.getAttribute('data-pac-index') || 'index'; // Variable name for current index
+                const template = element.innerHTML.trim();                           // Preserve original content as template
 
-                // Create the binding object with foreach-specific configuration
+                // Create the binding object with foreach-specific properties
                 const bindingElement = this.createBinding('foreach', element, {
-                    target: target,
-                    collection: target,
-                    itemName: element.getAttribute('data-pac-item') || 'item',
-                    indexName: element.getAttribute('data-pac-index') || 'index',
-                    template: templateHtml,
-                    previous: []
+                    target: target,          // Property path to watch for changes
+                    collection: target,      // Collection to iterate over (same as target)
+                    itemName: itemName,      // Template variable name for each item
+                    indexName: indexName,    // Template variable name for item index
+                    template: template,      // HTML template to render for each item
+                    previous: []             // Cache of previous collection state for diff optimization
                 });
 
-                // Create guard
-                element.__pacForeachBound = true;
-                element.__pacForeachTarget = target;
-                element.__pacForeachBinding = bindingElement;
-
-                // Clear the element content since we'll populate it dynamically
-                // The original template is preserved in bindingElement.template
+                // Clear the element's content AFTER capturing the template
+                // The original innerHTML is preserved in the template property above
                 element.innerHTML = '';
 
-                // Return the binding for potential chaining or further configuration
+                // Return the created binding for potential further configuration
                 return bindingElement;
             },
 
@@ -3230,6 +3318,15 @@
              * @returns {void}
              */
             setupInputElement(element, property, bindingType = 'value') {
+                // Check if element is already bound to prevent conflicts
+                const existingProperty = element.getAttribute('data-pac-property');
+                const existingType = element.getAttribute('data-pac-binding-type');
+
+                if (existingProperty || existingType) {
+                    console.warn(`Element already has PAC binding: ${existingProperty}:${existingType}. Skipping new binding: ${property}:${bindingType}`);
+                    return;
+                }
+
                 const attrs = {
                     'data-pac-property': property,
                     'data-pac-binding-type': bindingType,
@@ -3578,7 +3675,8 @@
             },
 
             /**
-             * Processes text interpolation bindings for an element by reusing existing text binding logic
+             * Processes text interpolation bindings for an element by creating reactive bindings
+             * that update when dependencies change, even in foreach contexts
              * @param {HTMLElement} element - The DOM element to process text bindings on
              * @param {Object} contextVars - Context variables for expression evaluation
              */
@@ -3587,7 +3685,7 @@
                 const textNodes = Utils.getTextNodesFromElement(element);
 
                 // Create evaluation context
-                const context = Object.assign({}, this.abstraction, contextVars);
+                const context = Utils.createScopedContext('text', this.abstraction, contextVars);
 
                 // Process each text node that contains interpolation patterns
                 textNodes.forEach(textNode => {
@@ -3596,9 +3694,43 @@
 
                     // Only process nodes that have interpolation patterns
                     if (/\{\{\s*[^}]+\s*}}/.test(originalText)) {
-                        textNode.textContent = this.processTextInterpolation(originalText, context);
+                        // Create a reactive text binding for this node
+                        this.createReactiveTextBinding(textNode, originalText, context);
                     }
                 });
+            },
+
+            /**
+             * Creates a reactive text binding that updates when dependencies change
+             * @param {Text} textNode - The text node to bind
+             * @param {string} originalText - Original text with interpolation patterns
+             * @param {Object} context - Evaluation context
+             */
+            createReactiveTextBinding(textNode, originalText, context) {
+                // Extract dependencies from the text interpolations
+                const dependencies = this.extractTextInterpolationDependencies(originalText);
+
+                // Create a unique binding for this text node
+                const binding = this.createBinding('text', textNode, {
+                    target: null, // No single target, multiple interpolations
+                    originalText: originalText,
+                    dependencies: Array.from(dependencies)
+                });
+
+                // Store the binding
+                this.bindings.set(binding.id, binding);
+
+                // Index the binding by its dependencies
+                dependencies.forEach(dep => {
+                    if (!this.bindingIndex.has(dep)) {
+                        this.bindingIndex.set(dep, new Set());
+                    }
+
+                    this.bindingIndex.get(dep).add(binding);
+                });
+
+                // Perform initial text replacement
+                textNode.textContent = this.processTextInterpolation(originalText, context);
             },
 
             /**
@@ -3643,21 +3775,13 @@
 
             /**
              * Processes attribute bindings for a given element and its descendants.
-             *
-             * This method handles data binding by:
-             * 1. Creating a combined context from abstraction data and contextVars
-             * 2. Finding all elements with data-pac-bind attributes (including the root element)
-             * 3. Parsing binding strings and evaluating expressions
-             * 4. Updating element properties based on binding results
-             *
              * @param {Element} element - The root element to process bindings for
              * @param {Object} contextVars - Additional context variables to merge with abstraction
-             * @param {Object} [parentBinding] - Optional parent binding context for nested scenarios
              * @returns {void}
              */
-            processElementAttributeBindings(element, contextVars, parentBinding) {
+            processElementAttributeBindings(element, contextVars ) {
                 // Merge abstraction data with context variables to create evaluation context
-                const context = Object.assign({}, this.abstraction, contextVars);
+                const context = Utils.createScopedContext('attribute', this.abstraction, contextVars);
 
                 // Find all descendant elements with binding attributes
                 const bindingElements = Utils.queryElementsIncludingSelf(element, '[data-pac-bind]');
@@ -3679,7 +3803,7 @@
                         .forEach(({type, target}) => {
                             // Handle parent binding context if present
                             // This allows for nested binding scenarios with inherited context
-                            if (parentBinding && this.processForeachChildBinding(el, type, target, contextVars, parentBinding)) {
+                            if (this.isInForeachContext(contextVars) && this.processForeachChildBinding(el, type, target, contextVars)) {
                                 return; // Skip further processing if parent context handled it
                             }
 
@@ -3702,75 +3826,94 @@
              * @param {string} type - Binding type ('value', 'checked', 'click', etc.)
              * @param {string} target - Property path or expression to bind to
              * @param {Object} contextVars - Loop variables (item, index, etc.)
-             * @param {Object} parentBinding - Foreach binding metadata
              * @returns {boolean} Whether the binding was successfully handled
              */
-            processForeachChildBinding(el, type, target, contextVars, parentBinding) {
+            processForeachChildBinding(el, type, target, contextVars) {
                 // Handle two-way binding for form controls within foreach loops
-                if ((type === 'value' || type === 'checked') && PropertyPath.isNested(target, contextVars)) {
-                    const item = contextVars[parentBinding.itemName];
+                if (type === 'value' || type === 'checked') {
+                    // Create evaluation context by merging global scope with loop-specific variables
+                    const context = Utils.createScopedContext('foreach', this.abstraction, contextVars);
 
-                    // Locate the source array in the data model that contains this item
-                    // This is needed to build the correct property path for updates
+                    // Parse and evaluate the target expression to get initial value
+                    const currentValue = ExpressionParser.evaluate(ExpressionParser.parseExpression(target), context);
+
+                    // Set the initial display value on the DOM element
+                    this.updateBindingDirect(el, type, currentValue);
+
+                    // Resolve the actual property path for bidirectional binding updates
+                    // This converts relative paths (like "item.name") to absolute paths (like "users.0.name")
+                    const resolvedPath = this.resolveForeachPropertyPath(target, contextVars);
+
+                    // Establish the two-way binding connection for form input synchronization
+                    this.setupInputElement(el, resolvedPath, type);
+
+                    // Done
+                    return true;
+                }
+
+                // Handle event delegation for dynamic elements
+                if (Utils.isEventType(type)) {
+                    // Set up event handlers with proper context binding
+                    // Pass the current item and index for event handler context
+                    const parentBinding = this.getParentBindingFromContext(contextVars);
+
+                    this.handleEventBinding(
+                        el, type, target,
+                        contextVars[parentBinding.itemName],
+                        contextVars[parentBinding.indexName]
+                    );
+
+                    return true;
+                }
+
+                // Binding type not handled by foreach-specific logic
+                return false;
+            },
+
+            // === CONTEXT ===
+
+            /**
+             * Resolves relative property paths within foreach contexts to absolute paths
+             * for proper data binding. Handles both nested object properties and root-level properties.
+             * @param {string} target - The property path expression to resolve
+             * @param {Object} contextVars - Loop context variables (item, index, etc.)
+             * @returns {string} Absolute property path for data binding
+             */
+            resolveForeachPropertyPath(target, contextVars) {
+                // Check if this is a nested property path (e.g., "item.name", "item.address.street")
+                if (PropertyPath.isNested(target, contextVars)) {
+                    // Get the nearest foreach context
+                    const foreachContext = this.findNearestForeachContext(contextVars);
+                    if (!foreachContext) {
+                        return target;
+                    }
+
+                    // Extract the item and variable names from the foreach context
+                    const contextKeys = Object.getOwnPropertyNames(foreachContext);
+                    const localVars = contextKeys.filter(key => key !== '_contextType');
+
+                    // Find the matching binding to get collection info
+                    const binding = this.findMatchingForeachBinding(localVars);
+
+                    if (!binding) {
+                        return target;
+                    }
+
+                    // Get the actual item value and index
+                    const item = foreachContext[binding.itemName];
+                    const index = foreachContext[binding.indexName];
+
+                    // Find the source array in the abstraction that contains this item
                     const sourceArray = Object.keys(this.abstraction).find(key =>
                         Array.isArray(this.abstraction[key]) && this.abstraction[key].includes(item)
                     );
 
-                    // Build property path: either array[index].property or fallback to collection context
-                    const propertyPath = sourceArray
-                        ? PropertyPath.buildNestedPropertyPath(target, contextVars, sourceArray, this.abstraction[sourceArray].indexOf(item))
-                        : PropertyPath.buildNestedPropertyPath(target, contextVars, parentBinding.collection, contextVars[parentBinding.indexName]);
-
-                    // Initialize element with current data value before establishing binding
-                    const context = { ...this.abstraction, ...contextVars };
-                    const currentValue = ExpressionParser.evaluate(ExpressionParser.parseExpression(target), context);
-                    this.updateBindingDirect(el, type, currentValue);
-                    this.setupInputElement(el, propertyPath, type);
-                    return true;
+                    // Build the absolute path: use found source array or fall back to binding collection
+                    const collection = sourceArray || binding.collection;
+                    return PropertyPath.buildNestedPropertyPath(target, contextVars, collection, index);
                 }
 
-                // Delegate event handlers with access to current loop item and index
-                if (Utils.isEventType(type)) {
-                    this.handleEventBinding(el, type, target, contextVars[parentBinding.itemName], contextVars[parentBinding.indexName]);
-                    return true;
-                }
-
-                return false;
-            },
-
-            /**
-             * Applies style binding to a DOM element
-             * @param {Object} binding - The binding
-             * @param {Object|string} value - The style value(s) to apply
-             */
-            applyStyleBinding(binding, value) {
-                // Fetch the element
-                const element = binding.element;
-
-                // Object syntax: { color: 'red', fontSize: '16px' }
-                // Check if value is an object (preferred object syntax)
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    // Iterate through each style property in the object
-                    Object.keys(value).forEach(styleProp => {
-                        // Only set non-null/undefined values to avoid clearing styles accidentally
-                        if (value[styleProp] != null) {
-                            // Check if this is a CSS custom property (starts with --)
-                            if (styleProp.startsWith('--')) {
-                                element.style.setProperty(styleProp, value[styleProp]); // CSS custom properties
-                            } else {
-                                element.style[styleProp] = value[styleProp]; // regular CSS properties
-                            }
-                        }
-                    });
-
-                    return;
-                }
-
-                // String syntax: "color: red; font-size: 16px;"
-                // Set the entire CSS text at once (less efficient but backwards compatible)
-                if (typeof value === 'string') {
-                    element.style.cssText = value;
-                }
+                return target;
             },
 
             // === EVENT HANDLING SECTION ===
@@ -4272,6 +4415,41 @@
             },
 
             /**
+             * Applies style binding to a DOM element
+             * @param {Object} binding - The binding
+             * @param {Object|string} value - The style value(s) to apply
+             */
+            applyStyleBinding(binding, value) {
+                // Fetch the element
+                const element = binding.element;
+
+                // Object syntax: { color: 'red', fontSize: '16px' }
+                // Check if value is an object (preferred object syntax)
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Iterate through each style property in the object
+                    Object.keys(value).forEach(styleProp => {
+                        // Only set non-null/undefined values to avoid clearing styles accidentally
+                        if (value[styleProp] != null) {
+                            // Check if this is a CSS custom property (starts with --)
+                            if (styleProp.startsWith('--')) {
+                                element.style.setProperty(styleProp, value[styleProp]); // CSS custom properties
+                            } else {
+                                element.style[styleProp] = value[styleProp]; // regular CSS properties
+                            }
+                        }
+                    });
+
+                    return;
+                }
+
+                // String syntax: "color: red; font-size: 16px;"
+                // Set the entire CSS text at once (less efficient but backwards compatible)
+                if (typeof value === 'string') {
+                    element.style.cssText = value;
+                }
+            },
+
+            /**
              * Applies text binding to update DOM element content with interpolated values
              * @param {Object} binding - Binding object containing element reference and original text
              * @param {string} property - The property name being bound (for potential debugging/logging)
@@ -4281,12 +4459,8 @@
                 // Get reference to the DOM text node that will be updated
                 const textNode = binding.element;
 
-                // Create evaluation context - merge abstraction with optional context
-                // If contextVars provided, merge them with the base abstraction object
-                // Otherwise, just use the abstraction object as-is
-                const context = contextVars ?
-                    Object.assign({}, this.abstraction, contextVars) :
-                    this.abstraction;
+                // Determine the evaluation context
+                const context = binding.contextVars || contextVars || this.abstraction;
 
                 // Use the shared interpolation utility to process template strings
                 // This handles variable substitution within the original text template
@@ -4328,47 +4502,64 @@
                     return;
                 }
 
+                // Ensure we have a valid template to work with
+                binding = this.findBindingWithTemplate(binding);
+
+                if (!binding) {
+                    return;
+                }
+
                 // Fetch container
                 const container = binding.element;
 
-                // Create evaluation context by merging abstraction data with parent foreach variables
-                const context = Object.assign({}, this.abstraction, foreachVars || {});
+                if (!container) {
+                    console.error('FOREACH: No container element found');
+                    return;
+                }
 
-                // Evaluate the binding expression to get the current array value
-                const arrayValue = ExpressionParser.evaluate(binding.parsedExpression, context);
+                // Clean up existing text bindings before clearing DOM
+                this.cleanupForeachTextBindings(binding);
+
+                // Create evaluation context by merging data source with parent foreach variables
+                const context = foreachVars || this.abstraction;
+
+                // Parse and evaluate the binding expression on-demand
+                const parsed = ExpressionParser.parseExpression(binding.target || binding.collection);
+                const arrayValue = ExpressionParser.evaluate(parsed, context);
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
 
-                // Clear existing content completely - destroys all child elements and their bindings
+                // Clear existing content
                 container.innerHTML = '';
 
-                // Use DocumentFragment for efficient DOM manipulation
-                // This allows building the entire structure in memory before adding to DOM
-                const fragment = document.createDocumentFragment();
+                // If we have no items or no template, exit
+                if (array.length === 0 || binding.template?.length === 0) {
+                    return;
+                }
 
-                // Create DOM elements for each item in the array
+                // Create elements
                 array.forEach((item, index) => {
-                    // Create new DOM element from the stored template HTML
-                    const itemElement = this.createForeachItemElement(binding.template);
+                    try {
+                        // Create new DOM element from the stored template HTML
+                        const itemElement = this.createForeachItemElement(binding.template);
 
-                    // Create context variables for this foreach item
-                    const itemContext = Object.assign({}, foreachVars || {}, {
-                        [binding.itemName]: item,      // e.g., 'todo' -> current todo object
-                        [binding.indexName]: index     // e.g., 'index' -> current position
-                    });
+                        // Create context variables for this foreach item
+                        const itemContext = Utils.createScopedContext('foreach', context, {
+                            [binding.itemName]: item,
+                            [binding.indexName]: index
+                        });
 
-                    // Set up text interpolation for the new element
-                    this.processTextBindingsForElement(itemElement, itemContext);
+                        // Set up text interpolation for the new element
+                        this.processTextBindingsForElement(itemElement, itemContext);
 
-                    // Set up attribute bindings (class, style, events, etc.) for the new element
-                    this.processElementAttributeBindings(itemElement, itemContext, binding);
+                        // Set up attribute bindings (class, style, events, etc.) for the new element
+                        this.processElementAttributeBindings(itemElement, itemContext);
 
-                    // Add the configured element to the fragment
-                    fragment.appendChild(itemElement);
+                        // Add the configured element to the fragment
+                        container.appendChild(itemElement);
+                    } catch (error) {
+                        console.error('FOREACH: Error creating element for item', index, error);
+                    }
                 });
-
-                // Add all new elements to the DOM in a single operation
-                // This minimizes layout recalculations and improves performance
-                container.appendChild(fragment);
             },
 
             /**
@@ -4510,6 +4701,141 @@
                         element.textContent = value;
                         return true;
                     }
+                }
+            },
+
+            /**
+             * Helper method to detect if current context is inside a foreach loop
+             * @param {Object|null} contextVars - The hierarchical context to check
+             * @returns {boolean} True if context is within a foreach binding
+             */
+            isInForeachContext(contextVars) {
+                if (!contextVars) {
+                    return false;
+                }
+
+                // Walk up the prototype chain to find a foreach context
+                let current = contextVars;
+
+                while (current) {
+                    if (current._contextType === 'foreach') {
+                        return true;
+                    }
+
+                    current = Object.getPrototypeOf(current);
+                }
+
+                return false;
+            },
+
+            /**
+             * Finds the nearest foreach context in the prototype chain
+             * @param {Object|null} contextVars - The hierarchical context to search
+             * @returns {Object|null} The nearest foreach context object, or null if none found
+             */
+            findNearestForeachContext(contextVars) {
+                if (!contextVars) return null;
+
+                let current = contextVars;
+                while (current) {
+                    if (current._contextType === 'foreach') {
+                        return current;
+                    }
+                    current = Object.getPrototypeOf(current);
+                }
+
+                return null;
+            },
+
+            /**
+             * Extracts parent foreach binding information from hierarchical context
+             * Uses context type metadata to efficiently find foreach contexts
+             * @param {Object|null} contextVars - The hierarchical context containing foreach variables
+             * @returns {Object|null} The parent foreach binding object, or null if not found
+             */
+            getParentBindingFromContext(contextVars) {
+                // Find the nearest foreach context
+                const foreachContext = this.findNearestForeachContext(contextVars);
+
+                if (!foreachContext) {
+                    return null;
+                }
+
+                // Get the foreach variables from this context level
+                const contextKeys = Object.getOwnPropertyNames(foreachContext);
+
+                // Find the binding that matches these variable names
+                return this.findMatchingForeachBinding(contextKeys);
+            },
+
+            /**
+             * Finds a foreach binding by matching its variable names with context keys
+             * @param {string[]} contextKeys - Array of variable names found in the foreach context
+             * @returns {Object|null} Matching foreach binding or null if none found
+             */
+            findMatchingForeachBinding(contextKeys) {
+                // Search through all foreach bindings to find one with matching itemName/indexName
+                for (const binding of this.bindings.values()) {
+                    if (binding.type === 'foreach' &&
+                        binding.itemName &&
+                        binding.indexName &&
+                        contextKeys.includes(binding.itemName) &&
+                        contextKeys.includes(binding.indexName)) {
+                        return binding;
+                    }
+                }
+                return null;
+            },
+
+            /**
+             * Cleans up all child text bindings for a foreach binding
+             * Uses DOM hierarchy to find child text bindings
+             * @param {Object} foreachBinding - The foreach binding to clean up
+             */
+            cleanupForeachTextBindings(foreachBinding) {
+                const foreachContainer = foreachBinding.element;
+                const textBindingsToRemove = [];
+
+                // Find all text bindings whose elements are contained within this foreach container
+                this.bindings.forEach(binding => {
+                    if (
+                        binding.type === 'text' &&
+                        binding.element &&
+                        foreachContainer.contains(binding.element)
+                    ) {
+                        textBindingsToRemove.push(binding);
+                    }
+                });
+
+                // Remove all found text bindings
+                textBindingsToRemove.forEach(binding => {
+                    this.removeBinding(binding);
+                });
+            },
+
+            /**
+             * Removes a binding and cleans up all references
+             * @param {Object} binding - The binding to remove
+             */
+            removeBinding(binding) {
+                // Remove from main bindings map
+                this.bindings.delete(binding.id);
+
+                // Remove from dependency index
+                if (binding.dependencies) {
+                    binding.dependencies.forEach(dep => {
+                        const bindingSet = this.bindingIndex.get(dep);
+
+                        if (bindingSet) {
+                            // Remove binding
+                            bindingSet.delete(binding);
+
+                            // Clean up empty sets
+                            if (bindingSet.size === 0) {
+                                this.bindingIndex.delete(dep);
+                            }
+                        }
+                    });
                 }
             },
 
@@ -4660,6 +4986,76 @@
                 if (child && child.receiveFromParent) {
                     child.receiveFromParent(cmd, data);
                 }
+            },
+
+            /*
+             * Finds a binding with a valid template, either using the current binding or searching globally.
+             * If the current binding has no template, searches all components for a matching binding with template.
+             * @param {Object} binding - The binding object to check/find template for
+             * @returns {Object|null} Binding object with valid template, or null if none found
+             */
+            findBindingWithTemplate(binding) {
+                // Return current binding if it already has a template
+                if (binding.template && binding.template.length > 0) {
+                    return binding;
+                }
+
+                // Search across ALL components in the registry for a binding with template
+                let bindingWithTemplate = null;
+
+                if (window.PACRegistry && window.PACRegistry.components) {
+                    window.PACRegistry.components.forEach(component => {
+                        // Found one already
+                        if (bindingWithTemplate) {
+                            return;
+                        }
+
+                        const found = Array.from(component.bindings.values()).find(b =>
+                            b.type === 'foreach' &&
+                            b.collection === binding.collection &&
+                            b.template &&
+                            b.template.length > 0
+                        );
+
+                        if (found) {
+                            bindingWithTemplate = found;
+                        }
+                    });
+                }
+
+                return bindingWithTemplate;
+            },
+
+            /**
+             * Finds the data source object containing the target property for this binding.
+             * Searches in order: current abstraction → child components → global registry.
+             * @param {Object} binding - The binding object containing target/collection property
+             * @returns {Object} Data source object containing the property
+             */
+            findDataSource(binding) {
+                let dataSource = this.abstraction;
+                const targetProperty = binding.target || binding.collection;
+
+                if (!(targetProperty in this.abstraction)) {
+                    // Look for the property in child components
+                    for (const child of this.children) {
+                        if (child.abstraction && targetProperty in child.abstraction) {
+                            dataSource = child.abstraction;
+                            break;
+                        }
+                    }
+
+                    // If still not found, search globally
+                    if (!(targetProperty in dataSource) && window.PACRegistry) {
+                        window.PACRegistry.components.forEach(component => {
+                            if (component.abstraction && targetProperty in component.abstraction) {
+                                dataSource = component.abstraction;
+                            }
+                        });
+                    }
+                }
+
+                return dataSource;
             },
 
             // === HTTP/SERIALIZATION SECTION ===
