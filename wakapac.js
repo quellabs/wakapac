@@ -3872,11 +3872,11 @@
 
             // === CONTEXT ===
 
-            /* Resolves relative property paths within foreach contexts to absolute paths
+            /**
+             * Resolves relative property paths within foreach contexts to absolute paths
              * for proper data binding. Handles both nested object properties and root-level properties.
              * @param {string} target - The property path expression to resolve
              * @param {Object} contextVars - Loop context variables (item, index, etc.)
-             * @param {Object} parentBinding - Parent foreach binding metadata containing collection info
              * @returns {string} Absolute property path for data binding
              */
             resolveForeachPropertyPath(target, contextVars) {
@@ -3899,10 +3899,9 @@
                         return target;
                     }
 
-                    // Get the actual item value
+                    // Get the actual item value and index
                     const item = foreachContext[binding.itemName];
                     const index = foreachContext[binding.indexName];
-                    const collection = sourceArray || binding.collection;
 
                     // Find the source array in the abstraction that contains this item
                     const sourceArray = Object.keys(this.abstraction).find(key =>
@@ -3910,6 +3909,7 @@
                     );
 
                     // Build the absolute path: use found source array or fall back to binding collection
+                    const collection = sourceArray || binding.collection;
                     return PropertyPath.buildNestedPropertyPath(target, contextVars, collection, index);
                 }
 
