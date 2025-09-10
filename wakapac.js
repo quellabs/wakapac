@@ -586,32 +586,36 @@
          * @param {string} path - Dot-separated property path (e.g., "activeTab.items")
          * @returns {*} The resolved value at the end of the path, or undefined if any segment is null/undefined
          */
+        /**
+         * Optimized resolveComputedPath - handles mixed computed/regular property paths
+         * @param {Object} control - The PAC control object containing abstraction and dependencies
+         * @param {string} path - Dot-separated property path (e.g., "activeTab.items")
+         * @returns {*} The resolved value at the end of the path, or undefined if any segment is null/undefined
+         */
         resolveComputedPath(control, path) {
             const parts = path.split('.');
+
             let current = control.abstraction;
 
             for (let i = 0; i < parts.length; i++) {
+                if (current == null) {
+                    return undefined;
+                }
+
                 const part = parts[i];
 
-                // Check if this part is a computed property
-                const isComputed = control.deps && control.deps.has(part) && control.deps.get(part).fn;
-
-                if (isComputed) {
-                    // Get the computed value
+                // Check if this part is computed - simplified check
+                if (control.deps?.has(part) && control.deps.get(part).fn) {
+                    // Get computed value and continue with remaining path
                     current = current[part];
 
-                    // If we have more parts, continue with the computed result
-                    if (i < parts.length - 1 && current != null) {
-                        // The rest of the path operates on the computed result
+                    // If more parts remain, use regular PropertyPath.get for the rest
+                    if (i < parts.length - 1) {
                         const remainingPath = parts.slice(i + 1).join('.');
                         return PropertyPath.get(current, remainingPath);
                     }
                 } else {
-                    // Regular property
-                    if (current == null) {
-                        return undefined;
-                    }
-
+                    // Regular property access
                     current = current[part];
                 }
             }
