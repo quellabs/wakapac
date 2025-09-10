@@ -81,20 +81,35 @@
 
         /**
          * Creates a new scope object that inherits from the given parent scope
-         * and optionally extends it with local variables.
+         * and optionally extends it with local variables and context metadata.
+         * @param {string} contextType - The type of context being created ('foreach', 'component', etc.)
          * @param {Object|null} parentScope - The parent scope to inherit from.
          * @param {Object<string, any>} [localVars] - An object containing local variables
-         * @returns {Object} The newly created scope object
+         * @returns {Object} The newly created scope object with context metadata
          */
-        createScopedContext(parentScope, localVars) {
-            const scope = Object.create(parentScope || null);
-
-            if (localVars && typeof localVars === 'object') {
-                for (const key of Object.keys(localVars)) {
-                    scope[key] = localVars[key];
-                }
+        createScopedContext(contextType, parentScope, localVars) {
+            // Parameter validity
+            if (!localVars && !contextType) {
+                return parentScope;
             }
 
+            // Create new scope
+            const scope = Object.create(parentScope || null);
+
+            // Store context type metadata
+            Object.defineProperty(scope, '_contextType', {
+                value: contextType,
+                writable: false,
+                enumerable: false,
+                configurable: false
+            });
+
+            // Add local variables if provided
+            if (localVars && typeof localVars === 'object') {
+                Object.assign(scope, localVars);
+            }
+
+            // Return scope
             return scope;
         },
 
@@ -3269,7 +3284,7 @@
                     return existingBinding;
                 }
 
-                // CRITICAL FIX: Capture the template BEFORE any processing
+                // Capture the template BEFORE any processing
                 // Extract configuration from element attributes with sensible defaults
                 const itemName = element.getAttribute('data-pac-item') || 'item';    // Variable name for current item
                 const indexName = element.getAttribute('data-pac-index') || 'index'; // Variable name for current index
@@ -3669,9 +3684,8 @@
                 // Collect all text nodes first to avoid modifying the tree while traversing
                 const textNodes = Utils.getTextNodesFromElement(element);
 
-                
                 // Create evaluation context
-                const context = Utils.createScopedContext(this.abstraction, contextVars);
+                const context = Utils.createScopedContext('text', this.abstraction, contextVars);
 
                 // Process each text node that contains interpolation patterns
                 textNodes.forEach(textNode => {
@@ -3763,12 +3777,11 @@
              * Processes attribute bindings for a given element and its descendants.
              * @param {Element} element - The root element to process bindings for
              * @param {Object} contextVars - Additional context variables to merge with abstraction
-             * @param {Object} [parentBinding] - Optional parent binding context for nested scenarios
              * @returns {void}
              */
-            processElementAttributeBindings(element, contextVars, parentBinding) {
+            processElementAttributeBindings(element, contextVars ) {
                 // Merge abstraction data with context variables to create evaluation context
-                const context = Utils.createScopedContext(this.abstraction, contextVars);
+                const context = Utils.createScopedContext('attribute', this.abstraction, contextVars);
 
                 // Find all descendant elements with binding attributes
                 const bindingElements = Utils.queryElementsIncludingSelf(element, '[data-pac-bind]');
@@ -3790,7 +3803,7 @@
                         .forEach(({type, target}) => {
                             // Handle parent binding context if present
                             // This allows for nested binding scenarios with inherited context
-                            if (parentBinding && this.processForeachChildBinding(el, type, target, contextVars, parentBinding)) {
+                            if (this.isInForeachContext(contextVars) && this.processForeachChildBinding(el, type, target, contextVars)) {
                                 return; // Skip further processing if parent context handled it
                             }
 
@@ -3813,14 +3826,13 @@
              * @param {string} type - Binding type ('value', 'checked', 'click', etc.)
              * @param {string} target - Property path or expression to bind to
              * @param {Object} contextVars - Loop variables (item, index, etc.)
-             * @param {Object} parentBinding - Foreach binding metadata
              * @returns {boolean} Whether the binding was successfully handled
              */
-            processForeachChildBinding(el, type, target, contextVars, parentBinding) {
+            processForeachChildBinding(el, type, target, contextVars) {
                 // Handle two-way binding for form controls within foreach loops
                 if (type === 'value' || type === 'checked') {
                     // Create evaluation context by merging global scope with loop-specific variables
-                    const context = Utils.createScopedContext(this.abstraction, contextVars);
+                    const context = Utils.createScopedContext('foreach', this.abstraction, contextVars);
 
                     // Parse and evaluate the target expression to get initial value
                     const currentValue = ExpressionParser.evaluate(ExpressionParser.parseExpression(target), context);
@@ -3830,7 +3842,7 @@
 
                     // Resolve the actual property path for bidirectional binding updates
                     // This converts relative paths (like "item.name") to absolute paths (like "users.0.name")
-                    const resolvedPath = this.resolveForeachPropertyPath(target, contextVars, parentBinding);
+                    const resolvedPath = this.resolveForeachPropertyPath(target, contextVars);
 
                     // Establish the two-way binding connection for form input synchronization
                     this.setupInputElement(el, resolvedPath, type);
@@ -3843,12 +3855,12 @@
                 if (Utils.isEventType(type)) {
                     // Set up event handlers with proper context binding
                     // Pass the current item and index for event handler context
+                    const parentBinding = this.getParentBindingFromContext(contextVars);
+
                     this.handleEventBinding(
-                        el,
-                        type,
-                        target,
-                        contextVars[parentBinding.itemName],    // Current loop item
-                        contextVars[parentBinding.indexName]    // Current loop index
+                        el, type, target,
+                        contextVars[parentBinding.itemName],
+                        contextVars[parentBinding.indexName]
                     );
 
                     return true;
@@ -3867,26 +3879,40 @@
              * @param {Object} parentBinding - Parent foreach binding metadata containing collection info
              * @returns {string} Absolute property path for data binding
              */
-            resolveForeachPropertyPath(target, contextVars, parentBinding) {
+            resolveForeachPropertyPath(target, contextVars) {
                 // Check if this is a nested property path (e.g., "item.name", "item.address.street")
                 if (PropertyPath.isNested(target, contextVars)) {
-                    // Get the current item from the loop context
-                    const item = contextVars[parentBinding.itemName];
+                    // Get the nearest foreach context
+                    const foreachContext = this.findNearestForeachContext(contextVars);
+                    if (!foreachContext) {
+                        return target;
+                    }
+
+                    // Extract the item and variable names from the foreach context
+                    const contextKeys = Object.getOwnPropertyNames(foreachContext);
+                    const localVars = contextKeys.filter(key => key !== '_contextType');
+
+                    // Find the matching binding to get collection info
+                    const binding = this.findMatchingForeachBinding(localVars);
+
+                    if (!binding) {
+                        return target;
+                    }
+
+                    // Get the actual item value
+                    const item = foreachContext[binding.itemName];
+                    const index = foreachContext[binding.indexName];
+                    const collection = sourceArray || binding.collection;
 
                     // Find the source array in the abstraction that contains this item
-                    // This handles cases where multiple arrays exist in the data model
                     const sourceArray = Object.keys(this.abstraction).find(key =>
                         Array.isArray(this.abstraction[key]) && this.abstraction[key].includes(item)
                     );
 
-                    // Build the absolute path: use found source array or fall back to parent collection
-                    const collection = sourceArray || parentBinding.collection;
-                    const index = sourceArray ? this.abstraction[sourceArray].indexOf(item) : contextVars[parentBinding.indexName];
+                    // Build the absolute path: use found source array or fall back to binding collection
                     return PropertyPath.buildNestedPropertyPath(target, contextVars, collection, index);
                 }
 
-                // For root-level properties (e.g., "activeTab.sampleInput"), return as-is
-                // These don't need path resolution since they're not relative to the loop item
                 return target;
             },
 
@@ -4434,16 +4460,7 @@
                 const textNode = binding.element;
 
                 // Determine the evaluation context
-                let context;
-
-                if (binding.contextVars && binding.parentBinding) {
-                    // This is a foreach text binding - merge contexts properly
-                    context = Utils.createScopedContext(this.abstraction, binding.contextVars);
-                } else if (contextVars) {
-                    context = Utils.createScopedContext(this.abstraction, contextVars);
-                } else {
-                    context = this.abstraction;
-                }
+                const context = binding.contextVars || contextVars || this.abstraction;
 
                 // Use the shared interpolation utility to process template strings
                 // This handles variable substitution within the original text template
@@ -4503,11 +4520,8 @@
                 // Clean up existing text bindings before clearing DOM
                 this.cleanupForeachTextBindings(binding);
 
-                // Find the correct data source
-                const dataSource = this.findDataSource(binding);
-
                 // Create evaluation context by merging data source with parent foreach variables
-                const context = Utils.createScopedContext(dataSource, foreachVars || {});
+                const context = foreachVars || this.abstraction;
 
                 // Parse and evaluate the binding expression on-demand
                 const parsed = ExpressionParser.parseExpression(binding.target || binding.collection);
@@ -4518,7 +4532,7 @@
                 container.innerHTML = '';
 
                 // If we have no items or no template, exit
-                if (array.length === 0 || !binding.template || binding.template.length === 0) {
+                if (array.length === 0 || binding.template?.length === 0) {
                     return;
                 }
 
@@ -4529,16 +4543,16 @@
                         const itemElement = this.createForeachItemElement(binding.template);
 
                         // Create context variables for this foreach item
-                        const itemContext = Utils.createScopedContext(context, {
+                        const itemContext = Utils.createScopedContext('foreach', context, {
                             [binding.itemName]: item,
                             [binding.indexName]: index
                         });
 
                         // Set up text interpolation for the new element
-                        this.processTextBindingsForElement(itemElement, itemContext, binding);
+                        this.processTextBindingsForElement(itemElement, itemContext);
 
                         // Set up attribute bindings (class, style, events, etc.) for the new element
-                        this.processElementAttributeBindings(itemElement, itemContext, binding);
+                        this.processElementAttributeBindings(itemElement, itemContext);
 
                         // Add the configured element to the fragment
                         container.appendChild(itemElement);
@@ -4688,6 +4702,89 @@
                         return true;
                     }
                 }
+            },
+
+            /**
+             * Helper method to detect if current context is inside a foreach loop
+             * @param {Object|null} contextVars - The hierarchical context to check
+             * @returns {boolean} True if context is within a foreach binding
+             */
+            isInForeachContext(contextVars) {
+                if (!contextVars) {
+                    return false;
+                }
+
+                // Walk up the prototype chain to find a foreach context
+                let current = contextVars;
+
+                while (current) {
+                    if (current._contextType === 'foreach') {
+                        return true;
+                    }
+
+                    current = Object.getPrototypeOf(current);
+                }
+
+                return false;
+            },
+
+            /**
+             * Finds the nearest foreach context in the prototype chain
+             * @param {Object|null} contextVars - The hierarchical context to search
+             * @returns {Object|null} The nearest foreach context object, or null if none found
+             */
+            findNearestForeachContext(contextVars) {
+                if (!contextVars) return null;
+
+                let current = contextVars;
+                while (current) {
+                    if (current._contextType === 'foreach') {
+                        return current;
+                    }
+                    current = Object.getPrototypeOf(current);
+                }
+
+                return null;
+            },
+
+            /**
+             * Extracts parent foreach binding information from hierarchical context
+             * Uses context type metadata to efficiently find foreach contexts
+             * @param {Object|null} contextVars - The hierarchical context containing foreach variables
+             * @returns {Object|null} The parent foreach binding object, or null if not found
+             */
+            getParentBindingFromContext(contextVars) {
+                // Find the nearest foreach context
+                const foreachContext = this.findNearestForeachContext(contextVars);
+
+                if (!foreachContext) {
+                    return null;
+                }
+
+                // Get the foreach variables from this context level
+                const contextKeys = Object.getOwnPropertyNames(foreachContext);
+
+                // Find the binding that matches these variable names
+                return this.findMatchingForeachBinding(contextKeys);
+            },
+
+            /**
+             * Finds a foreach binding by matching its variable names with context keys
+             * @param {string[]} contextKeys - Array of variable names found in the foreach context
+             * @returns {Object|null} Matching foreach binding or null if none found
+             */
+            findMatchingForeachBinding(contextKeys) {
+                // Search through all foreach bindings to find one with matching itemName/indexName
+                for (const binding of this.bindings.values()) {
+                    if (binding.type === 'foreach' &&
+                        binding.itemName &&
+                        binding.indexName &&
+                        contextKeys.includes(binding.itemName) &&
+                        contextKeys.includes(binding.indexName)) {
+                        return binding;
+                    }
+                }
+                return null;
             },
 
             /**
