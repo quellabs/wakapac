@@ -576,6 +576,47 @@
             }
 
             return target;
+        },
+
+        /**
+         * Resolves property paths that may contain computed properties.
+         * Handles mixed paths where some segments are computed (e.g., "activeTab.items"
+         * where "activeTab" is computed and "items" is a regular property).
+         * @param {Object} control - The PAC control object containing abstraction and dependencies
+         * @param {string} path - Dot-separated property path (e.g., "activeTab.items")
+         * @returns {*} The resolved value at the end of the path, or undefined if any segment is null/undefined
+         */
+        resolveComputedPath(control, path) {
+            const parts = path.split('.');
+            let current = control.abstraction;
+
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+
+                // Check if this part is a computed property
+                const isComputed = control.deps && control.deps.has(part) && control.deps.get(part).fn;
+
+                if (isComputed) {
+                    // Get the computed value
+                    current = current[part];
+
+                    // If we have more parts, continue with the computed result
+                    if (i < parts.length - 1 && current != null) {
+                        // The rest of the path operates on the computed result
+                        const remainingPath = parts.slice(i + 1).join('.');
+                        return PropertyPath.get(current, remainingPath);
+                    }
+                } else {
+                    // Regular property
+                    if (current == null) {
+                        return undefined;
+                    }
+
+                    current = current[part];
+                }
+            }
+
+            return current;
         }
     }
 
@@ -2969,6 +3010,14 @@
                     binding.parsedExpression = ExpressionCache.parseExpression(binding.target);
                     let dependencies = binding.parsedExpression.dependencies || [];
 
+                    // For foreach bindings with computed paths, add the root computed property
+                    if (binding.type === 'foreach' && binding.target.includes('.')) {
+                        const rootProp = binding.target.split('.')[0];
+                        if (this.deps && this.deps.has(rootProp) && this.deps.get(rootProp).fn) {
+                            dependencies.push(rootProp);
+                        }
+                    }
+
                     // Templates can reference properties that aren't in the main expression
                     if (binding.type === 'foreach' && binding.template) {
                         // Extract the dependencies
@@ -2992,6 +3041,9 @@
                     // Store final dependencies on the binding for later use
                     binding.dependencies = dependencies;
                 });
+
+                // CRITICAL: Handle computed property dependencies for foreach bindings
+                this.handleComputedForeachDependencies();
             },
 
             // === BINDING CREATION SECTION ===
@@ -3406,9 +3458,27 @@
              * @returns {boolean} True if binding should update
              */
             shouldUpdateBinding(binding, changedProperty) {
-                // For foreach bindings, only update if the collection itself changed
+                // For foreach bindings, check if it's a computed property path
                 if (binding.type === 'foreach') {
-                    return binding.collection === changedProperty;
+                    // Direct collection match
+                    if (binding.collection === changedProperty) {
+                        return true;
+                    }
+
+                    // Check if any template dependencies changed
+                    if (binding.dependencies && binding.dependencies.includes(changedProperty)) {
+                        return true;
+                    }
+
+                    // Check if binding target contains a computed property that changed
+                    if (binding.target && binding.target.includes('.')) {
+                        const rootProp = binding.target.split('.')[0];
+                        if (rootProp === changedProperty) {
+                            return true;
+                        }
+                    }
+
+                    return false;
                 }
 
                 // Direct property match
@@ -3546,6 +3616,14 @@
                         this.triggerWatcher(computedName, newValue, oldValue);
                         this.scheduleUpdate(computedName, newValue);
                         this.updateComputedProperties(computedName);
+
+                        // CRITICAL FIX: Also trigger updates for bindings that depend on paths starting with this computed property
+                        this.bindings.forEach(binding => {
+                            if (binding.target && binding.target.startsWith(computedName + '.')) {
+                                // Force update this binding since its computed root changed
+                                this.updateBinding(binding, computedName, null);
+                            }
+                        });
                     }
                 });
             },
@@ -3664,13 +3742,18 @@
                     }
 
                     // Default case: evaluate expression and apply result
-                    const context = Object.assign({}, this.abstraction, foreachVars || {});
+                    const context = Utils.createScopedContext(binding.type, this.abstraction, foreachVars || {});
                     const parsed = ExpressionCache.parseExpression(binding.target);
+                    const evaluatedValue = ExpressionParser.evaluate(parsed, context);
 
-                    handler(context, ExpressionParser.evaluate(parsed, context));
+                    handler(context, evaluatedValue);
 
                 } catch (error) {
-                    console.error('Error updating ' + binding.type + ' binding:', error);
+                    console.error('Error updating ' + binding.type + ' binding:', error, {
+                        bindingType: binding.type,
+                        target: binding.target,
+                        foreachVars: foreachVars
+                    });
                 }
             },
 
@@ -4562,69 +4645,221 @@
              * @returns {void}
              */
             applyForeachBinding(binding, property, foreachVars = null) {
-                // Early exit: Only update if this binding matches the changed property OR if property is null (force update)
-                if (property && binding.collection !== property) {
+                // Early exit if update is not needed
+                if (!this.shouldUpdateForeach(binding, property)) {
                     return;
                 }
 
-                // Ensure we have a valid template to work with
-                binding = this.findBindingWithTemplate(binding);
+                // Validate and prepare binding
+                const validatedBinding = this.validateForeachBinding(binding);
 
-                if (!binding) {
+                if (!validatedBinding) {
                     return;
                 }
 
-                // Fetch container
-                const container = binding.element;
+                // Get the array data to render
+                const arrayData = this.getForeachArrayData(validatedBinding, foreachVars);
 
-                if (!container) {
+                if (!Array.isArray(arrayData)) {
+                    console.warn('FOREACH: Expected array but got:', typeof arrayData);
+                    return;
+                }
+
+                // Clean up and render
+                this.cleanupForeachContainer(validatedBinding);
+                this.renderForeachItems(validatedBinding, arrayData, foreachVars);
+            },
+
+            /**
+             * Determines if the foreach binding should update based on the changed property.
+             * Updates are triggered by direct collection changes or computed property dependencies.
+             * @param {Object} binding - The foreach binding configuration object
+             * @param {string} binding.collection - The name of the collection property
+             * @param {string} [binding.target] - Alternative target path (may include dots for computed properties)
+             * @param {string|null} property - The name of the changed property, null forces update
+             * @returns {boolean} True if the foreach binding should be updated
+             */
+            shouldUpdateForeach(binding, property) {
+                // Force update if no specific property changed
+                if (!property) {
+                    return true;
+                }
+
+                // Direct collection match
+                if (binding.collection === property) {
+                    return true;
+                }
+
+                // Check computed property dependencies
+                if (binding.target?.includes('.')) {
+                    return this.isComputedPropertyAffected(binding.target, property);
+                }
+
+                return false;
+            },
+
+            /**
+             * Checks if a computed property path is affected by the changed property.
+             * Handles both direct root property changes and dependency chain relationships.
+             * @param {string} targetPath - The computed property path (e.g., "activeTab.items")
+             * @param {string} changedProperty - The name of the property that changed
+             * @returns {boolean} True if the computed property should be recalculated
+             */
+            isComputedPropertyAffected(targetPath, changedProperty) {
+                const rootProperty = targetPath.split('.')[0];
+
+                // Root property changed - immediate dependency
+                if (rootProperty === changedProperty) {
+                    return true;
+                }
+
+                // Check dependency chain - indirect dependency through computed properties
+                if (this.deps?.has(rootProperty)) {
+                    const dependencies = this.deps.get(rootProperty).dependencies || [];
+                    return dependencies.includes(changedProperty);
+                }
+
+                return false;
+            },
+
+            /**
+             * Validates and ensures the binding has all required properties for foreach operation.
+             * Performs comprehensive validation of binding structure and required elements.
+             * @param {Object} binding - The foreach binding to validate
+             * @param {HTMLElement} [binding.element] - The container element for the foreach
+             * @param {string} [binding.itemName] - Variable name for each item in the loop
+             * @param {string} [binding.indexName] - Variable name for the current index
+             * @returns {Object|null} The validated binding object or null if invalid
+             */
+            validateForeachBinding(binding) {
+                // Attempt to find and attach template if missing
+                const validatedBinding = this.findBindingWithTemplate(binding);
+
+                if (!validatedBinding) {
+                    console.error('FOREACH: Invalid binding - missing template');
+                    return null;
+                }
+
+                if (!validatedBinding.element) {
                     console.error('FOREACH: No container element found');
-                    return;
+                    return null;
                 }
 
-                // Clean up existing text bindings before clearing DOM
+                if (!validatedBinding.itemName || !validatedBinding.indexName) {
+                    console.error('FOREACH: Missing item or index name configuration');
+                    return null;
+                }
+
+                return validatedBinding;
+            },
+
+            /**
+             * Retrieves and evaluates the array data for the foreach binding.
+             * Handles both simple property names and complex computed property paths.
+             * @param {Object} binding - The foreach binding configuration
+             * @param {string} [binding.target] - Primary target path for data resolution
+             * @param {string} [binding.collection] - Fallback collection property name
+             * @param {Object} [foreachVars] - Optional context variables, defaults to this.abstraction
+             * @returns {Array} The array data to iterate over, empty array on error
+             */
+            getForeachArrayData(binding, foreachVars) {
+                const context = foreachVars || this.abstraction;
+                const targetPath = binding.target || binding.collection;
+
+                try {
+                    if (targetPath.includes('.')) {
+                        // Handle computed property paths like "activeTab.items"
+                        return PropertyPath.resolveComputedPath(this, targetPath);
+                    } else {
+                        // Handle simple property names - parse and evaluate expression
+                        const parsedExpression = ExpressionCache.parseExpression(targetPath);
+                        return ExpressionParser.evaluate(parsedExpression, context);
+                    }
+                } catch (error) {
+                    console.error('FOREACH: Error evaluating array data:', error);
+                    return [];
+                }
+            },
+
+            /**
+             * Cleans up the container and existing bindings to prevent memory leaks.
+             * Essential for proper cleanup before re-rendering foreach items.
+             * @param {Object} binding - The foreach binding configuration
+             * @param {HTMLElement} binding.element - The container element to clean
+             */
+            cleanupForeachContainer(binding) {
+                // Clean up existing text bindings to prevent memory leaks
                 this.cleanupForeachTextBindings(binding);
 
-                // Create evaluation context by merging data source with parent foreach variables
-                const context = foreachVars || this.abstraction;
+                // Clear container content - removes all child elements
+                binding.element.innerHTML = '';
+            },
 
-                // Parse and evaluate the binding expression on-demand
-                const parsed = ExpressionCache.parseExpression(binding.target || binding.collection);
-                const arrayValue = ExpressionParser.evaluate(parsed, context);
-                const array = Array.isArray(arrayValue) ? arrayValue : [];
-
-                // Clear existing content
-                container.innerHTML = '';
-
-                // If we have no items or no template, exit
-                if (array.length === 0 || binding.template?.length === 0) {
+            /**
+             * Renders all items in the foreach loop using document fragment for performance.
+             * Creates DOM elements for each array item and applies all necessary bindings.
+             * @param {Object} binding - The foreach binding configuration
+             * @param {HTMLElement} binding.element - Container element for rendered items
+             * @param {Array} binding.template - Template configuration for item elements
+             * @param {Array} arrayData - The array of data to render
+             * @param {Object} [foreachVars] - Optional context variables
+             */
+            renderForeachItems(binding, arrayData, foreachVars) {
+                // Early return for empty data or missing template
+                if (arrayData.length === 0 || !binding.template?.length) {
                     return;
                 }
 
-                // Create elements
-                array.forEach((item, index) => {
-                    try {
-                        // Create new DOM element from the stored template HTML
-                        const itemElement = this.createForeachItemElement(binding.template);
+                const context = foreachVars || this.abstraction;
+                const documentFragment = document.createDocumentFragment();
 
-                        // Create context variables for this foreach item
-                        const itemContext = Utils.createScopedContext('foreach', context, {
-                            [binding.itemName]: item,
-                            [binding.indexName]: index
-                        });
+                arrayData.forEach((item, index) => {
+                    const itemElement = this.createForeachItem(binding, item, index, context);
 
-                        // Set up text interpolation for the new element
-                        this.processTextBindingsForElement(itemElement, itemContext);
-
-                        // Set up attribute bindings (class, style, events, etc.) for the new element
-                        this.processElementAttributeBindings(itemElement, itemContext);
-
-                        // Add the configured element to the fragment
-                        container.appendChild(itemElement);
-                    } catch (error) {
-                        console.error('FOREACH: Error creating element for item', index, error);
+                    if (itemElement) {
+                        documentFragment.appendChild(itemElement);
                     }
                 });
+
+                // Single DOM insertion for all items
+                binding.element.appendChild(documentFragment);
+            },
+
+            /**
+             * Creates a single foreach item element with all bindings applied.
+             * Handles DOM creation, context scoping, and binding application for individual items.
+             * @param {Object} binding - The foreach binding configuration
+             * @param {Array} binding.template - Template configuration for the item
+             * @param {string} binding.itemName - Variable name for the current item
+             * @param {string} binding.indexName - Variable name for the current index
+             * @param {*} item - The data item to bind to the element
+             * @param {number} index - The current index in the array
+             * @param {Object} parentContext - The parent context for variable resolution
+             * @returns {HTMLElement|null} The created element or null on error
+             */
+            createForeachItem(binding, item, index, parentContext) {
+                try {
+                    // Create DOM element from template configuration
+                    const itemElement = this.createForeachItemElement(binding.template);
+
+                    // Create scoped context for this item - isolates variables per iteration
+                    const itemContext = Utils.createScopedContext('foreach', parentContext, {
+                        [binding.itemName]: item,
+                        [binding.indexName]: index
+                    });
+
+                    // Apply all bindings to the new element
+                    // Set up text interpolation for dynamic content
+                    this.processTextBindingsForElement(itemElement, itemContext);
+
+                    // Set up attribute bindings (class, style, events, etc.)
+                    this.processElementAttributeBindings(itemElement, itemContext);
+
+                    return itemElement;
+                } catch (error) {
+                    console.error(`FOREACH: Error creating item at index ${index}:`, error);
+                    return null;
+                }
             },
 
             /**
@@ -4850,6 +5085,40 @@
                     }
                 }
                 return null;
+            },
+
+            handleComputedForeachDependencies() {
+                // Check all foreach bindings for computed property paths
+                this.bindings.forEach(binding => {
+                    if (binding.type === 'foreach' && binding.target && binding.target.includes('.')) {
+                        const rootProp = binding.target.split('.')[0];
+
+                        // If root property is computed, add this binding to its dependents
+                        if (this.deps && this.deps.has(rootProp)) {
+                            const computedEntry = this.deps.get(rootProp);
+                            if (computedEntry && computedEntry.fn) {
+                                // Get the computed property's dependencies
+                                const computedDeps = computedEntry.dependencies || [];
+
+                                // For each dependency of the computed property, add this foreach binding
+                                computedDeps.forEach(dep => {
+                                    if (!this.bindingIndex.has(dep)) {
+                                        this.bindingIndex.set(dep, new Set());
+                                    }
+                                    this.bindingIndex.get(dep).add(binding);
+
+                                    // Also add to binding's dependencies
+                                    if (!binding.dependencies) {
+                                        binding.dependencies = [];
+                                    }
+                                    if (!binding.dependencies.includes(dep)) {
+                                        binding.dependencies.push(dep);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                });
             },
 
             /**
