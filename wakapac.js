@@ -3347,6 +3347,11 @@
              * @returns {boolean} True if binding should update
              */
             shouldUpdateBinding(binding, changedProperty) {
+                // For foreach bindings, only update if the collection itself changed
+                if (binding.type === 'foreach') {
+                    return binding.collection === changedProperty;
+                }
+
                 // Direct property match
                 if (binding.property === changedProperty) {
                     return true;
@@ -3714,7 +3719,8 @@
                 const binding = this.createBinding('text', textNode, {
                     target: null, // No single target, multiple interpolations
                     originalText: originalText,
-                    dependencies: Array.from(dependencies)
+                    dependencies: Array.from(dependencies),
+                    contextVars: context
                 });
 
                 // Store the binding
