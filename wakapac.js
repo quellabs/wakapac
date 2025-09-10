@@ -1950,6 +1950,65 @@
     };
 
     // ============================================================================
+    // Parser caching
+    // ============================================================================
+
+    /**
+     * A caching layer for parsed expressions with LRU eviction policy.
+     * Improves performance by avoiding redundant parsing of identical expressions.
+     * @namespace ExpressionCache
+     */
+    const ExpressionCache = {
+        /** @type {Map<string, *>} Internal cache storage mapping expression strings to parsed results */
+        cache: new Map(),
+
+        /** @type {number} Maximum number of cached entries before LRU eviction begins */
+        maxSize: 1000, // Prevent unbounded growth
+
+        /**
+         * Parses an expression with caching support.
+         * Uses string representation of the expression as cache key for consistent lookups.
+         * Implements simple LRU eviction when cache exceeds maxSize.
+         * @param {*} expression - The expression to parse (will be converted to string for caching)
+         * @returns {*} The parsed expression result from ExpressionParser or cache
+         */
+        parseExpression(expression) {
+            // Convert to string and use as cache key
+            // Trimming ensures consistent keys regardless of whitespace variations
+            const key = String(expression).trim();
+
+            // Check cache first - O(1) lookup
+            if (this.cache.has(key)) {
+                return this.cache.get(key);
+            }
+
+            // Parse using existing parser
+            const result = ExpressionParser.parseExpression(expression);
+
+            // Cache management - implement simple LRU eviction
+            if (this.cache.size >= this.maxSize) {
+                // Simple LRU: delete oldest entry (first inserted)
+                // Note: Map maintains insertion order, so first key is oldest
+                const firstKey = this.cache.keys().next().value;
+                this.cache.delete(firstKey);
+            }
+
+            // Store result in cache for future lookups
+            this.cache.set(key, result);
+            return result;
+        },
+
+        /**
+         * Clears all cached expressions.
+         * Useful for memory management or when expression parsing logic changes.
+         * @returns {void}
+         */
+        clear() {
+            this.cache.clear();
+        }
+    };
+
+    // ============================================================================
     // MAIN PAC FRAMEWORK
     // ============================================================================
 
@@ -2907,7 +2966,7 @@
                     }
 
                     // Parse the binding expression to extract its dependencies
-                    binding.parsedExpression = ExpressionParser.parseExpression(binding.target);
+                    binding.parsedExpression = ExpressionCache.parseExpression(binding.target);
                     let dependencies = binding.parsedExpression.dependencies || [];
 
                     // Templates can reference properties that aren't in the main expression
@@ -2951,7 +3010,7 @@
                         const expression = match.replace(/^\{\{\s*|\s*\}\}$/g, '').trim();
 
                         try {
-                            const parsed = ExpressionParser.parseExpression(expression);
+                            const parsed = ExpressionCache.parseExpression(expression);
 
                             if (parsed && parsed.dependencies) {
                                 parsed.dependencies.forEach(dep => dependencies.add(dep));
@@ -3000,7 +3059,7 @@
                                 // Skip empty target expressions
                                 if (target && target.trim()) {
                                     // Parse the target expression to extract variable dependencies
-                                    const parsed = ExpressionParser.parseExpression(target);
+                                    const parsed = ExpressionCache.parseExpression(target);
 
                                     // Add all discovered dependencies to our set
                                     if (parsed && parsed.dependencies) {
@@ -3606,7 +3665,7 @@
 
                     // Default case: evaluate expression and apply result
                     const context = Object.assign({}, this.abstraction, foreachVars || {});
-                    const parsed = ExpressionParser.parseExpression(binding.target);
+                    const parsed = ExpressionCache.parseExpression(binding.target);
 
                     handler(context, ExpressionParser.evaluate(parsed, context));
 
@@ -3762,7 +3821,7 @@
                         const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
 
                         try {
-                            const parsed = ExpressionParser.parseExpression(expression);
+                            const parsed = ExpressionCache.parseExpression(expression);
                             const result = ExpressionParser.evaluate(parsed, context);
                             const formattedValue = Utils.formatValue(result);
 
@@ -3814,7 +3873,7 @@
                             }
 
                             // Parse the target expression (e.g., "user.name" or "items[0].title")
-                            const parsed = ExpressionParser.parseExpression(target);
+                            const parsed = ExpressionCache.parseExpression(target);
 
                             // Evaluate the parsed expression against the current context
                             const value = ExpressionParser.evaluate(parsed, context);
@@ -3841,7 +3900,7 @@
                     const context = Utils.createScopedContext('foreach', this.abstraction, contextVars);
 
                     // Parse and evaluate the target expression to get initial value
-                    const currentValue = ExpressionParser.evaluate(ExpressionParser.parseExpression(target), context);
+                    const currentValue = ExpressionParser.evaluate(ExpressionCache.parseExpression(target), context);
 
                     // Set the initial display value on the DOM element
                     this.updateBindingDirect(el, type, currentValue);
@@ -4530,7 +4589,7 @@
                 const context = foreachVars || this.abstraction;
 
                 // Parse and evaluate the binding expression on-demand
-                const parsed = ExpressionParser.parseExpression(binding.target || binding.collection);
+                const parsed = ExpressionCache.parseExpression(binding.target || binding.collection);
                 const arrayValue = ExpressionParser.evaluate(parsed, context);
                 const array = Array.isArray(arrayValue) ? arrayValue : [];
 
