@@ -3664,12 +3664,12 @@
              * that update when dependencies change, even in foreach contexts
              * @param {HTMLElement} element - The DOM element to process text bindings on
              * @param {Object} contextVars - Context variables for expression evaluation
-             * @param {Object} [parentBinding] - Parent foreach binding for dependency tracking
              */
-            processTextBindingsForElement(element, contextVars, parentBinding = null) {
+            processTextBindingsForElement(element, contextVars) {
                 // Collect all text nodes first to avoid modifying the tree while traversing
                 const textNodes = Utils.getTextNodesFromElement(element);
 
+                
                 // Create evaluation context
                 const context = Utils.createScopedContext(this.abstraction, contextVars);
 
@@ -3681,7 +3681,7 @@
                     // Only process nodes that have interpolation patterns
                     if (/\{\{\s*[^}]+\s*}}/.test(originalText)) {
                         // Create a reactive text binding for this node
-                        this.createReactiveTextBinding(textNode, originalText, context, contextVars, parentBinding);
+                        this.createReactiveTextBinding(textNode, originalText, context);
                     }
                 });
             },
@@ -3691,10 +3691,8 @@
              * @param {Text} textNode - The text node to bind
              * @param {string} originalText - Original text with interpolation patterns
              * @param {Object} context - Evaluation context
-             * @param {Object} contextVars - Context variables (item, index, etc.)
-             * @param {Object} parentBinding - Parent foreach binding
              */
-            createReactiveTextBinding(textNode, originalText, context, contextVars, parentBinding) {
+            createReactiveTextBinding(textNode, originalText, context) {
                 // Extract dependencies from the text interpolations
                 const dependencies = this.extractTextInterpolationDependencies(originalText);
 
@@ -3702,8 +3700,6 @@
                 const binding = this.createBinding('text', textNode, {
                     target: null, // No single target, multiple interpolations
                     originalText: originalText,
-                    contextVars: contextVars,
-                    parentBinding: parentBinding,
                     dependencies: Array.from(dependencies)
                 });
 
@@ -3715,6 +3711,7 @@
                     if (!this.bindingIndex.has(dep)) {
                         this.bindingIndex.set(dep, new Set());
                     }
+
                     this.bindingIndex.get(dep).add(binding);
                 });
 
@@ -4442,11 +4439,10 @@
                 if (binding.contextVars && binding.parentBinding) {
                     // This is a foreach text binding - merge contexts properly
                     context = Utils.createScopedContext(this.abstraction, binding.contextVars);
+                } else if (contextVars) {
+                    context = Utils.createScopedContext(this.abstraction, contextVars);
                 } else {
-                    // Regular text binding - use provided context or abstraction
-                    context = contextVars
-                        ? Utils.createScopedContext(this.abstraction, contextVars)
-                        : this.abstraction;
+                    context = this.abstraction;
                 }
 
                 // Use the shared interpolation utility to process template strings
@@ -4503,6 +4499,9 @@
                     console.error('FOREACH: No container element found');
                     return;
                 }
+
+                // Clean up existing text bindings before clearing DOM
+                this.cleanupForeachTextBindings(binding);
 
                 // Find the correct data source
                 const dataSource = this.findDataSource(binding);
@@ -4688,6 +4687,58 @@
                         element.textContent = value;
                         return true;
                     }
+                }
+            },
+
+            /**
+             * Cleans up all child text bindings for a foreach binding
+             * Uses DOM hierarchy to find child text bindings
+             * @param {Object} foreachBinding - The foreach binding to clean up
+             */
+            cleanupForeachTextBindings(foreachBinding) {
+                const foreachContainer = foreachBinding.element;
+                const textBindingsToRemove = [];
+
+                // Find all text bindings whose elements are contained within this foreach container
+                this.bindings.forEach(binding => {
+                    if (
+                        binding.type === 'text' &&
+                        binding.element &&
+                        foreachContainer.contains(binding.element)
+                    ) {
+                        textBindingsToRemove.push(binding);
+                    }
+                });
+
+                // Remove all found text bindings
+                textBindingsToRemove.forEach(binding => {
+                    this.removeBinding(binding);
+                });
+            },
+
+            /**
+             * Removes a binding and cleans up all references
+             * @param {Object} binding - The binding to remove
+             */
+            removeBinding(binding) {
+                // Remove from main bindings map
+                this.bindings.delete(binding.id);
+
+                // Remove from dependency index
+                if (binding.dependencies) {
+                    binding.dependencies.forEach(dep => {
+                        const bindingSet = this.bindingIndex.get(dep);
+
+                        if (bindingSet) {
+                            // Remove binding
+                            bindingSet.delete(binding);
+
+                            // Clean up empty sets
+                            if (bindingSet.size === 0) {
+                                this.bindingIndex.delete(dep);
+                            }
+                        }
+                    });
                 }
             },
 
