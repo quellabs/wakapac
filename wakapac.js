@@ -1,5 +1,6 @@
 /**
- * Complete wakaPAC Framework with Restored PAC Events
+ * Unified wakaPAC Framework
+ * Single subscription system, PAC events, original binding methods
  */
 (function() {
     "use strict";
@@ -525,9 +526,6 @@
             return Array.from(dependencies);
         },
 
-        /**
-         * Parses a binding string into key-value pairs
-         */
         parseBindingString(bindingString) {
             const pairs = [];
             let current = '';
@@ -799,36 +797,40 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // SUBSCRIPTION TRACKER
+    // UNIFIED SUBSCRIPTION SYSTEM
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    function ContainerSubscriptionMap(container) {
+    function UnifiedSubscriptionMap(container) {
         this.container = container;
-        this.propertyToElements = new Map();
+        this.propertyToElements = new Map(); // property -> Set of elements
+        this.elementToBindings = new WeakMap(); // element -> Set of bindings
         this.container.setAttribute('data-pac-container', '');
     }
 
-    ContainerSubscriptionMap.prototype.subscribe = function (element, propertyPath) {
+    UnifiedSubscriptionMap.prototype.subscribe = function (element, propertyPath, binding) {
         if (!this.belongsToThisContainer(element)) {
             return false;
         }
 
+        // Track property -> elements
         if (!this.propertyToElements.has(propertyPath)) {
             this.propertyToElements.set(propertyPath, new Set());
         }
-
         this.propertyToElements.get(propertyPath).add(element);
+
+        // Track element -> bindings
+        if (!this.elementToBindings.has(element)) {
+            this.elementToBindings.set(element, new Set());
+        }
+        this.elementToBindings.get(element).add(binding);
+
         return true;
     };
 
-    ContainerSubscriptionMap.prototype.belongsToThisContainer = function (element) {
+    UnifiedSubscriptionMap.prototype.belongsToThisContainer = function (element) {
         if (element.nodeType === Node.TEXT_NODE) {
             const parentElement = element.parentElement;
-
-            if (!parentElement) {
-                return false;
-            }
-
+            if (!parentElement) return false;
             const closestContainer = parentElement.closest('[data-pac-container]');
             return closestContainer === this.container;
         }
@@ -837,7 +839,7 @@
         return closestContainer === this.container;
     };
 
-    ContainerSubscriptionMap.prototype.getSubscribedElements = function (propertyPath) {
+    UnifiedSubscriptionMap.prototype.getSubscribedElements = function (propertyPath) {
         const elements = this.propertyToElements.get(propertyPath) || new Set();
         const liveElements = new Set();
         const self = this;
@@ -849,34 +851,12 @@
             }
         });
 
-        // Update the mapping with cleaned elements
         this.propertyToElements.set(propertyPath, liveElements);
         return liveElements;
     };
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // BINDING MAP
-    // ═══════════════════════════════════════════════════════════════════════════════
-
-    function BindingMap() {
-        this.elementToBindings = new WeakMap();
-        this.bindingToElement = new WeakMap();
-    }
-
-    BindingMap.prototype.addBinding = function(element, binding) {
-        if (!this.elementToBindings.has(element)) {
-            this.elementToBindings.set(element, new Set());
-        }
-        this.elementToBindings.get(element).add(binding);
-        this.bindingToElement.set(binding, element);
-    };
-
-    BindingMap.prototype.getBindingsForElement = function(element) {
-        return this.elementToBindings.get(element) || new Set();
-    };
-
-    BindingMap.prototype.getBindingForElementAndProperty = function(element, propertyPath) {
-        const bindings = this.getBindingsForElement(element);
+    UnifiedSubscriptionMap.prototype.getBindingForElementAndProperty = function(element, propertyPath) {
+        const bindings = this.elementToBindings.get(element) || new Set();
 
         for (const binding of bindings) {
             if (binding.dependencies && binding.dependencies.includes(propertyPath)) {
@@ -918,8 +898,7 @@
             eventBindings: [],
 
             initialize: function () {
-                this.bindingMap = new BindingMap();
-                this.subscriptionMap = new ContainerSubscriptionMap(this.container);
+                this.subscriptionMap = new UnifiedSubscriptionMap(this.container);
 
                 this.setupTextBindings();
                 this.setupAttributeBindings();
@@ -953,7 +932,8 @@
 
                 // Handle computed properties
                 if (this.original.computed) {
-                    this.computedManager = new ComputedManager(proxiedReactive, this.original.computed);
+                    const computedManager = new ComputedManager(proxiedReactive, this.original.computed);
+                    this.computedManager = computedManager;
                 }
 
                 return proxiedReactive;
@@ -980,10 +960,8 @@
                                 dependencies: dependencies
                             });
 
-                            self.bindingMap.addBinding(node, binding);
-
                             dependencies.forEach(function (dependency) {
-                                self.subscriptionMap.subscribe(node, dependency);
+                                self.subscriptionMap.subscribe(node, dependency, binding);
                             });
                         });
                     }
@@ -1020,7 +998,6 @@
                     const bindingString = element.getAttribute('data-pac-bind');
                     const bindingPairs = ExpressionParser.parseBindingString(bindingString);
 
-                    // Process each binding pair
                     bindingPairs.forEach(function (pair) {
                         const type = pair.type;
                         const target = pair.target;
@@ -1038,8 +1015,9 @@
                             const binding = self.createBinding(type, element, {target, dependencies});
 
                             if (binding) {
-                                self.bindingMap.addBinding(element, binding);
-                                dependencies.forEach(dep => self.subscriptionMap.subscribe(element, dep));
+                                dependencies.forEach(function(dep) {
+                                    self.subscriptionMap.subscribe(element, dep, binding);
+                                });
                             }
                         }
                     });
@@ -1052,7 +1030,11 @@
                             if (pair.target) {
                                 computedNames.forEach(function(computedName) {
                                     if (pair.target.includes(computedName)) {
-                                        self.subscriptionMap.subscribe(element, computedName);
+                                        const computedBinding = self.createBinding(pair.type, element, {
+                                            target: pair.target,
+                                            dependencies: [computedName]
+                                        });
+                                        self.subscriptionMap.subscribe(element, computedName, computedBinding);
                                     }
                                 });
                             }
@@ -1131,7 +1113,7 @@
             },
 
             updateElementForProperty: function (element, propertyPath) {
-                const binding = this.bindingMap.getBindingForElementAndProperty(element, propertyPath);
+                const binding = this.subscriptionMap.getBindingForElementAndProperty(element, propertyPath);
 
                 if (!binding) {
                     return;
@@ -1187,8 +1169,7 @@
                 });
 
                 rootProperties.forEach(function (propertyName) {
-                    const currentValue = self.abstraction[propertyName];
-                    self.handlePropertyChange(propertyName, undefined, currentValue);
+                    self.handlePropertyChange(propertyName);
                 });
 
                 // Call initialization hook if provided
@@ -1298,22 +1279,8 @@
         // Initialize the control unit
         const controlUnit = control.initialize();
 
-        // Create public API
-        function createPublicAPI(unit) {
-            const api = {};
-
-            Object.keys(unit.abstraction).forEach(function (key) {
-                const descriptor = Object.getOwnPropertyDescriptor(unit.abstraction, key);
-
-                if (descriptor) {
-                    Object.defineProperty(api, key, descriptor);
-                }
-            });
-
-            return api;
-        }
-
-        const publicAPI = createPublicAPI(controlUnit);
+        // Create public API - simplified
+        const publicAPI = Object.assign({}, controlUnit.abstraction);
         window.PACRegistry.register(selector, control);
         return publicAPI;
     }
