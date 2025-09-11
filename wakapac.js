@@ -1,12 +1,11 @@
 /**
- * wakaPAC Framework - Fixed Version
- * Clear separation of concerns with properly working computed properties
+ * Complete wakaPAC Framework with Restored PAC Events
  */
 (function() {
     "use strict";
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // EXPRESSION PARSER (KEPT INTACT)
+    // ORIGINAL EXPRESSION PARSER (COMPLETE)
     // ═══════════════════════════════════════════════════════════════════════════════
 
     const ExpressionParser = {
@@ -524,6 +523,121 @@
 
             traverse(node);
             return Array.from(dependencies);
+        },
+
+        /**
+         * Parses a binding string into key-value pairs
+         */
+        parseBindingString(bindingString) {
+            const pairs = [];
+            let current = '';
+            let inQuotes = false;
+            let quoteChar = '';
+            let parenDepth = 0;
+            let braceDepth = 0;
+
+            for (let i = 0; i < bindingString.length; i++) {
+                const char = bindingString[i];
+                const isEscaped = i > 0 && bindingString[i - 1] === '\\';
+
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                if (!inQuotes) {
+                    if (char === '(') {
+                        parenDepth++;
+                    } else if (char === ')') {
+                        parenDepth--;
+                    } else if (char === '{') {
+                        braceDepth++;
+                    } else if (char === '}') {
+                        braceDepth--;
+                    }
+                }
+
+                if (char === ',' && !inQuotes && parenDepth === 0 && braceDepth === 0) {
+                    this.addBindingPairIfValid(current, pairs);
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+
+            this.addBindingPairIfValid(current, pairs);
+            return pairs;
+        },
+
+        addBindingPairIfValid(pairString, pairs) {
+            const trimmed = pairString.trim();
+
+            if (!trimmed) {
+                return;
+            }
+
+            const colonIndex = this.findBindingColon(trimmed);
+
+            if (colonIndex === -1) {
+                pairs.push({
+                    type: trimmed,
+                    target: ''
+                });
+            } else {
+                pairs.push({
+                    type: trimmed.substring(0, colonIndex).trim(),
+                    target: trimmed.substring(colonIndex + 1).trim()
+                });
+            }
+        },
+
+        findBindingColon(str) {
+            const KNOWN_BINDING_TYPES = [
+                "value", "checked", "visible", "if", "foreach", "class", "style",
+                "click", "change", "input", "submit", "focus", "blur", "keyup", "keydown"
+            ];
+
+            for (const type of KNOWN_BINDING_TYPES) {
+                if (str.startsWith(type + ':')) {
+                    return type.length;
+                }
+            }
+
+            let inQuotes = false;
+            let quoteChar = '';
+            let parenDepth = 0;
+
+            for (let i = 0; i < str.length; i++) {
+                const char = str[i];
+                const isEscaped = i > 0 && str[i - 1] === '\\';
+
+                if ((char === '"' || char === "'") && !isEscaped) {
+                    if (!inQuotes) {
+                        inQuotes = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuotes = false;
+                        quoteChar = '';
+                    }
+                }
+
+                if (!inQuotes) {
+                    if (char === '(') {
+                        parenDepth++;
+                    } else if (char === ')') {
+                        parenDepth--;
+                    } else if (char === ':' && parenDepth === 0) {
+                        return i;
+                    }
+                }
+            }
+
+            return -1;
         }
     };
 
@@ -555,104 +669,108 @@
     };
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // CHANGE DETECTION SYSTEM (ONLY EMITS EVENTS)
+    // REACTIVE PROXY WITH PAC:CHANGE EVENTS
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    function ChangeDetector(container) {
+    function makeDeepReactiveProxy(value, container) {
         const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
 
-        this.makeReactive = function(obj, path = []) {
-            if (obj === null || typeof obj !== 'object') {
-                return obj;
-            }
-
-            const self = this;
+        function createProxy(obj, currentPath) {
+            currentPath = currentPath || [];
 
             return new Proxy(obj, {
-                get(target, prop) {
-                    const value = target[prop];
+                get: function (target, prop) {
+                    const val = target[prop];
 
-                    // Handle array mutations
-                    if (Array.isArray(target) && ARRAY_METHODS.includes(prop)) {
-                        return function(...args) {
-                            const result = Array.prototype[prop].apply(target, args);
-                            emitChange([...path], target);
+                    // Handle array mutation methods
+                    if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
+                        return function () {
+                            const oldArray = Array.prototype.slice.call(target);
+                            const result = Array.prototype[prop].apply(target, arguments);
+
+                            // Emit pac:change event
+                            container.dispatchEvent(new CustomEvent("pac:change", {
+                                detail: {
+                                    path: currentPath,
+                                    oldValue: oldArray,
+                                    newValue: Array.prototype.slice.call(target)
+                                }
+                            }));
+
                             return result;
                         };
                     }
 
                     // Make nested objects reactive
-                    if (value && typeof value === 'object' && !value._isReactive) {
-                        const reactiveValue = self.makeReactive(value, [...path, prop]);
-                        reactiveValue._isReactive = true;
-                        target[prop] = reactiveValue;
+                    if (val && typeof val === 'object' && !val._isReactive) {
+                        const nestedPath = currentPath.concat([prop]);
+                        target[prop] = createProxy(val, nestedPath);
+                        target[prop]._isReactive = true;
                     }
 
                     return target[prop];
                 },
 
-                set(target, prop, newValue) {
+                set: function (target, prop, newValue) {
                     const oldValue = target[prop];
+                    const propertyPath = currentPath.concat([prop]);
 
+                    // Skip update if values are equal
                     if (oldValue === newValue) {
                         return true;
                     }
 
                     // Make new value reactive if needed
                     if (newValue && typeof newValue === 'object') {
-                        const reactiveValue = self.makeReactive(newValue, [...path, prop]);
-                        reactiveValue._isReactive = true;
-                        target[prop] = reactiveValue;
+                        target[prop] = createProxy(newValue, propertyPath);
+                        target[prop]._isReactive = true;
                     } else {
                         target[prop] = newValue;
                     }
 
-                    emitChange([...path, prop], newValue, oldValue);
+                    // Emit pac:change event
+                    container.dispatchEvent(new CustomEvent("pac:change", {
+                        detail: {
+                            path: propertyPath,
+                            oldValue: oldValue,
+                            newValue: target[prop]
+                        }
+                    }));
+
                     return true;
                 }
             });
-        };
-
-        function emitChange(propertyPath, newValue, oldValue) {
-            container.dispatchEvent(new CustomEvent('property:changed', {
-                detail: { path: propertyPath, newValue, oldValue }
-            }));
         }
+
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+
+        return createProxy(value, []);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // COMPUTED PROPERTIES MANAGER
+    // COMPUTED PROPERTIES
     // ═══════════════════════════════════════════════════════════════════════════════
 
     function ComputedManager(abstraction, computedDefs) {
         const computedCache = new Map();
         const computedDeps = new Map();
-        const listeners = new Set();
 
         // Initialize computed properties
         Object.keys(computedDefs).forEach(name => {
             const fn = computedDefs[name];
             const deps = extractDependencies(fn);
-            computedDeps.set(name, { fn, dependencies: deps, isDirty: true, lastValue: undefined });
+            computedDeps.set(name, { fn, dependencies: deps, isDirty: true });
 
             Object.defineProperty(abstraction, name, {
                 get() {
                     const entry = computedDeps.get(name);
 
                     if (entry.isDirty || !computedCache.has(name)) {
-                        const newValue = entry.fn.call(this);
-                        const oldValue = entry.lastValue;
-
-                        computedCache.set(name, newValue);
+                        const value = entry.fn.call(this);
+                        computedCache.set(name, value);
                         entry.isDirty = false;
-                        entry.lastValue = newValue;
-
-                        // Notify listeners if value changed
-                        if (oldValue !== newValue) {
-                            listeners.forEach(listener => {
-                                listener(name, newValue, oldValue);
-                            });
-                        }
                     }
 
                     return computedCache.get(name);
@@ -672,152 +790,102 @@
             computedDeps.forEach((entry, computedName) => {
                 if (entry.dependencies.includes(changedProperty)) {
                     entry.isDirty = true;
+                    computedCache.delete(computedName);
                     invalidated.push(computedName);
-
-                    // Trigger getter to check for value change
-                    const _ = abstraction[computedName];
                 }
             });
             return invalidated;
         };
-
-        this.addChangeListener = function(listener) {
-            listeners.add(listener);
-        };
-
-        this.removeChangeListener = function(listener) {
-            listeners.delete(listener);
-        };
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // CHANGE HANDLER (ONLY HANDLES EVENTS)
+    // SUBSCRIPTION TRACKER
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    function ChangeHandler(container, abstraction, computedManager) {
-        const subscriptions = new Map(); // property -> Set of elements
-        const bindings = new WeakMap();   // element -> binding info
+    function ContainerSubscriptionMap(container) {
+        this.container = container;
+        this.propertyToElements = new Map();
+        this.container.setAttribute('data-pac-container', '');
+    }
 
-        this.subscribe = function(element, property, bindingInfo) {
-            if (!subscriptions.has(property)) {
-                subscriptions.set(property, new Set());
+    ContainerSubscriptionMap.prototype.subscribe = function (element, propertyPath) {
+        if (!this.belongsToThisContainer(element)) {
+            return false;
+        }
+
+        if (!this.propertyToElements.has(propertyPath)) {
+            this.propertyToElements.set(propertyPath, new Set());
+        }
+
+        this.propertyToElements.get(propertyPath).add(element);
+        return true;
+    };
+
+    ContainerSubscriptionMap.prototype.belongsToThisContainer = function (element) {
+        if (element.nodeType === Node.TEXT_NODE) {
+            const parentElement = element.parentElement;
+
+            if (!parentElement) {
+                return false;
             }
-            subscriptions.get(property).add(element);
-            bindings.set(element, bindingInfo);
-        };
 
-        this.handleChange = function(propertyPath) {
-            const rootProperty = propertyPath[0];
+            const closestContainer = parentElement.closest('[data-pac-container]');
+            return closestContainer === this.container;
+        }
 
-            // Invalidate computed properties
-            computedManager.invalidateComputed(rootProperty);
+        const closestContainer = element.closest('[data-pac-container]');
+        return closestContainer === this.container;
+    };
 
-            // Update elements subscribed to this property
-            const elements = subscriptions.get(rootProperty) || new Set();
-            elements.forEach(element => {
-                if (element.isConnected) {
-                    updateElement(element);
-                } else {
-                    elements.delete(element);
-                }
-            });
-        };
+    ContainerSubscriptionMap.prototype.getSubscribedElements = function (propertyPath) {
+        const elements = this.propertyToElements.get(propertyPath) || new Set();
+        const liveElements = new Set();
+        const self = this;
 
-        // Listen for computed property changes
-        computedManager.addChangeListener((computedName, newValue, oldValue) => {
-            const elements = subscriptions.get(computedName) || new Set();
-            elements.forEach(element => {
-                if (element.isConnected) {
-                    updateElement(element);
-                } else {
-                    elements.delete(element);
-                }
-            });
+        // Clean up disconnected elements
+        elements.forEach(function (el) {
+            if (el.isConnected && self.belongsToThisContainer(el)) {
+                liveElements.add(el);
+            }
         });
 
-        function updateElement(element) {
-            const binding = bindings.get(element);
-            if (!binding) return;
+        // Update the mapping with cleaned elements
+        this.propertyToElements.set(propertyPath, liveElements);
+        return liveElements;
+    };
 
-            const value = ExpressionParser.evaluate(binding.parsed, abstraction);
-            applyBinding(element, binding.type, value, binding);
-        }
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // BINDING MAP
+    // ═══════════════════════════════════════════════════════════════════════════════
 
-        function applyBinding(element, type, value, binding) {
-            switch (type) {
-                case 'text':
-                    const newText = processTextInterpolation(binding.originalText, abstraction);
-                    if (element.textContent !== newText) {
-                        element.textContent = newText;
-                    }
-                    break;
-
-                case 'visible':
-                    const shouldShow = !!value;
-                    if (shouldShow) {
-                        if (element.hasAttribute('data-hidden')) {
-                            element.style.display = element.getAttribute('data-orig-display') || '';
-                            element.removeAttribute('data-hidden');
-                            element.removeAttribute('data-orig-display');
-                        }
-                    } else {
-                        if (!element.hasAttribute('data-hidden')) {
-                            const currentDisplay = getComputedStyle(element).display;
-                            if (currentDisplay !== 'none') {
-                                element.setAttribute('data-orig-display', currentDisplay);
-                            }
-                            element.style.display = 'none';
-                            element.setAttribute('data-hidden', 'true');
-                        }
-                    }
-                    break;
-
-                case 'value':
-                    const stringValue = String(value || '');
-                    if ('value' in element && element.value !== stringValue) {
-                        element.value = stringValue;
-                    }
-                    break;
-
-                case 'checked':
-                    element.checked = Boolean(value);
-                    break;
-
-                default:
-                    // Generic attribute
-                    const booleanAttrs = ['readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
-                    if (booleanAttrs.includes(type)) {
-                        element.toggleAttribute(type, !!value);
-                    } else if (value != null) {
-                        element.setAttribute(type, value);
-                    } else {
-                        element.removeAttribute(type);
-                    }
-                    break;
-            }
-        }
-
-        function processTextInterpolation(textContent, context) {
-            let text = String(textContent || '');
-            const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
-
-            if (matches) {
-                for (const match of matches) {
-                    const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
-                    try {
-                        const parsed = ExpressionCache.parseExpression(expression);
-                        const result = ExpressionParser.evaluate(parsed, context);
-                        const formattedValue = result != null ? String(result) : '';
-                        text = text.replace(match, formattedValue);
-                    } catch (error) {
-                        console.warn(`Error evaluating expression "${expression}":`, error);
-                    }
-                }
-            }
-
-            return text;
-        }
+    function BindingMap() {
+        this.elementToBindings = new WeakMap();
+        this.bindingToElement = new WeakMap();
     }
+
+    BindingMap.prototype.addBinding = function(element, binding) {
+        if (!this.elementToBindings.has(element)) {
+            this.elementToBindings.set(element, new Set());
+        }
+        this.elementToBindings.get(element).add(binding);
+        this.bindingToElement.set(binding, element);
+    };
+
+    BindingMap.prototype.getBindingsForElement = function(element) {
+        return this.elementToBindings.get(element) || new Set();
+    };
+
+    BindingMap.prototype.getBindingForElementAndProperty = function(element, propertyPath) {
+        const bindings = this.getBindingsForElement(element);
+
+        for (const binding of bindings) {
+            if (binding.dependencies && binding.dependencies.includes(propertyPath)) {
+                return binding;
+            }
+        }
+
+        return null;
+    };
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // MAIN FRAMEWORK
@@ -828,242 +896,432 @@
         options = options || {};
 
         const container = document.querySelector(selector);
+
         if (!container) {
             throw new Error('Container not found: ' + selector);
         }
 
-        // Initialize subsystems in correct order
-        const changeDetector = new ChangeDetector(container);
-        const reactiveAbstraction = changeDetector.makeReactive(abstraction);
+        const config = {
+            updateMode: options.updateMode || 'batched',
+            delay: options.delay || 300
+        };
 
-        // Bind methods to reactive abstraction
-        Object.keys(abstraction).forEach(key => {
-            if (typeof abstraction[key] === 'function' && key !== 'computed') {
-                reactiveAbstraction[key] = abstraction[key].bind(reactiveAbstraction);
-            }
-        });
+        const control = {
+            selector: selector,
+            container: container,
+            config: config,
+            original: abstraction,
+            abstraction: null,
+            bindings: new Map(),
+            deps: new Map(),
+            subscriptionMap: null,
+            eventBindings: [],
 
-        // Set up computed properties and change handler
-        const computedManager = new ComputedManager(reactiveAbstraction, abstraction.computed || {});
-        const changeHandler = new ChangeHandler(container, reactiveAbstraction, computedManager);
+            initialize: function () {
+                this.bindingMap = new BindingMap();
+                this.subscriptionMap = new ContainerSubscriptionMap(this.container);
 
-        // Setup bindings
-        setupTextBindings();
-        setupAttributeBindings();
-        setupEventBindings();
+                this.setupTextBindings();
+                this.setupAttributeBindings();
+                this.setupSimpleEventCapture();
+                this.abstraction = this.createReactiveAbstraction();
+                this.setupEventHandlers();
+                this.performInitialUpdate();
+                return this;
+            },
 
-        // Setup change event listener
-        container.addEventListener('property:changed', function(event) {
-            changeHandler.handleChange(event.detail.path);
-        });
+            createReactiveAbstraction: function () {
+                const reactive = {};
+                const self = this;
 
-        // Initial update
-        performInitialUpdate();
+                // Copy all non-function properties
+                Object.keys(this.original).forEach(function (key) {
+                    if (key !== 'computed' && typeof self.original[key] !== 'function') {
+                        reactive[key] = self.original[key];
+                    }
+                });
 
-        // Call init if provided
-        if (abstraction.init) {
-            abstraction.init.call(reactiveAbstraction);
-        }
+                // Create the reactive proxy
+                const proxiedReactive = makeDeepReactiveProxy(reactive, this.container);
 
-        function setupTextBindings() {
-            const walker = document.createTreeWalker(
-                container,
-                NodeFilter.SHOW_TEXT,
-                { acceptNode: (node) => /\{\{.*\}\}/.test(node.textContent) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }
-            );
+                // Bind methods to the proxy
+                Object.keys(this.original).forEach(function (key) {
+                    if (typeof self.original[key] === 'function' && key !== 'computed') {
+                        proxiedReactive[key] = self.original[key].bind(proxiedReactive);
+                    }
+                });
 
-            const textNodes = [];
-            let node;
-            while ((node = walker.nextNode())) {
-                textNodes.push(node);
-            }
-
-            textNodes.forEach(textNode => {
-                const text = textNode.textContent;
-                const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
-
-                if (matches) {
-                    matches.forEach(match => {
-                        const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
-                        const parsed = ExpressionCache.parseExpression(expression);
-                        const dependencies = parsed.dependencies || [];
-
-                        const bindingInfo = {
-                            type: 'text',
-                            originalText: text,
-                            parsed: parsed
-                        };
-
-                        dependencies.forEach(dep => {
-                            changeHandler.subscribe(textNode, dep, bindingInfo);
-                        });
-                    });
+                // Handle computed properties
+                if (this.original.computed) {
+                    this.computedManager = new ComputedManager(proxiedReactive, this.original.computed);
                 }
-            });
-        }
 
-        function setupAttributeBindings() {
-            const elements = container.querySelectorAll('[data-pac-bind]');
+                return proxiedReactive;
+            },
 
-            Array.from(elements).forEach(element => {
-                const bindingString = element.getAttribute('data-pac-bind');
-                const bindingPairs = parseBindingString(bindingString);
+            setupTextBindings: function () {
+                const textNodes = this.getTextNodesFromElement(this.container);
+                const self = this;
 
-                bindingPairs.forEach(pair => {
-                    if (pair.target) {
-                        const parsed = ExpressionCache.parseExpression(pair.target);
-                        const dependencies = parsed.dependencies || [];
+                textNodes.forEach(function (node) {
+                    const text = node.textContent;
+                    const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
 
-                        const bindingInfo = {
-                            type: pair.type,
-                            parsed: parsed
-                        };
+                    if (matches) {
+                        matches.forEach(function (match) {
+                            const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
+                            const parsed = ExpressionCache.parseExpression(expression);
+                            const dependencies = parsed.dependencies || [];
 
-                        dependencies.forEach(dep => {
-                            changeHandler.subscribe(element, dep, bindingInfo);
+                            const binding = self.createBinding('text', node, {
+                                target: expression,
+                                originalText: text,
+                                fullMatch: match,
+                                dependencies: dependencies
+                            });
+
+                            self.bindingMap.addBinding(node, binding);
+
+                            dependencies.forEach(function (dependency) {
+                                self.subscriptionMap.subscribe(node, dependency);
+                            });
                         });
                     }
                 });
-            });
-        }
+            },
 
-        function setupEventBindings() {
-            const elements = container.querySelectorAll('[data-pac-bind]');
+            getTextNodesFromElement: function(element) {
+                const textNodes = [];
+                const walker = document.createTreeWalker(
+                    element,
+                    NodeFilter.SHOW_TEXT,
+                    {
+                        acceptNode: (node) => {
+                            return /\{\{.*\}\}/.test(node.textContent) ?
+                                NodeFilter.FILTER_ACCEPT :
+                                NodeFilter.FILTER_SKIP;
+                        }
+                    }
+                );
 
-            Array.from(elements).forEach(element => {
-                const bindingString = element.getAttribute('data-pac-bind');
-                const bindingPairs = parseBindingString(bindingString);
+                let node;
+                while ((node = walker.nextNode())) {
+                    textNodes.push(node);
+                }
 
-                bindingPairs.forEach(pair => {
-                    if (pair.type === 'click' && pair.target) {
-                        element.addEventListener('click', function(event) {
-                            const method = reactiveAbstraction[pair.target];
-                            if (typeof method === 'function') {
-                                try {
-                                    method.call(reactiveAbstraction, event);
-                                } catch (error) {
-                                    console.error(`Error executing click handler "${pair.target}":`, error);
-                                }
+                return textNodes;
+            },
+
+            setupAttributeBindings: function () {
+                const elements = this.container.querySelectorAll('[data-pac-bind]');
+                const self = this;
+
+                Array.from(elements).forEach(function (element) {
+                    const bindingString = element.getAttribute('data-pac-bind');
+                    const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+
+                    // Process each binding pair
+                    bindingPairs.forEach(function (pair) {
+                        const type = pair.type;
+                        const target = pair.target;
+
+                        // Handle event bindings separately
+                        if (type === 'click') {
+                            self.eventBindings.push({element, type, target});
+                            return;
+                        }
+
+                        // Process property bindings
+                        if (target) {
+                            const parsed = ExpressionCache.parseExpression(target);
+                            const dependencies = parsed.dependencies || [];
+                            const binding = self.createBinding(type, element, {target, dependencies});
+
+                            if (binding) {
+                                self.bindingMap.addBinding(element, binding);
+                                dependencies.forEach(dep => self.subscriptionMap.subscribe(element, dep));
+                            }
+                        }
+                    });
+
+                    // Subscribe to computed properties referenced in bindings
+                    if (self.original.computed) {
+                        const computedNames = Object.keys(self.original.computed);
+
+                        bindingPairs.forEach(function(pair) {
+                            if (pair.target) {
+                                computedNames.forEach(function(computedName) {
+                                    if (pair.target.includes(computedName)) {
+                                        self.subscriptionMap.subscribe(element, computedName);
+                                    }
+                                });
                             }
                         });
                     }
                 });
-            });
-        }
+            },
 
-        function parseBindingString(bindingString) {
-            const pairs = [];
-            const knownTypes = ['value', 'checked', 'visible', 'if', 'foreach', 'class', 'style', 'click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
+            setupEventHandlers: function () {
+                const self = this;
 
-            let current = '';
-            let inQuotes = false;
-            let quoteChar = '';
-            let parenDepth = 0;
-            let braceDepth = 0;
-
-            for (let i = 0; i < bindingString.length; i++) {
-                const char = bindingString[i];
-                const isEscaped = i > 0 && bindingString[i - 1] === '\\';
-
-                if ((char === '"' || char === "'") && !isEscaped) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = '';
+                this.eventBindings.forEach(function (eventBinding) {
+                    if (eventBinding.type === 'click') {
+                        self.setupClickBinding(eventBinding.element, eventBinding.target);
                     }
-                }
-
-                if (!inQuotes) {
-                    if (char === '(') parenDepth++;
-                    else if (char === ')') parenDepth--;
-                    else if (char === '{') braceDepth++;
-                    else if (char === '}') braceDepth--;
-                }
-
-                if (char === ',' && !inQuotes && parenDepth === 0 && braceDepth === 0) {
-                    addBindingPair(current.trim(), pairs, knownTypes);
-                    current = '';
-                } else {
-                    current += char;
-                }
-            }
-
-            addBindingPair(current.trim(), pairs, knownTypes);
-            return pairs;
-        }
-
-        function addBindingPair(pairString, pairs, knownTypes) {
-            if (!pairString) return;
-
-            const colonIndex = findBindingColon(pairString, knownTypes);
-
-            if (colonIndex === -1) {
-                pairs.push({ type: pairString, target: '' });
-            } else {
-                pairs.push({
-                    type: pairString.substring(0, colonIndex).trim(),
-                    target: pairString.substring(colonIndex + 1).trim()
                 });
-            }
-        }
+            },
 
-        function findBindingColon(str, knownTypes) {
-            for (const type of knownTypes) {
-                if (str.startsWith(type + ':')) {
-                    return type.length;
+            setupClickBinding: function (element, methodName) {
+                const self = this;
+
+                element.addEventListener('click', function (event) {
+                    const method = self.abstraction[methodName];
+
+                    if (typeof method === 'function') {
+                        try {
+                            method.call(self.abstraction, event);
+                        } catch (error) {
+                            console.error('Error executing click handler "' + methodName + '":', error);
+                        }
+                    } else {
+                        console.warn('Click handler "' + methodName + '" is not a function');
+                    }
+                });
+            },
+
+            createBinding: function (type, element, config) {
+                return {
+                    id: Date.now() + '_' + (Math.random() * 10000 | 0),
+                    type: type,
+                    element: element,
+                    target: config.target,
+                    originalText: config.originalText,
+                    fullMatch: config.fullMatch,
+                    dependencies: config.dependencies
+                };
+            },
+
+            setupSimpleEventCapture: function () {
+                const self = this;
+
+                this.container.addEventListener('pac:change', function (event) {
+                    const detail = event.detail;
+                    const path = detail.path;
+                    const propertyPath = path.join('.');
+
+                    self.handlePropertyChange(propertyPath);
+
+                    if (path.length > 1) {
+                        self.handlePropertyChange(path[0]);
+                    }
+                });
+            },
+
+            handlePropertyChange: function (propertyPath) {
+                const self = this;
+                const subscribedElements = this.subscriptionMap.getSubscribedElements(propertyPath);
+
+                if (subscribedElements.size > 0) {
+                    subscribedElements.forEach(function (element) {
+                        self.updateElementForProperty(element, propertyPath);
+                    });
+
+                    this.invalidateComputedDependents(propertyPath);
                 }
-            }
+            },
 
-            let inQuotes = false;
-            let quoteChar = '';
-            let parenDepth = 0;
+            updateElementForProperty: function (element, propertyPath) {
+                const binding = this.bindingMap.getBindingForElementAndProperty(element, propertyPath);
 
-            for (let i = 0; i < str.length; i++) {
-                const char = str[i];
-                const isEscaped = i > 0 && str[i - 1] === '\\';
+                if (!binding) {
+                    return;
+                }
 
-                if ((char === '"' || char === "'") && !isEscaped) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = '';
+                const context = this.abstraction;
+                const parsed = ExpressionCache.parseExpression(binding.target);
+                const evaluatedValue = ExpressionParser.evaluate(parsed, context);
+
+                switch (binding.type) {
+                    case 'text':
+                        this.applyTextBinding(binding, context);
+                        break;
+
+                    case 'visible':
+                        this.applyVisibilityBinding(binding, evaluatedValue);
+                        break;
+
+                    case 'value':
+                        this.applyInputBinding(binding, evaluatedValue);
+                        break;
+
+                    case 'checked':
+                        this.applyCheckedBinding(binding, evaluatedValue);
+                        break;
+
+                    default:
+                        this.applyAttributeBinding(binding, evaluatedValue);
+                        break;
+                }
+            },
+
+            invalidateComputedDependents: function (changedProperty) {
+                if (!this.computedManager) {
+                    return;
+                }
+
+                const invalidatedComputed = this.computedManager.invalidateComputed(changedProperty);
+                const self = this;
+
+                invalidatedComputed.forEach(function (computedName) {
+                    // Access the computed property to trigger recalculation
+                    const _ = self.abstraction[computedName];
+                    // Then trigger updates for elements that depend on it
+                    self.handlePropertyChange(computedName);
+                });
+            },
+
+            performInitialUpdate: function () {
+                const self = this;
+                const rootProperties = Object.keys(this.abstraction).filter(function (key) {
+                    return typeof self.abstraction[key] !== 'function' && !key.startsWith('_');
+                });
+
+                rootProperties.forEach(function (propertyName) {
+                    const currentValue = self.abstraction[propertyName];
+                    self.handlePropertyChange(propertyName, undefined, currentValue);
+                });
+
+                // Call initialization hook if provided
+                if (this.original.init) {
+                    this.original.init.call(this.abstraction);
+                }
+            },
+
+            processTextInterpolation: function (textContent, context) {
+                let text = String(textContent || '');
+                const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+
+                if (matches) {
+                    for (let i = 0; i < matches.length; i++) {
+                        const match = matches[i];
+                        const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
+
+                        try {
+                            const parsed = ExpressionCache.parseExpression(expression);
+                            const result = ExpressionParser.evaluate(parsed, context);
+                            const formattedValue = result != null ? String(result) : '';
+                            text = text.replace(match, formattedValue);
+                        } catch (error) {
+                            console.warn('Error evaluating expression "' + expression + '":', error);
+                        }
                     }
                 }
 
-                if (!inQuotes) {
-                    if (char === '(') parenDepth++;
-                    else if (char === ')') parenDepth--;
-                    else if (char === ':' && parenDepth === 0) {
-                        return i;
+                return text;
+            },
+
+            /**
+             * Applies text binding to a text node
+             */
+            applyTextBinding: function (binding, context) {
+                const textNode = binding.element;
+                const newText = this.processTextInterpolation(binding.originalText, context);
+
+                if (textNode.textContent !== newText) {
+                    textNode.textContent = newText;
+                }
+            },
+
+            /**
+             * Applies visibility binding to an element
+             */
+            applyVisibilityBinding: function (binding, value) {
+                const element = binding.element;
+                const shouldShow = !!value;
+
+                if (shouldShow) {
+                    if (element.hasAttribute('data-pac-hidden')) {
+                        element.style.display = element.getAttribute('data-pac-orig-display') || '';
+                        element.removeAttribute('data-pac-hidden');
+                        element.removeAttribute('data-pac-orig-display');
+                    }
+                } else {
+                    if (!element.hasAttribute('data-pac-hidden')) {
+                        const currentDisplay = getComputedStyle(element).display;
+                        if (currentDisplay !== 'none') {
+                            element.setAttribute('data-pac-orig-display', currentDisplay);
+                        }
+                        element.style.display = 'none';
+                        element.setAttribute('data-pac-hidden', 'true');
                     }
                 }
+            },
+
+            /**
+             * Applies input value binding to form elements
+             */
+            applyInputBinding: function (binding, value) {
+                const element = binding.element;
+                const stringValue = String(value || '');
+
+                if ('value' in element && element.value !== stringValue) {
+                    element.value = stringValue;
+                }
+            },
+
+            /**
+             * Applies checked binding to checkboxes and radio buttons
+             */
+            applyCheckedBinding: function (binding, value) {
+                const element = binding.element;
+                element.checked = Boolean(value);
+            },
+
+            /**
+             * Applies generic attribute binding to an element
+             */
+            applyAttributeBinding: function (binding, value) {
+                const element = binding.element;
+                const attribute = binding.type;
+                const booleanAttrs = ['readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
+
+                if (booleanAttrs.includes(attribute)) {
+                    element.toggleAttribute(attribute, !!value);
+                } else if (value != null) {
+                    element.setAttribute(attribute, value);
+                } else {
+                    element.removeAttribute(attribute);
+                }
             }
+        };
 
-            return -1;
-        }
+        // Initialize the control unit
+        const controlUnit = control.initialize();
 
-        function performInitialUpdate() {
-            const rootProperties = Object.keys(reactiveAbstraction).filter(key => {
-                return typeof reactiveAbstraction[key] !== 'function' && !key.startsWith('_');
+        // Create public API
+        function createPublicAPI(unit) {
+            const api = {};
+
+            Object.keys(unit.abstraction).forEach(function (key) {
+                const descriptor = Object.getOwnPropertyDescriptor(unit.abstraction, key);
+
+                if (descriptor) {
+                    Object.defineProperty(api, key, descriptor);
+                }
             });
 
-            rootProperties.forEach(propertyName => {
-                changeHandler.handleChange([propertyName]);
-            });
+            return api;
         }
 
-        return reactiveAbstraction;
+        const publicAPI = createPublicAPI(controlUnit);
+        window.PACRegistry.register(selector, control);
+        return publicAPI;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
     // EXPORTS
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    // Simple registry for component management
     function SimplePACRegistry() {
         this.components = new Map();
 
@@ -1076,7 +1334,6 @@
         };
     }
 
-    // Initialize global registry and export
     window.PACRegistry = window.PACRegistry || new SimplePACRegistry();
     window.wakaPAC = wakaPAC;
 
