@@ -130,7 +130,7 @@
          * @param {*} value - Value to test
          * @returns {boolean} True if value should be proxied for deep reactivity
          */
-        isReactive(value) {
+        needsDeepTracking(value) {
             if (!value || typeof value !== 'object') {
                 return false;
             }
@@ -168,7 +168,7 @@
             }
 
             // For objects, check if they should be proxied for deep reactivity
-            return this.isReactive(value);
+            return this.needsDeepTracking(value);
         },
 
         /**
@@ -734,7 +734,7 @@
 
                 // Handle nested object access by creating recursive tracking proxies
                 // Only wrap plain objects and arrays - skip primitives, DOM elements, and custom classes
-                if (Utils.isReactive(value)) {
+                if (Utils.needsDeepTracking(value)) {
                     // Create a new tracking proxy for the nested object with extended path
                     // This enables deep dependency tracking: user.profile.settings.theme
                     return self.createTrackingProxy(value, fullPath);
@@ -845,7 +845,7 @@
      */
     function createReactive(target, onChange, path = '') {
         // Return target unchanged when it's not reactive
-        if (!Utils.isReactive(target)) {
+        if (!Utils.needsDeepTracking(target)) {
             return target;
         }
 
@@ -883,7 +883,7 @@
     function makeNestedReactive(target, onChange, path) {
         // Iterate through all enumerable properties of the target object
         Object.keys(target).forEach(key => {
-            if (Object.prototype.hasOwnProperty.call(target, key) && Utils.isReactive(target[key])) {
+            if (Object.prototype.hasOwnProperty.call(target, key) && Utils.needsDeepTracking(target[key])) {
                 target[key] = createReactive(target[key], onChange, path ? `${path}.${key}` : key);
             }
         });
@@ -891,7 +891,7 @@
         // Handle arrays separately to make their elements reactive
         if (Array.isArray(target)) {
             target.forEach((item, index) => {
-                if (Utils.isReactive(item)) {
+                if (Utils.needsDeepTracking(item)) {
                     target[index] = createReactive(item, onChange, path ? `${path}.${index}` : index);
                 }
             });
@@ -919,7 +919,7 @@
                 if (/^(push|unshift|splice)$/.test(prop)) {
                     // Iterate through all array items to make new ones reactive
                     arr.forEach((item, index) => {
-                        if (Utils.isReactive(item) && !item._isReactive) {
+                        if (Utils.needsDeepTracking(item) && !item._isReactive) {
                             arr[index] = createReactive(item, onChange, `${path}.${index}`);
                         }
                     });
@@ -970,7 +970,7 @@
 
             // Convert the new value to a reactive object if it's an object/array
             // This ensures nested objects also trigger change notifications
-            if (Utils.isReactive(value)) {
+            if (Utils.needsDeepTracking(value)) {
                 value = createReactive(value, onChange, path ? `${path}.${prop}` : prop);
             }
 
@@ -2784,7 +2784,7 @@
 
                 // Check if the initial value is a complex object/array that needs deep reactivity
                 // Make initial value reactive if needed
-                if (Utils.isReactive(value)) {
+                if (Utils.needsDeepTracking(value)) {
                     // Wrap the initial value in a reactive proxy to track nested changes
                     value = createReactive(value, (path, newVal, type, meta) => {
                         // Forward deep change notifications up the chain with proper path context
@@ -2814,13 +2814,13 @@
                         const oldValue = value;
 
                         // Determine if we're dealing with objects that might need deep comparison
-                        const isObject = Utils.isReactive(value) || Utils.isReactive(newValue);
+                        const isObject = Utils.needsDeepTracking(value) || Utils.needsDeepTracking(newValue);
 
                         // Only proceed with update if the value actually changed
                         // For objects, we skip equality check and always update (performance vs accuracy tradeoff)
                         if (isObject || !Utils.isEqual(value, newValue)) {
                             // Make new value reactive if needed
-                            if (Utils.isReactive(newValue)) {
+                            if (Utils.needsDeepTracking(newValue)) {
                                 // Create reactive wrapper with change handler that forwards to deep change system
                                 newValue = createReactive(newValue, (path, changedVal, type, meta) => {
                                     // Delegate nested property changes to the deep change handler
