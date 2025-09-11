@@ -833,195 +833,6 @@
     };
 
     // ============================================================================
-    // REACTIVITY SYSTEM
-    // ============================================================================
-
-    /**
-     * Creates a reactive proxy with deep reactivity support
-     * @param {Object} target - Object to make reactive
-     * @param {Function} onChange - Change notification callback
-     * @param {string} [path=''] - Current property path
-     * @returns {Object} Reactive proxy object
-     */
-    function createReactive(target, onChange, path = '') {
-        // Return target unchanged when it's not reactive
-        if (!Utils.needsDeepTracking(target)) {
-            return target;
-        }
-
-        // Make existing nested objects/arrays reactive immediately
-        makeNestedReactive(target, onChange, path);
-
-        // Store original array methods for arrays
-        const originalMethods = {};
-        const isArray = Array.isArray(target);
-
-        if (isArray) {
-            ARRAY_METHODS.forEach(method => {
-                originalMethods[method] = target[method];
-            });
-        }
-
-        // Create specialized handlers
-        // noinspection JSCheckFunctionSignatures
-        const arrayMutationHandler = createArrayMutationHandler(target, originalMethods, onChange, path);
-
-        return new Proxy(target, {
-            get: createProxyGetter(isArray, originalMethods, arrayMutationHandler),
-            set: createProxySetter(onChange, path),
-            deleteProperty: createProxyDeleter(onChange, path)
-        });
-    }
-
-    /**
-     * Recursively makes nested objects and arrays reactive by wrapping them
-     * with reactive proxies. This enables deep reactivity for complex data structures.
-     * @param {Object|Array} target - The object or array to make nested properties reactive
-     * @param {Function} onChange - Callback function to invoke when changes occur
-     * @param {string} path - Current path in the nested structure (for tracking changes)
-     */
-    function makeNestedReactive(target, onChange, path) {
-        // Iterate through all enumerable properties of the target object
-        Object.keys(target).forEach(key => {
-            if (Object.prototype.hasOwnProperty.call(target, key) && Utils.needsDeepTracking(target[key])) {
-                target[key] = createReactive(target[key], onChange, path ? `${path}.${key}` : key);
-            }
-        });
-
-        // Handle arrays separately to make their elements reactive
-        if (Array.isArray(target)) {
-            target.forEach((item, index) => {
-                if (Utils.needsDeepTracking(item)) {
-                    target[index] = createReactive(item, onChange, path ? `${path}.${index}` : index);
-                }
-            });
-        }
-    }
-
-    /**
-     * Creates a handler function that wraps array mutation methods to maintain reactivity
-     * when arrays are modified. This ensures that new items added to reactive arrays
-     * are automatically made reactive as well.
-     * @param {Array} arr - The reactive array being monitored
-     * @param {Object} originalMethods - Reference to the original Array.prototype methods
-     * @param {Function} onChange - Callback function to invoke when array mutations occur
-     * @param {string} path - The path of this array in the nested reactive structure
-     * @returns {Function} A handler function that creates wrapped mutation methods
-     */
-    function createArrayMutationHandler(arr, originalMethods, onChange, path) {
-        return function (prop) {
-            return function (...args) {
-                // Execute the original array method with the provided arguments
-                const result = originalMethods[prop].apply(arr, args);
-
-                // Check if this method adds new items to the array
-                // Methods that can add new elements: push (end), unshift (beginning), splice (anywhere)
-                if (/^(push|unshift|splice)$/.test(prop)) {
-                    // Iterate through all array items to make new ones reactive
-                    arr.forEach((item, index) => {
-                        if (Utils.needsDeepTracking(item) && !item._isReactive) {
-                            arr[index] = createReactive(item, onChange, `${path}.${index}`);
-                        }
-                    });
-                }
-
-                // Notify observers that an array mutation occurred
-                // Provides context about the mutation including method name and arguments
-                onChange(path || 'root', arr, 'array-mutation', {method: prop, args});
-
-                // Return the result of the original method call
-                return result;
-            };
-        };
-    }
-
-    /**
-     * Creates proxy getter handler
-     * @param {boolean} isArray - Whether target is an array
-     * @param {Object} originalMethods - Original array methods
-     * @param {Function} arrayMutationHandler - Array mutation handler
-     * @returns {Function} Proxy getter function
-     */
-    function createProxyGetter(isArray, originalMethods, arrayMutationHandler) {
-        return function (obj, prop) {
-            // Check if we're dealing with an array
-            // If so, return a wrapped version of the array method
-            if (isArray && originalMethods[prop]) {
-                return arrayMutationHandler(prop);
-            }
-
-            // For non-array objects or non-mutating properties,
-            // return the property value directly without interception
-            return obj[prop];
-        };
-    }
-
-    /**
-     * Creates a proxy setter function that handles reactive property assignments
-     * This function is used as the 'set' trap in the Proxy handler
-     * @param {Function} onChange - Callback function to invoke when properties change
-     * @param {string} path - The current path in the object hierarchy (e.g., "user.profile")
-     * @returns {Function} A proxy setter function that handles property assignments
-     */
-    function createProxySetter(onChange, path) {
-        return function (obj, prop, value) {
-            // Store the current value before modification for comparison
-            const oldValue = obj[prop];
-
-            // Convert the new value to a reactive object if it's an object/array
-            // This ensures nested objects also trigger change notifications
-            if (Utils.needsDeepTracking(value)) {
-                value = createReactive(value, onChange, path ? `${path}.${prop}` : prop);
-            }
-
-            // Perform the actual property assignment
-            obj[prop] = value;
-
-            // Only trigger change notifications if the value actually changed
-            // This prevents unnecessary updates when the same value is assigned
-            if (!Utils.isEqual(oldValue, value)) {
-                // Construct the full property path (e.g., "user.profile.name")
-                const propertyPath = path ? path + '.' + prop : prop;
-
-                // Notify listeners about the property change
-                // Includes the path, new value, operation type, and old value
-                onChange(propertyPath, value, 'set', {oldValue});
-            }
-
-            // Return true to indicate the set operation was successful
-            // This is required by the Proxy specification
-            return true;
-        };
-    }
-
-    /**
-     * Creates proxy delete handler
-     * @param {Function} onChange - Change notification callback
-     * @param {string} path - Current property path
-     * @returns {Function} Proxy delete function
-     */
-    function createProxyDeleter(onChange, path) {
-        return function (obj, prop) {
-            // Store the value being deleted for the change notification
-            const oldValue = obj[prop];
-
-            // Perform the actual deletion on the target object
-            delete obj[prop];
-
-            // Build the full property path for nested objects
-            // If path exists, append the property with a dot separator
-            // Otherwise, use just the property name for root-level properties
-            const propertyPath = path ? path + '.' + prop : prop;
-
-            // Notify listeners of the deletion
-            onChange(propertyPath, undefined, 'delete', {oldValue});
-
-            // Return true to indicate successful deletion (Proxy requirement)
-            return true;
-        };
-    }
-
-    // ============================================================================
     // EXPRESSION PARSER
     // ============================================================================
 
@@ -2125,6 +1936,9 @@
                 // Creates the reactive abstraction object with computed properties
                 this.abstraction = this.createReactiveAbstraction();
 
+                // Setup complex change listener
+                this.setupComplexChangeListener();
+
                 // Sets up event handling with delegation
                 this.setupEventHandling();
                 this.setupIntersectionObserver();
@@ -2785,11 +2599,7 @@
                 // Check if the initial value is a complex object/array that needs deep reactivity
                 // Make initial value reactive if needed
                 if (Utils.needsDeepTracking(value)) {
-                    // Wrap the initial value in a reactive proxy to track nested changes
-                    value = createReactive(value, (path, newVal, type, meta) => {
-                        // Forward deep change notifications up the chain with proper path context
-                        this.notifyChange(path, newVal, type, meta);
-                    }, key);
+                    value = this.createEventEmittingObject(value, key);
                 }
 
                 // Define the reactive property using Object.defineProperty for full control
@@ -2799,46 +2609,287 @@
 
                     // Setter: Handle value changes with full reactive capabilities
                     set: (newValue) => {
-                        // Special handling for scroll properties
-                        if (key === 'containerScrollX' && this.container) {
-                            this.container.scrollLeft = newValue;
-                        } else if (key === 'containerScrollY' && this.container) {
-                            this.container.scrollTop = newValue;
-                        } else if (key === 'browserScrollX') {
-                            window.scrollTo(newValue, window.scrollY);
-                        } else if (key === 'browserScrollY') {
-                            window.scrollTo(window.scrollX, newValue);
+                        // Keep old value
+                        const oldValue = value;
+                        
+                        // Check if new value is complex
+                        const newIsComplex = Utils.needsDeepTracking(newValue);
+
+                        // Wrap new complex values for event emission
+                        if (newIsComplex) {
+                            newValue = this.createEventEmittingObject(newValue, key);
                         }
 
-                        // Capture the previous value for change detection and watchers
-                        const oldValue = value;
-
-                        // Determine if we're dealing with objects that might need deep comparison
-                        const isObject = Utils.needsDeepTracking(value) || Utils.needsDeepTracking(newValue);
-
-                        // Only proceed with update if the value actually changed
-                        // For objects, we skip equality check and always update (performance vs accuracy tradeoff)
-                        if (isObject || !Utils.isEqual(value, newValue)) {
-                            // Make new value reactive if needed
-                            if (Utils.needsDeepTracking(newValue)) {
-                                // Create reactive wrapper with change handler that forwards to deep change system
-                                newValue = createReactive(newValue, (path, changedVal, type, meta) => {
-                                    // Delegate nested property changes to the deep change handler
-                                    this.notifyChange(path, changedVal, type, meta);
-                                }, key);
+                        // Set new value
+                        value = newValue;
+                        
+                        // Update reactivity
+                        if (!Utils.isEqual(oldValue, newValue)) {
+                            // Route to appropriate handler based on complexity
+                            if (!newIsComplex && !Utils.needsDeepTracking(oldValue)) {
+                                // Simple property: direct synchronous handling
+                                this.handleSimpleChange(key, newValue, oldValue);
+                            } else {
+                                // Complex property: event-driven handling
+                                this.emitComplexChange(key, newValue, 'set', {oldValue});
                             }
-
-                            // Update the stored value
-                            value = newValue;
-
-                            // Notify system of changes
-                            this.notifyChange(key, newValue, 'set', {oldValue});
                         }
                     },
 
                     // Make the property enumerable so it shows up in Object.keys(), for...in, etc.
                     enumerable: true
                 });
+            },
+
+            // ============================================================================
+            // SIMPLE PROPERTY HANDLING (Direct, Synchronous)
+            // ============================================================================
+
+            /**
+             * Direct synchronous handling for simple properties (strings, numbers, booleans)
+             * No events, no async processing - immediate updates
+             */
+            handleSimpleChange(property, newValue, oldValue) {
+                // 1. Watchers (immediate)
+                this.triggerWatcher(property, newValue, oldValue);
+
+                // 2. Computed properties (immediate)
+                this.invalidateComputedDependents(property);
+
+                // 3. DOM updates (immediate, no batching)
+                this.updateBindingsImmediately(property);
+            },
+
+            /**
+             * Immediately invalidate computed properties that depend on this property
+             */
+            invalidateComputedDependents(property) {
+                const entry = this.deps.get(property);
+
+                if (!entry?.dependents) {
+                    return;
+                }
+
+                entry.dependents.forEach(computedName => {
+                    const computedEntry = this.deps.get(computedName);
+
+                    if (computedEntry?.fn) {
+                        const oldValue = computedEntry.value;
+                        computedEntry.isDirty = true;
+
+                        // Trigger computed getter and check for changes
+                        const newValue = this.abstraction[computedName];
+
+                        if (!Utils.isEqual(oldValue, newValue)) {
+                            this.triggerWatcher(computedName, newValue, oldValue);
+                            this.updateBindingsImmediately(computedName, newValue);
+                            this.invalidateComputedDependents(computedName); // Recursive
+                        }
+                    }
+                });
+            },
+
+            /**
+             * Update bindings immediately without batching (for simple properties)
+             */
+            updateBindingsImmediately(property) {
+                const bindingsToUpdate = this.bindingIndex.get(property);
+
+                if (!bindingsToUpdate) {
+                    return;
+                }
+
+                bindingsToUpdate.forEach(binding => {
+                    if (this.shouldUpdateBinding(binding, property)) {
+                        this.updateBinding(binding, property, null);
+                    }
+                });
+            },
+
+            // ============================================================================
+            // COMPLEX PROPERTY HANDLING (Event-Driven, Asynchronous)
+            // ============================================================================
+
+            /**
+             * Creates event-emitting wrapper for complex objects/arrays
+             */
+            createEventEmittingObject(target, rootProperty) {
+                // Recursively wrap nested objects
+                this.makeNestedEventEmitting(target, rootProperty);
+
+                return new Proxy(target, {
+                    set: (obj, prop, newValue) => {
+                        const oldValue = obj[prop];
+
+                        if (Utils.needsDeepTracking(newValue)) {
+                            newValue = this.createEventEmittingObject(newValue, rootProperty);
+                        }
+
+                        obj[prop] = newValue;
+
+                        if (!Utils.isEqual(oldValue, newValue)) {
+                            this.emitComplexChange(rootProperty, obj, 'nested-set', {
+                                oldValue,
+                                nestedPath: `${rootProperty}.${prop}`,
+                                newValue
+                            });
+                        }
+
+                        return true;
+                    },
+
+                    get: (obj, prop) => {
+                        if (Array.isArray(obj) && ARRAY_METHODS.includes(prop)) {
+                            return this.createEventEmittingArrayMethod(obj, prop, rootProperty);
+                        }
+
+                        return obj[prop];
+                    },
+
+                    deleteProperty: (obj, prop) => {
+                        const oldValue = obj[prop];
+                        delete obj[prop];
+
+                        this.emitComplexChange(rootProperty, obj, 'nested-delete', {
+                            oldValue,
+                            nestedPath: `${rootProperty}.${prop}`
+                        });
+
+                        return true;
+                    }
+                });
+            },
+
+            /**
+             * Makes nested objects/arrays event-emitting
+             */
+            makeNestedEventEmitting(target, rootProperty) {
+                Object.keys(target).forEach(key => {
+                    if (Utils.needsDeepTracking(target[key])) {
+                        target[key] = this.createEventEmittingObject(target[key], rootProperty);
+                    }
+                });
+
+                if (Array.isArray(target)) {
+                    target.forEach((item, index) => {
+                        if (Utils.needsDeepTracking(item)) {
+                            target[index] = this.createEventEmittingObject(item, rootProperty);
+                        }
+                    });
+                }
+            },
+
+            /**
+             * Creates event-emitting array mutation methods
+             */
+            createEventEmittingArrayMethod(array, method, rootProperty) {
+                return function(...args) {
+                    const result = Array.prototype[method].apply(array, args);
+
+                    // Make new items event-emitting
+                    if (['push', 'unshift', 'splice'].includes(method)) {
+                        array.forEach((item, index) => {
+                            if (Utils.needsDeepTracking(item) && !this.isAlreadyWrapped(item)) {
+                                array[index] = this.createEventEmittingObject(item, rootProperty);
+                            }
+                        });
+                    }
+
+                    this.emitComplexChange(rootProperty, array, 'array-mutation', {
+                        method,
+                        args
+                    });
+
+                    return result;
+                }.bind(this);
+            },
+
+            /**
+             * Check if object is already wrapped to avoid double-wrapping
+             */
+            isAlreadyWrapped(obj) {
+                return obj && obj._isEventEmittingProxy === true;
+            },
+
+            /**
+             * Emit complex change event
+             */
+            emitComplexChange(property, newValue, changeType, metadata = {}) {
+                this.container.dispatchEvent(new CustomEvent('pac:complex-change', {
+                    detail: {
+                        property,
+                        newValue,
+                        changeType,
+                        ...metadata
+                    },
+                    bubbles: false
+                }));
+            },
+
+            /**
+             * Setup complex change event listener
+             */
+            setupComplexChangeListener() {
+                this.complexChangeHandler = (event) => {
+                    const { property, newValue, changeType, oldValue, nestedPath } = event.detail;
+
+                    // Handle complex changes with batching
+                    this.scheduleComplexUpdate(property, newValue, changeType, {
+                        oldValue,
+                        nestedPath
+                    });
+                };
+
+                this.container.addEventListener('pac:complex-change', this.complexChangeHandler);
+            },
+
+            /**
+             * Schedule batched updates for complex changes
+             */
+            scheduleComplexUpdate(property, newValue, changeType, metadata) {
+                if (!this.pendingComplexUpdates) {
+                    this.pendingComplexUpdates = new Map();
+
+                    // Use requestAnimationFrame for batched complex updates
+                    requestAnimationFrame(() => {
+                        this.flushComplexUpdates();
+                    });
+                }
+
+                this.pendingComplexUpdates.set(property, {
+                    newValue,
+                    changeType,
+                    metadata
+                });
+            },
+
+            /**
+             * Flush all pending complex updates
+             */
+            flushComplexUpdates() {
+                if (!this.pendingComplexUpdates) {
+                    return;
+                }
+
+                this.pendingComplexUpdates.forEach((updateInfo, property) => {
+                    const {newValue, metadata} = updateInfo;
+
+                    // Process watchers
+                    this.triggerWatcher(property, newValue, metadata.oldValue, metadata.nestedPath);
+
+                    // Process computed properties
+                    this.invalidateComputedDependents(property);
+
+                    // Process DOM updates
+                    this.updateBindingsImmediately(property, newValue);
+
+                    // Handle nested path updates
+                    if (metadata.nestedPath && metadata.nestedPath !== property) {
+                        this.updateBindingsImmediately(metadata.nestedPath, newValue);
+                    }
+                });
+
+                this.pendingComplexUpdates = null;
             },
 
             /**
@@ -6253,6 +6304,12 @@
                 this.eventListeners?.forEach((handler, type) => {
                     this.container?.removeEventListener(type, handler, true);
                 });
+
+                // Remove complex change listener
+                if (this.complexChangeHandler) {
+                    this.container?.removeEventListener('pac:complex-change', this.complexChangeHandler);
+                    this.complexChangeHandler = null;
+                }
 
                 // Clear the event listener list
                 this.eventListeners?.clear();
