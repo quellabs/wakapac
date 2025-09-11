@@ -1,13 +1,13 @@
 /**
- * Unified wakaPAC Framework
+ * Unified wakaPAC Framework with BindingManager Subsystem
  * Single subscription system, PAC events, original binding methods
  */
 (function() {
     "use strict";
 
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
     // ORIGINAL EXPRESSION PARSER (COMPLETE)
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
 
     const ExpressionParser = {
         tokens: [],
@@ -34,6 +34,7 @@
                 if (expression.dependencies) {
                     return expression;
                 }
+
                 const dependencies = this.extractDependencies(expression);
                 return Object.assign({}, expression, {dependencies});
             }
@@ -49,9 +50,11 @@
                 }
 
                 const result = this.parseTernary();
+
                 if (result) {
                     result.dependencies = this.extractDependencies(result);
                 }
+
                 return result;
             } catch (error) {
                 throw new Error(`Expression parsing failed: "${expression}"\nOriginal error: ${error.message}`);
@@ -330,7 +333,6 @@
             }
         },
 
-        // Parser state management
         match(...types) {
             for (const type of types) {
                 if (this.check(type)) {
@@ -666,9 +668,9 @@
         }
     };
 
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
     // REACTIVE PROXY WITH PAC:CHANGE EVENTS
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
 
     function makeDeepReactiveProxy(value, container) {
         const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
@@ -680,13 +682,11 @@
                 get: function (target, prop) {
                     const val = target[prop];
 
-                    // Handle array mutation methods
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
                             const oldArray = Array.prototype.slice.call(target);
                             const result = Array.prototype[prop].apply(target, arguments);
 
-                            // Emit pac:change event
                             container.dispatchEvent(new CustomEvent("pac:change", {
                                 detail: {
                                     path: currentPath,
@@ -699,7 +699,6 @@
                         };
                     }
 
-                    // Make nested objects reactive
                     if (val && typeof val === 'object' && !val._isReactive) {
                         const nestedPath = currentPath.concat([prop]);
                         target[prop] = createProxy(val, nestedPath);
@@ -713,12 +712,10 @@
                     const oldValue = target[prop];
                     const propertyPath = currentPath.concat([prop]);
 
-                    // Skip update if values are equal
                     if (oldValue === newValue) {
                         return true;
                     }
 
-                    // Make new value reactive if needed
                     if (newValue && typeof newValue === 'object') {
                         target[prop] = createProxy(newValue, propertyPath);
                         target[prop]._isReactive = true;
@@ -726,7 +723,6 @@
                         target[prop] = newValue;
                     }
 
-                    // Emit pac:change event
                     container.dispatchEvent(new CustomEvent("pac:change", {
                         detail: {
                             path: propertyPath,
@@ -747,15 +743,14 @@
         return createProxy(value, []);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
     // COMPUTED PROPERTIES
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
 
     function ComputedManager(abstraction, computedDefs) {
         const computedCache = new Map();
         const computedDeps = new Map();
 
-        // Initialize computed properties
         Object.keys(computedDefs).forEach(name => {
             const fn = computedDefs[name];
             const deps = extractDependencies(fn);
@@ -796,14 +791,14 @@
         };
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
     // UNIFIED SUBSCRIPTION SYSTEM
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
 
     function UnifiedSubscriptionMap(container) {
         this.container = container;
-        this.propertyToElements = new Map(); // property -> Set of elements
-        this.elementToBindings = new WeakMap(); // element -> Set of bindings
+        this.propertyToElements = new Map();
+        this.elementToBindings = new WeakMap();
         this.container.setAttribute('data-pac-container', '');
     }
 
@@ -812,13 +807,11 @@
             return false;
         }
 
-        // Track property -> elements
         if (!this.propertyToElements.has(propertyPath)) {
             this.propertyToElements.set(propertyPath, new Set());
         }
         this.propertyToElements.get(propertyPath).add(element);
 
-        // Track element -> bindings
         if (!this.elementToBindings.has(element)) {
             this.elementToBindings.set(element, new Set());
         }
@@ -844,7 +837,6 @@
         const liveElements = new Set();
         const self = this;
 
-        // Clean up disconnected elements
         elements.forEach(function (el) {
             if (el.isConnected && self.belongsToThisContainer(el)) {
                 liveElements.add(el);
@@ -867,9 +859,271 @@
         return null;
     };
 
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // MAIN FRAMEWORK
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
+    // BINDING MANAGEMENT SUBSYSTEM
+    // ========================================================================
+
+    function BindingManager(container, subscriptionMap) {
+        this.container = container;
+        this.subscriptionMap = subscriptionMap;
+        this.bindings = new Map();
+        this.eventBindings = [];
+        this.bindingCounter = 0;
+    }
+
+    BindingManager.prototype.createBinding = function(type, element, config) {
+        const binding = {
+            id: ++this.bindingCounter + '_' + Date.now(),
+            type: type,
+            element: element,
+            target: config.target,
+            originalText: config.originalText,
+            fullMatch: config.fullMatch,
+            dependencies: config.dependencies || []
+        };
+
+        this.bindings.set(binding.id, binding);
+        return binding;
+    };
+
+    BindingManager.prototype.setupTextBindings = function() {
+        const textNodes = this.getTextNodesFromElement(this.container);
+        const self = this;
+
+        textNodes.forEach(function(node) {
+            const text = node.textContent;
+            const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+
+            if (matches) {
+                matches.forEach(function(match) {
+                    const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
+                    const parsed = ExpressionCache.parseExpression(expression);
+                    const dependencies = parsed.dependencies || [];
+
+                    const binding = self.createBinding('text', node, {
+                        target: expression,
+                        originalText: text,
+                        fullMatch: match,
+                        dependencies: dependencies
+                    });
+
+                    dependencies.forEach(function(dependency) {
+                        self.subscriptionMap.subscribe(node, dependency, binding);
+                    });
+                });
+            }
+        });
+    };
+
+    BindingManager.prototype.setupAttributeBindings = function(computedProperties) {
+        const elements = this.container.querySelectorAll('[data-pac-bind]');
+        const self = this;
+
+        Array.from(elements).forEach(function(element) {
+            const bindingString = element.getAttribute('data-pac-bind');
+            const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+
+            bindingPairs.forEach(function(pair) {
+                const type = pair.type;
+                const target = pair.target;
+
+                if (self.isEventBinding(type)) {
+                    self.eventBindings.push({element, type, target});
+                    return;
+                }
+
+                if (target) {
+                    const parsed = ExpressionCache.parseExpression(target);
+                    const dependencies = parsed.dependencies || [];
+                    const binding = self.createBinding(type, element, {target, dependencies});
+
+                    if (binding) {
+                        dependencies.forEach(function(dep) {
+                            self.subscriptionMap.subscribe(element, dep, binding);
+                        });
+                    }
+                }
+            });
+
+            // Subscribe to computed properties referenced in bindings
+            if (computedProperties) {
+                const computedNames = Object.keys(computedProperties);
+
+                bindingPairs.forEach(function(pair) {
+                    if (pair.target) {
+                        computedNames.forEach(function(computedName) {
+                            if (pair.target.includes(computedName)) {
+                                const computedBinding = self.createBinding(pair.type, element, {
+                                    target: pair.target,
+                                    dependencies: [computedName]
+                                });
+                                self.subscriptionMap.subscribe(element, computedName, computedBinding);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    };
+
+    BindingManager.prototype.isEventBinding = function(type) {
+        const eventTypes = ['click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
+        return eventTypes.includes(type);
+    };
+
+    BindingManager.prototype.getTextNodesFromElement = function(element) {
+        const textNodes = [];
+        const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT,
+            {
+                acceptNode: (node) => {
+                    return /\{\{.*\}\}/.test(node.textContent) ?
+                        NodeFilter.FILTER_ACCEPT :
+                        NodeFilter.FILTER_SKIP;
+                }
+            }
+        );
+
+        let node;
+        while ((node = walker.nextNode())) {
+            textNodes.push(node);
+        }
+
+        return textNodes;
+    };
+
+    BindingManager.prototype.updateElementForProperty = function(element, propertyPath, context) {
+        const binding = this.subscriptionMap.getBindingForElementAndProperty(element, propertyPath);
+
+        if (!binding) {
+            return;
+        }
+
+        const parsed = ExpressionCache.parseExpression(binding.target);
+        const evaluatedValue = ExpressionParser.evaluate(parsed, context);
+
+        switch (binding.type) {
+            case 'text':
+                this.applyTextBinding(binding, context);
+                break;
+            case 'visible':
+                this.applyVisibilityBinding(binding, evaluatedValue);
+                break;
+            case 'value':
+                this.applyInputBinding(binding, evaluatedValue);
+                break;
+            case 'checked':
+                this.applyCheckedBinding(binding, evaluatedValue);
+                break;
+            default:
+                this.applyAttributeBinding(binding, evaluatedValue);
+                break;
+        }
+    };
+
+    BindingManager.prototype.processTextInterpolation = function(textContent, context) {
+        let text = String(textContent || '');
+        const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+
+        if (matches) {
+            for (let i = 0; i < matches.length; i++) {
+                const match = matches[i];
+                const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
+
+                try {
+                    const parsed = ExpressionCache.parseExpression(expression);
+                    const result = ExpressionParser.evaluate(parsed, context);
+                    const formattedValue = result != null ? String(result) : '';
+                    text = text.replace(match, formattedValue);
+                } catch (error) {
+                    console.warn('Error evaluating expression "' + expression + '":', error);
+                }
+            }
+        }
+
+        return text;
+    };
+
+    BindingManager.prototype.applyTextBinding = function(binding, context) {
+        const textNode = binding.element;
+        const newText = this.processTextInterpolation(binding.originalText, context);
+
+        if (textNode.textContent !== newText) {
+            textNode.textContent = newText;
+        }
+    };
+
+    BindingManager.prototype.applyVisibilityBinding = function(binding, value) {
+        const element = binding.element;
+        const shouldShow = !!value;
+
+        if (shouldShow) {
+            if (element.hasAttribute('data-pac-hidden')) {
+                element.style.display = element.getAttribute('data-pac-orig-display') || '';
+                element.removeAttribute('data-pac-hidden');
+                element.removeAttribute('data-pac-orig-display');
+            }
+        } else {
+            if (!element.hasAttribute('data-pac-hidden')) {
+                const currentDisplay = getComputedStyle(element).display;
+                if (currentDisplay !== 'none') {
+                    element.setAttribute('data-pac-orig-display', currentDisplay);
+                }
+                element.style.display = 'none';
+                element.setAttribute('data-pac-hidden', 'true');
+            }
+        }
+    };
+
+    BindingManager.prototype.applyInputBinding = function(binding, value) {
+        const element = binding.element;
+        const stringValue = String(value || '');
+
+        if ('value' in element && element.value !== stringValue) {
+            element.value = stringValue;
+        }
+    };
+
+    BindingManager.prototype.applyCheckedBinding = function(binding, value) {
+        const element = binding.element;
+        element.checked = Boolean(value);
+    };
+
+    BindingManager.prototype.applyAttributeBinding = function(binding, value) {
+        const element = binding.element;
+        const attribute = binding.type;
+        const booleanAttrs = ['readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
+
+        if (booleanAttrs.includes(attribute)) {
+            element.toggleAttribute(attribute, !!value);
+        } else if (value != null) {
+            element.setAttribute(attribute, value);
+        } else {
+            element.removeAttribute(attribute);
+        }
+    };
+
+    BindingManager.prototype.getEventBindings = function() {
+        return this.eventBindings;
+    };
+
+    BindingManager.prototype.getBinding = function(id) {
+        return this.bindings.get(id);
+    };
+
+    BindingManager.prototype.removeBinding = function(id) {
+        return this.bindings.delete(id);
+    };
+
+    BindingManager.prototype.cleanup = function() {
+        this.bindings.clear();
+        this.eventBindings = [];
+    };
+
+    // ========================================================================
+    // MAIN FRAMEWORK WITH BINDING MANAGER INTEGRATION
+    // ========================================================================
 
     function wakaPAC(selector, abstraction, options) {
         abstraction = abstraction || {};
@@ -892,16 +1146,15 @@
             config: config,
             original: abstraction,
             abstraction: null,
-            bindings: new Map(),
-            deps: new Map(),
             subscriptionMap: null,
-            eventBindings: [],
+            bindingManager: null,
 
             initialize: function () {
                 this.subscriptionMap = new UnifiedSubscriptionMap(this.container);
+                this.bindingManager = new BindingManager(this.container, this.subscriptionMap);
 
-                this.setupTextBindings();
-                this.setupAttributeBindings();
+                this.bindingManager.setupTextBindings();
+                this.bindingManager.setupAttributeBindings(this.original.computed);
                 this.setupSimpleEventCapture();
                 this.abstraction = this.createReactiveAbstraction();
                 this.setupEventHandlers();
@@ -913,140 +1166,32 @@
                 const reactive = {};
                 const self = this;
 
-                // Copy all non-function properties
                 Object.keys(this.original).forEach(function (key) {
                     if (key !== 'computed' && typeof self.original[key] !== 'function') {
                         reactive[key] = self.original[key];
                     }
                 });
 
-                // Create the reactive proxy
                 const proxiedReactive = makeDeepReactiveProxy(reactive, this.container);
 
-                // Bind methods to the proxy
                 Object.keys(this.original).forEach(function (key) {
                     if (typeof self.original[key] === 'function' && key !== 'computed') {
                         proxiedReactive[key] = self.original[key].bind(proxiedReactive);
                     }
                 });
 
-                // Handle computed properties
                 if (this.original.computed) {
-                    const computedManager = new ComputedManager(proxiedReactive, this.original.computed);
-                    this.computedManager = computedManager;
+                    this.computedManager = new ComputedManager(proxiedReactive, this.original.computed);
                 }
 
                 return proxiedReactive;
             },
 
-            setupTextBindings: function () {
-                const textNodes = this.getTextNodesFromElement(this.container);
-                const self = this;
-
-                textNodes.forEach(function (node) {
-                    const text = node.textContent;
-                    const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
-
-                    if (matches) {
-                        matches.forEach(function (match) {
-                            const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
-                            const parsed = ExpressionCache.parseExpression(expression);
-                            const dependencies = parsed.dependencies || [];
-
-                            const binding = self.createBinding('text', node, {
-                                target: expression,
-                                originalText: text,
-                                fullMatch: match,
-                                dependencies: dependencies
-                            });
-
-                            dependencies.forEach(function (dependency) {
-                                self.subscriptionMap.subscribe(node, dependency, binding);
-                            });
-                        });
-                    }
-                });
-            },
-
-            getTextNodesFromElement: function(element) {
-                const textNodes = [];
-                const walker = document.createTreeWalker(
-                    element,
-                    NodeFilter.SHOW_TEXT,
-                    {
-                        acceptNode: (node) => {
-                            return /\{\{.*\}\}/.test(node.textContent) ?
-                                NodeFilter.FILTER_ACCEPT :
-                                NodeFilter.FILTER_SKIP;
-                        }
-                    }
-                );
-
-                let node;
-                while ((node = walker.nextNode())) {
-                    textNodes.push(node);
-                }
-
-                return textNodes;
-            },
-
-            setupAttributeBindings: function () {
-                const elements = this.container.querySelectorAll('[data-pac-bind]');
-                const self = this;
-
-                Array.from(elements).forEach(function (element) {
-                    const bindingString = element.getAttribute('data-pac-bind');
-                    const bindingPairs = ExpressionParser.parseBindingString(bindingString);
-
-                    bindingPairs.forEach(function (pair) {
-                        const type = pair.type;
-                        const target = pair.target;
-
-                        // Handle event bindings separately
-                        if (type === 'click') {
-                            self.eventBindings.push({element, type, target});
-                            return;
-                        }
-
-                        // Process property bindings
-                        if (target) {
-                            const parsed = ExpressionCache.parseExpression(target);
-                            const dependencies = parsed.dependencies || [];
-                            const binding = self.createBinding(type, element, {target, dependencies});
-
-                            if (binding) {
-                                dependencies.forEach(function(dep) {
-                                    self.subscriptionMap.subscribe(element, dep, binding);
-                                });
-                            }
-                        }
-                    });
-
-                    // Subscribe to computed properties referenced in bindings
-                    if (self.original.computed) {
-                        const computedNames = Object.keys(self.original.computed);
-
-                        bindingPairs.forEach(function(pair) {
-                            if (pair.target) {
-                                computedNames.forEach(function(computedName) {
-                                    if (pair.target.includes(computedName)) {
-                                        const computedBinding = self.createBinding(pair.type, element, {
-                                            target: pair.target,
-                                            dependencies: [computedName]
-                                        });
-                                        self.subscriptionMap.subscribe(element, computedName, computedBinding);
-                                    }
-                                });
-                            }
-                        });
-                    }
-                });
-            },
-
             setupEventHandlers: function () {
                 const self = this;
+                const eventBindings = this.bindingManager.getEventBindings();
 
-                this.eventBindings.forEach(function (eventBinding) {
+                eventBindings.forEach(function (eventBinding) {
                     if (eventBinding.type === 'click') {
                         self.setupClickBinding(eventBinding.element, eventBinding.target);
                     }
@@ -1071,18 +1216,6 @@
                 });
             },
 
-            createBinding: function (type, element, config) {
-                return {
-                    id: Date.now() + '_' + (Math.random() * 10000 | 0),
-                    type: type,
-                    element: element,
-                    target: config.target,
-                    originalText: config.originalText,
-                    fullMatch: config.fullMatch,
-                    dependencies: config.dependencies
-                };
-            },
-
             setupSimpleEventCapture: function () {
                 const self = this;
 
@@ -1105,44 +1238,10 @@
 
                 if (subscribedElements.size > 0) {
                     subscribedElements.forEach(function (element) {
-                        self.updateElementForProperty(element, propertyPath);
+                        self.bindingManager.updateElementForProperty(element, propertyPath, self.abstraction);
                     });
 
                     this.invalidateComputedDependents(propertyPath);
-                }
-            },
-
-            updateElementForProperty: function (element, propertyPath) {
-                const binding = this.subscriptionMap.getBindingForElementAndProperty(element, propertyPath);
-
-                if (!binding) {
-                    return;
-                }
-
-                const context = this.abstraction;
-                const parsed = ExpressionCache.parseExpression(binding.target);
-                const evaluatedValue = ExpressionParser.evaluate(parsed, context);
-
-                switch (binding.type) {
-                    case 'text':
-                        this.applyTextBinding(binding, context);
-                        break;
-
-                    case 'visible':
-                        this.applyVisibilityBinding(binding, evaluatedValue);
-                        break;
-
-                    case 'value':
-                        this.applyInputBinding(binding, evaluatedValue);
-                        break;
-
-                    case 'checked':
-                        this.applyCheckedBinding(binding, evaluatedValue);
-                        break;
-
-                    default:
-                        this.applyAttributeBinding(binding, evaluatedValue);
-                        break;
                 }
             },
 
@@ -1155,9 +1254,7 @@
                 const self = this;
 
                 invalidatedComputed.forEach(function (computedName) {
-                    // Access the computed property to trigger recalculation
                     const _ = self.abstraction[computedName];
-                    // Then trigger updates for elements that depend on it
                     self.handlePropertyChange(computedName);
                 });
             },
@@ -1172,122 +1269,22 @@
                     self.handlePropertyChange(propertyName);
                 });
 
-                // Call initialization hook if provided
                 if (this.original.init) {
                     this.original.init.call(this.abstraction);
-                }
-            },
-
-            processTextInterpolation: function (textContent, context) {
-                let text = String(textContent || '');
-                const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
-
-                if (matches) {
-                    for (let i = 0; i < matches.length; i++) {
-                        const match = matches[i];
-                        const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
-
-                        try {
-                            const parsed = ExpressionCache.parseExpression(expression);
-                            const result = ExpressionParser.evaluate(parsed, context);
-                            const formattedValue = result != null ? String(result) : '';
-                            text = text.replace(match, formattedValue);
-                        } catch (error) {
-                            console.warn('Error evaluating expression "' + expression + '":', error);
-                        }
-                    }
-                }
-
-                return text;
-            },
-
-            /**
-             * Applies text binding to a text node
-             */
-            applyTextBinding: function (binding, context) {
-                const textNode = binding.element;
-                const newText = this.processTextInterpolation(binding.originalText, context);
-
-                if (textNode.textContent !== newText) {
-                    textNode.textContent = newText;
-                }
-            },
-
-            /**
-             * Applies visibility binding to an element
-             */
-            applyVisibilityBinding: function (binding, value) {
-                const element = binding.element;
-                const shouldShow = !!value;
-
-                if (shouldShow) {
-                    if (element.hasAttribute('data-pac-hidden')) {
-                        element.style.display = element.getAttribute('data-pac-orig-display') || '';
-                        element.removeAttribute('data-pac-hidden');
-                        element.removeAttribute('data-pac-orig-display');
-                    }
-                } else {
-                    if (!element.hasAttribute('data-pac-hidden')) {
-                        const currentDisplay = getComputedStyle(element).display;
-                        if (currentDisplay !== 'none') {
-                            element.setAttribute('data-pac-orig-display', currentDisplay);
-                        }
-                        element.style.display = 'none';
-                        element.setAttribute('data-pac-hidden', 'true');
-                    }
-                }
-            },
-
-            /**
-             * Applies input value binding to form elements
-             */
-            applyInputBinding: function (binding, value) {
-                const element = binding.element;
-                const stringValue = String(value || '');
-
-                if ('value' in element && element.value !== stringValue) {
-                    element.value = stringValue;
-                }
-            },
-
-            /**
-             * Applies checked binding to checkboxes and radio buttons
-             */
-            applyCheckedBinding: function (binding, value) {
-                const element = binding.element;
-                element.checked = Boolean(value);
-            },
-
-            /**
-             * Applies generic attribute binding to an element
-             */
-            applyAttributeBinding: function (binding, value) {
-                const element = binding.element;
-                const attribute = binding.type;
-                const booleanAttrs = ['readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
-
-                if (booleanAttrs.includes(attribute)) {
-                    element.toggleAttribute(attribute, !!value);
-                } else if (value != null) {
-                    element.setAttribute(attribute, value);
-                } else {
-                    element.removeAttribute(attribute);
                 }
             }
         };
 
-        // Initialize the control unit
         const controlUnit = control.initialize();
 
-        // Create public API - simplified
         const publicAPI = Object.assign({}, controlUnit.abstraction);
         window.PACRegistry.register(selector, control);
         return publicAPI;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
     // EXPORTS
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // ========================================================================
 
     function SimplePACRegistry() {
         this.components = new Map();
