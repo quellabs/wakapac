@@ -221,6 +221,7 @@
 
             while (this.peek().type === 'OPERATOR') {
                 const opPrec = this.getOperatorPrecedence(this.peek().value);
+
                 if (opPrec < minPrec) {
                     break;
                 }
@@ -342,10 +343,13 @@
             switch (node.type) {
                 case 'literal':
                     return typeof node.value === 'string' ? '"' + node.value + '"' : String(node.value);
+
                 case 'property':
                     return node.path;
+                
                 case 'arithmetic':
                     return `${this.reconstructExpression(node.left)} ${node.operator} ${this.reconstructExpression(node.right)}`;
+                
                 default:
                     return 'unknown';
             }
@@ -364,11 +368,13 @@
         matchOperator(...operators) {
             if (this.check('OPERATOR')) {
                 const current = this.peek();
+
                 if (operators.includes(current.value)) {
                     this.advance();
                     return true;
                 }
             }
+
             return false;
         },
 
@@ -376,6 +382,7 @@
             if (this.isAtEnd()) {
                 return false;
             }
+
             return this.peek().type === type;
         },
 
@@ -383,6 +390,7 @@
             if (!this.isAtEnd()) {
                 this.currentToken++;
             }
+
             return this.previous();
         },
 
@@ -432,12 +440,14 @@
 
                 case 'logical': {
                     const leftLogical = this.evaluate(parsedExpr.left, context);
+
                     if (parsedExpr.operator === '&&') {
                         return leftLogical ? this.evaluate(parsedExpr.right, context) : false;
                     } else if (parsedExpr.operator === '||') {
                         return leftLogical ? true : this.evaluate(parsedExpr.right, context);
+                    } else {
+                        return false;
                     }
-                    return false;
                 }
 
                 case 'comparison':
@@ -482,6 +492,7 @@
                 if (current == null) {
                     return undefined;
                 }
+
                 current = current[parts[i]];
             }
 
@@ -1153,9 +1164,10 @@
         }
 
         const bindingPairs = ExpressionParser.parseBindingString(bindingString);
-        let propertyPath = null;
 
         // Find the appropriate binding type for this event
+        let propertyPath = null;
+
         for (const pair of bindingPairs) {
             if ((pair.type === 'value' && eventType === 'input' && 'value' in element) ||
                 (pair.type === 'checked' && eventType === 'change' && element.type === 'checkbox')) {
@@ -1169,12 +1181,7 @@
         }
 
         // Get the value to set
-        let value;
-        if (element.type === 'checkbox') {
-            value = element.checked;
-        } else {
-            value = element.value;
-        }
+        const value = (element.type === 'checkbox') ? element.checked : element.value;
 
         // Get the component and set the property
         const containerSelector = this.getContainerSelector();
@@ -1189,9 +1196,11 @@
         if (this.container.id) {
             return '#' + this.container.id;
         }
+        
         if (this.container.className) {
             return '.' + this.container.className.split(' ')[0];
         }
+
         return null;
     };
 
@@ -1204,6 +1213,7 @@
             if (!current[parts[i]]) {
                 current[parts[i]] = {};
             }
+
             current = current[parts[i]];
         }
 
@@ -1241,19 +1251,20 @@
         const self = this;
         textNodes.forEach(function (textNode) {
             const originalText = textNode.textContent;
-            const processedText = self.processTextInterpolation(originalText, context);
-            textNode.textContent = processedText;
+            textNode.textContent = self.processTextInterpolation(originalText, context);
         });
     };
 
     BindingManager.prototype.processAttributeBindingsWithContext = function (element, context) {
         const elements = element.querySelectorAll('[data-pac-bind]');
+
         // Include the element itself if it has bindings
         const allElements = element.hasAttribute('data-pac-bind') ?
             [element].concat(Array.from(elements)) :
             Array.from(elements);
 
         const self = this;
+
         allElements.forEach(function (el) {
             const bindingString = el.getAttribute('data-pac-bind');
             const bindingPairs = ExpressionParser.parseBindingString(bindingString);
@@ -1272,6 +1283,7 @@
                         if (pair.type === 'value' && ('value' in el)) {
                             self.setupContextualTwoWayBinding(el, pair.target, context, 'input');
                         }
+
                         if (pair.type === 'checked' && el.type === 'checkbox') {
                             self.setupContextualTwoWayBinding(el, pair.target, context, 'change');
                         }
@@ -1285,14 +1297,8 @@
         const self = this;
 
         element.addEventListener(eventType, function () {
-            let value;
-            if (element.type === 'checkbox') {
-                value = element.checked;
-            } else {
-                value = element.value;
-            }
-
             // Use the expression parser to set the property in the correct context
+            const value = (element.type === 'checkbox') ? element.checked : element.value;
             const parsed = ExpressionCache.parseExpression(propertyPath);
             self.setPropertyInContext(parsed, context, value);
         });
@@ -1305,7 +1311,6 @@
         }
 
         const path = parsedExpr.path;
-        console.log('Setting property:', path, 'to value:', value, 'in context:', context);
 
         const parts = path.split('.');
         let current = context;
@@ -1313,38 +1318,32 @@
         // Navigate to the parent object
         for (let i = 0; i < parts.length - 1; i++) {
             if (!current || typeof current !== 'object') {
-                console.log('Failed to navigate - current is:', current, 'at part:', parts[i]);
                 return;
             }
-            console.log('Navigating to:', parts[i], 'current:', current[parts[i]]);
+
             current = current[parts[i]];
         }
 
         // Set the final property
         if (current && typeof current === 'object') {
             const finalProp = parts[parts.length - 1];
-            console.log('Setting', finalProp, 'on object:', current, 'to:', value);
             current[finalProp] = value;
-            console.log('After setting, property is:', current[finalProp]);
-        } else {
-            console.log('Cannot set property - current is not an object:', current);
         }
     };
 
     // NEW: Event binding that passes context for foreach items
     BindingManager.prototype.setupContextualEventBinding = function (element, eventType, methodName, context) {
-        const self = this;
-
         element.addEventListener(eventType, function (event) {
             // Get the global context (main abstraction) that has the methods
             const globalContext = context.__parent || context;
 
             if (globalContext && typeof globalContext[methodName] === 'function') {
                 const method = globalContext[methodName];
+
                 try {
                     // Pass item, index, and event for foreach contexts
-                    if (context.item !== undefined && context.$index !== undefined) {
-                        method.call(globalContext, context.item, context.$index, event);
+                    if (context.item !== undefined && context.index !== undefined) {
+                        method.call(globalContext, context.item, context.index, event);
                     } else {
                         method.call(globalContext, event);
                     }
@@ -1561,7 +1560,7 @@
             if (foreachPair) {
                 const arrayProperty = foreachPair.target;
                 const itemName = element.getAttribute('data-pac-item') || 'item';
-                const indexName = element.getAttribute('data-pac-index') || '$index';
+                const indexName = element.getAttribute('data-pac-index') || 'index';
 
                 const binding = {
                     arrayProperty: arrayProperty,
@@ -1633,7 +1632,7 @@
 
             // Add references for event handlers to find the main context
             itemContext.item = array[index];  // Direct reference to array item
-            itemContext.$index = index;
+            itemContext.index = index;
             itemContext.__parent = globalContext;
 
             // Don't create a separate reactive proxy for the item - use the array item directly
