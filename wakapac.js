@@ -23,6 +23,9 @@
     // CONSTANTS AND CONFIGURATION
     // =============================================================================
 
+    const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
+    const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
+
     /**
      * All binding types
      * @type {string[]}
@@ -1669,6 +1672,7 @@
             original_abstraction: abstraction,
             abstraction: null,
             dependencies: [],
+            text_interpolation_map: null,
             dom_update_tracker: null,
 
             /**
@@ -1680,11 +1684,9 @@
 
                 // Make abstraction reactive
                 this.abstraction = this.createReactiveAbstraction();
+                this.text_interpolation_map = this.scanTextBindings();
                 this.dom_update_tracker = new DomUpdateTracker(container);
                 this.dependencies = this.getDependencies();
-
-                // Convert mustache to spans
-                this.replaceMustachesWithSpans();
 
                 // Execute click binds
                 this.container.addEventListener('pac:dom:click', function (event) {
@@ -1728,26 +1730,27 @@
                     }
 
                     for (let i = 0; i < path.length; ++i) {
-                        const selector = `.mustache[data-inner*="${CSS.escape(path[i])}"]`;
+                        self.text_interpolation_map.forEach((template, textNode) => {
+                            if (template.includes(path[i])) {
+                                const newText = template.replace(/\{\{(.*?)}}/g, (match, expression) => {
+                                    try {
+                                        const parsed = ExpressionCache.parseExpression(expression.trim());
+                                        const result = ExpressionParser.evaluate(parsed, self.abstraction);
+                                        return result != null ? String(result) : '';
+                                    } catch (error) {
+                                        return match;
+                                    }
+                                });
 
-                        // Check the original path string, not the array
-                        self.container.querySelectorAll(selector).forEach(function (element) {
-                            const template = element.dataset.inner || '';
-                            const ast = ExpressionCache.parseExpression(template);
-                            const value = ExpressionParser.evaluate(ast, self.abstraction);
-
-                            element.textContent = String(value ?? '');
+                                if (textNode.textContent !== newText) {
+                                    textNode.textContent = newText;
+                                }
+                            }
                         });
                     }
                 });
 
                 return this;
-            },
-
-            replaceMustachesWithSpans() {
-                this.container.innerHTML = this.container.innerHTML.replace(/\{\{(.*?)}}/g, (_, inner) => {
-                    return `<span class="mustache" data-inner="${inner}">{{${inner}}}</span>`;
-                });
             },
 
             getDependencies() {
@@ -1780,6 +1783,25 @@
                 });
 
                 return dependencies;
+            },
+
+            scanTextBindings() {
+                const map = new Map();
+                const walker = document.createTreeWalker(
+                    this.container,
+                    NodeFilter.SHOW_TEXT,
+                    {
+                        acceptNode: node => INTERPOLATION_TEST_REGEX.test(node.textContent) ?
+                            NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+                    }
+                );
+
+                let node;
+                while ((node = walker.nextNode())) {
+                    map.set(node, node.textContent);
+                }
+
+                return map;
             },
 
             /**
