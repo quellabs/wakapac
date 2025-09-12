@@ -2,7 +2,7 @@
  * wakaPAC Framework with Working Foreach Implementation
  * Fixed event handling in foreach contexts
  */
-(function() {
+(function () {
     "use strict";
 
     // ========================================================================
@@ -11,6 +11,11 @@
 
     const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
     const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
+
+    const KNOWN_BINDING_TYPES = [
+        "value", "checked", "visible", "if", "foreach", "class", "style",
+        "click", "change", "input", "submit", "focus", "blur", "keyup", "keydown"
+    ];
 
     // ========================================================================
     // ORIGINAL EXPRESSION PARSER (COMPLETE)
@@ -166,6 +171,7 @@
 
         tokenizeNumber(expression, start) {
             const numberMatch = /^(\d*\.?\d+(?:[eE][+-]?\d+)?)/.exec(expression.slice(start));
+
             if (numberMatch) {
                 return {
                     token: {type: 'NUMBER', value: parseFloat(numberMatch[1])},
@@ -176,6 +182,7 @@
 
         tokenizeIdentifier(expression, start) {
             const identMatch = /^([a-zA-Z_$][a-zA-Z0-9_$]*)/.exec(expression.slice(start));
+
             if (identMatch) {
                 const value = identMatch[1];
                 const type = ['true', 'false', 'null', 'undefined'].includes(value) ? 'KEYWORD' : 'IDENTIFIER';
@@ -214,7 +221,9 @@
 
             while (this.peek().type === 'OPERATOR') {
                 const opPrec = this.getOperatorPrecedence(this.peek().value);
-                if (opPrec < minPrec) break;
+                if (opPrec < minPrec) {
+                    break;
+                }
 
                 const op = this.advance().value;
                 const right = this.parseBinaryWithPrecedence(opPrec + 1);
@@ -326,7 +335,9 @@
         },
 
         reconstructExpression(node) {
-            if (!node) return '';
+            if (!node) {
+                return '';
+            }
 
             switch (node.type) {
                 case 'literal':
@@ -362,12 +373,16 @@
         },
 
         check(type) {
-            if (this.isAtEnd()) return false;
+            if (this.isAtEnd()) {
+                return false;
+            }
             return this.peek().type === type;
         },
 
         advance() {
-            if (!this.isAtEnd()) this.currentToken++;
+            if (!this.isAtEnd()) {
+                this.currentToken++;
+            }
             return this.previous();
         },
 
@@ -384,12 +399,16 @@
         },
 
         consume(type, message) {
-            if (this.check(type)) return this.advance();
+            if (this.check(type)) {
+                return this.advance();
+            }
             throw new Error(message + ` at token: ${JSON.stringify(this.peek())}`);
         },
 
         evaluate(parsedExpr, context) {
-            if (!parsedExpr) return undefined;
+            if (!parsedExpr) {
+                return undefined;
+            }
 
             switch (parsedExpr.type) {
                 case 'literal':
@@ -431,10 +450,14 @@
                 case 'unary': {
                     const operandValue = this.evaluate(parsedExpr.operand, context);
                     switch (parsedExpr.operator) {
-                        case '!': return !operandValue;
-                        case '-': return -operandValue;
-                        case '+': return +operandValue;
-                        default: return operandValue;
+                        case '!':
+                            return !operandValue;
+                        case '-':
+                            return -operandValue;
+                        case '+':
+                            return +operandValue;
+                        default:
+                            return operandValue;
                     }
                 }
 
@@ -444,7 +467,9 @@
         },
 
         getProperty(obj, path) {
-            if (!obj || !path) return undefined;
+            if (!obj || !path) {
+                return undefined;
+            }
 
             if (path.indexOf('.') === -1) {
                 return obj[path];
@@ -454,7 +479,9 @@
             let current = obj;
 
             for (let i = 0; i < parts.length; i++) {
-                if (current == null) return undefined;
+                if (current == null) {
+                    return undefined;
+                }
                 current = current[parts[i]];
             }
 
@@ -473,30 +500,48 @@
 
         performOperation(left, operator, right) {
             switch (operator) {
-                case '+': return left + right;
-                case '-': return Number(left) - Number(right);
-                case '*': return Number(left) * Number(right);
-                case '/': return Number(left) / Number(right);
-                case '%': return Number(left) % Number(right);
-                case '===': return left === right;
-                case '!==': return left !== right;
-                case '==': return left == right;
-                case '!=': return left != right;
-                case '>=': return left >= right;
-                case '<=': return left <= right;
-                case '>': return left > right;
-                case '<': return left < right;
-                default: return false;
+                case '+':
+                    return left + right;
+                case '-':
+                    return Number(left) - Number(right);
+                case '*':
+                    return Number(left) * Number(right);
+                case '/':
+                    return Number(left) / Number(right);
+                case '%':
+                    return Number(left) % Number(right);
+                case '===':
+                    return left === right;
+                case '!==':
+                    return left !== right;
+                case '==':
+                    return left == right;
+                case '!=':
+                    return left != right;
+                case '>=':
+                    return left >= right;
+                case '<=':
+                    return left <= right;
+                case '>':
+                    return left > right;
+                case '<':
+                    return left < right;
+                default:
+                    return false;
             }
         },
 
         extractDependencies(node) {
-            if (!node) return [];
+            if (!node) {
+                return [];
+            }
 
             const dependencies = new Set();
 
             const traverse = (n) => {
-                if (!n) return;
+                if (!n) {
+                    return;
+                }
 
                 switch (n.type) {
                     case 'property': {
@@ -604,11 +649,6 @@
         },
 
         findBindingColon(str) {
-            const KNOWN_BINDING_TYPES = [
-                "value", "checked", "visible", "if", "foreach", "class", "style",
-                "click", "change", "input", "submit", "focus", "blur", "keyup", "keydown"
-            ];
-
             for (const type of KNOWN_BINDING_TYPES) {
                 if (str.startsWith(type + ':')) {
                     return type.length;
@@ -794,7 +834,7 @@
         Object.keys(computedDefs).forEach(name => {
             const fn = computedDefs[name];
             const deps = extractDependencies(fn);
-            computedDeps.set(name, { fn, dependencies: deps, isDirty: true });
+            computedDeps.set(name, {fn, dependencies: deps, isDirty: true});
 
             Object.defineProperty(abstraction, name, {
                 get() {
@@ -818,7 +858,7 @@
             return [...new Set(matches.map(m => m.replace('this.', '')))];
         }
 
-        this.invalidateComputed = function(changedProperty) {
+        this.invalidateComputed = function (changedProperty) {
             const invalidated = [];
             computedDeps.forEach((entry, computedName) => {
                 if (entry.dependencies.includes(changedProperty)) {
@@ -850,11 +890,13 @@
         if (!this.propertyToElements.has(propertyPath)) {
             this.propertyToElements.set(propertyPath, new Set());
         }
+
         this.propertyToElements.get(propertyPath).add(element);
 
         if (!this.elementToBindings.has(element)) {
             this.elementToBindings.set(element, new Set());
         }
+
         this.elementToBindings.get(element).add(binding);
 
         return true;
@@ -865,6 +907,7 @@
         if (element._pacContainerCheck === this.container) {
             return true;
         }
+
         if (element._pacContainerCheck) {
             return false;
         }
@@ -872,7 +915,11 @@
         let belongs;
         if (element.nodeType === Node.TEXT_NODE) {
             const parentElement = element.parentElement;
-            if (!parentElement) return false;
+
+            if (!parentElement) {
+                return false;
+            }
+
             const closestContainer = parentElement.closest('[data-pac-container]');
             belongs = closestContainer === this.container;
         } else {
@@ -900,7 +947,7 @@
         return liveElements;
     };
 
-    UnifiedSubscriptionMap.prototype.getBindingForElementAndProperty = function(element, propertyPath) {
+    UnifiedSubscriptionMap.prototype.getBindingForElementAndProperty = function (element, propertyPath) {
         const bindings = this.elementToBindings.get(element) || new Set();
 
         for (const binding of bindings) {
@@ -929,14 +976,14 @@
         this.cacheElements();
     }
 
-    BindingManager.prototype.cacheElements = function() {
+    BindingManager.prototype.cacheElements = function () {
         // Cache text nodes with interpolation ONCE
         const walker = document.createTreeWalker(
             this.container,
             NodeFilter.SHOW_TEXT,
             {
                 acceptNode: (node) => {
-                    return /\{\{.*\}\}/.test(node.textContent) ?
+                    return INTERPOLATION_TEST_REGEX.test(node.textContent) ?
                         NodeFilter.FILTER_ACCEPT :
                         NodeFilter.FILTER_SKIP;
                 }
@@ -960,7 +1007,7 @@
         });
     };
 
-    BindingManager.prototype.batchDOMUpdates = function(updates) {
+    BindingManager.prototype.batchDOMUpdates = function (updates) {
         // Use requestAnimationFrame to batch DOM updates
         if (this.pendingUpdates) {
             this.pendingUpdates = this.pendingUpdates.concat(updates);
@@ -980,7 +1027,7 @@
         });
     };
 
-    BindingManager.prototype.createBinding = function(type, element, config) {
+    BindingManager.prototype.createBinding = function (type, element, config) {
         const binding = {
             id: ++this.bindingCounter + '_' + Date.now(),
             type: type,
@@ -995,16 +1042,16 @@
         return binding;
     };
 
-    BindingManager.prototype.setupTextBindings = function() {
+    BindingManager.prototype.setupTextBindings = function () {
         const self = this;
 
         // Use cached text nodes instead of searching again
-        this.textNodes.forEach(function(node) {
+        this.textNodes.forEach(function (node) {
             const text = node.textContent;
-            const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+            const matches = text.match(INTERPOLATION_REGEX);
 
             if (matches) {
-                matches.forEach(function(match) {
+                matches.forEach(function (match) {
                     const expression = match.replace(/^\{\{\s*|\s*}}$/g, '').trim();
                     const parsed = ExpressionCache.parseExpression(expression);
                     const dependencies = parsed.dependencies || [];
@@ -1016,7 +1063,7 @@
                         dependencies: dependencies
                     });
 
-                    dependencies.forEach(function(dependency) {
+                    dependencies.forEach(function (dependency) {
                         self.subscriptionMap.subscribe(node, dependency, binding);
                     });
                 });
@@ -1024,15 +1071,15 @@
         });
     };
 
-    BindingManager.prototype.setupAttributeBindings = function(computedProperties) {
+    BindingManager.prototype.setupAttributeBindings = function (computedProperties) {
         const self = this;
 
         // Use cached elements instead of querying again
-        this.attributeElements.forEach(function(element) {
+        this.attributeElements.forEach(function (element) {
             const bindingString = element.getAttribute('data-pac-bind');
             const bindingPairs = ExpressionParser.parseBindingString(bindingString);
 
-            bindingPairs.forEach(function(pair) {
+            bindingPairs.forEach(function (pair) {
                 const type = pair.type;
                 const target = pair.target;
 
@@ -1047,17 +1094,9 @@
                     const binding = self.createBinding(type, element, {target, dependencies});
 
                     if (binding) {
-                        dependencies.forEach(function(dep) {
+                        dependencies.forEach(function (dep) {
                             self.subscriptionMap.subscribe(element, dep, binding);
                         });
-                    }
-
-                    // Set up two-way binding for input elements
-                    if (type === 'value' && ('value' in element)) {
-                        self.setupTwoWayBinding(element, target);
-                    }
-                    if (type === 'checked' && element.type === 'checkbox') {
-                        self.setupTwoWayBinding(element, target, 'change');
                     }
                 }
             });
@@ -1066,14 +1105,15 @@
             if (computedProperties) {
                 const computedNames = Object.keys(computedProperties);
 
-                bindingPairs.forEach(function(pair) {
+                bindingPairs.forEach(function (pair) {
                     if (pair.target) {
-                        computedNames.forEach(function(computedName) {
+                        computedNames.forEach(function (computedName) {
                             if (pair.target.includes(computedName)) {
                                 const computedBinding = self.createBinding(pair.type, element, {
                                     target: pair.target,
                                     dependencies: [computedName]
                                 });
+
                                 self.subscriptionMap.subscribe(element, computedName, computedBinding);
                             }
                         });
@@ -1083,32 +1123,80 @@
         });
     };
 
-    // NEW: Two-way binding setup
-    BindingManager.prototype.setupTwoWayBinding = function(element, propertyPath, eventType) {
-        eventType = eventType || 'input';
+    BindingManager.prototype.setupDelegatedTwoWayBinding = function() {
         const self = this;
 
-        element.addEventListener(eventType, function() {
-            // Get the current abstraction from the container
-            const containerSelector = self.container.id ? '#' + self.container.id : self.container.className ? '.' + self.container.className.split(' ')[0] : null;
-            const control = window.PACRegistry.components.get(containerSelector);
+        // Single event listener for all input events
+        this.container.addEventListener('input', function(event) {
+            self.handleTwoWayBindingEvent(event, 'input');
+        });
 
-            if (control && control.abstraction) {
-                let value;
-                if (element.type === 'checkbox') {
-                    value = element.checked;
-                } else {
-                    value = element.value;
-                }
-
-                // Set the property on the reactive abstraction
-                self.setNestedProperty(control.abstraction, propertyPath, value);
-            }
+        // Single event listener for all change events
+        this.container.addEventListener('change', function(event) {
+            self.handleTwoWayBindingEvent(event, 'change');
         });
     };
 
+    BindingManager.prototype.handleTwoWayBindingEvent = function(event, eventType) {
+        const element = event.target;
+
+        // Only process elements that belong to this container
+        if (!this.subscriptionMap.belongsToThisContainer(element)) {
+            return;
+        }
+
+        // Check if this element has two-way binding
+        const bindingString = element.getAttribute('data-pac-bind');
+
+        if (!bindingString) {
+            return;
+        }
+
+        const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+        let propertyPath = null;
+
+        // Find the appropriate binding type for this event
+        for (const pair of bindingPairs) {
+            if ((pair.type === 'value' && eventType === 'input' && 'value' in element) ||
+                (pair.type === 'checked' && eventType === 'change' && element.type === 'checkbox')) {
+                propertyPath = pair.target;
+                break;
+            }
+        }
+
+        if (!propertyPath) {
+            return;
+        }
+
+        // Get the value to set
+        let value;
+        if (element.type === 'checkbox') {
+            value = element.checked;
+        } else {
+            value = element.value;
+        }
+
+        // Get the component and set the property
+        const containerSelector = this.getContainerSelector();
+        const control = window.PACRegistry.components.get(containerSelector);
+
+        if (control && control.abstraction) {
+            this.setNestedProperty(control.abstraction, propertyPath, value);
+        }
+    };
+
+    BindingManager.prototype.getContainerSelector = function() {
+        if (this.container.id) {
+            return '#' + this.container.id;
+        }
+        if (this.container.className) {
+            return '.' + this.container.className.split(' ')[0];
+        }
+        return null;
+    };
+
     // Helper to set nested properties like 'todo.completed'
-    BindingManager.prototype.setNestedProperty = function(obj, path, value) {
+    BindingManager.prototype.setNestedProperty = function (obj, path, value) {
         const parts = path.split('.');
         let current = obj;
 
@@ -1123,7 +1211,7 @@
     };
 
     // NEW: Methods for processing foreach contexts
-    BindingManager.prototype.processElementBindings = function(element, context) {
+    BindingManager.prototype.processElementBindings = function (element, context) {
         // Process text interpolation in the element
         this.processTextNodesWithContext(element, context);
 
@@ -1131,13 +1219,13 @@
         this.processAttributeBindingsWithContext(element, context);
     };
 
-    BindingManager.prototype.processTextNodesWithContext = function(element, context) {
+    BindingManager.prototype.processTextNodesWithContext = function (element, context) {
         const walker = document.createTreeWalker(
             element,
             NodeFilter.SHOW_TEXT,
             {
-                acceptNode: function(node) {
-                    return /\{\{.*\}\}/.test(node.textContent) ?
+                acceptNode: function (node) {
+                    return INTERPOLATION_TEST_REGEX.test(node.textContent) ?
                         NodeFilter.FILTER_ACCEPT :
                         NodeFilter.FILTER_SKIP;
                 }
@@ -1151,14 +1239,14 @@
         }
 
         const self = this;
-        textNodes.forEach(function(textNode) {
+        textNodes.forEach(function (textNode) {
             const originalText = textNode.textContent;
             const processedText = self.processTextInterpolation(originalText, context);
             textNode.textContent = processedText;
         });
     };
 
-    BindingManager.prototype.processAttributeBindingsWithContext = function(element, context) {
+    BindingManager.prototype.processAttributeBindingsWithContext = function (element, context) {
         const elements = element.querySelectorAll('[data-pac-bind]');
         // Include the element itself if it has bindings
         const allElements = element.hasAttribute('data-pac-bind') ?
@@ -1166,11 +1254,11 @@
             Array.from(elements);
 
         const self = this;
-        allElements.forEach(function(el) {
+        allElements.forEach(function (el) {
             const bindingString = el.getAttribute('data-pac-bind');
             const bindingPairs = ExpressionParser.parseBindingString(bindingString);
 
-            bindingPairs.forEach(function(pair) {
+            bindingPairs.forEach(function (pair) {
                 if (pair.type !== 'foreach') {
                     if (self.isEventBinding(pair.type) && pair.target) {
                         // Handle event bindings with context
@@ -1193,10 +1281,10 @@
         });
     };
 
-    BindingManager.prototype.setupContextualTwoWayBinding = function(element, propertyPath, context, eventType) {
+    BindingManager.prototype.setupContextualTwoWayBinding = function (element, propertyPath, context, eventType) {
         const self = this;
 
-        element.addEventListener(eventType, function() {
+        element.addEventListener(eventType, function () {
             let value;
             if (element.type === 'checkbox') {
                 value = element.checked;
@@ -1211,7 +1299,7 @@
     };
 
     // Helper to set properties using the expression parser
-    BindingManager.prototype.setPropertyInContext = function(parsedExpr, context, value) {
+    BindingManager.prototype.setPropertyInContext = function (parsedExpr, context, value) {
         if (!parsedExpr || parsedExpr.type !== 'property') {
             return;
         }
@@ -1244,10 +1332,10 @@
     };
 
     // NEW: Event binding that passes context for foreach items
-    BindingManager.prototype.setupContextualEventBinding = function(element, eventType, methodName, context) {
+    BindingManager.prototype.setupContextualEventBinding = function (element, eventType, methodName, context) {
         const self = this;
 
-        element.addEventListener(eventType, function(event) {
+        element.addEventListener(eventType, function (event) {
             // Get the global context (main abstraction) that has the methods
             const globalContext = context.__parent || context;
 
@@ -1269,36 +1357,36 @@
         });
     };
 
-    BindingManager.prototype.applyBindingWithType = function(element, type, value) {
+    BindingManager.prototype.applyBindingWithType = function (element, type, value) {
         switch (type) {
             case 'visible':
-                this.applyVisibilityBinding({ element: element }, value);
+                this.applyVisibilityBinding({element: element}, value);
                 break;
             case 'value':
-                this.applyInputBinding({ element: element }, value);
+                this.applyInputBinding({element: element}, value);
                 break;
             case 'checked':
-                this.applyCheckedBinding({ element: element }, value);
+                this.applyCheckedBinding({element: element}, value);
                 break;
             default:
-                this.applyAttributeBinding({ element: element, type: type }, value);
+                this.applyAttributeBinding({element: element, type: type}, value);
                 break;
         }
     };
 
-    BindingManager.prototype.isEventBinding = function(type) {
+    BindingManager.prototype.isEventBinding = function (type) {
         const eventTypes = ['click', 'change', 'input', 'submit', 'focus', 'blur', 'keyup', 'keydown'];
         return eventTypes.includes(type);
     };
 
-    BindingManager.prototype.getTextNodesFromElement = function(element) {
+    BindingManager.prototype.getTextNodesFromElement = function (element) {
         const textNodes = [];
         const walker = document.createTreeWalker(
             element,
             NodeFilter.SHOW_TEXT,
             {
                 acceptNode: (node) => {
-                    return /\{\{.*\}\}/.test(node.textContent) ?
+                    return INTERPOLATION_TEST_REGEX.test(node.textContent) ?
                         NodeFilter.FILTER_ACCEPT :
                         NodeFilter.FILTER_SKIP;
                 }
@@ -1313,7 +1401,7 @@
         return textNodes;
     };
 
-    BindingManager.prototype.updateElementForProperty = function(element, propertyPath, context) {
+    BindingManager.prototype.updateElementForProperty = function (element, propertyPath, context) {
         const binding = this.subscriptionMap.getBindingForElementAndProperty(element, propertyPath);
 
         if (!binding) {
@@ -1342,9 +1430,9 @@
         }
     };
 
-    BindingManager.prototype.processTextInterpolation = function(textContent, context) {
+    BindingManager.prototype.processTextInterpolation = function (textContent, context) {
         let text = String(textContent || '');
-        const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
+        const matches = text.match(INTERPOLATION_REGEX);
 
         if (matches) {
             for (let i = 0; i < matches.length; i++) {
@@ -1365,7 +1453,7 @@
         return text;
     };
 
-    BindingManager.prototype.applyTextBinding = function(binding, context) {
+    BindingManager.prototype.applyTextBinding = function (binding, context) {
         const textNode = binding.element;
         const newText = this.processTextInterpolation(binding.originalText, context);
 
@@ -1374,7 +1462,7 @@
         }
     };
 
-    BindingManager.prototype.applyVisibilityBinding = function(binding, value) {
+    BindingManager.prototype.applyVisibilityBinding = function (binding, value) {
         const element = binding.element;
         const shouldShow = !!value;
 
@@ -1396,7 +1484,7 @@
         }
     };
 
-    BindingManager.prototype.applyInputBinding = function(binding, value) {
+    BindingManager.prototype.applyInputBinding = function (binding, value) {
         const element = binding.element;
         const stringValue = String(value || '');
 
@@ -1405,12 +1493,12 @@
         }
     };
 
-    BindingManager.prototype.applyCheckedBinding = function(binding, value) {
+    BindingManager.prototype.applyCheckedBinding = function (binding, value) {
         const element = binding.element;
         element.checked = Boolean(value);
     };
 
-    BindingManager.prototype.applyAttributeBinding = function(binding, value) {
+    BindingManager.prototype.applyAttributeBinding = function (binding, value) {
         const element = binding.element;
         const attribute = binding.type;
         const booleanAttrs = ['readonly', 'required', 'selected', 'checked', 'hidden', 'multiple'];
@@ -1424,19 +1512,19 @@
         }
     };
 
-    BindingManager.prototype.getEventBindings = function() {
+    BindingManager.prototype.getEventBindings = function () {
         return this.eventBindings;
     };
 
-    BindingManager.prototype.getBinding = function(id) {
+    BindingManager.prototype.getBinding = function (id) {
         return this.bindings.get(id);
     };
 
-    BindingManager.prototype.removeBinding = function(id) {
+    BindingManager.prototype.removeBinding = function (id) {
         return this.bindings.delete(id);
     };
 
-    BindingManager.prototype.cleanup = function() {
+    BindingManager.prototype.cleanup = function () {
         this.bindings.clear();
         this.eventBindings = [];
     };
@@ -1453,11 +1541,11 @@
         this.itemReactivityCleanup = new WeakMap();
     }
 
-    ForeachManager.prototype.setupForeachBindings = function() {
+    ForeachManager.prototype.setupForeachBindings = function () {
         const elements = this.container.querySelectorAll('[data-pac-bind*="foreach:"]');
         const self = this;
 
-        Array.from(elements).forEach(function(element) {
+        Array.from(elements).forEach(function (element) {
             // Skip elements that don't belong to this container
             if (!self.subscriptionMap.belongsToThisContainer(element)) {
                 return;
@@ -1466,7 +1554,7 @@
             const bindingString = element.getAttribute('data-pac-bind');
             const bindingPairs = ExpressionParser.parseBindingString(bindingString);
 
-            const foreachPair = bindingPairs.find(function(pair) {
+            const foreachPair = bindingPairs.find(function (pair) {
                 return pair.type === 'foreach';
             });
 
@@ -1504,17 +1592,17 @@
         });
     };
 
-    ForeachManager.prototype.rebuildArray = function(arrayProperty, newArray, context) {
+    ForeachManager.prototype.rebuildArray = function (arrayProperty, newArray, context) {
         const self = this;
 
-        this.foreachBindings.forEach(function(binding, element) {
+        this.foreachBindings.forEach(function (binding, element) {
             if (binding.arrayProperty === arrayProperty) {
                 self.rebuildForeachElement(binding, newArray, context);
             }
         });
     };
 
-    ForeachManager.prototype.rebuildForeachElement = function(binding, array, globalContext) {
+    ForeachManager.prototype.rebuildForeachElement = function (binding, array, globalContext) {
         const element = binding.element;
         const template = binding.template;
 
@@ -1532,7 +1620,7 @@
         const fragment = document.createDocumentFragment();
 
         // Create elements for each array item
-        array.forEach(function(item, index) {
+        array.forEach(function (item, index) {
             const itemElement = template.cloneNode(true);
 
             // Create item context with proper linking
@@ -1560,7 +1648,7 @@
         element.appendChild(fragment);
     };
 
-    ForeachManager.prototype.makeItemReactive = function(item, parentElement, itemName) {
+    ForeachManager.prototype.makeItemReactive = function (item, parentElement, itemName) {
         if (!item || typeof item !== 'object') {
             return item;
         }
@@ -1577,7 +1665,7 @@
         return reactiveItem;
     };
 
-    ForeachManager.prototype.cleanupElementReactivity = function(element) {
+    ForeachManager.prototype.cleanupElementReactivity = function (element) {
         const cleanupItems = this.itemReactivityCleanup.get(element);
         if (cleanupItems) {
             // Clear the cleanup tracking
@@ -1585,7 +1673,7 @@
         }
     };
 
-    ForeachManager.prototype.cleanup = function() {
+    ForeachManager.prototype.cleanup = function () {
         this.foreachBindings.clear();
         this.itemReactivityCleanup = new WeakMap();
     };
@@ -1624,6 +1712,8 @@
                 this.bindingManager = new BindingManager(this.container, this.subscriptionMap);
                 this.foreachManager = new ForeachManager(this.container, this.subscriptionMap, this.bindingManager);
 
+                // Set up delegated two-way binding ONCE
+                this.bindingManager.setupDelegatedTwoWayBinding();
                 this.bindingManager.setupTextBindings();
                 this.bindingManager.setupAttributeBindings(this.original.computed);
                 this.foreachManager.setupForeachBindings();
@@ -1790,11 +1880,11 @@
     function SimplePACRegistry() {
         this.components = new Map();
 
-        this.register = function(selector, component) {
+        this.register = function (selector, component) {
             this.components.set(selector, component);
         };
 
-        this.unregister = function(selector) {
+        this.unregister = function (selector) {
             this.components.delete(selector);
         };
     }
