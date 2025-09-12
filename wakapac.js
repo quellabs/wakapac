@@ -1,9 +1,16 @@
 /**
- * Unified wakaPAC Framework with BindingManager Subsystem
- * Single subscription system, PAC events, original binding methods
+ * wakaPAC Framework with Working Foreach Implementation
+ * Fixed event handling in foreach contexts
  */
 (function() {
     "use strict";
+
+    // ========================================================================
+    // CONSTANTS
+    // ========================================================================
+
+    const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
+    const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
 
     // ========================================================================
     // ORIGINAL EXPRESSION PARSER (COMPLETE)
@@ -669,7 +676,7 @@
     };
 
     // ========================================================================
-    // REACTIVE PROXY WITH PAC:CHANGE EVENTS
+    // ENHANCED REACTIVE PROXY WITH ARRAY-SPECIFIC EVENTS
     // ========================================================================
 
     function makeDeepReactiveProxy(value, container) {
@@ -684,14 +691,35 @@
 
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
+                            // For methods that add items, proxy the arguments first
+                            if (prop === 'push' || prop === 'unshift') {
+                                for (let i = 0; i < arguments.length; i++) {
+                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
+                                        arguments[i] = createProxy(arguments[i], currentPath.concat([target.length + i]));
+                                        arguments[i]._isReactive = true;
+                                    }
+                                }
+                            } else if (prop === 'splice' && arguments.length > 2) {
+                                // For splice, items to add start at index 2
+                                for (let i = 2; i < arguments.length; i++) {
+                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
+                                        arguments[i] = createProxy(arguments[i], currentPath.concat([arguments[0] + i - 2]));
+                                        arguments[i]._isReactive = true;
+                                    }
+                                }
+                            }
+
                             const oldArray = Array.prototype.slice.call(target);
                             const result = Array.prototype[prop].apply(target, arguments);
+                            const newArray = Array.prototype.slice.call(target);
 
-                            container.dispatchEvent(new CustomEvent("pac:change", {
+                            // Dispatch array-specific event
+                            container.dispatchEvent(new CustomEvent("pac:array-change", {
                                 detail: {
                                     path: currentPath,
                                     oldValue: oldArray,
-                                    newValue: Array.prototype.slice.call(target)
+                                    newValue: newArray,
+                                    method: prop
                                 }
                             }));
 
@@ -721,6 +749,18 @@
                         target[prop]._isReactive = true;
                     } else {
                         target[prop] = newValue;
+                    }
+
+                    // Dispatch array-specific event if this is an array assignment
+                    if (Array.isArray(newValue)) {
+                        container.dispatchEvent(new CustomEvent("pac:array-change", {
+                            detail: {
+                                path: propertyPath,
+                                oldValue: oldValue,
+                                newValue: target[prop],
+                                method: 'assignment'
+                            }
+                        }));
                     }
 
                     container.dispatchEvent(new CustomEvent("pac:change", {
@@ -821,15 +861,28 @@
     };
 
     UnifiedSubscriptionMap.prototype.belongsToThisContainer = function (element) {
+        // Cache the result since this gets called repeatedly
+        if (element._pacContainerCheck === this.container) {
+            return true;
+        }
+        if (element._pacContainerCheck) {
+            return false;
+        }
+
+        let belongs;
         if (element.nodeType === Node.TEXT_NODE) {
             const parentElement = element.parentElement;
             if (!parentElement) return false;
             const closestContainer = parentElement.closest('[data-pac-container]');
-            return closestContainer === this.container;
+            belongs = closestContainer === this.container;
+        } else {
+            const closestContainer = element.closest('[data-pac-container]');
+            belongs = closestContainer === this.container;
         }
 
-        const closestContainer = element.closest('[data-pac-container]');
-        return closestContainer === this.container;
+        // Cache the result
+        element._pacContainerCheck = belongs ? this.container : false;
+        return belongs;
     };
 
     UnifiedSubscriptionMap.prototype.getSubscribedElements = function (propertyPath) {
@@ -860,7 +913,7 @@
     };
 
     // ========================================================================
-    // BINDING MANAGEMENT SUBSYSTEM
+    // BINDING MANAGEMENT SUBSYSTEM WITH FOREACH CONTEXT SUPPORT
     // ========================================================================
 
     function BindingManager(container, subscriptionMap) {
@@ -869,7 +922,63 @@
         this.bindings = new Map();
         this.eventBindings = [];
         this.bindingCounter = 0;
+        this.textNodes = [];
+        this.attributeElements = [];
+
+        // Cache elements immediately
+        this.cacheElements();
     }
+
+    BindingManager.prototype.cacheElements = function() {
+        // Cache text nodes with interpolation ONCE
+        const walker = document.createTreeWalker(
+            this.container,
+            NodeFilter.SHOW_TEXT,
+            {
+                acceptNode: (node) => {
+                    return /\{\{.*\}\}/.test(node.textContent) ?
+                        NodeFilter.FILTER_ACCEPT :
+                        NodeFilter.FILTER_SKIP;
+                }
+            }
+        );
+
+        let node;
+        while ((node = walker.nextNode())) {
+            if (this.subscriptionMap.belongsToThisContainer(node)) {
+                this.textNodes.push(node);
+            }
+        }
+
+        // Cache attribute elements ONCE
+        const elements = this.container.querySelectorAll('[data-pac-bind]');
+
+        Array.from(elements).forEach(element => {
+            if (this.subscriptionMap.belongsToThisContainer(element)) {
+                this.attributeElements.push(element);
+            }
+        });
+    };
+
+    BindingManager.prototype.batchDOMUpdates = function(updates) {
+        // Use requestAnimationFrame to batch DOM updates
+        if (this.pendingUpdates) {
+            this.pendingUpdates = this.pendingUpdates.concat(updates);
+            return;
+        }
+
+        this.pendingUpdates = updates;
+
+        requestAnimationFrame(() => {
+            const allUpdates = this.pendingUpdates;
+            this.pendingUpdates = null;
+
+            // Apply all updates in one frame
+            allUpdates.forEach(update => {
+                update();
+            });
+        });
+    };
 
     BindingManager.prototype.createBinding = function(type, element, config) {
         const binding = {
@@ -887,10 +996,10 @@
     };
 
     BindingManager.prototype.setupTextBindings = function() {
-        const textNodes = this.getTextNodesFromElement(this.container);
         const self = this;
 
-        textNodes.forEach(function(node) {
+        // Use cached text nodes instead of searching again
+        this.textNodes.forEach(function(node) {
             const text = node.textContent;
             const matches = text.match(/\{\{\s*([^}]+)\s*}}/g);
 
@@ -916,10 +1025,10 @@
     };
 
     BindingManager.prototype.setupAttributeBindings = function(computedProperties) {
-        const elements = this.container.querySelectorAll('[data-pac-bind]');
         const self = this;
 
-        Array.from(elements).forEach(function(element) {
+        // Use cached elements instead of querying again
+        this.attributeElements.forEach(function(element) {
             const bindingString = element.getAttribute('data-pac-bind');
             const bindingPairs = ExpressionParser.parseBindingString(bindingString);
 
@@ -941,6 +1050,14 @@
                         dependencies.forEach(function(dep) {
                             self.subscriptionMap.subscribe(element, dep, binding);
                         });
+                    }
+
+                    // Set up two-way binding for input elements
+                    if (type === 'value' && ('value' in element)) {
+                        self.setupTwoWayBinding(element, target);
+                    }
+                    if (type === 'checked' && element.type === 'checkbox') {
+                        self.setupTwoWayBinding(element, target, 'change');
                     }
                 }
             });
@@ -964,6 +1081,209 @@
                 });
             }
         });
+    };
+
+    // NEW: Two-way binding setup
+    BindingManager.prototype.setupTwoWayBinding = function(element, propertyPath, eventType) {
+        eventType = eventType || 'input';
+        const self = this;
+
+        element.addEventListener(eventType, function() {
+            // Get the current abstraction from the container
+            const containerSelector = self.container.id ? '#' + self.container.id : self.container.className ? '.' + self.container.className.split(' ')[0] : null;
+            const control = window.PACRegistry.components.get(containerSelector);
+
+            if (control && control.abstraction) {
+                let value;
+                if (element.type === 'checkbox') {
+                    value = element.checked;
+                } else {
+                    value = element.value;
+                }
+
+                // Set the property on the reactive abstraction
+                self.setNestedProperty(control.abstraction, propertyPath, value);
+            }
+        });
+    };
+
+    // Helper to set nested properties like 'todo.completed'
+    BindingManager.prototype.setNestedProperty = function(obj, path, value) {
+        const parts = path.split('.');
+        let current = obj;
+
+        for (let i = 0; i < parts.length - 1; i++) {
+            if (!current[parts[i]]) {
+                current[parts[i]] = {};
+            }
+            current = current[parts[i]];
+        }
+
+        current[parts[parts.length - 1]] = value;
+    };
+
+    // NEW: Methods for processing foreach contexts
+    BindingManager.prototype.processElementBindings = function(element, context) {
+        // Process text interpolation in the element
+        this.processTextNodesWithContext(element, context);
+
+        // Process attribute bindings in the element
+        this.processAttributeBindingsWithContext(element, context);
+    };
+
+    BindingManager.prototype.processTextNodesWithContext = function(element, context) {
+        const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT,
+            {
+                acceptNode: function(node) {
+                    return /\{\{.*\}\}/.test(node.textContent) ?
+                        NodeFilter.FILTER_ACCEPT :
+                        NodeFilter.FILTER_SKIP;
+                }
+            }
+        );
+
+        const textNodes = [];
+        let node;
+        while ((node = walker.nextNode())) {
+            textNodes.push(node);
+        }
+
+        const self = this;
+        textNodes.forEach(function(textNode) {
+            const originalText = textNode.textContent;
+            const processedText = self.processTextInterpolation(originalText, context);
+            textNode.textContent = processedText;
+        });
+    };
+
+    BindingManager.prototype.processAttributeBindingsWithContext = function(element, context) {
+        const elements = element.querySelectorAll('[data-pac-bind]');
+        // Include the element itself if it has bindings
+        const allElements = element.hasAttribute('data-pac-bind') ?
+            [element].concat(Array.from(elements)) :
+            Array.from(elements);
+
+        const self = this;
+        allElements.forEach(function(el) {
+            const bindingString = el.getAttribute('data-pac-bind');
+            const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+
+            bindingPairs.forEach(function(pair) {
+                if (pair.type !== 'foreach') {
+                    if (self.isEventBinding(pair.type) && pair.target) {
+                        // Handle event bindings with context
+                        self.setupContextualEventBinding(el, pair.type, pair.target, context);
+                    } else if (pair.target) {
+                        const parsed = ExpressionCache.parseExpression(pair.target);
+                        const value = ExpressionParser.evaluate(parsed, context);
+                        self.applyBindingWithType(el, pair.type, value);
+
+                        // Set up two-way binding for form elements in foreach context
+                        if (pair.type === 'value' && ('value' in el)) {
+                            self.setupContextualTwoWayBinding(el, pair.target, context, 'input');
+                        }
+                        if (pair.type === 'checked' && el.type === 'checkbox') {
+                            self.setupContextualTwoWayBinding(el, pair.target, context, 'change');
+                        }
+                    }
+                }
+            });
+        });
+    };
+
+    BindingManager.prototype.setupContextualTwoWayBinding = function(element, propertyPath, context, eventType) {
+        const self = this;
+
+        element.addEventListener(eventType, function() {
+            let value;
+            if (element.type === 'checkbox') {
+                value = element.checked;
+            } else {
+                value = element.value;
+            }
+
+            // Use the expression parser to set the property in the correct context
+            const parsed = ExpressionCache.parseExpression(propertyPath);
+            self.setPropertyInContext(parsed, context, value);
+        });
+    };
+
+    // Helper to set properties using the expression parser
+    BindingManager.prototype.setPropertyInContext = function(parsedExpr, context, value) {
+        if (!parsedExpr || parsedExpr.type !== 'property') {
+            return;
+        }
+
+        const path = parsedExpr.path;
+        console.log('Setting property:', path, 'to value:', value, 'in context:', context);
+
+        const parts = path.split('.');
+        let current = context;
+
+        // Navigate to the parent object
+        for (let i = 0; i < parts.length - 1; i++) {
+            if (!current || typeof current !== 'object') {
+                console.log('Failed to navigate - current is:', current, 'at part:', parts[i]);
+                return;
+            }
+            console.log('Navigating to:', parts[i], 'current:', current[parts[i]]);
+            current = current[parts[i]];
+        }
+
+        // Set the final property
+        if (current && typeof current === 'object') {
+            const finalProp = parts[parts.length - 1];
+            console.log('Setting', finalProp, 'on object:', current, 'to:', value);
+            current[finalProp] = value;
+            console.log('After setting, property is:', current[finalProp]);
+        } else {
+            console.log('Cannot set property - current is not an object:', current);
+        }
+    };
+
+    // NEW: Event binding that passes context for foreach items
+    BindingManager.prototype.setupContextualEventBinding = function(element, eventType, methodName, context) {
+        const self = this;
+
+        element.addEventListener(eventType, function(event) {
+            // Get the global context (main abstraction) that has the methods
+            const globalContext = context.__parent || context;
+
+            if (globalContext && typeof globalContext[methodName] === 'function') {
+                const method = globalContext[methodName];
+                try {
+                    // Pass item, index, and event for foreach contexts
+                    if (context.item !== undefined && context.$index !== undefined) {
+                        method.call(globalContext, context.item, context.$index, event);
+                    } else {
+                        method.call(globalContext, event);
+                    }
+                } catch (error) {
+                    console.error('Error executing ' + eventType + ' handler "' + methodName + '":', error);
+                }
+            } else {
+                console.warn(eventType + ' handler "' + methodName + '" is not a function');
+            }
+        });
+    };
+
+    BindingManager.prototype.applyBindingWithType = function(element, type, value) {
+        switch (type) {
+            case 'visible':
+                this.applyVisibilityBinding({ element: element }, value);
+                break;
+            case 'value':
+                this.applyInputBinding({ element: element }, value);
+                break;
+            case 'checked':
+                this.applyCheckedBinding({ element: element }, value);
+                break;
+            default:
+                this.applyAttributeBinding({ element: element, type: type }, value);
+                break;
+        }
     };
 
     BindingManager.prototype.isEventBinding = function(type) {
@@ -1122,7 +1442,156 @@
     };
 
     // ========================================================================
-    // MAIN FRAMEWORK WITH BINDING MANAGER INTEGRATION
+    // CLEAN FOREACH MANAGER (Only foreach-specific logic)
+    // ========================================================================
+
+    function ForeachManager(container, subscriptionMap, bindingManager) {
+        this.container = container;
+        this.subscriptionMap = subscriptionMap;
+        this.bindingManager = bindingManager;
+        this.foreachBindings = new Map();
+        this.itemReactivityCleanup = new WeakMap();
+    }
+
+    ForeachManager.prototype.setupForeachBindings = function() {
+        const elements = this.container.querySelectorAll('[data-pac-bind*="foreach:"]');
+        const self = this;
+
+        Array.from(elements).forEach(function(element) {
+            // Skip elements that don't belong to this container
+            if (!self.subscriptionMap.belongsToThisContainer(element)) {
+                return;
+            }
+
+            const bindingString = element.getAttribute('data-pac-bind');
+            const bindingPairs = ExpressionParser.parseBindingString(bindingString);
+
+            const foreachPair = bindingPairs.find(function(pair) {
+                return pair.type === 'foreach';
+            });
+
+            if (foreachPair) {
+                const arrayProperty = foreachPair.target;
+                const itemName = element.getAttribute('data-pac-item') || 'item';
+                const indexName = element.getAttribute('data-pac-index') || '$index';
+
+                const binding = {
+                    arrayProperty: arrayProperty,
+                    itemName: itemName,
+                    indexName: indexName,
+                    element: element
+                };
+
+                self.foreachBindings.set(element, binding);
+
+                // Subscribe to the array property
+                self.subscriptionMap.subscribe(element, arrayProperty, {
+                    type: 'foreach',
+                    element: element,
+                    target: arrayProperty,
+                    dependencies: [arrayProperty]
+                });
+
+                // Store the original template
+                binding.template = element.cloneNode(true);
+                binding.template.removeAttribute('data-pac-bind');
+                binding.template.removeAttribute('data-pac-item');
+                binding.template.removeAttribute('data-pac-index');
+
+                // Clear the element initially
+                element.innerHTML = '';
+            }
+        });
+    };
+
+    ForeachManager.prototype.rebuildArray = function(arrayProperty, newArray, context) {
+        const self = this;
+
+        this.foreachBindings.forEach(function(binding, element) {
+            if (binding.arrayProperty === arrayProperty) {
+                self.rebuildForeachElement(binding, newArray, context);
+            }
+        });
+    };
+
+    ForeachManager.prototype.rebuildForeachElement = function(binding, array, globalContext) {
+        const element = binding.element;
+        const template = binding.template;
+
+        // Clean up old reactivity
+        this.cleanupElementReactivity(element);
+
+        // Clear current content
+        element.innerHTML = '';
+
+        if (!Array.isArray(array) || array.length === 0) {
+            return;
+        }
+
+        const self = this;
+        const fragment = document.createDocumentFragment();
+
+        // Create elements for each array item
+        array.forEach(function(item, index) {
+            const itemElement = template.cloneNode(true);
+
+            // Create item context with proper linking
+            const itemContext = Object.assign({}, globalContext);
+
+            // IMPORTANT: Use the actual array item, not a copy
+            // This ensures changes to the item properties propagate to the original array
+            itemContext[binding.itemName] = array[index];  // Direct reference to array item
+            itemContext[binding.indexName] = index;
+
+            // Add references for event handlers to find the main context
+            itemContext.item = array[index];  // Direct reference to array item
+            itemContext.$index = index;
+            itemContext.__parent = globalContext;
+
+            // Don't create a separate reactive proxy for the item - use the array item directly
+            // The array is already reactive, so items within it are also reactive
+
+            // Delegate to BindingManager for processing bindings
+            self.bindingManager.processElementBindings(itemElement, itemContext);
+
+            fragment.appendChild(itemElement);
+        });
+
+        element.appendChild(fragment);
+    };
+
+    ForeachManager.prototype.makeItemReactive = function(item, parentElement, itemName) {
+        if (!item || typeof item !== 'object') {
+            return item;
+        }
+
+        // Create a reactive proxy for the item
+        const reactiveItem = makeDeepReactiveProxy(item, this.container);
+
+        // Track for cleanup
+        if (!this.itemReactivityCleanup.has(parentElement)) {
+            this.itemReactivityCleanup.set(parentElement, []);
+        }
+        this.itemReactivityCleanup.get(parentElement).push(reactiveItem);
+
+        return reactiveItem;
+    };
+
+    ForeachManager.prototype.cleanupElementReactivity = function(element) {
+        const cleanupItems = this.itemReactivityCleanup.get(element);
+        if (cleanupItems) {
+            // Clear the cleanup tracking
+            this.itemReactivityCleanup.delete(element);
+        }
+    };
+
+    ForeachManager.prototype.cleanup = function() {
+        this.foreachBindings.clear();
+        this.itemReactivityCleanup = new WeakMap();
+    };
+
+    // ========================================================================
+    // MAIN FRAMEWORK WITH FOREACH INTEGRATION
     // ========================================================================
 
     function wakaPAC(selector, abstraction, options) {
@@ -1148,14 +1617,17 @@
             abstraction: null,
             subscriptionMap: null,
             bindingManager: null,
+            foreachManager: null,
 
             initialize: function () {
                 this.subscriptionMap = new UnifiedSubscriptionMap(this.container);
                 this.bindingManager = new BindingManager(this.container, this.subscriptionMap);
+                this.foreachManager = new ForeachManager(this.container, this.subscriptionMap, this.bindingManager);
 
                 this.bindingManager.setupTextBindings();
                 this.bindingManager.setupAttributeBindings(this.original.computed);
-                this.setupSimpleEventCapture();
+                this.foreachManager.setupForeachBindings();
+                this.setupEventCapture();
                 this.abstraction = this.createReactiveAbstraction();
                 this.setupEventHandlers();
                 this.performInitialUpdate();
@@ -1166,14 +1638,17 @@
                 const reactive = {};
                 const self = this;
 
+                // First, create the reactive proxy with an empty object
+                const proxiedReactive = makeDeepReactiveProxy(reactive, this.container);
+
+                // Then set all properties through the proxy so they become reactive
                 Object.keys(this.original).forEach(function (key) {
                     if (key !== 'computed' && typeof self.original[key] !== 'function') {
-                        reactive[key] = self.original[key];
+                        proxiedReactive[key] = self.original[key];  // This triggers the proxy setter
                     }
                 });
 
-                const proxiedReactive = makeDeepReactiveProxy(reactive, this.container);
-
+                // Add methods
                 Object.keys(this.original).forEach(function (key) {
                     if (typeof self.original[key] === 'function' && key !== 'computed') {
                         proxiedReactive[key] = self.original[key].bind(proxiedReactive);
@@ -1216,9 +1691,10 @@
                 });
             },
 
-            setupSimpleEventCapture: function () {
+            setupEventCapture: function () {
                 const self = this;
 
+                // Handle regular property changes
                 this.container.addEventListener('pac:change', function (event) {
                     const detail = event.detail;
                     const path = detail.path;
@@ -1230,6 +1706,17 @@
                         self.handlePropertyChange(path[0]);
                     }
                 });
+
+                // Handle array-specific changes
+                this.container.addEventListener('pac:array-change', function (event) {
+                    const detail = event.detail;
+                    const path = detail.path;
+                    const propertyPath = path.join('.');
+                    const newArray = detail.newValue;
+
+                    // Rebuild foreach elements for this array
+                    self.foreachManager.rebuildArray(propertyPath, newArray, self.abstraction);
+                });
             },
 
             handlePropertyChange: function (propertyPath) {
@@ -1238,6 +1725,13 @@
 
                 if (subscribedElements.size > 0) {
                     subscribedElements.forEach(function (element) {
+                        const binding = self.subscriptionMap.getBindingForElementAndProperty(element, propertyPath);
+
+                        // Skip foreach bindings - they're handled by pac:array-change
+                        if (binding && binding.type === 'foreach') {
+                            return;
+                        }
+
                         self.bindingManager.updateElementForProperty(element, propertyPath, self.abstraction);
                     });
 
@@ -1266,6 +1760,13 @@
                 });
 
                 rootProperties.forEach(function (propertyName) {
+                    const value = self.abstraction[propertyName];
+
+                    // Handle initial array rendering
+                    if (Array.isArray(value)) {
+                        self.foreachManager.rebuildArray(propertyName, value, self.abstraction);
+                    }
+
                     self.handlePropertyChange(propertyName);
                 });
 
@@ -1277,9 +1778,9 @@
 
         const controlUnit = control.initialize();
 
-        const publicAPI = Object.assign({}, controlUnit.abstraction);
+        // Return the reactive abstraction directly, not a copy
         window.PACRegistry.register(selector, control);
-        return publicAPI;
+        return controlUnit.abstraction;
     }
 
     // ========================================================================
@@ -1300,5 +1801,4 @@
 
     window.PACRegistry = window.PACRegistry || new SimplePACRegistry();
     window.wakaPAC = wakaPAC;
-
 })();
