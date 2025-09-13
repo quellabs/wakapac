@@ -1479,8 +1479,16 @@
 
     // All binding application methods - centralized in DomUpdater
     DomUpdater.prototype.applyValueBinding = function (element, value) {
+        // Handle radio buttons specially - they should be checked/unchecked based on value match
+        if (element.type === 'radio') {
+            element.checked = (element.value === String(value));
+            return;
+        }
+
+        // Handle all other elements with value property (input, select, textarea, etc.)
         if ('value' in element) {
             const stringValue = String(value || '');
+
             if (element.value !== stringValue) {
                 element.value = stringValue;
             }
