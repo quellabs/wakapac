@@ -46,39 +46,49 @@
     const Utils = {
 
         /**
-         * Returns true if the element belongs to the given container
-         * @param container
-         * @param element
-         * @returns {boolean}
+         * Determines if an element belongs to the specified PAC container, with performance optimizations.
+         * Uses WeakMap caching to avoid repeated DOM traversals for the same elements.
+         * @param {Element} container - The PAC container element with data-pac-container attribute
+         * @param {Node} element - The element to check (can be Element or Text node)
+         * @returns {boolean} True if element belongs to this container, false otherwise
          */
         belongsToThisContainer(container, element) {
-            // Cache the result since this gets called repeatedly
-            if (element._pacContainerCheck === container) {
+            // Initialize WeakMap cache on first use - automatically garbage collected when elements are removed
+            if (!this._cache) {
+                this._cache = new WeakMap();
+            }
+
+            // Check cache first - O(1) lookup avoids expensive DOM traversals
+            const cached = this._cache.get(element);
+
+            // Cache hit: element belongs to this container
+            if (cached === container) {
                 return true;
             }
 
-            if (element._pacContainerCheck) {
+            // Cache hit: element doesn't belong to any container
+            if (cached === false) {
                 return false;
             }
 
+            // Determine if element belongs to container
             let belongs;
 
             if (element.nodeType === Node.TEXT_NODE) {
-                const parentElement = element.parentElement;
-
-                if (!parentElement) {
-                    return false;
-                }
-
-                const closestContainer = parentElement.closest('[data-pac-container]');
-                belongs = closestContainer === container;
+                // Text nodes don't have closest() method, so check their parent element
+                const parent = element.parentElement;
+                belongs = parent &&
+                    container.contains(parent) &&  // Fast containment check first
+                    parent.closest('[data-pac-container]') === container;  // Verify correct container
             } else {
-                const closestContainer = element.closest('[data-pac-container]');
-                belongs = closestContainer === container;
+                // Element nodes: check containment then verify it's not in a nested container
+                belongs = container.contains(element) &&  // Fast containment check first
+                    element.closest('[data-pac-container]') === container;  // Verify correct container
             }
 
-            // Cache the result
-            element._pacContainerCheck = belongs ? container : false;
+            // Cache result: store container reference if belongs, false if not
+            // WeakMap automatically cleans up when element is garbage collected
+            this._cache.set(element, belongs ? container : false);
             return belongs;
         },
 
