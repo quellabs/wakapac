@@ -77,6 +77,7 @@
             if (element.nodeType === Node.TEXT_NODE) {
                 // Text nodes don't have closest() method, so check their parent element
                 const parent = element.parentElement;
+
                 belongs = parent &&
                     container.contains(parent) &&  // Fast containment check first
                     parent.closest('[data-pac-container]') === container;  // Verify correct container
@@ -325,29 +326,15 @@
     // Send PAC-events for changed DOM elements
     // ============================================================================
 
-    function DomUpdateTracker(container) {
-        this.container = container;
+    const DomUpdateTracker = {
+        _initialized: false,
 
-        // Ensure container has the required attribute
-        if (!container.hasAttribute('data-pac-container')) {
-            container.setAttribute('data-pac-container', this.uniqid());
-        }
-
-        // Setup event listeners
-        this.setupEventListeners();
-    }
-
-    DomUpdateTracker.prototype.uniqid = function(prefix = "", random = false) {
-        const sec = Date.now() * 1000 + Math.random() * 1000;
-        const id = sec.toString(16).replace(/\./g, "").padEnd(14, "0");
-        return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
-    };
-
-    DomUpdateTracker._docListenersAttached = DomUpdateTracker._docListenersAttached || false;
-
-    DomUpdateTracker.prototype.setupEventListeners = function () {
-        if (!DomUpdateTracker._docListenersAttached) {
+        initialize() {
             const self = this;
+
+            if (this._initialized) {
+                return;
+            }
 
             document.addEventListener('click', function (event) {
                 self.dispatchTrackedEvent('pac:dom:click', event, {
@@ -376,32 +363,30 @@
                     elementCount: event.target.elements.length
                 });
             });
+        },
 
-            DomUpdateTracker._docListenersAttached = true;
+        dispatchTrackedEvent(eventName, originalEvent, extra = {}) {
+            const container = originalEvent.target.closest('[data-pac-container]');
+
+            if (!container) {
+                return;
+            }
+
+            container.dispatchEvent(new CustomEvent(eventName, {
+                detail: {
+                    timestamp: Date.now(),
+                    id: originalEvent.target.id || null,
+                    elementType: originalEvent.target.type || originalEvent.target.tagName.toLowerCase(),
+                    elementName: originalEvent.target.name || null,
+                    target: originalEvent.target,
+                    value: Utils.readDOMValue(originalEvent.target),
+                    originalEvent: originalEvent,
+                    bindString: originalEvent.target.getAttribute('data-pac-bind') ?? '',
+                    extra: extra
+                }
+            }));
         }
     }
-
-    DomUpdateTracker.prototype.dispatchTrackedEvent = function (eventName, originalEvent, extra = {}) {
-        const container = originalEvent.target.closest('[data-pac-container]');
-
-        if (!container) {
-            return;
-        }
-
-        container.dispatchEvent(new CustomEvent(eventName, {
-            detail: {
-                timestamp: Date.now(),
-                id: originalEvent.target.id || null,
-                elementType: originalEvent.target.type || originalEvent.target.tagName.toLowerCase(),
-                elementName: originalEvent.target.name || null,
-                target: originalEvent.target,
-                value: Utils.readDOMValue(originalEvent.target),
-                originalEvent: originalEvent,
-                bindString: originalEvent.target.getAttribute('data-pac-bind') ?? '',
-                extra: extra
-            }
-        }));
-    };
 
     // ============================================================================
     // EXPRESSION PARSER
@@ -451,27 +436,22 @@
             expression = String(expression).trim();
 
             // Tokenize and parse
-            try {
-                this.tokens = this.tokenize(expression);
-                this.currentToken = 0;
+            this.tokens = this.tokenize(expression);
+            this.currentToken = 0;
 
-                if (this.tokens.length === 0) {
-                    return null;
-                }
-
-                // Add dependencies to the result
-                const result = this.parseTernary();
-
-                if (result) {
-                    result.dependencies = this.extractDependencies(result);
-                }
-
-                // Cache the result
-                return result;
-            } catch (error) {
-                // Use the parser's own error enhancement method
-                throw this.createHelpfulError(expression, error);
+            if (this.tokens.length === 0) {
+                return null;
             }
+
+            // Add dependencies to the result
+            const result = this.parseTernary();
+
+            if (result) {
+                result.dependencies = this.extractDependencies(result);
+            }
+
+            // Cache the result
+            return result;
         },
 
         /**
@@ -1572,9 +1552,385 @@
     };
 
     // ========================================================================
+    // CONTEXT
+    // ========================================================================
+
+    function Context(container, abstraction, parent = null) {
+        const self = this;
+
+        // Ensure container has the required attribute
+        if (!container.hasAttribute('data-pac-container')) {
+            container.setAttribute('data-pac-container', this.uniqid());
+        }
+
+        this.originalAbstraction = abstraction;
+        this.parent = parent;
+        this.container = container;
+        this.abstraction = this.createReactiveAbstraction();
+        this.domUpdater = new DomUpdater(this.container);
+        this.dependencies = this.getDependencies();
+        this.clickInterpolationMap = this.scanClickBindings();
+        this.textInterpolationMap = this.scanTextBindings();
+        this.attributeInterpolationMap = this.scanAttributeBindings();
+
+        // Handle click events
+        this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
+        this.boundHandleDomChange = function(event) { self.handleDomChange(event); };
+        this.boundHandleReactiveChange = function(event) { self.handleReactiveChange(event); };
+
+        // Add listeners using the stored references
+        this.container.addEventListener('pac:dom:click', this.boundHandleDomClicks);
+        this.container.addEventListener('pac:dom:change', this.boundHandleDomChange);
+        this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
+
+        // First time setup
+        this.textInterpolationMap.forEach((mappingData, textNode) => {
+            self.domUpdater.updateTextNode(textNode, mappingData.template, self.abstraction);
+        });
+
+        this.attributeInterpolationMap.forEach(mappingData => {
+            const { element, bindings } = mappingData;
+
+            bindings.forEach(binding => {
+                self.domUpdater.updateAttributeBinding(element, binding, self.abstraction);
+            })
+        });
+    }
+
+    Context.prototype.destroy = function() {
+        // Now you can remove them
+        this.container.removeEventListener('pac:dom:click', this.boundHandleDomClicks);
+        this.container.removeEventListener('pac:dom:change', this.boundHandleDomChange);
+        this.container.removeEventListener('pac:change', this.boundHandleReactiveChange);
+
+        // Clear references
+        this.boundHandleDomClicks = null;
+        this.boundHandleDomChange = null;
+        this.boundHandleReactiveChange = null;
+    }
+
+    Context.prototype.uniqid = function(prefix = "", random = false) {
+        const sec = Date.now() * 1000 + Math.random() * 1000;
+        const id = sec.toString(16).replace(/\./g, "").padEnd(14, "0");
+        return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
+    }
+
+    Context.prototype.getDependencies = function() {
+        const dependencies = new Map();
+        const computed = this.originalAbstraction.computed || {};
+        const accessed = new Set();
+
+        const proxy = new Proxy(this.originalAbstraction, {
+            get(target, prop) {
+                if (typeof prop === 'string') {
+                    accessed.add(prop);
+                }
+                return target[prop];
+            }
+        });
+
+        Object.keys(computed).forEach(name => {
+            accessed.clear();
+            computed[name].call(proxy);
+
+            // For each accessed property, add this computed property as a dependent
+            accessed.forEach(prop => {
+                if (!dependencies.has(prop)) {
+                    dependencies.set(prop, []);
+                }
+
+                dependencies.get(prop).push(name);
+            });
+        });
+
+        return dependencies;
+    };
+
+    Context.prototype.handleAttributeChanges = function(event, pathsToCheck) {
+        const self = this;
+
+        this.attributeInterpolationMap.forEach(mappingData => {
+            const { element, bindings } = mappingData;
+
+            // Check each binding individually and only update those that need it
+            bindings.forEach(binding => {
+                // Check if any of the paths that changed affect this node
+                if (binding.dependencies.some(dependency =>
+                    pathsToCheck.includes(dependency)
+                )) {
+                    self.domUpdater.updateAttributeBinding(element, binding, self.abstraction);
+                }
+            });
+        });
+    };
+
+    Context.prototype.handleTextInterpolation = function(event, pathsToCheck) {
+        const self = this;
+
+        self.textInterpolationMap.forEach((mappingData, textNode) => {
+            // Check if any of the paths that changed affect this node
+            if (mappingData.dependencies.some(dep =>
+                pathsToCheck.includes(dep)
+            )) {
+                self.domUpdater.updateTextNode(textNode, mappingData.template, self.abstraction);
+            }
+        });
+    };
+
+    Context.prototype.handleDomClicks = function(event) {
+        const self = this;
+
+        // Find the corresponding click bindings from the pre-scanned map by matching the element
+        const clickBinding = this.clickInterpolationMap.find(binding =>
+            binding.element === event.detail.target
+        );
+
+        // If no click bindings found for this element, return early
+        if (!clickBinding || clickBinding.bindings.length === 0) {
+            return;
+        }
+
+        // Execute all the click functions from the pre-scanned bindings
+        clickBinding.bindings.forEach(function (binding) {
+            // Fetch target function from abstraction
+            const method = self.abstraction[binding.target];
+
+            // Check if the function is inside the abstraction. If so, call it
+            if (typeof method === 'function') {
+                try {
+                    method.call(self.abstraction, event);
+                } catch (error) {
+                    console.error(`Error executing click binding '${binding.target}':`, error);
+                }
+            }
+        });
+    };
+
+    Context.prototype.handleDomChange = function(event) {
+        const self = this;
+        const parsed = ExpressionParser.parseBindingString(event.detail.bindString);
+
+        parsed.forEach(function(binding) {
+            if (binding.type === 'value' && binding.target) {
+                if (binding.target in self.abstraction) {
+                    self.abstraction[binding.target] = event.detail.value;
+                }
+            }
+        });
+    }
+
+    Context.prototype.handleReactiveChange = function(event) {
+        // Add dependencies to path
+        const pathString = event.detail.path.join('.');
+        const pathsToCheck = [pathString];
+
+        if (this.dependencies.has(pathString)) {
+            pathsToCheck.push(...this.dependencies.get(pathString));
+        }
+
+        this.handleTextInterpolation(event, pathsToCheck);
+        this.handleAttributeChanges(event, pathsToCheck);
+    }
+
+    /**
+     * Scans the container for text nodes containing interpolation expressions and builds
+     * a mapping of nodes to their templates and dependencies.
+     * @returns {Map<Node, {template: string, dependencies: string[]}>}
+     */
+    Context.prototype.scanTextBindings = function() {
+        const interpolationMap = new Map();
+
+        // Create tree walker to find text nodes with interpolation expressions
+        const walker = document.createTreeWalker(
+            this.container,
+            NodeFilter.SHOW_TEXT,
+            { acceptNode: node => INTERPOLATION_TEST_REGEX.test(node.textContent) ?
+                    NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }
+        );
+
+        // Walk through matching text nodes that belong to this container
+        let node;
+
+        while ((node = walker.nextNode())) {
+            if (Utils.belongsToThisContainer(this.container, node)) {
+                const template = node.textContent;
+                const dependencies = this.extractInterpolationDependencies(template);
+                interpolationMap.set(node, { template, dependencies });
+            }
+        }
+
+        return interpolationMap;
+    };
+
+    /**
+     * Scans the container for elements with data-pac-bind attributes and extracts
+     * their binding information along with expression dependencies.
+     * @returns {Array<Object>}
+     */
+    Context.prototype.scanAttributeBindings = function() {
+        const self = this;
+        const elements = this.container.querySelectorAll('[data-pac-bind]');
+        const interpolationMap = [];
+
+        elements.forEach(element => {
+            // Skip elements that don't belong to this container
+            if (!Utils.belongsToThisContainer(self.container, element)) {
+                return;
+            }
+
+            const bindingString = element.getAttribute('data-pac-bind');
+            const bindings = ExpressionParser.parseBindingString(bindingString);
+
+            // Filter out event handlers and foreach loops, keep only data bindings
+            const dataBindings = bindings.filter(binding =>
+                binding.type !== 'click' &&
+                binding.type !== 'foreach' &&
+                binding.target
+            );
+
+            if (dataBindings.length === 0) {
+                return;
+            }
+
+            // Parse expression dependencies for each binding
+            const bindingsWithDependencies = dataBindings.map(binding => ({
+                ...binding,
+                dependencies: this.extractDependencies(binding.target)
+            }));
+
+            interpolationMap.push({
+                element,
+                bindingString,
+                bindings: bindingsWithDependencies
+            });
+        });
+
+        return interpolationMap;
+    };
+
+    /**
+     * Scans the container for elements with data-pac-bind attributes and extracts
+     * only their click binding information along with expression dependencies.
+     * @returns {Array<Object>}
+     */
+    Context.prototype.scanClickBindings = function() {
+        const self = this;
+        const elements = this.container.querySelectorAll('[data-pac-bind]');
+        const clickBindingsMap = [];
+
+        elements.forEach(element => {
+            // Skip elements that don't belong to this container
+            if (!Utils.belongsToThisContainer(self.container, element)) {
+                return;
+            }
+
+            // Filter to keep only click bindings
+            const bindingString = element.getAttribute('data-pac-bind');
+            const bindings = ExpressionParser.parseBindingString(bindingString);
+            const clickBindings = bindings.filter(binding => binding.type === 'click');
+
+            if (clickBindings.length === 0) {
+                return;
+            }
+
+            // Parse expression dependencies for each click binding
+            const bindingsWithDependencies = clickBindings.map(binding => ({
+                ...binding,
+                dependencies: this.extractDependencies(binding.target)
+            }));
+
+            clickBindingsMap.push({
+                element,
+                bindingString,
+                bindings: bindingsWithDependencies
+            });
+        });
+
+        return clickBindingsMap;
+    };
+
+    /**
+     * Extracts all unique dependencies from interpolation expressions in a text template.
+     * @param {string} template - The text template containing interpolation expressions
+     * @returns {Array<string>} Array of unique dependency identifiers
+     * @private
+     */
+    Context.prototype.extractInterpolationDependencies = function(template) {
+        const dependencies = new Set();
+
+        template.replace(INTERPOLATION_REGEX, (match, expression) => {
+            const expressionDependencies = this.extractDependencies(expression.trim());
+            expressionDependencies.forEach(dep => dependencies.add(dep));
+            return match; // Return match to satisfy replace callback
+        });
+
+        return Array.from(dependencies);
+    };
+
+    /**
+     * Extracts dependencies from a binding expression, with error handling.
+     * @param {string} expression - The binding expression to parse
+     * @returns {Array<string>} Array of dependency identifiers
+     * @private
+     */
+    Context.prototype.extractDependencies = function(expression) {
+        try {
+            const parsed = ExpressionParser.parseExpression(expression);
+            return parsed?.dependencies || [];
+        } catch (error) {
+            console.warn('Failed to parse binding dependencies:', expression, error);
+            return [];
+        }
+    };
+
+    /**
+     * Setup reactive properties for this container
+     * @returns {*|object}
+     */
+    Context.prototype.createReactiveAbstraction = function() {
+        const reactive = {};
+        const self = this;
+
+        // First, create the reactive proxy with an empty object
+        const proxiedReactive = makeDeepReactiveProxy(reactive, this.container);
+
+        // Then set all properties through the proxy so they become reactive
+        Object.keys(this.originalAbstraction).forEach(function (key) {
+            if (key !== 'computed' && typeof self.originalAbstraction[key] !== 'function') {
+                proxiedReactive[key] = self.originalAbstraction[key];  // This triggers the proxy setter
+            }
+        });
+
+        // Add methods
+        Object.keys(this.originalAbstraction).forEach(function (key) {
+            if (typeof self.originalAbstraction[key] === 'function' && key !== 'computed') {
+                proxiedReactive[key] = self.originalAbstraction[key].bind(proxiedReactive);
+            }
+        });
+
+        // Add computed properties as getters
+        const computed = this.originalAbstraction.computed || {};
+        Object.keys(computed).forEach(function (computedName) {
+            Object.defineProperty(proxiedReactive, computedName, {
+                get: function () {
+                    return computed[computedName].call(proxiedReactive);
+                },
+                enumerable: true,
+                configurable: true
+            });
+        });
+
+        return proxiedReactive;
+    };
+
+    // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
+
     function wakaPAC(selector, abstraction, options) {
+        // Initialize global event tracking first
+        DomUpdateTracker.initialize();
+
         // Fetch selector
         const container = document.querySelector(selector);
 
@@ -1592,14 +1948,7 @@
             selector: selector,
             container: container,
             config: config,
-            original_abstraction: abstraction,
-            abstraction: null,
-            dependencies: [],
-            dom_updater: null,
-            dom_update_tracker: null,
-            clickInterpolationMap: null,
-            textInterpolationMap: null,
-            attributeInterpolationMap: null,
+            context: new Context(container, abstraction),
 
             /**
              * Constructor
@@ -1607,349 +1956,8 @@
              */
             initialize: function () {
                 const self = this;
-
-                // Make abstraction reactive
-                this.abstraction = this.createReactiveAbstraction();
-                this.dom_updater = new DomUpdater(this.container);
-                this.dom_update_tracker = new DomUpdateTracker(container);
-                this.dependencies = this.getDependencies();
-                this.clickInterpolationMap = this.scanClickBindings();
-                this.textInterpolationMap = this.scanTextBindings();
-                this.attributeInterpolationMap = this.scanAttributeBindings();
-
-                // Handle click events
-                this.container.addEventListener('pac:dom:click', function (event) {
-                    self.handleDomClicks(event);
-                });
-
-                // Handle DOM change events
-                this.container.addEventListener('pac:dom:change', function (event) {
-                    const parsed = ExpressionParser.parseBindingString(event.detail.bindString);
-
-                    parsed.forEach(function(binding) {
-                        if (binding.type === 'value' && binding.target) {
-                            if (binding.target in self.abstraction) {
-                                self.abstraction[binding.target] = event.detail.value;
-                            }
-                        }
-                    });
-                });
-
-                // Handle reactive property changes
-                this.container.addEventListener('pac:change', function (event) {
-                    // Add dependencies to path
-                    const pathString = event.detail.path.join('.');
-                    const pathsToCheck = [pathString];
-
-                    if (self.dependencies.has(pathString)) {
-                        pathsToCheck.push(...self.dependencies.get(pathString));
-                    }
-
-                    self.handleTextInterpolation(event, pathsToCheck);
-                    self.handleAttributeChanges(event, pathsToCheck);
-                });
-
-                // Setup first values
-                self.textInterpolationMap.forEach((mappingData, textNode) => {
-                    self.dom_updater.updateTextNode(textNode, mappingData.template, self.abstraction);
-                });
-
-                this.attributeInterpolationMap.forEach(mappingData => {
-                    const { element, bindings } = mappingData;
-
-                    bindings.forEach(binding => {
-                        self.dom_updater.updateAttributeBinding(element, binding, self.abstraction);
-                    })
-                });
-
                 return this;
-            },
-
-            getDependencies() {
-                const dependencies = new Map();
-                const computed = this.original_abstraction.computed || {};
-                const accessed = new Set();
-
-                const proxy = new Proxy(this.original_abstraction, {
-                    get(target, prop) {
-                        if (typeof prop === 'string') {
-                            accessed.add(prop);
-                        }
-
-                        return target[prop];
-                    }
-                });
-
-                Object.keys(computed).forEach(name => {
-                    accessed.clear();
-                    computed[name].call(proxy);
-
-                    // For each accessed property, add this computed property as a dependent
-                    accessed.forEach(prop => {
-                        if (!dependencies.has(prop)) {
-                            dependencies.set(prop, []);
-                        }
-
-                        dependencies.get(prop).push(name);
-                    });
-                });
-
-                return dependencies;
-            },
-
-            handleAttributeChanges(event, pathsToCheck) {
-                const self = this;
-
-                this.attributeInterpolationMap.forEach(mappingData => {
-                    const { element, bindings } = mappingData;
-
-                    // Check each binding individually and only update those that need it
-                    bindings.forEach(binding => {
-                        // Check if any of the paths that changed affect this node
-                        if (binding.dependencies.some(dependency =>
-                            pathsToCheck.includes(dependency)
-                        )) {
-                            self.dom_updater.updateAttributeBinding(element, binding, self.abstraction);
-                        }
-                    });
-                });
-            },
-
-            handleTextInterpolation(event, pathsToCheck) {
-                const self = this;
-
-                self.textInterpolationMap.forEach((mappingData, textNode) => {
-                    // Check if any of the paths that changed affect this node
-                    if (mappingData.dependencies.some(dep =>
-                        pathsToCheck.includes(dep)
-                    )) {
-                        self.dom_updater.updateTextNode(textNode, mappingData.template, self.abstraction);
-                    }
-                });
-            },
-
-            handleDomClicks(event) {
-                const self = this;
-
-                // Find the corresponding click bindings from the pre-scanned map by matching the element
-                const clickBinding = this.clickInterpolationMap.find(binding =>
-                    binding.element === event.detail.target
-                );
-
-                // If no click bindings found for this element, return early
-                if (!clickBinding || clickBinding.bindings.length === 0) {
-                    return;
-                }
-
-                // Execute all the click functions from the pre-scanned bindings
-                clickBinding.bindings.forEach(function (binding) {
-                    // Fetch target function from abstraction
-                    const method = self.abstraction[binding.target];
-
-                    // Check if the function is inside the abstraction. If so, call it
-                    if (typeof method === 'function') {
-                        try {
-                            method.call(self.abstraction, event);
-                        } catch (error) {
-                            console.error(`Error executing click binding '${binding.target}':`, error);
-                        }
-                    }
-                });
-            },
-
-            /**
-             * Scans the container for text nodes containing interpolation expressions and builds
-             * a mapping of nodes to their templates and dependencies.
-             * @returns {Map<Node, {template: string, dependencies: string[]}>}
-             */
-            scanTextBindings() {
-                const interpolationMap = new Map();
-
-                // Create tree walker to find text nodes with interpolation expressions
-                const walker = document.createTreeWalker(
-                    this.container,
-                    NodeFilter.SHOW_TEXT,
-                    { acceptNode: node => INTERPOLATION_TEST_REGEX.test(node.textContent) ?
-                            NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }
-                );
-
-                // Walk through matching text nodes that belong to this container
-                let node;
-
-                while ((node = walker.nextNode()) && Utils.belongsToThisContainer(this.container, node)) {
-                    const template = node.textContent;
-                    const dependencies = this.extractInterpolationDependencies(template);
-
-                    // Store the node mapping with template and unique dependencies
-                    interpolationMap.set(node, {
-                        template,
-                        dependencies
-                    });
-                }
-
-                return interpolationMap;
-            },
-
-            /**
-             * Scans the container for elements with data-pac-bind attributes and extracts
-             * their binding information along with expression dependencies.
-             * @returns {Array<Object>}
-             */
-            scanAttributeBindings() {
-                const self = this;
-                const elements = this.container.querySelectorAll('[data-pac-bind]');
-                const interpolationMap = [];
-
-                elements.forEach(element => {
-                    // Skip elements that don't belong to this container
-                    if (!Utils.belongsToThisContainer(self.container, element)) {
-                        return;
-                    }
-
-                    const bindingString = element.getAttribute('data-pac-bind');
-                    const bindings = ExpressionParser.parseBindingString(bindingString);
-
-                    // Filter out event handlers and foreach loops, keep only data bindings
-                    const dataBindings = bindings.filter(binding =>
-                        binding.type !== 'click' &&
-                        binding.type !== 'foreach' &&
-                        binding.target
-                    );
-
-                    if (dataBindings.length === 0) {
-                        return;
-                    }
-
-                    // Parse expression dependencies for each binding
-                    const bindingsWithDependencies = dataBindings.map(binding => ({
-                        ...binding,
-                        dependencies: this.extractDependencies(binding.target)
-                    }));
-
-                    interpolationMap.push({
-                        element,
-                        bindingString,
-                        bindings: bindingsWithDependencies
-                    });
-                });
-
-                return interpolationMap;
-            },
-
-            /**
-             * Scans the container for elements with data-pac-bind attributes and extracts
-             * only their click binding information along with expression dependencies.
-             * @returns {Array<Object>}
-             */
-            scanClickBindings() {
-                const self = this;
-                const elements = this.container.querySelectorAll('[data-pac-bind]');
-                const clickBindingsMap = [];
-
-                elements.forEach(element => {
-                    // Skip elements that don't belong to this container
-                    if (!Utils.belongsToThisContainer(self.container, element)) {
-                        return;
-                    }
-
-                    // Filter to keep only click bindings
-                    const bindingString = element.getAttribute('data-pac-bind');
-                    const bindings = ExpressionParser.parseBindingString(bindingString);
-                    const clickBindings = bindings.filter(binding => binding.type === 'click');
-
-                    if (clickBindings.length === 0) {
-                        return;
-                    }
-
-                    // Parse expression dependencies for each click binding
-                    const bindingsWithDependencies = clickBindings.map(binding => ({
-                        ...binding,
-                        dependencies: this.extractDependencies(binding.target)
-                    }));
-
-                    clickBindingsMap.push({
-                        element,
-                        bindingString,
-                        bindings: bindingsWithDependencies
-                    });
-                });
-
-                return clickBindingsMap;
-            },
-
-            /**
-             * Extracts all unique dependencies from interpolation expressions in a text template.
-             * @param {string} template - The text template containing interpolation expressions
-             * @returns {Array<string>} Array of unique dependency identifiers
-             * @private
-             */
-            extractInterpolationDependencies(template) {
-                const dependencies = new Set();
-
-                template.replace(INTERPOLATION_REGEX, (match, expression) => {
-                    const expressionDependencies = this.extractDependencies(expression.trim());
-                    expressionDependencies.forEach(dep => dependencies.add(dep));
-                    return match; // Return match to satisfy replace callback
-                });
-
-                return Array.from(dependencies);
-            },
-
-            /**
-             * Extracts dependencies from a binding expression, with error handling.
-             * @param {string} expression - The binding expression to parse
-             * @returns {Array<string>} Array of dependency identifiers
-             * @private
-             */
-            extractDependencies(expression) {
-                try {
-                    const parsed = ExpressionParser.parseExpression(expression);
-                    return parsed?.dependencies || [];
-                } catch (error) {
-                    console.warn('Failed to parse binding dependencies:', expression, error);
-                    return [];
-                }
-            },
-
-            /**
-             * Setup reactive properties for this container
-             * @returns {*|object}
-             */
-            createReactiveAbstraction: function () {
-                const reactive = {};
-                const self = this;
-
-                // First, create the reactive proxy with an empty object
-                const proxiedReactive = makeDeepReactiveProxy(reactive, this.container);
-
-                // Then set all properties through the proxy so they become reactive
-                Object.keys(this.original_abstraction).forEach(function (key) {
-                    if (key !== 'computed' && typeof self.original_abstraction[key] !== 'function') {
-                        proxiedReactive[key] = self.original_abstraction[key];  // This triggers the proxy setter
-                    }
-                });
-
-                // Add methods
-                Object.keys(this.original_abstraction).forEach(function (key) {
-                    if (typeof self.original_abstraction[key] === 'function' && key !== 'computed') {
-                        proxiedReactive[key] = self.original_abstraction[key].bind(proxiedReactive);
-                    }
-                });
-
-                // Add computed properties as getters
-                const computed = this.original_abstraction.computed || {};
-                Object.keys(computed).forEach(function (computedName) {
-                    Object.defineProperty(proxiedReactive, computedName, {
-                        get: function () {
-                            return computed[computedName].call(proxiedReactive);
-                        },
-                        enumerable: true,
-                        configurable: true
-                    });
-                });
-
-                return proxiedReactive;
-            },
+            }
         };
 
         // Initialize control
