@@ -1406,128 +1406,10 @@
 
     function DomUpdater(container) {
         this.container = container;
-        this.textBindings = new Map();
-        this.attributeBindings = new Map();
-
-        this.setupEventListeners();
     }
 
-    DomUpdater.prototype.setupEventListeners = function () {
-        const self = this;
-
-        this.container.addEventListener('pac:property-changed', function (event) {
-            self.updateForProperty(event.detail.property);
-        });
-
-        this.container.addEventListener('pac:array-changed', function (event) {
-            self.updateForProperty(event.detail.property);
-        });
-
-        this.container.addEventListener('pac:computed-changed', function (event) {
-            self.updateForProperty(event.detail.property);
-        });
-    };
-
-    DomUpdater.prototype.belongsToThisContainer = function (element) {
-        if (element._pacContainerCheck === this.container) {
-            return true;
-        }
-
-        if (element._pacContainerCheck === false) {
-            return false;
-        }
-
-        let belongs;
-        if (element.nodeType === Node.TEXT_NODE) {
-            const parentElement = element.parentElement;
-            if (!parentElement) {
-                return false;
-            }
-            const closestContainer = parentElement.closest('[data-pac-container]');
-            belongs = closestContainer === this.container;
-        } else {
-            const closestContainer = element.closest('[data-pac-container]');
-            belongs = closestContainer === this.container;
-        }
-
-        element._pacContainerCheck = belongs ? this.container : false;
-        return belongs;
-    };
-
-    DomUpdater.prototype.scanAndRegister = function (context) {
-        this.scanTextBindings(context);
-        this.scanAttributeBindings(context);
-    };
-
-    DomUpdater.prototype.scanTextBindings = function (context) {
-        const walker = document.createTreeWalker(
-            this.container,
-            NodeFilter.SHOW_TEXT,
-            {
-                acceptNode: node => INTERPOLATION_TEST_REGEX.test(node.textContent) ?
-                    NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
-            }
-        );
-
-        let node;
-        while ((node = walker.nextNode())) {
-            if (this.belongsToThisContainer(node)) {
-                this.textBindings.set(node, node.textContent);
-                this.updateTextNode(node, context);
-            }
-        }
-    };
-
-    DomUpdater.prototype.scanAttributeBindings = function (context) {
-        const elements = this.container.querySelectorAll('[data-pac-bind]');
-
-        elements.forEach(element => {
-            if (!this.belongsToThisContainer(element)) {
-                return;
-            }
-
-            const bindingString = element.getAttribute('data-pac-bind');
-            const bindings = ExpressionParser.parseBindingString(bindingString);
-
-            const relevantBindings = bindings.filter(b =>
-                b.type !== 'click' && b.type !== 'foreach' && b.target
-            );
-
-            if (relevantBindings.length > 0) {
-                this.attributeBindings.set(element, relevantBindings);
-                relevantBindings.forEach(binding => {
-                    this.updateAttributeBinding(element, binding, context);
-                });
-            }
-        });
-    };
-
-    DomUpdater.prototype.updateForProperty = function (propertyName) {
-        const context = this.container._pacContext;
-        if (!context) {
-            return;
-        }
-
-        // Update text bindings
-        this.textBindings.forEach((originalText, node) => {
-            if (originalText.includes(propertyName)) {
-                this.updateTextNode(node, context);
-            }
-        });
-
-        // Update attribute bindings
-        this.attributeBindings.forEach((bindings, element) => {
-            bindings.forEach(binding => {
-                if (binding.target.includes(propertyName)) {
-                    this.updateAttributeBinding(element, binding, context);
-                }
-            });
-        });
-    };
-
-    DomUpdater.prototype.updateTextNode = function (node, context) {
-        const originalText = this.textBindings.get(node) || node.textContent;
-        const newText = originalText.replace(INTERPOLATION_REGEX, (match, expression) => {
+    DomUpdater.prototype.updateTextNode = function (element, template, context) {
+        const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
             try {
                 const parsed = ExpressionParser.parseExpression(expression.trim());
                 const result = ExpressionParser.evaluate(parsed, context);
@@ -1537,8 +1419,8 @@
             }
         });
 
-        if (node.textContent !== newText) {
-            node.textContent = newText;
+        if (element.textContent !== newText) {
+            element.textContent = newText;
         }
     };
 
@@ -1551,18 +1433,23 @@
                 case 'value':
                     this.applyValueBinding(element, value);
                     break;
+                    
                 case 'checked':
                     this.applyCheckedBinding(element, value);
                     break;
+                    
                 case 'visible':
                     this.applyVisibleBinding(element, value);
                     break;
+                    
                 case 'class':
                     this.applyClassBinding(element, value);
                     break;
+
                 case 'style':
                     this.applyStyleBinding(element, value);
                     break;
+
                 default:
                     this.applyAttributeBinding(element, binding.type, value);
                     break;
@@ -1672,8 +1559,11 @@
             original_abstraction: abstraction,
             abstraction: null,
             dependencies: [],
-            text_interpolation_map: null,
+            dom_updater: null,
             dom_update_tracker: null,
+            clickInterpolationMap: null,
+            textInterpolationMap: null,
+            attributeInterpolationMap: null,
 
             /**
              * Constructor
@@ -1684,70 +1574,40 @@
 
                 // Make abstraction reactive
                 this.abstraction = this.createReactiveAbstraction();
-                this.text_interpolation_map = this.scanTextBindings();
+                this.dom_updater = new DomUpdater(this.container);
                 this.dom_update_tracker = new DomUpdateTracker(container);
                 this.dependencies = this.getDependencies();
+                this.clickInterpolationMap = this.scanClickBindings();
+                this.textInterpolationMap = this.scanTextBindings();
+                this.attributeInterpolationMap = this.scanAttributeBindings();
 
-                // Execute click binds
+                // Handle click events
                 this.container.addEventListener('pac:dom:click', function (event) {
-                    // Do nothing if no bind was registered
-                    if (!event.detail.bind) {
-                        return;
-                    }
-
-                    // Parse the bind string
-                    const bindingPairs = ExpressionParser.parseBindingString(event.detail.bind);
-                    
-                    // Execute all the click functions
-                    bindingPairs.forEach(function (pair) {
-                        if (pair.type !== 'click') {
-                            return;
-                        }
-
-                        // Fetch target function from abstraction
-                        const method = self.abstraction[pair.target];
-                        
-                        // Check if the function is inside the abstraction. If so, call it
-                        if (typeof method === 'function') {
-                            try {
-                                method.call(self.abstraction, event);
-                            } catch (error) {
-                                console.error(`Error executing click binding '${pair.target}':`, error);
-                            }
-                        }
-                    });
+                    self.handleDomClicks(event);
                 });
 
-                // Text interpolation
+                // Handle reactive property changes
                 this.container.addEventListener('pac:change', function (event) {
+                    // Add dependencies to path
                     const pathString = event.detail.path.join('.');
-
-                    // Add dependencies if they exist
-                    let path = [pathString];
+                    const pathsToCheck = [pathString];
 
                     if (self.dependencies.has(pathString)) {
-                        path = path.concat(self.dependencies.get(pathString));
+                        pathsToCheck.push(...self.dependencies.get(pathString));
                     }
 
-                    for (let i = 0; i < path.length; ++i) {
-                        self.text_interpolation_map.forEach((template, textNode) => {
-                            if (template.includes(path[i])) {
-                                const newText = template.replace(/\{\{(.*?)}}/g, (match, expression) => {
-                                    try {
-                                        const parsed = ExpressionCache.parseExpression(expression.trim());
-                                        const result = ExpressionParser.evaluate(parsed, self.abstraction);
-                                        return result != null ? String(result) : '';
-                                    } catch (error) {
-                                        return match;
-                                    }
-                                });
+                    self.handleTextInterpolation(event, pathsToCheck);
+                    self.handleAttributeChanges(event, pathsToCheck);
+                });
 
-                                if (textNode.textContent !== newText) {
-                                    textNode.textContent = newText;
-                                }
-                            }
-                        });
-                    }
+                // Setup first values
+                self.textInterpolationMap.forEach((mappingData, textNode) => {
+                    self.dom_updater.updateTextNode(textNode, mappingData.template, self.abstraction);
+                });
+
+                this.attributeInterpolationMap.forEach(mappingData => {
+                    const {element, binding} = mappingData;
+                    self.dom_updater.updateAttributeBinding(element, binding, self.abstraction);
                 });
 
                 return this;
@@ -1785,23 +1645,212 @@
                 return dependencies;
             },
 
+            handleAttributeChanges(event, pathsToCheck) {
+                const self = this;
+
+                this.attributeInterpolationMap.forEach(mappingData => {
+                    const { element, bindings } = mappingData;
+
+                    // Check each binding individually and only update those that need it
+                    bindings.forEach(binding => {
+                        // Check if any of the paths that changed affect this node
+                        if (binding.dependencies.some(dependency =>
+                            pathsToCheck.includes(dependency)
+                        )) {
+                            self.dom_updater.updateAttributeBinding(element, binding, self.abstraction);
+                        }
+                    });
+                });
+            },
+
+            handleTextInterpolation(event, pathsToCheck) {
+                const self = this;
+
+                self.textInterpolationMap.forEach((mappingData, textNode) => {
+                    // Check if any of the paths that changed affect this node
+                    if (mappingData.dependencies.some(dep =>
+                        pathsToCheck.includes(dep)
+                    )) {
+                        self.dom_updater.updateTextNode(textNode, mappingData.template, self.abstraction);
+                    }
+                });
+            },
+
+            handleDomClicks(event) {
+                const self = this;
+
+                // Find the corresponding click bindings from the pre-scanned map by matching the element
+                const clickBinding = this.clickInterpolationMap.find(binding =>
+                    binding.element === event.detail.target
+                );
+
+                // If no click bindings found for this element, return early
+                if (!clickBinding || clickBinding.bindings.length === 0) {
+                    return;
+                }
+
+                // Execute all the click functions from the pre-scanned bindings
+                clickBinding.bindings.forEach(function (binding) {
+                    // Fetch target function from abstraction
+                    const method = self.abstraction[binding.target];
+
+                    // Check if the function is inside the abstraction. If so, call it
+                    if (typeof method === 'function') {
+                        try {
+                            method.call(self.abstraction, event);
+                        } catch (error) {
+                            console.error(`Error executing click binding '${binding.target}':`, error);
+                        }
+                    }
+                });
+            },
+
+            /**
+             * Scans the container for text nodes containing interpolation expressions and builds
+             * a mapping of nodes to their templates and dependencies.
+             * @returns {Map<Node, {template: string, dependencies: string[]}>}
+             */
             scanTextBindings() {
-                const map = new Map();
+                const interpolationMap = new Map();
+
+                // Create tree walker to find text nodes with interpolation expressions
                 const walker = document.createTreeWalker(
                     this.container,
                     NodeFilter.SHOW_TEXT,
-                    {
-                        acceptNode: node => INTERPOLATION_TEST_REGEX.test(node.textContent) ?
-                            NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
-                    }
+                    { acceptNode: node => INTERPOLATION_TEST_REGEX.test(node.textContent) ?
+                            NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }
                 );
 
+                // Walk through matching text nodes that belong to this container
                 let node;
-                while ((node = walker.nextNode())) {
-                    map.set(node, node.textContent);
+
+                while ((node = walker.nextNode()) && this.belongsToThisContainer(node)) {
+                    const template = node.textContent;
+                    const dependencies = this.extractInterpolationDependencies(template);
+
+                    // Store the node mapping with template and unique dependencies
+                    interpolationMap.set(node, {
+                        template,
+                        dependencies
+                    });
                 }
 
-                return map;
+                return interpolationMap;
+            },
+
+            /**
+             * Scans the container for elements with data-pac-bind attributes and extracts
+             * their binding information along with expression dependencies.
+             * @returns {Array<Object>}
+             */
+            scanAttributeBindings() {
+                const elements = this.container.querySelectorAll('[data-pac-bind]');
+                const interpolationMap = [];
+
+                elements.forEach(element => {
+                    // Skip elements that don't belong to this container
+                    if (!this.belongsToThisContainer(element)) return;
+
+                    const bindingString = element.getAttribute('data-pac-bind');
+                    const bindings = ExpressionParser.parseBindingString(bindingString);
+
+                    // Filter out event handlers and foreach loops, keep only data bindings
+                    const dataBindings = bindings.filter(binding =>
+                        binding.type !== 'click' &&
+                        binding.type !== 'foreach' &&
+                        binding.target
+                    );
+
+                    if (dataBindings.length === 0) return;
+
+                    // Parse expression dependencies for each binding
+                    const bindingsWithDependencies = dataBindings.map(binding => ({
+                        ...binding,
+                        dependencies: this.extractDependencies(binding.target)
+                    }));
+
+                    interpolationMap.push({
+                        element,
+                        bindingString,
+                        bindings: bindingsWithDependencies
+                    });
+                });
+
+                return interpolationMap;
+            },
+
+            /**
+             * Scans the container for elements with data-pac-bind attributes and extracts
+             * only their click binding information along with expression dependencies.
+             * @returns {Array<Object>}
+             */
+            scanClickBindings() {
+                const elements = this.container.querySelectorAll('[data-pac-bind]');
+                const clickBindingsMap = [];
+
+                elements.forEach(element => {
+                    // Skip elements that don't belong to this container
+                    if (!this.belongsToThisContainer(element)) {
+                        return;
+                    }
+
+                    // Filter to keep only click bindings
+                    const bindingString = element.getAttribute('data-pac-bind');
+                    const bindings = ExpressionParser.parseBindingString(bindingString);
+                    const clickBindings = bindings.filter(binding => binding.type === 'click');
+
+                    if (clickBindings.length === 0) {
+                        return;
+                    }
+
+                    // Parse expression dependencies for each click binding
+                    const bindingsWithDependencies = clickBindings.map(binding => ({
+                        ...binding,
+                        dependencies: this.extractDependencies(binding.target)
+                    }));
+
+                    clickBindingsMap.push({
+                        element,
+                        bindingString,
+                        bindings: bindingsWithDependencies
+                    });
+                });
+
+                return clickBindingsMap;
+            },
+
+            /**
+             * Extracts all unique dependencies from interpolation expressions in a text template.
+             * @param {string} template - The text template containing interpolation expressions
+             * @returns {Array<string>} Array of unique dependency identifiers
+             * @private
+             */
+            extractInterpolationDependencies(template) {
+                const dependencies = new Set();
+
+                template.replace(INTERPOLATION_REGEX, (match, expression) => {
+                    const expressionDependencies = this.extractDependencies(expression.trim());
+                    expressionDependencies.forEach(dep => dependencies.add(dep));
+                    return match; // Return match to satisfy replace callback
+                });
+
+                return Array.from(dependencies);
+            },
+
+            /**
+             * Extracts dependencies from a binding expression, with error handling.
+             * @param {string} expression - The binding expression to parse
+             * @returns {Array<string>} Array of dependency identifiers
+             * @private
+             */
+            extractDependencies(expression) {
+                try {
+                    const parsed = ExpressionParser.parseExpression(expression);
+                    return parsed?.dependencies || [];
+                } catch (error) {
+                    console.warn('Failed to parse binding dependencies:', expression, error);
+                    return [];
+                }
             },
 
             /**
@@ -1842,6 +1891,37 @@
                 });
 
                 return proxiedReactive;
+            },
+
+            belongsToThisContainer(element) {
+                // Cache the result since this gets called repeatedly
+                if (element._pacContainerCheck === this.container) {
+                    return true;
+                }
+
+                if (element._pacContainerCheck) {
+                    return false;
+                }
+
+                let belongs;
+
+                if (element.nodeType === Node.TEXT_NODE) {
+                    const parentElement = element.parentElement;
+
+                    if (!parentElement) {
+                        return false;
+                    }
+
+                    const closestContainer = parentElement.closest('[data-pac-container]');
+                    belongs = closestContainer === this.container;
+                } else {
+                    const closestContainer = element.closest('[data-pac-container]');
+                    belongs = closestContainer === this.container;
+                }
+
+                // Cache the result
+                element._pacContainerCheck = belongs ? this.container : false;
+                return belongs;
             }
         };
 
