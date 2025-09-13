@@ -316,12 +316,7 @@
             });
 
             document.addEventListener('change', function (event) {
-                self.dispatchTrackedEvent('pac:dom:change', event, {
-                    elementType: event.target.type || event.target.tagName.toLowerCase(),
-                    elementName: event.target.name || null,
-                    value: self.getElementValue(event.target),
-                    checked: event.target.checked || null
-                });
+                self.dispatchTrackedEvent('pac:dom:change', event);
             });
 
             document.addEventListener('submit', function (event) {
@@ -353,26 +348,12 @@
                 elementType: originalEvent.target.type || originalEvent.target.tagName.toLowerCase(),
                 elementName: originalEvent.target.name || null,
                 target: originalEvent.target,
-                bind: originalEvent.target.getAttribute('data-pac-bind') ?? '',
                 value: Utils.readDOMValue(originalEvent.target),
                 originalEvent: originalEvent,
+                bindString: originalEvent.target.getAttribute('data-pac-bind') ?? '',
                 extra: extra
             }
         }));
-    };
-
-    DomUpdateTracker.prototype.getElementValue = function (element) {
-        if (element.type === 'checkbox' || element.type === 'radio') {
-            return element.checked;
-        }
-
-        if (element.tagName.toLowerCase() === 'select') {
-            return element.multiple ?
-                Array.from(element.selectedOptions).map(option => option.value) :
-                element.value;
-        }
-
-        return element.value || element.textContent || null;
     };
 
     // ============================================================================
@@ -1586,6 +1567,19 @@
                     self.handleDomClicks(event);
                 });
 
+                // Handle DOM change events
+                this.container.addEventListener('pac:dom:change', function (event) {
+                    const parsed = ExpressionParser.parseBindingString(event.detail.bindString);
+
+                    parsed.forEach(function(binding) {
+                        if (binding.type === 'value' && binding.target) {
+                            if (binding.target in self.abstraction) {
+                                self.abstraction[binding.target] = event.detail.value;
+                            }
+                        }
+                    });
+                });
+
                 // Handle reactive property changes
                 this.container.addEventListener('pac:change', function (event) {
                     // Add dependencies to path
@@ -1606,8 +1600,11 @@
                 });
 
                 this.attributeInterpolationMap.forEach(mappingData => {
-                    const {element, binding} = mappingData;
-                    self.dom_updater.updateAttributeBinding(element, binding, self.abstraction);
+                    const { element, bindings } = mappingData;
+
+                    bindings.forEach(binding => {
+                        self.dom_updater.updateAttributeBinding(element, binding, self.abstraction);
+                    })
                 });
 
                 return this;
@@ -1749,7 +1746,9 @@
 
                 elements.forEach(element => {
                     // Skip elements that don't belong to this container
-                    if (!this.belongsToThisContainer(element)) return;
+                    if (!this.belongsToThisContainer(element)) {
+                        return;
+                    }
 
                     const bindingString = element.getAttribute('data-pac-bind');
                     const bindings = ExpressionParser.parseBindingString(bindingString);
@@ -1761,7 +1760,9 @@
                         binding.target
                     );
 
-                    if (dataBindings.length === 0) return;
+                    if (dataBindings.length === 0) {
+                        return;
+                    }
 
                     // Parse expression dependencies for each binding
                     const bindingsWithDependencies = dataBindings.map(binding => ({
