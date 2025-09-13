@@ -46,6 +46,43 @@
     const Utils = {
 
         /**
+         * Returns true if the element belongs to the given container
+         * @param container
+         * @param element
+         * @returns {boolean}
+         */
+        belongsToThisContainer(container, element) {
+            // Cache the result since this gets called repeatedly
+            if (element._pacContainerCheck === container) {
+                return true;
+            }
+
+            if (element._pacContainerCheck) {
+                return false;
+            }
+
+            let belongs;
+
+            if (element.nodeType === Node.TEXT_NODE) {
+                const parentElement = element.parentElement;
+
+                if (!parentElement) {
+                    return false;
+                }
+
+                const closestContainer = parentElement.closest('[data-pac-container]');
+                belongs = closestContainer === container;
+            } else {
+                const closestContainer = element.closest('[data-pac-container]');
+                belongs = closestContainer === container;
+            }
+
+            // Cache the result
+            element._pacContainerCheck = belongs ? container : false;
+            return belongs;
+        },
+
+        /**
          * Reads the current value from a DOM element (input, select, textarea, etc.)
          * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
          * @returns {string|boolean} The element's value (string for most inputs, boolean for checkboxes)
@@ -1721,7 +1758,7 @@
                 // Walk through matching text nodes that belong to this container
                 let node;
 
-                while ((node = walker.nextNode()) && this.belongsToThisContainer(node)) {
+                while ((node = walker.nextNode()) && Utils.belongsToThisContainer(this.container, node)) {
                     const template = node.textContent;
                     const dependencies = this.extractInterpolationDependencies(template);
 
@@ -1741,12 +1778,13 @@
              * @returns {Array<Object>}
              */
             scanAttributeBindings() {
+                const self = this;
                 const elements = this.container.querySelectorAll('[data-pac-bind]');
                 const interpolationMap = [];
 
                 elements.forEach(element => {
                     // Skip elements that don't belong to this container
-                    if (!this.belongsToThisContainer(element)) {
+                    if (!Utils.belongsToThisContainer(self.container, element)) {
                         return;
                     }
 
@@ -1786,12 +1824,13 @@
              * @returns {Array<Object>}
              */
             scanClickBindings() {
+                const self = this;
                 const elements = this.container.querySelectorAll('[data-pac-bind]');
                 const clickBindingsMap = [];
 
                 elements.forEach(element => {
                     // Skip elements that don't belong to this container
-                    if (!this.belongsToThisContainer(element)) {
+                    if (!Utils.belongsToThisContainer(self.container, element)) {
                         return;
                     }
 
@@ -1893,37 +1932,6 @@
 
                 return proxiedReactive;
             },
-
-            belongsToThisContainer(element) {
-                // Cache the result since this gets called repeatedly
-                if (element._pacContainerCheck === this.container) {
-                    return true;
-                }
-
-                if (element._pacContainerCheck) {
-                    return false;
-                }
-
-                let belongs;
-
-                if (element.nodeType === Node.TEXT_NODE) {
-                    const parentElement = element.parentElement;
-
-                    if (!parentElement) {
-                        return false;
-                    }
-
-                    const closestContainer = parentElement.closest('[data-pac-container]');
-                    belongs = closestContainer === this.container;
-                } else {
-                    const closestContainer = element.closest('[data-pac-container]');
-                    belongs = closestContainer === this.container;
-                }
-
-                // Cache the result
-                element._pacContainerCheck = belongs ? this.container : false;
-                return belongs;
-            }
         };
 
         // Initialize control
