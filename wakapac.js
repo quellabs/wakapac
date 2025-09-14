@@ -370,10 +370,17 @@
                 });
             });
 
+            // Change event (when input element loses focus)
             document.addEventListener('change', function (event) {
                 self.dispatchTrackedEvent('pac:dom:change', event);
             });
 
+            // Input event (when user types)
+            document.addEventListener('input', function (event) {
+                self.dispatchTrackedEvent('pac:dom:change', event);
+            });
+
+            // Submit event (when user submits form)
             document.addEventListener('submit', function (event) {
                 const formData = new FormData(event.target);
                 const formObject = Object.fromEntries(formData.entries());

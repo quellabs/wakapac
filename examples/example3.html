@@ -25,7 +25,9 @@
 
         computed: {
             isValid() {
-                return this.email.includes('@') && this.password.length >= 6;
+                const emailValid = this.email.includes('@');
+                const passwordValid = this.password.length >= 6;
+                return emailValid && passwordValid;
             }
         },
 
