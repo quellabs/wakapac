@@ -228,6 +228,7 @@
                 get: function (target, prop) {
                     const val = target[prop];
 
+                    // Handle array methods first (unchanged)
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
                             // For methods that add items, proxy the arguments first
@@ -266,6 +267,26 @@
                         };
                     }
 
+                    // Check if this property is a getter-only property (computed property)
+                    const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+
+                    if (descriptor && descriptor.get && !descriptor.set) {
+                        // This is a getter-only property (computed), return the value as-is
+                        // Don't try to make it reactive since it's computed from other reactive properties
+                        return val;
+                    }
+
+                    // Don't make functions reactive, just return them as-is
+                    if (typeof val === 'function') {
+                        return val;
+                    }
+
+                    // Check if the property already exists and is already reactive
+                    if (val && typeof val === 'object' && val._isReactive) {
+                        return val;
+                    }
+
+                    // Make nested objects reactive if they aren't already
                     if (val && typeof val === 'object' && !val._isReactive) {
                         const nestedPath = currentPath.concat([prop]);
                         target[prop] = createProxy(val, nestedPath);
@@ -1089,7 +1110,7 @@
             }
 
             if (path.indexOf('.') === -1) {
-                return obj[path];
+                return (path in obj) ? obj[path] : undefined;
             }
 
             const parts = path.split('.');
@@ -1527,25 +1548,45 @@
     };
 
     DomUpdater.prototype.applyStyleBinding = function (element, value) {
-        if (typeof value === 'string') {
-            element.setAttribute('style', value);
-        } else if (typeof value === 'object' && value !== null) {
-            Object.keys(value).forEach(property => {
-                element.style[property] = value[property];
+        // Object syntax: { color: 'red', fontSize: '16px' }
+        // Check if value is an object (preferred object syntax)
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            // Iterate through each style property in the object
+            Object.keys(value).forEach(styleProp => {
+                // Only set non-null/undefined values to avoid clearing styles accidentally
+                if (value[styleProp] != null) {
+                    // Check if this is a CSS custom property (starts with --)
+                    if (styleProp.startsWith('--')) {
+                        element.style.setProperty(styleProp, value[styleProp]); // CSS custom properties
+                    } else {
+                        element.style[styleProp] = value[styleProp]; // regular CSS properties
+                    }
+                }
             });
+
+            return;
+        }
+
+        // String syntax: "color: red; font-size: 16px;"
+        // Set the entire CSS text at once (less efficient but backwards compatible)
+        if (typeof value === 'string') {
+            element.style.cssText = value;
         }
     };
 
     DomUpdater.prototype.applyAttributeBinding = function (element, attribute, value) {
         const BOOLEAN_ATTRIBUTES = [
             'readonly', 'required', 'selected', 'checked',
-            'hidden', 'multiple', 'disabled', 'autofocus'
+            'hidden', 'multiple', 'autofocus'
         ];
 
-        if (BOOLEAN_ATTRIBUTES.includes(attribute)) {
+        if (attribute === 'enable') {
+            // Handle 'enable' as reverse of 'disabled'
+            element.toggleAttribute('disabled', !value);
+        } else if (BOOLEAN_ATTRIBUTES.includes(attribute)) {
             element.toggleAttribute(attribute, !!value);
         } else if (value != null) {
-            element.setAttribute(attribute, String(value));
+            element.setAttribute(attribute, value);
         } else {
             element.removeAttribute(attribute);
         }
