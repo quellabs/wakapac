@@ -218,108 +218,103 @@
     // ENHANCED REACTIVE PROXY WITH ARRAY-SPECIFIC EVENTS
     // ========================================================================
 
-    /**
-     * Creates a deep reactive proxy that enables hierarchical reactivity for objects and arrays.
-     * @param {*} value - The value to make reactive (object, array, or primitive)
-     * @param {Element} container - The DOM container that will receive change events
-     * @param {Context|null} parentContext - Parent context for hierarchical context management
-     * @returns {Proxy|*} A reactive proxy of the input value, or the value itself if not an object
-     */
-    function makeDeepReactiveProxy(value, container, parentContext = null) {
-        /**
-         * Array methods that modify the array content and require context lifecycle management.
-         */
+    function makeDeepReactiveProxy(value, container) {
         const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
 
-        /**
-         * Routes object/array creation to appropriate handler.
-         * @param {Object|Array} obj - The object or array to make reactive
-         * @param {string[]} currentPath - Path from root to current object
-         * @returns {Object} Reactive proxy or array context
-         */
         function createProxy(obj, currentPath) {
             currentPath = currentPath || [];
 
-            // Arrays require special handling with hierarchical contexts
-            // Each array gets its own isolated context to manage its reactive scope
-            if (Array.isArray(obj)) {
-                return createArrayContext(obj, container, parentContext, currentPath);
-            } else {
-                return createObjectProxy(obj, currentPath);
-            }
-        }
-
-        /**
-         * Creates a reactive proxy for objects (non-arrays).
-         * Handles property access, mutations, and special cases like computed properties.
-         * @param {Object} obj - The object to make reactive
-         * @param {string[]} currentPath - Path from root to current object
-         * @returns {Object} Reactive proxy of the object
-         */
-        function createObjectProxy(obj, currentPath) {
             return new Proxy(obj, {
-                /**
-                 * Intercepts property access to provide reactive behavior.
-                 *
-                 * @param {Object} target - The target object being proxied
-                 * @param {string|Symbol} prop - The property being accessed
-                 * @returns {*} The property value, potentially wrapped or modified for reactivity
-                 */
                 get: function (target, prop) {
                     const val = target[prop];
 
-                    // Skip array context creation for 'items' property in array contexts
-                    if (Array.isArray(val) && prop === 'items' && parentContext && parentContext.parent) {
-                        // This is the 'items' reference in an array context - return as-is
-                        return val;
-                    }
+                    // Handle array methods first
+                    if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
+                        return function () {
+                            // For methods that add items, proxy the arguments first
+                            if (prop === 'push' || prop === 'unshift') {
+                                for (let i = 0; i < arguments.length; i++) {
+                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
+                                        arguments[i] = createProxy(arguments[i], currentPath.concat([target.length + i]));
+                                        arguments[i]._isReactive = true;
+                                    }
+                                }
+                            } else if (prop === 'splice' && arguments.length > 2) {
+                                // For splice, items to add start at index 2
+                                for (let i = 2; i < arguments.length; i++) {
+                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
+                                        arguments[i] = createProxy(arguments[i], currentPath.concat([arguments[0] + i - 2]));
+                                        arguments[i]._isReactive = true;
+                                    }
+                                }
+                            }
 
-                    // If assigning a new array, create context for it
-                    if (Array.isArray(val) && !val._hasContext) {
-                        return createArrayContext(val, container, parentContext, currentPath.concat([prop]));
+                            const oldArray = Array.prototype.slice.call(target);
+                            const result = Array.prototype[prop].apply(target, arguments);
+                            const newArray = Array.prototype.slice.call(target);
+
+                            // Dispatch array-specific event
+                            container.dispatchEvent(new CustomEvent("pac:array-change", {
+                                detail: {
+                                    path: currentPath,
+                                    oldValue: oldArray,
+                                    newValue: newArray,
+                                    method: prop
+                                }
+                            }));
+
+                            return result;
+                        };
                     }
 
                     // Check if this property is a getter-only property (computed property)
                     const descriptor = Object.getOwnPropertyDescriptor(target, prop);
-
                     if (descriptor && descriptor.get && !descriptor.set) {
-                        // This is a computed property - return the evaluated value directly
+                        // This is a getter-only property (computed), return the value as-is
                         return val;
                     }
 
-                    // Functions should not be made reactive - return them unchanged
+                    // Don't make functions reactive, just return them as-is
                     if (typeof val === 'function') {
                         return val;
                     }
 
-                    // For all other values, return as-is
-                    // Key principle: no side effects on property access
+                    // Return the value directly - no lazy wrapping
                     return val;
                 },
 
-                /**
-                 * Intercepts property assignment to maintain reactivity on new values.
-                 * @param {Object} target - The target object being modified
-                 * @param {string|Symbol} prop - The property being set
-                 * @param {*} newValue - The new value being assigned
-                 * @returns {boolean} Always returns true to indicate successful assignment
-                 */
                 set: function (target, prop, newValue) {
                     const oldValue = target[prop];
+                    const propertyPath = currentPath.concat([prop]);
 
-                    // If assigning a new array, create a context for it immediately
-                    if (Array.isArray(newValue)) {
-                        target[prop] = createArrayContext(newValue, container, parentContext, currentPath.concat([prop]));
+                    if (oldValue === newValue) {
+                        return true;
+                    }
+
+                    // Wrap objects and arrays in proxies when they're assigned
+                    if (newValue && typeof newValue === 'object') {
+                        target[prop] = createProxy(newValue, propertyPath);
+                        target[prop]._isReactive = true;
                     } else {
-                        // For non-arrays, assign the value directly
                         target[prop] = newValue;
                     }
 
-                    // Dispatch change event to trigger reactive updates in the DOM
+                    // Dispatch array-specific event if this is an array assignment
+                    if (Array.isArray(newValue)) {
+                        container.dispatchEvent(new CustomEvent("pac:array-change", {
+                            detail: {
+                                path: propertyPath,
+                                oldValue: oldValue,
+                                newValue: target[prop],
+                                method: 'assignment'
+                            }
+                        }));
+                    }
+
                     container.dispatchEvent(new CustomEvent("pac:change", {
                         detail: {
-                            path: currentPath.concat([prop]),
-                            oldValue,
+                            path: propertyPath,
+                            oldValue: oldValue,
                             newValue: target[prop]
                         }
                     }));
@@ -329,179 +324,11 @@
             });
         }
 
-        // Handle primitive values and null/undefined - return as-is
         if (!value || typeof value !== 'object') {
             return value;
         }
 
-        // Start the reactive proxy creation process
         return createProxy(value, []);
-    }
-
-    function createArrayContext(array, container, parentContext, path) {
-        // Don't create array contexts for child contexts (foreach items)
-        if (array._context ||
-            (parentContext && parentContext._analyzingDependencies)) {
-            return array;
-        }
-
-        // Store reference to original array methods before we override them
-        const originalArrayMethods = {};
-        const allMethods = ['filter', 'map', 'reduce', 'forEach', 'find', 'some', 'every', 'includes', 'indexOf', 'slice', 'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
-
-        allMethods.forEach(methodName => {
-            if (typeof array[methodName] === 'function') {
-                originalArrayMethods[methodName] = array[methodName].bind(array);
-            }
-        });
-
-        // Create isolated abstraction (no method inheritance)
-        const arrayAbstraction = {
-            items: array,
-            parent: parentContext,
-            originalMethods: originalArrayMethods,
-            parentContext: parentContext
-        };
-
-        // Create the context using the existing container (foreach template)
-        const childContext = new Context(container, arrayAbstraction, parentContext);
-
-        // Extend the actual array with context methods/properties
-        Object.defineProperty(array, '_context', {
-            value: childContext,
-            writable: false,
-            enumerable: false,
-            configurable: true
-        });
-
-        Object.defineProperty(array, 'parent', {
-            value: parentContext,
-            writable: false,
-            enumerable: false,
-            configurable: true
-        });
-
-        // Make the arrayContext behave like an array by proxying array methods to original methods
-        const readOnlyMethods = ['filter', 'map', 'reduce', 'forEach', 'find', 'some', 'every', 'includes', 'indexOf', 'slice'];
-
-        readOnlyMethods.forEach(methodName => {
-            array[methodName] = function(...args) {
-                // Use the original method stored in abstraction to avoid recursion
-                return this._context.abstraction.originalMethods[methodName](...args);
-            };
-        });
-
-        // Handle length property specially - check if it's configurable first
-        const lengthDescriptor = Object.getOwnPropertyDescriptor(array, 'length');
-        if (!lengthDescriptor || lengthDescriptor.configurable) {
-            Object.defineProperty(array, 'length', {
-                get() {
-                    return this._context ? this._context.abstraction.items.length : 0;
-                },
-                configurable: true
-            });
-        }
-
-        // Override array mutation methods to include lifecycle management
-        const mutationMethods = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
-
-        mutationMethods.forEach(methodName => {
-            array[methodName] = function(...args) {
-                const result = this._context.abstraction.originalMethods[methodName](...args);
-
-                destroyChildContexts(this);
-                recreateChildContexts(this, container, parentContext);
-
-                // Defer event dispatch to avoid intermediate state issues
-                setTimeout(() => {
-                    container.dispatchEvent(new CustomEvent("pac:array-change", {
-                        detail: {
-                            path,
-                            method: methodName,
-                            array: this,
-                            context: this._context
-                        }
-                    }));
-                }, 0);
-
-                return result;
-            };
-        });
-
-        return array;
-    }
-
-    /**
-     * Destroys all child contexts for arrays within the given parent array.
-     * Recursively destroys nested array contexts and cleans up their references.
-     * @param {Array} parentArray - The parent array containing potential child arrays with contexts
-     */
-    function destroyChildContexts(parentArray) {
-        if (!Array.isArray(parentArray)) {
-            return;
-        }
-
-        parentArray.forEach((item, index) => {
-            // If this item is an array with a context, destroy it
-            if (Array.isArray(item) && item._context) {
-                // Recursively destroy any nested child contexts first
-                destroyChildContexts(item);
-
-                // Destroy the context (this will clean up event listeners, etc.)
-                item._context.destroy();
-
-                // Clean up the context reference
-                delete item._context;
-                delete item._hasContext;
-
-                // Remove parent reference
-                if (item.parent) {
-                    delete item.parent;
-                }
-
-                // Restore original array methods if they were overridden
-                restoreOriginalArrayMethods(item);
-            }
-        });
-    }
-
-    /**
-     * Recreates child contexts for arrays within the given parent array.
-     * Only creates contexts for direct children, not nested arrays (those get their own contexts).
-     * @param {Array} parentArray - The parent array containing potential child arrays
-     * @param {Element} container - The DOM container for the new contexts
-     * @param {Context} parentContext - The parent context reference
-     */
-    function recreateChildContexts(parentArray, container, parentContext) {
-        if (!Array.isArray(parentArray)) {
-            return;
-        }
-
-        parentArray.forEach((item, index) => {
-            // If this item is an array and doesn't already have a context, create one
-            if (Array.isArray(item) && !item._context) {
-                const path = [index]; // Path from parent to this child array
-                createArrayContext(item, container, parentContext, path);
-            }
-        });
-    }
-
-    /**
-     * Restores original array methods that were overridden during context creation.
-     * This ensures clean destruction without leaving modified prototypes.
-     * @param {Array} array - The array to restore
-     */
-    function restoreOriginalArrayMethods(array) {
-        const originalMethods = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
-
-        originalMethods.forEach(methodName => {
-            // Restore to original Array.prototype method
-            if (Object.prototype.hasOwnProperty.call(array, methodName)) {
-                // Remove the overridden method
-                // The original Array.prototype method will be used automatically
-                delete array[methodName];
-            }
-        });
     }
 
     // ============================================================================
@@ -1280,32 +1107,17 @@
             }
 
             if (path.indexOf('.') === -1) {
-                // Check current object first
-                if (path in obj) {
-                    return obj[path];
-                }
-
-                // Check parent
-                if (obj.parent && obj.parent.abstraction) {
-                    return this.getProperty(path, obj.parent.abstraction);
-                }
-
-                return undefined;
+                return (path in obj) ? obj[path] : undefined;
             }
 
-            // Handle dot notation - same parent fallback logic
             const parts = path.split('.');
             let current = obj;
 
             for (let i = 0; i < parts.length; i++) {
                 if (current == null) {
-                    // Try parent context if we hit a dead end
-                    if (obj.parent && obj.parent.abstraction && i === 0) {
-                        return this.getProperty(path, obj.parent.abstraction);
-                    }
-
                     return undefined;
                 }
+
                 current = current[parts[i]];
             }
 
@@ -1799,20 +1611,15 @@
         this.textInterpolationMap = this.scanTextBindings();
         this.attributeInterpolationMap = this.scanAttributeBindings();
 
-        // Initialize foreaches
-        this.processForeachBindings();
-
         // Handle click events
         this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
         this.boundHandleDomChange = function(event) { self.handleDomChange(event); };
         this.boundHandleReactiveChange = function(event) { self.handleReactiveChange(event); };
-        this.boundHandleArrayChange = function(event) { self.handleArrayChange(event); };
 
         // Add listeners using the stored references
         this.container.addEventListener('pac:dom:click', this.boundHandleDomClicks);
         this.container.addEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
-        this.container.addEventListener('pac:array-change', this.boundHandleArrayChange);
 
         // First time setup
         this.textInterpolationMap.forEach((mappingData, textNode) => {
@@ -1833,7 +1640,6 @@
         this.container.removeEventListener('pac:dom:click', this.boundHandleDomClicks);
         this.container.removeEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.removeEventListener('pac:change', this.boundHandleReactiveChange);
-        this.container.removeEventListener('pac:array-change', this.boundHandleArrayChange);
 
         // Clear references
         this.boundHandleDomClicks = null;
@@ -1847,42 +1653,36 @@
         return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
     }
 
-    Context.prototype.getDependencies = function getDependencies() {
-        const dependencyMap = new Map();
-        const computedFunctions = this.originalAbstraction.computed || {};
+    Context.prototype.getDependencies = function() {
+        const dependencies = new Map();
+        const computed = this.originalAbstraction.computed || {};
+        const accessed = new Set();
 
-        // Prevent side effects during analysis
-        this._analyzingDependencies = true;
-
-        // For each computed property, track accessed props directly
-        Object.keys(computedFunctions).forEach((computedName) => {
-            const accessedProperties = new Set();
-
-            const proxy = new Proxy(this.originalAbstraction, {
-                get(target, property, receiver) {
-                    if (typeof property === "string") {
-                        accessedProperties.add(property); // record usage
-                    }
-                    return Reflect.get(target, property, receiver);
+        const proxy = new Proxy(this.originalAbstraction, {
+            get(target, prop) {
+                if (typeof prop === 'string') {
+                    accessed.add(prop);
                 }
-            });
+                return target[prop];
+            }
+        });
 
-            // Run the computed with proxy as "this"
-            computedFunctions[computedName].call(proxy);
+        Object.keys(computed).forEach(name => {
+            accessed.clear();
+            computed[name].call(proxy);
 
-            // Register dependencies: prop → computed(s)
-            accessedProperties.forEach((propertyName) => {
-                if (!dependencyMap.has(propertyName)) {
-                    dependencyMap.set(propertyName, []);
+            // For each accessed property, add this computed property as a dependent
+            accessed.forEach(prop => {
+                if (!dependencies.has(prop)) {
+                    dependencies.set(prop, []);
                 }
 
-                dependencyMap.get(propertyName).push(computedName);
+                dependencies.get(prop).push(name);
             });
         });
 
-        this._analyzingDependencies = false;
-        return dependencyMap;
-    }
+        return dependencies;
+    };
 
     Context.prototype.handleAttributeChanges = function(event, pathsToCheck) {
         const self = this;
@@ -1949,82 +1749,13 @@
         const parsed = ExpressionParser.parseBindingString(event.detail.bindString);
 
         parsed.forEach(function(binding) {
-            if ((binding.type === 'value' || binding.type === 'checked') && binding.target) {
-                // Update the property in this context
-                self.setNestedProperty(binding.target, event.detail.value);
-
-                // If this is a child context, notify parent that data changed
-                if (self.parent) {
-                    self.notifyParentOfChange(binding.target, event.detail.value);
+            if (binding.type === 'value' && binding.target) {
+                if (binding.target in self.abstraction) {
+                    self.abstraction[binding.target] = event.detail.value;
                 }
             }
         });
     }
-
-    /**
-     * Notifies parent context that child data has changed
-     * @param {string} path - Property path like 'todo.completed'
-     * @param {*} value - New value
-     */
-    Context.prototype.notifyParentOfChange = function(path, value) {
-        if (!this.parent) {
-            return;
-        }
-
-        // Use the stored parent array path instead of searching
-        const parentArrayPath = this.parentArrayPath;
-
-        if (parentArrayPath) {
-            // Dispatch a change event on the parent container to trigger parent reactivity
-            this.parent.container.dispatchEvent(new CustomEvent("pac:change", {
-                detail: {
-                    childChange: true,        // Flag to indicate this came from a child
-                    path: [parentArrayPath],  // Dynamic parent array path (e.g., 'todos', 'categories', etc.)
-                    oldValue: null,           // We don't track old values for child changes
-                    newValue: null,           // We don't have the full new value
-                    childPath: path,          // Original path in child context
-                    childValue: value         // Value that changed in child
-                }
-            }));
-        } else {
-            console.warn('No parent array path found for child context');
-        }
-    };
-
-    /**
-     * Sets a nested property value in the abstraction, handling dot notation
-     * @param {string} path - Property path like 'todo.completed' or 'simpleProperty'
-     * @param {*} value - Value to set
-     */
-    Context.prototype.setNestedProperty = function(path, value) {
-        if (!path) {
-            return;
-        }
-
-        const parts = path.split('.');
-        let current = this.abstraction;
-
-        // Navigate to the parent object
-        for (let i = 0; i < parts.length - 1; i++) {
-            const part = parts[i];
-
-            if (current[part] === undefined) {
-                console.warn(`Property path ${path} not found in abstraction`);
-                return;
-            }
-
-            current = current[part];
-        }
-
-        // Set the final property
-        const finalProperty = parts[parts.length - 1];
-
-        if (current && typeof current === 'object') {
-            current[finalProperty] = value;
-        } else {
-            console.warn(`Cannot set property ${finalProperty} on non-object:`, current);
-        }
-    };
 
     Context.prototype.handleReactiveChange = function(event) {
         // Add dependencies to path
@@ -2038,39 +1769,6 @@
         this.handleTextInterpolation(event, pathsToCheck);
         this.handleAttributeChanges(event, pathsToCheck);
     }
-
-    Context.prototype.handleArrayChange = function (event) {
-        const d = event && event.detail;
-
-        if (!d || !Array.isArray(d.path)) {
-            return;
-        }
-
-        const changedPath = d.path.join('.'); // e.g. "todos" or "app.todos"
-
-        this.container.querySelectorAll('[data-pac-bind*="foreach:"]').forEach((el) => {
-            if (!Utils.belongsToThisContainer(this.container, el)) {
-                return;
-            }
-
-            const bind = this.extractForeachBinding(el.getAttribute('data-pac-bind'));
-
-            if (!bind || !bind.target) {
-                return;
-            }
-
-            // exact or suffix match allows relative bindings
-            const matches = changedPath === bind.target || changedPath.endsWith('.' + bind.target);
-
-            if (matches) {
-                // Only render if this context actually has the target array
-                const array = this.abstraction[bind.target];
-                if (Array.isArray(array)) {
-                    this.renderForeachItems(el);
-                }
-            }
-        });
-    };
 
     /**
      * Scans the container for text nodes containing interpolation expressions and builds
@@ -2231,7 +1929,7 @@
         const self = this;
 
         // Create reactive proxy directly from original abstraction
-        const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container, this);
+        const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
 
         // Copy all methods from the original abstraction to the reactive proxy (except the special
         // 'computed' property which gets handled separately), but critically: rebind their 'this'
@@ -2257,219 +1955,6 @@
         });
 
         return proxiedReactive;
-    };
-
-    /**
-     * Scans for and processes all foreach bindings in the container
-     */
-    Context.prototype.processForeachBindings = function () {
-        const foreachElements = this.container.querySelectorAll('[data-pac-bind*="foreach:"]');
-
-        foreachElements.forEach(element => {
-            if (!Utils.belongsToThisContainer(this.container, element)) {
-                return;
-            }
-
-            const bindingString = element.getAttribute('data-pac-bind');
-            const foreachBinding = this.extractForeachBinding(bindingString);
-
-            if (foreachBinding) {
-                this.setupForeachBinding(element, foreachBinding);
-            }
-        });
-    };
-
-    /**
-     * Extracts foreach binding from a binding string
-     * @param {string} bindingString - The data-pac-bind attribute value
-     * @returns {Object|null} The foreach binding object or null
-     */
-    Context.prototype.extractForeachBinding = function(bindingString) {
-        const bindings = ExpressionParser.parseBindingString(bindingString);
-        return bindings.find(binding => binding.type === 'foreach') || null;
-    };
-
-    /**
-     * Sets up a foreach binding on an element
-     * @param {Element} element - The element with foreach binding
-     * @param {Object} binding - The parsed foreach binding
-     */
-    Context.prototype.setupForeachBinding = function(element, binding) {
-        // Skip if already processed
-        if (element._foreachData) {
-            return;
-        }
-
-        const arrayPath = binding.target; // e.g., 'todos'
-        const itemName = element.getAttribute('data-pac-item') || 'item'; // e.g., 'todo'
-        const indexName = element.getAttribute('data-pac-index') || 'index'; // e.g., 'index'
-
-        // Store the template (first child element, which becomes the repeated template)
-        const templateElement = element.children[0];
-
-        if (!templateElement) {
-            console.warn('Foreach element has no template child:', element);
-            return;
-        }
-
-        // Clone and store the template, then clear the container
-        const template = templateElement.cloneNode(true);
-        element.innerHTML = '';
-
-        // Store foreach metadata on the element
-        element._foreachData = {
-            arrayPath,
-            itemName,
-            indexName,
-            template,
-            renderedItems: []
-        };
-
-        // Initial render
-        try {
-            this.renderForeachItems(element);
-        } catch (error) {
-            console.error('⚙️ ERROR in renderForeachItems:', error);
-        }
-    };
-
-    /**
-     * Renders all items in a foreach binding
-     * @param {Element} foreachElement - The foreach container element
-     */
-    Context.prototype.renderForeachItems = function (foreachElement) {
-        const foreachData = foreachElement._foreachData;
-
-        if (!foreachData) {
-            return;
-        }
-
-        // Check if we're in an array context and should delegate to parent
-        if (this.abstraction.items && this.abstraction.parentContext) {
-            return this.abstraction.parentContext.renderForeachItems(foreachElement);
-        }
-
-        // Silent return - this context doesn't have the target array
-        const array = ExpressionParser.getProperty(foreachData.arrayPath, this.abstraction);
-
-        if (!Array.isArray(array)) {
-            return;
-        }
-
-        // Clear existing rendered items
-        this.clearForeachItems(foreachElement);
-
-        // Render each item
-        array.forEach((item, index) => {
-            this.renderForeachItem(foreachElement, item, index);
-        });
-    };
-
-    /**
-     * Renders a single item in a foreach binding
-     * @param {Element} foreachElement - The foreach container element
-     * @param {*} item - The array item data
-     * @param {number} index - The item index
-     */
-    Context.prototype.renderForeachItem = function(foreachElement, item, index) {
-        const foreachData = foreachElement._foreachData;
-
-        // Clone the template
-        const itemElement = foreachData.template.cloneNode(true);
-
-        // Create item-specific abstraction
-        const itemAbstraction = this.createItemAbstraction(item, index, foreachData);
-
-        // Create child context for this item
-        const itemContext = new Context(itemElement, itemAbstraction, this);
-
-        // Store the parent array path in the child context for notifications
-        itemContext.parentArrayPath = foreachData.arrayPath;
-
-        // Store the context reference
-        foreachData.renderedItems.push({
-            element: itemElement,
-            context: itemContext,
-            item: item,
-            index: index
-        });
-
-        // Add to DOM
-        foreachElement.appendChild(itemElement);
-    };
-
-    /**
-     * Creates an abstraction object for a foreach item
-     * @param {*} item - The array item
-     * @param {number} index - The item index
-     * @param {Object} foreachData - The foreach metadata
-     * @returns {Object} The item abstraction
-     */
-    Context.prototype.createItemAbstraction = function(item, index, foreachData) {
-        const baseAbstraction = {
-            // Add the item under its specified name (e.g., 'todo')
-            [foreachData.itemName]: item,
-
-            // Add the index under its specified name (e.g., 'index')
-            [foreachData.indexName]: index,
-
-            // Reference to parent context for data access
-            parent: this
-        };
-
-        // Return a proxy that falls back to parent for missing properties/methods
-        return new Proxy(baseAbstraction, {
-            get(target, prop) {
-                // If property exists on child, return it
-                if (prop in target) {
-                    return target[prop];
-                }
-
-                // Fall back to parent abstraction for methods and properties
-                const parentValue = target.parent.abstraction[prop];
-
-                if (typeof parentValue === 'function') {
-                    return function(...args) {
-                        // Always inject item and index for parent methods
-                        return parentValue.call(
-                            target.parent.abstraction,
-                            target[foreachData.itemName],
-                            target[foreachData.indexName],
-                            ...args
-                        );
-                    };
-                }
-                
-                // Return other parent properties as-is
-                return parentValue;
-            },
-
-            set(target, prop, value) {
-                target[prop] = value;
-                return true;
-            }
-        });
-    };
-
-    /**
-     * Clears all rendered items in a foreach binding
-     * @param {Element} foreachElement - The foreach container element
-     */
-    Context.prototype.clearForeachItems = function(foreachElement) {
-        const foreachData = foreachElement._foreachData;
-
-        if (!foreachData) {
-            return;
-        }
-
-        // Destroy all child contexts
-        foreachData.renderedItems.forEach(renderedItem => {
-            renderedItem.context.destroy();
-            renderedItem.element.remove();
-        });
-
-        // Clear the array
-        foreachData.renderedItems = [];
     };
 
     // ========================================================================
@@ -2504,7 +1989,6 @@
              * @returns {control}
              */
             initialize: function () {
-                const self = this;
                 return this;
             }
         };
