@@ -535,6 +535,8 @@
                 return;
             }
 
+            this._initialized = true;
+
             document.addEventListener('click', function (event) {
                 self.dispatchTrackedEvent('pac:dom:click', event, {
                     clientX: event.clientX ?? null,   // Relative to viewport
@@ -1806,11 +1808,13 @@
         this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
         this.boundHandleDomChange = function(event) { self.handleDomChange(event); };
         this.boundHandleReactiveChange = function(event) { self.handleReactiveChange(event); };
+        this.boundHandleArrayChange = function(event) { self.handleArrayChange(event); };
 
         // Add listeners using the stored references
         this.container.addEventListener('pac:dom:click', this.boundHandleDomClicks);
         this.container.addEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
+        this.container.addEventListener('pac:array-change', this.boundHandleArrayChange);
 
         // First time setup
         this.textInterpolationMap.forEach((mappingData, textNode) => {
@@ -1831,6 +1835,7 @@
         this.container.removeEventListener('pac:dom:click', this.boundHandleDomClicks);
         this.container.removeEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.removeEventListener('pac:change', this.boundHandleReactiveChange);
+        this.container.removeEventListener('pac:array-change', this.boundHandleArrayChange);
 
         // Clear references
         this.boundHandleDomClicks = null;
@@ -2036,6 +2041,35 @@
         this.handleTextInterpolation(event, pathsToCheck);
         this.handleAttributeChanges(event, pathsToCheck);
     }
+
+    Context.prototype.handleArrayChange = function (event) {
+        const d = event && event.detail;
+
+        if (!d || !Array.isArray(d.path)) {
+            return;
+        }
+
+        const changedPath = d.path.join('.'); // e.g. "todos" or "app.todos"
+
+        this.container.querySelectorAll('[data-pac-bind*="foreach:"]').forEach((el) => {
+            if (!Utils.belongsToThisContainer(this.container, el)) {
+                return;
+            }
+
+            const bind = this.extractForeachBinding(el.getAttribute('data-pac-bind'));
+
+            if (!bind || !bind.target) {
+                return;
+            }
+
+            // exact or suffix match allows relative bindings
+            const matches = changedPath === bind.target || changedPath.endsWith('.' + bind.target);
+
+            if (matches) {
+                this.renderForeachItems(el);
+            }
+        });
+    };
 
     /**
      * Scans the container for text nodes containing interpolation expressions and builds
@@ -2285,9 +2319,6 @@
 
         // Initial render
         this.renderForeachItems(element);
-
-        // Set up reactivity - watch for changes to the array
-        this.watchForeachArray(element, arrayPath);
     };
 
     /**
@@ -2380,10 +2411,10 @@
 
                 // Fall back to parent abstraction for methods and properties
                 const parentValue = target.parent.abstraction[prop];
+
                 if (typeof parentValue === 'function') {
                     return function(...args) {
-                        // Call parent method with child context awareness
-                        // Automatically inject current item and index as first parameters
+                        // Always inject item and index for parent methods
                         return parentValue.call(
                             target.parent.abstraction,
                             target[foreachData.itemName],
@@ -2392,13 +2423,12 @@
                         );
                     };
                 }
-
+                
                 // Return other parent properties as-is
                 return parentValue;
             },
 
             set(target, prop, value) {
-                // Set properties on the child abstraction
                 target[prop] = value;
                 return true;
             }
@@ -2411,7 +2441,10 @@
      */
     Context.prototype.clearForeachItems = function(foreachElement) {
         const foreachData = foreachElement._foreachData;
-        if (!foreachData) return;
+
+        if (!foreachData) {
+            return;
+        }
 
         // Destroy all child contexts
         foreachData.renderedItems.forEach(renderedItem => {
@@ -2421,40 +2454,6 @@
 
         // Clear the array
         foreachData.renderedItems = [];
-    };
-
-    /**
-     * Sets up reactivity watching for array changes
-     * @param {Element} foreachElement - The foreach container element
-     * @param {string} arrayPath - The path to the array in the abstraction
-     */
-    Context.prototype.watchForeachArray = function(foreachElement, arrayPath) {
-        const self = this;
-
-        // Listen for array changes
-        this.container.addEventListener('pac:array-change', function(event) {
-            if (event.detail.path && event.detail.path.join('.') === arrayPath) {
-                // Re-render when the array changes
-                self.renderForeachItems(foreachElement);
-            }
-        });
-
-        // Listen for general property changes
-        this.container.addEventListener('pac:change', function(event) {
-            if (event.detail.path && event.detail.path.join('.') === arrayPath) {
-                // Re-render when the array reference changes
-                self.renderForeachItems(foreachElement);
-            }
-        });
-    };
-
-    /**
-     * Gets a property value from the abstraction using a path
-     * @param {string} path - The property path (e.g., 'todos' or 'user.name')
-     * @returns {*} The property value
-     */
-    Context.prototype.getPropertyValue = function(path) {
-        return ExpressionParser.getProperty(path, this.abstraction);
     };
 
     // ========================================================================
