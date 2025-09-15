@@ -1800,6 +1800,7 @@
                 if (typeof prop === 'string') {
                     accessed.add(prop);
                 }
+
                 return target[prop];
             }
         });
@@ -1918,12 +1919,12 @@
             // Dispatch a change event on the parent container to trigger parent reactivity
             this.parent.container.dispatchEvent(new CustomEvent("pac:change", {
                 detail: {
-                    path: [parentArrayPath], // Dynamic parent array path (e.g., 'todos', 'categories', etc.)
-                    oldValue: null,          // We don't track old values for child changes
-                    newValue: null,          // We don't have the full new value
-                    childChange: true,       // Flag to indicate this came from a child
-                    childPath: path,         // Original path in child context
-                    childValue: value        // Value that changed in child
+                    childChange: true,        // Flag to indicate this came from a child
+                    path: [parentArrayPath],  // Dynamic parent array path (e.g., 'todos', 'categories', etc.)
+                    oldValue: null,           // We don't track old values for child changes
+                    newValue: null,           // We don't have the full new value
+                    childPath: path,          // Original path in child context
+                    childValue: value         // Value that changed in child
                 }
             }));
         } else {
@@ -1932,38 +1933,14 @@
     };
 
     /**
-     * Determines which parent property this child context belongs to
-     * @returns {string|null} The parent property name (e.g., 'todos', 'items', etc.)
-     */
-    Context.prototype.getParentArrayPath = function() {
-        if (!this.parent) {
-            return null;
-        }
-
-        // Look through parent's abstraction to find which property points to an array context
-        // that matches this child context
-        for (const key in this.parent.abstraction) {
-            const parentProperty = this.parent.abstraction[key];
-
-            // Check if this property is an array with a context that matches this child
-            if (Array.isArray(parentProperty) && parentProperty._context === this) {
-                return key;
-            }
-        }
-
-        // If not found, this might be a nested child context
-        // In that case, we might need more sophisticated path resolution
-        console.warn('Could not determine parent array path for child context');
-        return null;
-    };
-
-    /**
      * Sets a nested property value in the abstraction, handling dot notation
      * @param {string} path - Property path like 'todo.completed' or 'simpleProperty'
      * @param {*} value - Value to set
      */
     Context.prototype.setNestedProperty = function(path, value) {
-        if (!path) return;
+        if (!path) {
+            return;
+        }
 
         const parts = path.split('.');
         let current = this.abstraction;
@@ -1984,9 +1961,7 @@
         const finalProperty = parts[parts.length - 1];
 
         if (current && typeof current === 'object') {
-            const oldValue = current[finalProperty];
             current[finalProperty] = value;
-            console.log(`Set ${path} = ${value} (was ${oldValue})`);
         } else {
             console.warn(`Cannot set property ${finalProperty} on non-object:`, current);
         }
