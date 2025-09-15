@@ -228,7 +228,7 @@
                 get: function (target, prop) {
                     const val = target[prop];
 
-                    // Handle array methods first (unchanged)
+                    // Handle array methods first
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
                             // For methods that add items, proxy the arguments first
@@ -269,10 +269,8 @@
 
                     // Check if this property is a getter-only property (computed property)
                     const descriptor = Object.getOwnPropertyDescriptor(target, prop);
-
                     if (descriptor && descriptor.get && !descriptor.set) {
                         // This is a getter-only property (computed), return the value as-is
-                        // Don't try to make it reactive since it's computed from other reactive properties
                         return val;
                     }
 
@@ -281,19 +279,8 @@
                         return val;
                     }
 
-                    // Check if the property already exists and is already reactive
-                    if (val && typeof val === 'object' && val._isReactive) {
-                        return val;
-                    }
-
-                    // Make nested objects reactive if they aren't already
-                    if (val && typeof val === 'object' && !val._isReactive) {
-                        const nestedPath = currentPath.concat([prop]);
-                        target[prop] = createProxy(val, nestedPath);
-                        target[prop]._isReactive = true;
-                    }
-
-                    return target[prop];
+                    // Return the value directly - no lazy wrapping
+                    return val;
                 },
 
                 set: function (target, prop, newValue) {
@@ -304,6 +291,7 @@
                         return true;
                     }
 
+                    // Wrap objects and arrays in proxies when they're assigned
                     if (newValue && typeof newValue === 'object') {
                         target[prop] = createProxy(newValue, propertyPath);
                         target[prop]._isReactive = true;
@@ -1936,20 +1924,12 @@
      * @returns {*|object}
      */
     Context.prototype.createReactiveAbstraction = function() {
-        const reactive = {};
         const self = this;
 
-        // First, create the reactive proxy with an empty object
-        const proxiedReactive = makeDeepReactiveProxy(reactive, this.container);
+        // Create reactive proxy directly from original abstraction
+        const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
 
-        // Then set all properties through the proxy so they become reactive
-        Object.keys(this.originalAbstraction).forEach(function (key) {
-            if (key !== 'computed' && typeof self.originalAbstraction[key] !== 'function') {
-                proxiedReactive[key] = self.originalAbstraction[key];  // This triggers the proxy setter
-            }
-        });
-
-        // Add methods
+        // Add methods (bind them to the reactive object)
         Object.keys(this.originalAbstraction).forEach(function (key) {
             if (typeof self.originalAbstraction[key] === 'function' && key !== 'computed') {
                 proxiedReactive[key] = self.originalAbstraction[key].bind(proxiedReactive);
