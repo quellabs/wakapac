@@ -1280,17 +1280,31 @@
             }
 
             if (path.indexOf('.') === -1) {
-                return (path in obj) ? obj[path] : undefined;
+                // Check current object first
+                if (path in obj) {
+                    return obj[path];
+                }
+
+                // If not found and object has a parent reference, check parent
+                if (obj.parent && obj.parent.abstraction) {
+                    return this.getProperty(path, obj.parent.abstraction);
+                }
+
+                return undefined;
             }
 
+            // Handle dot notation - same parent fallback logic
             const parts = path.split('.');
             let current = obj;
 
             for (let i = 0; i < parts.length; i++) {
                 if (current == null) {
+                    // Try parent context if we hit a dead end
+                    if (obj.parent && obj.parent.abstraction && i === 0) {
+                        return this.getProperty(path, obj.parent.abstraction);
+                    }
                     return undefined;
                 }
-
                 current = current[parts[i]];
             }
 
@@ -2049,7 +2063,11 @@
             const matches = changedPath === bind.target || changedPath.endsWith('.' + bind.target);
 
             if (matches) {
-                this.renderForeachItems(el);
+                // Only render if this context actually has the target array
+                const array = this.abstraction[bind.target];
+                if (Array.isArray(array)) {
+                    this.renderForeachItems(el);
+                }
             }
         });
     };
@@ -2322,22 +2340,10 @@
             return;
         }
 
-        console.log('=== renderForeachItems Debug ===');
-        console.log('this.abstraction:', this.abstraction);
-        console.log('this.abstraction.todos:', this.abstraction.todos);
-        console.log('typeof this.abstraction.todos:', typeof this.abstraction.todos);
-        console.log('Array.isArray(this.abstraction.todos):', Array.isArray(this.abstraction.todos));
-        console.log('Original abstraction todos:', this.originalAbstraction.todos);
-        console.log('Context parent:', this.parent);
-
-        // Get the current array from the abstraction
         const array = ExpressionParser.getProperty(foreachData.arrayPath, this.abstraction);
 
-        console.log('ExpressionParser result:', array);
-        console.log('typeof ExpressionParser result:', typeof array);
-
         if (!Array.isArray(array)) {
-            console.warn('Foreach target is not an array:', foreachData.arrayPath);
+            // Silent return - this context doesn't have the target array
             return;
         }
 
