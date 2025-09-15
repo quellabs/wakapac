@@ -1847,43 +1847,42 @@
         return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
     }
 
-    Context.prototype.getDependencies = function() {
-        const dependencies = new Map();
-        const computed = this.originalAbstraction.computed || {};
-        const accessed = new Set();
+    Context.prototype.getDependencies = function getDependencies() {
+        const dependencyMap = new Map();
+        const computedFunctions = this.originalAbstraction.computed || {};
 
-        // Set flag to prevent array context creation during analysis
+        // Prevent side effects during analysis
         this._analyzingDependencies = true;
 
-        const proxy = new Proxy(this.originalAbstraction, {
-            get(target, prop) {
-                if (typeof prop === 'string') {
-                    accessed.add(prop);
+        // For each computed property, track accessed props directly
+        Object.keys(computedFunctions).forEach((computedName) => {
+            const accessedProperties = new Set();
+
+            const proxy = new Proxy(this.originalAbstraction, {
+                get(target, property, receiver) {
+                    if (typeof property === "string") {
+                        accessedProperties.add(property); // record usage
+                    }
+                    return Reflect.get(target, property, receiver);
+                }
+            });
+
+            // Run the computed with proxy as "this"
+            computedFunctions[computedName].call(proxy);
+
+            // Register dependencies: prop → computed(s)
+            accessedProperties.forEach((propertyName) => {
+                if (!dependencyMap.has(propertyName)) {
+                    dependencyMap.set(propertyName, []);
                 }
 
-                return target[prop];
-            }
-        });
-
-        Object.keys(computed).forEach(name => {
-            accessed.clear();
-            computed[name].call(proxy);
-
-            // For each accessed property, add this computed property as a dependent
-            accessed.forEach(prop => {
-                if (!dependencies.has(prop)) {
-                    dependencies.set(prop, []);
-                }
-
-                dependencies.get(prop).push(name);
+                dependencyMap.get(propertyName).push(computedName);
             });
         });
 
-        // Clear flag after analysis
         this._analyzingDependencies = false;
-
-        return dependencies;
-    };
+        return dependencyMap;
+    }
 
     Context.prototype.handleAttributeChanges = function(event, pathsToCheck) {
         const self = this;
