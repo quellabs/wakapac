@@ -2261,11 +2261,13 @@
     /**
      * Scans for and processes all foreach bindings in the container
      */
-    Context.prototype.processForeachBindings = function() {
+    Context.prototype.processForeachBindings = function () {
         const foreachElements = this.container.querySelectorAll('[data-pac-bind*="foreach:"]');
 
         foreachElements.forEach(element => {
-            if (!Utils.belongsToThisContainer(this.container, element)) return;
+            if (!Utils.belongsToThisContainer(this.container, element)) {
+                return;
+            }
 
             const bindingString = element.getAttribute('data-pac-bind');
             const foreachBinding = this.extractForeachBinding(bindingString);
@@ -2292,6 +2294,11 @@
      * @param {Object} binding - The parsed foreach binding
      */
     Context.prototype.setupForeachBinding = function(element, binding) {
+        // Skip if already processed
+        if (element._foreachData) {
+            return;
+        }
+
         const arrayPath = binding.target; // e.g., 'todos'
         const itemName = element.getAttribute('data-pac-item') || 'item'; // e.g., 'todo'
         const indexName = element.getAttribute('data-pac-index') || 'index'; // e.g., 'index'
