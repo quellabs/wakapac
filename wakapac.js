@@ -307,11 +307,21 @@
             return array;
         }
 
+        // Store reference to original array methods before we override them
+        const originalArrayMethods = {};
+        const allMethods = ['filter', 'map', 'reduce', 'forEach', 'find', 'some', 'every', 'includes', 'indexOf', 'slice', 'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+
+        allMethods.forEach(methodName => {
+            if (typeof array[methodName] === 'function') {
+                originalArrayMethods[methodName] = array[methodName].bind(array);
+            }
+        });
+
         // Create isolated abstraction (no method inheritance)
         const arrayAbstraction = {
             items: array,
-            parent: parentContext, // Reference to parent context
-            // Add array-specific methods if needed
+            parent: parentContext,
+            originalMethods: originalArrayMethods // Store original methods for delegation
         };
 
         // Create the context using the existing container (foreach template)
@@ -322,23 +332,44 @@
             value: childContext,
             writable: false,
             enumerable: false,
-            configurable: true  // Allow redefinition if needed
+            configurable: true
         });
 
         Object.defineProperty(array, 'parent', {
             value: parentContext,
             writable: false,
             enumerable: false,
-            configurable: true  // Allow redefinition if needed
+            configurable: true
         });
 
-        // Override array methods to include lifecycle management
-        const originalMethods = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+        // Make the arrayContext behave like an array by proxying array methods to original methods
+        const readOnlyMethods = ['filter', 'map', 'reduce', 'forEach', 'find', 'some', 'every', 'includes', 'indexOf', 'slice'];
 
-        originalMethods.forEach(methodName => {
-            const original = array[methodName];
+        readOnlyMethods.forEach(methodName => {
             array[methodName] = function(...args) {
-                const result = original.apply(this, args);
+                // Use the original method stored in abstraction to avoid recursion
+                return this._context.abstraction.originalMethods[methodName](...args);
+            };
+        });
+
+        // Handle length property specially - check if it's configurable first
+        const lengthDescriptor = Object.getOwnPropertyDescriptor(array, 'length');
+        if (!lengthDescriptor || lengthDescriptor.configurable) {
+            Object.defineProperty(array, 'length', {
+                get() {
+                    return this._context ? this._context.abstraction.items.length : 0;
+                },
+                configurable: true
+            });
+        }
+
+        // Override array mutation methods to include lifecycle management
+        const mutationMethods = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+
+        mutationMethods.forEach(methodName => {
+            array[methodName] = function(...args) {
+                // Use the original method to avoid recursion
+                const result = this._context.abstraction.originalMethods[methodName](...args);
 
                 // Destroy and recreate children after modification
                 destroyChildContexts(this);
@@ -1858,13 +1889,108 @@
         const parsed = ExpressionParser.parseBindingString(event.detail.bindString);
 
         parsed.forEach(function(binding) {
-            if (binding.type === 'value' && binding.target) {
-                if (binding.target in self.abstraction) {
-                    self.abstraction[binding.target] = event.detail.value;
+            if ((binding.type === 'value' || binding.type === 'checked') && binding.target) {
+                // Update the property in this context
+                self.setNestedProperty(binding.target, event.detail.value);
+
+                // If this is a child context, notify parent that data changed
+                if (self.parent) {
+                    self.notifyParentOfChange(binding.target, event.detail.value);
                 }
             }
         });
     }
+
+    /**
+     * Notifies parent context that child data has changed
+     * @param {string} path - Property path like 'todo.completed'
+     * @param {*} value - New value
+     */
+    Context.prototype.notifyParentOfChange = function(path, value) {
+        if (!this.parent) {
+            return;
+        }
+
+        // Use the stored parent array path instead of searching
+        const parentArrayPath = this.parentArrayPath;
+
+        if (parentArrayPath) {
+            // Dispatch a change event on the parent container to trigger parent reactivity
+            this.parent.container.dispatchEvent(new CustomEvent("pac:change", {
+                detail: {
+                    path: [parentArrayPath], // Dynamic parent array path (e.g., 'todos', 'categories', etc.)
+                    oldValue: null,          // We don't track old values for child changes
+                    newValue: null,          // We don't have the full new value
+                    childChange: true,       // Flag to indicate this came from a child
+                    childPath: path,         // Original path in child context
+                    childValue: value        // Value that changed in child
+                }
+            }));
+        } else {
+            console.warn('No parent array path found for child context');
+        }
+    };
+
+    /**
+     * Determines which parent property this child context belongs to
+     * @returns {string|null} The parent property name (e.g., 'todos', 'items', etc.)
+     */
+    Context.prototype.getParentArrayPath = function() {
+        if (!this.parent) {
+            return null;
+        }
+
+        // Look through parent's abstraction to find which property points to an array context
+        // that matches this child context
+        for (const key in this.parent.abstraction) {
+            const parentProperty = this.parent.abstraction[key];
+
+            // Check if this property is an array with a context that matches this child
+            if (Array.isArray(parentProperty) && parentProperty._context === this) {
+                return key;
+            }
+        }
+
+        // If not found, this might be a nested child context
+        // In that case, we might need more sophisticated path resolution
+        console.warn('Could not determine parent array path for child context');
+        return null;
+    };
+
+    /**
+     * Sets a nested property value in the abstraction, handling dot notation
+     * @param {string} path - Property path like 'todo.completed' or 'simpleProperty'
+     * @param {*} value - Value to set
+     */
+    Context.prototype.setNestedProperty = function(path, value) {
+        if (!path) return;
+
+        const parts = path.split('.');
+        let current = this.abstraction;
+
+        // Navigate to the parent object
+        for (let i = 0; i < parts.length - 1; i++) {
+            const part = parts[i];
+
+            if (current[part] === undefined) {
+                console.warn(`Property path ${path} not found in abstraction`);
+                return;
+            }
+
+            current = current[part];
+        }
+
+        // Set the final property
+        const finalProperty = parts[parts.length - 1];
+
+        if (current && typeof current === 'object') {
+            const oldValue = current[finalProperty];
+            current[finalProperty] = value;
+            console.log(`Set ${path} = ${value} (was ${oldValue})`);
+        } else {
+            console.warn(`Cannot set property ${finalProperty} on non-object:`, current);
+        }
+    };
 
     Context.prototype.handleReactiveChange = function(event) {
         // Add dependencies to path
@@ -2176,6 +2302,9 @@
 
         // Create child context for this item
         const itemContext = new Context(itemElement, itemAbstraction, this);
+
+        // Store the parent array path in the child context for notifications
+        itemContext.parentArrayPath = foreachData.arrayPath;
 
         // Store the context reference
         foreachData.renderedItems.push({
