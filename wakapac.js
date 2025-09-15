@@ -341,8 +341,7 @@
     function createArrayContext(array, container, parentContext, path) {
         // Don't create array contexts for child contexts (foreach items)
         if (array._context ||
-            (parentContext && parentContext._analyzingDependencies) ||
-            (parentContext && parentContext.parent !== null)) { // This is a child context
+            (parentContext && parentContext._analyzingDependencies)) {
             return array;
         }
 
@@ -360,7 +359,8 @@
         const arrayAbstraction = {
             items: array,
             parent: parentContext,
-            originalMethods: originalArrayMethods // Store original methods for delegation
+            originalMethods: originalArrayMethods,
+            parentContext: parentContext
         };
 
         // Create the context using the existing container (foreach template)
@@ -1285,7 +1285,7 @@
                     return obj[path];
                 }
 
-                // If not found and object has a parent reference, check parent
+                // Check parent
                 if (obj.parent && obj.parent.abstraction) {
                     return this.getProperty(path, obj.parent.abstraction);
                 }
@@ -1303,6 +1303,7 @@
                     if (obj.parent && obj.parent.abstraction && i === 0) {
                         return this.getProperty(path, obj.parent.abstraction);
                     }
+
                     return undefined;
                 }
                 current = current[parts[i]];
@@ -2231,7 +2232,7 @@
         const self = this;
 
         // Create reactive proxy directly from original abstraction
-        const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
+        const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container, this);
 
         // Copy all methods from the original abstraction to the reactive proxy (except the special
         // 'computed' property which gets handled separately), but critically: rebind their 'this'
@@ -2326,7 +2327,11 @@
         };
 
         // Initial render
-        this.renderForeachItems(element);
+        try {
+            this.renderForeachItems(element);
+        } catch (error) {
+            console.error('⚙️ ERROR in renderForeachItems:', error);
+        }
     };
 
     /**
@@ -2340,10 +2345,15 @@
             return;
         }
 
+        // Check if we're in an array context and should delegate to parent
+        if (this.abstraction.items && this.abstraction.parentContext) {
+            return this.abstraction.parentContext.renderForeachItems(foreachElement);
+        }
+
+        // Silent return - this context doesn't have the target array
         const array = ExpressionParser.getProperty(foreachData.arrayPath, this.abstraction);
 
         if (!Array.isArray(array)) {
-            // Silent return - this context doesn't have the target array
             return;
         }
 
