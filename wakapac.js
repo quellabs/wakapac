@@ -268,29 +268,10 @@
                 get: function (target, prop) {
                     const val = target[prop];
 
-                    // Handle array mutation methods with context lifecycle management
-                    if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
-                        return function () {
-                            // Apply the original array method to modify the data
-                            const result = Array.prototype[prop].apply(target, arguments);
-
-                            // Destroy existing child contexts since array structure changed
-                            destroyChildContexts(target);
-
-                            // Recreate child contexts for the new array structure
-                            recreateChildContexts(target, container, parentContext);
-
-                            // Dispatch array-specific change event for reactive updates
-                            container.dispatchEvent(new CustomEvent("pac:array-change", {
-                                detail: {
-                                    path: currentPath,
-                                    method: prop,
-                                    target: target
-                                }
-                            }));
-
-                            return result;
-                        };
+                    // Skip array context creation for 'items' property in array contexts
+                    if (Array.isArray(val) && prop === 'items' && parentContext && parentContext.parent) {
+                        // This is the 'items' reference in an array context - return as-is
+                        return val;
                     }
 
                     // If assigning a new array, create context for it
@@ -2339,8 +2320,19 @@
             return;
         }
 
+        console.log('=== renderForeachItems Debug ===');
+        console.log('this.abstraction:', this.abstraction);
+        console.log('this.abstraction.todos:', this.abstraction.todos);
+        console.log('typeof this.abstraction.todos:', typeof this.abstraction.todos);
+        console.log('Array.isArray(this.abstraction.todos):', Array.isArray(this.abstraction.todos));
+        console.log('Original abstraction todos:', this.originalAbstraction.todos);
+        console.log('Context parent:', this.parent);
+
         // Get the current array from the abstraction
         const array = ExpressionParser.getProperty(foreachData.arrayPath, this.abstraction);
+
+        console.log('ExpressionParser result:', array);
+        console.log('typeof ExpressionParser result:', typeof array);
 
         if (!Array.isArray(array)) {
             console.warn('Foreach target is not an array:', foreachData.arrayPath);
