@@ -2069,8 +2069,35 @@
      */
     Context.prototype.scanAttributeBindings = function() {
         const self = this;
-        const elements = this.container.querySelectorAll('[data-pac-bind]');
         const interpolationMap = [];
+
+        // CRITICAL FIX: Check if the container itself has bindings (common in foreach templates)
+        if (this.container.hasAttribute('data-pac-bind')) {
+            const bindingString = this.container.getAttribute('data-pac-bind');
+            const bindings = ExpressionParser.parseBindingString(bindingString);
+
+            const dataBindings = bindings.filter(binding =>
+                binding.type !== 'click' &&
+                binding.type !== 'foreach' &&
+                binding.target
+            );
+
+            if (dataBindings.length > 0) {
+                const bindingsWithDependencies = dataBindings.map(binding => ({
+                    ...binding,
+                    dependencies: this.extractDependencies(binding.target)
+                }));
+
+                interpolationMap.push({
+                    element: this.container,
+                    bindingString,
+                    bindings: bindingsWithDependencies
+                });
+            }
+        }
+
+        // Then scan all child elements
+        const elements = this.container.querySelectorAll('[data-pac-bind]');
 
         elements.forEach(element => {
             // Skip elements that don't belong to this container
