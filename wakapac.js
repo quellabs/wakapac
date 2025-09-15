@@ -1929,7 +1929,11 @@
         // Create reactive proxy directly from original abstraction
         const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
 
-        // Add methods (bind them to the reactive object)
+        // Copy all methods from the original abstraction to the reactive proxy (except the special
+        // 'computed' property which gets handled separately), but critically: rebind their 'this'
+        // context to point to the reactive proxy instead of the original object.
+        // This ensures that when methods access properties via 'this.propertyName', they interact
+        // with the reactive proxy (triggering DOM updates) rather than the non-reactive original.
         Object.keys(this.originalAbstraction).forEach(function (key) {
             if (typeof self.originalAbstraction[key] === 'function' && key !== 'computed') {
                 proxiedReactive[key] = self.originalAbstraction[key].bind(proxiedReactive);
