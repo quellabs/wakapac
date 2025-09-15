@@ -218,75 +218,124 @@
     // ENHANCED REACTIVE PROXY WITH ARRAY-SPECIFIC EVENTS
     // ========================================================================
 
+    /**
+     * Creates a deep reactive proxy that enables hierarchical reactivity for objects and arrays.
+     * @param {*} value - The value to make reactive (object, array, or primitive)
+     * @param {Element} container - The DOM container that will receive change events
+     * @param {Context|null} parentContext - Parent context for hierarchical context management
+     * @returns {Proxy|*} A reactive proxy of the input value, or the value itself if not an object
+     */
     function makeDeepReactiveProxy(value, container, parentContext = null) {
+        /**
+         * Array methods that modify the array content and require context lifecycle management.
+         */
         const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
 
+        /**
+         * Routes object/array creation to appropriate handler.
+         * @param {Object|Array} obj - The object or array to make reactive
+         * @param {string[]} currentPath - Path from root to current object
+         * @returns {Object} Reactive proxy or array context
+         */
         function createProxy(obj, currentPath) {
             currentPath = currentPath || [];
 
-            // Handle arrays - create new isolated contexts
+            // Arrays require special handling with hierarchical contexts
+            // Each array gets its own isolated context to manage its reactive scope
             if (Array.isArray(obj)) {
                 return createArrayContext(obj, container, parentContext, currentPath);
+            } else {
+                return createObjectProxy(obj, currentPath);
             }
+        }
 
+        /**
+         * Creates a reactive proxy for objects (non-arrays).
+         * Handles property access, mutations, and special cases like computed properties.
+         * @param {Object} obj - The object to make reactive
+         * @param {string[]} currentPath - Path from root to current object
+         * @returns {Object} Reactive proxy of the object
+         */
+        function createObjectProxy(obj, currentPath) {
             return new Proxy(obj, {
+                /**
+                 * Intercepts property access to provide reactive behavior.
+                 *
+                 * @param {Object} target - The target object being proxied
+                 * @param {string|Symbol} prop - The property being accessed
+                 * @returns {*} The property value, potentially wrapped or modified for reactivity
+                 */
                 get: function (target, prop) {
                     const val = target[prop];
 
-                    // Handle array methods first
+                    // Handle array mutation methods with context lifecycle management
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
-                            // Apply the method
+                            // Apply the original array method to modify the data
                             const result = Array.prototype[prop].apply(target, arguments);
-                            
-                            // Destroy and recreate all child contexts when parent array changes
+
+                            // Destroy existing child contexts since array structure changed
                             destroyChildContexts(target);
+
+                            // Recreate child contexts for the new array structure
                             recreateChildContexts(target, container, parentContext);
 
-                            // Dispatch array-specific event
+                            // Dispatch array-specific change event for reactive updates
                             container.dispatchEvent(new CustomEvent("pac:array-change", {
-                                detail: { path: currentPath, method: prop }
+                                detail: {
+                                    path: currentPath,
+                                    method: prop,
+                                    target: target
+                                }
                             }));
 
                             return result;
                         };
                     }
 
-                    // If assigning a new array, create context for it
-                    if (Array.isArray(val) && !val._hasContext) {
-                        return createArrayContext(val, container, parentContext, currentPath.concat([prop]));
-                    }
-
-                    // Check if this property is a getter-only property (computed property)
+                    // Check for computed properties (getter-only descriptors)
                     const descriptor = Object.getOwnPropertyDescriptor(target, prop);
 
                     if (descriptor && descriptor.get && !descriptor.set) {
-                        // This is a getter-only property (computed), return the value as-is
+                        // This is a computed property - return the evaluated value directly
                         return val;
                     }
 
-                    // Don't make functions reactive, just return them as-is
+                    // Functions should not be made reactive - return them unchanged
                     if (typeof val === 'function') {
                         return val;
                     }
 
-                    // Return the value directly - no lazy wrapping
+                    // For all other values, return as-is
+                    // Key principle: no side effects on property access
                     return val;
                 },
 
+                /**
+                 * Intercepts property assignment to maintain reactivity on new values.
+                 * @param {Object} target - The target object being modified
+                 * @param {string|Symbol} prop - The property being set
+                 * @param {*} newValue - The new value being assigned
+                 * @returns {boolean} Always returns true to indicate successful assignment
+                 */
                 set: function (target, prop, newValue) {
                     const oldValue = target[prop];
 
-                    // If setting an array, create new context and replace with reference
+                    // If assigning a new array, create a context for it immediately
                     if (Array.isArray(newValue)) {
                         target[prop] = createArrayContext(newValue, container, parentContext, currentPath.concat([prop]));
                     } else {
+                        // For non-arrays, assign the value directly
                         target[prop] = newValue;
                     }
 
-                    // Dispatch array-specific event if this is an array assignment
+                    // Dispatch change event to trigger reactive updates in the DOM
                     container.dispatchEvent(new CustomEvent("pac:change", {
-                        detail: { path: currentPath.concat([prop]), oldValue, newValue: target[prop] }
+                        detail: {
+                            path: currentPath.concat([prop]),
+                            oldValue,
+                            newValue: target[prop]
+                        }
                     }));
 
                     return true;
@@ -294,15 +343,17 @@
             });
         }
 
+        // Handle primitive values and null/undefined - return as-is
         if (!value || typeof value !== 'object') {
             return value;
         }
 
+        // Start the reactive proxy creation process
         return createProxy(value, []);
     }
 
     function createArrayContext(array, container, parentContext, path) {
-        // Don't create contexts during dependency analysis or if already exists
+        // Don't create contexts during dependency analysis
         if (array._context || (parentContext && parentContext._analyzingDependencies)) {
             return array;
         }
@@ -457,9 +508,10 @@
 
         originalMethods.forEach(methodName => {
             // Restore to original Array.prototype method
-            if (array.hasOwnProperty(methodName)) {
-                delete array[methodName]; // Remove the overridden method
+            if (Object.prototype.hasOwnProperty.call(array, methodName)) {
+                // Remove the overridden method
                 // The original Array.prototype method will be used automatically
+                delete array[methodName];
             }
         });
     }
