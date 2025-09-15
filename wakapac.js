@@ -339,8 +339,10 @@
     }
 
     function createArrayContext(array, container, parentContext, path) {
-        // Don't create contexts during dependency analysis
-        if (array._context || (parentContext && parentContext._analyzingDependencies)) {
+        // Don't create array contexts for child contexts (foreach items)
+        if (array._context ||
+            (parentContext && parentContext._analyzingDependencies) ||
+            (parentContext && parentContext.parent !== null)) { // This is a child context
             return array;
         }
 
@@ -405,22 +407,22 @@
 
         mutationMethods.forEach(methodName => {
             array[methodName] = function(...args) {
-                // Use the original method to avoid recursion
                 const result = this._context.abstraction.originalMethods[methodName](...args);
 
-                // Destroy and recreate children after modification
                 destroyChildContexts(this);
                 recreateChildContexts(this, container, parentContext);
 
-                // Dispatch change event with context reference
-                container.dispatchEvent(new CustomEvent("pac:array-change", {
-                    detail: {
-                        path,
-                        method: methodName,
-                        array: this,
-                        context: this._context
-                    }
-                }));
+                // Defer event dispatch to avoid intermediate state issues
+                setTimeout(() => {
+                    container.dispatchEvent(new CustomEvent("pac:array-change", {
+                        detail: {
+                            path,
+                            method: methodName,
+                            array: this,
+                            context: this._context
+                        }
+                    }));
+                }, 0);
 
                 return result;
             };
