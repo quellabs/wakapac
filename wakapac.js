@@ -1621,14 +1621,12 @@
                 arrayExpr: bindings[0].target,  // e.g., "todos"
                 foreachId: self.uniqid('foreach'),
                 depth: self.calculateForEachDepth(element),
-                parentScope: self.findParentForeachElement(element),
+                parentElement: self.findParentForeachElement(element),
                 template: element.innerHTML,
                 itemVar: element.getAttribute('data-pac-item') || 'item',
                 indexVar: element.getAttribute('data-pac-index') || 'index'
             });
         });
-
-        console.log(this.foreachContextRegistry);
 
         // Handle click events
         this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
@@ -1652,39 +1650,6 @@
                 self.domUpdater.updateAttributeBinding(element, binding, self.abstraction);
             })
         });
-    }
-
-    Context.prototype.calculateForEachDepth = function(element) {
-        let depth = 0;
-        let current = element.parentElement;
-
-        while (current && current !== this.container) {
-            // Check if this ancestor has a foreach binding
-            if (current.hasAttribute('data-pac-bind') &&
-                current.getAttribute('data-pac-bind').includes('foreach:')) {
-                depth++;
-            }
-
-            current = current.parentElement;
-        }
-
-        return depth;
-    }
-
-    Context.prototype.findParentForeachElement = function(element) {
-        let current = element.parentElement;
-
-        while (current && current !== this.container) {
-            // Check if this ancestor has a foreach binding
-            if (current.hasAttribute('data-pac-bind') &&
-                current.getAttribute('data-pac-bind').includes('foreach:')) {
-                return current;
-            }
-
-            current = current.parentElement;
-        }
-
-        return null;
     }
 
     Context.prototype.destroy = function() {
@@ -2052,6 +2017,81 @@
         return proxiedReactive;
     };
 
+    Context.prototype.calculateForEachDepth = function(element) {
+        let depth = 0;
+        let current = element.parentElement;
+
+        while (current && current !== this.container) {
+            // Check if this ancestor has a foreach binding
+            if (current.hasAttribute('data-pac-bind') &&
+                current.getAttribute('data-pac-bind').includes('foreach:')) {
+                depth++;
+            }
+
+            current = current.parentElement;
+        }
+
+        return depth;
+    }
+
+    Context.prototype.findParentForeachElement = function(element) {
+        let current = element.parentElement;
+
+        while (current && current !== this.container) {
+            // Check if this ancestor has a foreach binding
+            if (current.hasAttribute('data-pac-bind') &&
+                current.getAttribute('data-pac-bind').includes('foreach:')) {
+                return current;
+            }
+
+            current = current.parentElement;
+        }
+
+        return null;
+    }
+
+    Context.prototype.renderForeach = function(foreachElement) {
+        const context = this.foreachContextRegistry.get(foreachElement);
+        const array = ExpressionParser.evaluate(
+            ExpressionParser.parseExpression(context.arrayExpr),
+            this.abstraction
+        );
+
+        foreachElement.innerHTML = '';
+
+        array.forEach((item, index) => {
+            // Get parent scope if this is nested
+            let parentScope = this.abstraction;
+            if (context.parentScope) {
+                const parentContext = this.foreachContextRegistry.get(context.parentScope);
+                if (parentContext && parentContext.currentScope) {
+                    parentScope = parentContext.currentScope;
+                }
+            }
+
+            // Create scope with item and index variables
+            const scope = Object.create(parentScope);
+            scope[context.itemVar] = item;
+            scope[context.indexVar] = index;
+
+            // Clone template and process interpolations
+            const itemHTML = context.template.replace(INTERPOLATION_REGEX, (match, expr) => {
+                const result = ExpressionParser.evaluate(
+                    ExpressionParser.parseExpression(expr),
+                    scope
+                );
+
+                return result != null ? String(result) : '';
+            });
+
+            // Add with comment markers
+            foreachElement.innerHTML +=
+                `<!-- pac-foreach-item: ${context.foreachId}, index=${index} -->` +
+                itemHTML +
+                `<!-- /pac-foreach-item -->`;
+        });
+    };
+    
     // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
