@@ -1612,14 +1612,19 @@
         this.attributeInterpolationMap = this.scanAttributeBindings();
 
         // Populate the foreach map
+        this.foreachInterpolationMap = this.scanForeachBindings();
         this.foreachContextRegistry = new WeakMap();
 
-        this.scanForeachBindings().forEach(mappingData => {
+        this.foreachInterpolationMap.forEach(mappingData => {
             const { element, bindings } = mappingData;
+
+            // Set the ID as an attribute for debugging/identification
+            const foreachId = self.uniqid('foreach');
+            element.setAttribute('data-pac-foreach-id', foreachId);
 
             this.foreachContextRegistry.set(element, {
                 arrayExpr: bindings[0].target,  // e.g., "todos"
-                foreachId: self.uniqid('foreach'),
+                foreachId: foreachId,
                 depth: self.calculateForEachDepth(element),
                 parentElement: self.findParentForeachElement(element),
                 template: element.innerHTML,
@@ -1650,6 +1655,18 @@
                 self.domUpdater.updateAttributeBinding(element, binding, self.abstraction);
             })
         });
+
+        // Sort by depth (deepest first) and render
+        this.foreachInterpolationMap
+            .sort((a, b) => {
+                const depthA = this.foreachContextRegistry.get(a.element).depth;
+                const depthB = this.foreachContextRegistry.get(b.element).depth;
+                return depthB - depthA;
+            })
+            .forEach(mappingData => {
+                const { element } = mappingData;
+                this.renderForeach(element);
+            });
     }
 
     Context.prototype.destroy = function() {
