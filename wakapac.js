@@ -1450,24 +1450,24 @@
         }
     };
 
-    DomUpdater.prototype.updateAttributeBinding = function (element, binding, context) {
+    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, context) {
         try {
-            const parsed = ExpressionParser.parseExpression(binding.target);
+            const parsed = ExpressionCache.parseExpression(bindingData.target);
             const value = ExpressionParser.evaluate(parsed, context);
 
-            switch (binding.type) {
+            switch (bindingType) {
                 case 'value':
                     this.applyValueBinding(element, value);
                     break;
-                    
+
                 case 'checked':
                     this.applyCheckedBinding(element, value);
                     break;
-                    
+
                 case 'visible':
                     this.applyVisibleBinding(element, value);
                     break;
-                    
+
                 case 'class':
                     this.applyClassBinding(element, value);
                     break;
@@ -1477,11 +1477,11 @@
                     break;
 
                 default:
-                    this.applyAttributeBinding(element, binding.type, value);
+                    this.applyAttributeBinding(element, bindingType, value);
                     break;
             }
         } catch (error) {
-            console.warn('Error updating binding:', binding, error);
+            console.warn('Error updating binding:', bindingType, bindingData, error);
         }
     };
 
@@ -1607,30 +1607,29 @@
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this.container);
         this.dependencies = this.getDependencies();
-        this.clickInterpolationMap = this.scanClickBindings();
-        this.textInterpolationMap = this.scanTextBindings();
-        this.attributeInterpolationMap = this.scanAttributeBindings();
+        this.interpolationMap = this.scanBindings(this.container);
+        this.textInterpolationMap = this.scanTextBindings(this.container);
 
-        // Populate the foreach map
-        this.foreachInterpolationMap = this.scanForeachBindings();
-        this.foreachContextRegistry = new WeakMap();
+        this.interpolationMap.forEach((mappingData, element) => {
+            const { bindings } = mappingData;
 
-        this.foreachInterpolationMap.forEach(mappingData => {
-            const { element, bindings } = mappingData;
+            // Check if this element has a foreach binding
+            if (bindings.foreach) {
+                // Set the ID as an attribute for debugging/identification
+                const foreachId = self.uniqid('foreach');
+                element.setAttribute('data-pac-foreach-id', foreachId);
 
-            // Set the ID as an attribute for debugging/identification
-            const foreachId = self.uniqid('foreach');
-            element.setAttribute('data-pac-foreach-id', foreachId);
-
-            this.foreachContextRegistry.set(element, {
-                arrayExpr: bindings[0].target,  // e.g., "todos"
-                foreachId: foreachId,
-                depth: self.calculateForEachDepth(element),
-                parentElement: self.findParentForeachElement(element),
-                template: element.innerHTML,
-                itemVar: element.getAttribute('data-pac-item') || 'item',
-                indexVar: element.getAttribute('data-pac-index') || 'index'
-            });
+                // Extend the existing mappingData with foreach-specific information
+                Object.assign(mappingData, {
+                    arrayExpr: bindings.foreach.target,  // e.g., "todos"
+                    foreachId: foreachId,
+                    depth: self.calculateForEachDepth(element),
+                    parentElement: self.findParentForeachElement(element),
+                    template: element.innerHTML,
+                    itemVar: element.getAttribute('data-pac-item') || 'item',
+                    indexVar: element.getAttribute('data-pac-index') || 'index'
+                });
+            }
         });
 
         // Handle click events
@@ -1648,23 +1647,30 @@
             self.domUpdater.updateTextNode(textNode, mappingData.template, self.abstraction);
         });
 
-        this.attributeInterpolationMap.forEach(mappingData => {
-            const { element, bindings } = mappingData;
+        this.interpolationMap.forEach((mappingData, element) => {
+            Object.keys(mappingData.bindings).forEach(bindingType => {
+                // Skip foreach and click bindings
+                if (
+                    bindingType === 'foreach' ||
+                    bindingType === 'click'
+                ) {
+                    return;
+                }
 
-            bindings.forEach(binding => {
-                self.domUpdater.updateAttributeBinding(element, binding, self.abstraction);
-            })
+                const bindingData = mappingData.bindings[bindingType];
+                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, self.abstraction);
+            });
         });
 
-        // Sort by depth (deepest first) and render
-        this.foreachInterpolationMap
-            .sort((a, b) => {
-                const depthA = this.foreachContextRegistry.get(a.element).depth;
-                const depthB = this.foreachContextRegistry.get(b.element).depth;
-                return depthB - depthA;
+        // Filter foreach bindings, sort by depth (deepest first), then render
+        Array.from(this.interpolationMap.entries())
+            .filter(([, mappingData]) => mappingData.bindings.foreach)
+            .sort(([, mappingDataA], [, mappingDataB]) => {
+                const depthA = mappingDataA.depth;
+                const depthB = mappingDataB.depth;
+                return depthB - depthA; // deepest first
             })
-            .forEach(mappingData => {
-                const { element } = mappingData;
+            .forEach(([element]) => {
                 this.renderForeach(element);
             });
     }
@@ -1751,45 +1757,52 @@
 
     Context.prototype.handleDomClicks = function(event) {
         const self = this;
+        const targetElement = event.detail.target;
 
-        // Find the corresponding click bindings from the pre-scanned map by matching the element
-        const clickBinding = this.clickInterpolationMap.find(binding =>
-            binding.element === event.detail.target
-        );
+        // Get the mapping data for this specific element
+        const mappingData = this.interpolationMap.get(targetElement);
 
-        // If no click bindings found for this element, return early
-        if (!clickBinding || clickBinding.bindings.length === 0) {
+        // If no mapping data found or no click binding, return early
+        if (!mappingData || !mappingData.bindings.click) {
             return;
         }
 
-        // Execute all the click functions from the pre-scanned bindings
-        clickBinding.bindings.forEach(function (binding) {
-            // Fetch target function from abstraction
-            const method = self.abstraction[binding.target];
+        // Get the click binding data
+        const clickBinding = mappingData.bindings.click;
 
-            // Check if the function is inside the abstraction. If so, call it
-            if (typeof method === 'function') {
-                try {
-                    method.call(self.abstraction, event);
-                } catch (error) {
-                    console.error(`Error executing click binding '${binding.target}':`, error);
-                }
+        // Fetch target function from abstraction
+        const method = self.abstraction[clickBinding.target];
+
+        // Check if the function is inside the abstraction. If so, call it
+        if (typeof method === 'function') {
+            try {
+                method.call(self.abstraction, event);
+            } catch (error) {
+                console.error(`Error executing click binding '${clickBinding.target}':`, error);
             }
-        });
+        }
     };
 
     Context.prototype.handleDomChange = function(event) {
         const self = this;
-        const parsed = ExpressionParser.parseBindingString(event.detail.bindString);
+        const targetElement = event.detail.target;
 
-        parsed.forEach(function(binding) {
-            if (binding.type === 'value' && binding.target) {
-                if (binding.target in self.abstraction) {
-                    self.abstraction[binding.target] = event.detail.value;
-                }
-            }
-        });
-    }
+        // Get the mapping data for this specific element
+        const mappingData = this.interpolationMap.get(targetElement);
+
+        // If no mapping data found or no value binding, return early
+        if (!mappingData || !mappingData.bindings.value) {
+            return;
+        }
+
+        // Get the value binding data
+        const valueBinding = mappingData.bindings.value;
+
+        // Check if the target property exists in abstraction and update it
+        if (valueBinding.target in self.abstraction) {
+            self.abstraction[valueBinding.target] = event.detail.value;
+        }
+    };
 
     Context.prototype.handleReactiveChange = function(event) {
         // Add dependencies to path
@@ -1805,163 +1818,85 @@
     }
 
     /**
+     * Scans the container for elements with data-pac-bind attributes and extracts
+     * their binding information along with expression dependencies.
+     * @returns {Map<WeakKey, any>}
+     */
+    Context.prototype.scanBindings = function(parentElement) {
+        const self = this;
+        const interpolationMap = new Map();
+        const elements = parentElement.querySelectorAll('[data-pac-bind]');
+
+        elements.forEach(element => {
+            // Skip elements that are already in the map
+            if (interpolationMap.has(element)) {
+                return;
+            }
+
+            // Skip elements that don't belong to this container
+            if (!Utils.belongsToThisContainer(self.container, element)) {
+                return;
+            }
+
+            const bindingString = element.getAttribute('data-pac-bind');
+            const parsedBindings = ExpressionParser.parseBindingString(bindingString);
+
+            // Transform bindings array into object keyed by binding type
+            const bindingsObject = {};
+
+            parsedBindings.forEach(binding => {
+                bindingsObject[binding.type] = {
+                    target: binding.target,
+                    dependencies: this.extractDependencies(binding.target)
+                };
+            });
+
+            interpolationMap.set(element, {
+                bindingString: bindingString,
+                bindings: bindingsObject
+            });
+        });
+
+        return interpolationMap;
+    };
+
+    /**
      * Scans the container for text nodes containing interpolation expressions and builds
      * a mapping of nodes to their templates and dependencies.
-     * @returns {Map<Node, {template: string, dependencies: string[]}>}
+     * @returns {Map<WeakKey, any>}
      */
-    Context.prototype.scanTextBindings = function() {
+    Context.prototype.scanTextBindings = function(parentElement) {
         const interpolationMap = new Map();
 
         // Create tree walker to find text nodes with interpolation expressions
         const walker = document.createTreeWalker(
-            this.container,
+            parentElement,
             NodeFilter.SHOW_TEXT,
             { acceptNode: node => INTERPOLATION_TEST_REGEX.test(node.textContent) ?
                     NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }
         );
 
         // Walk through matching text nodes that belong to this container
-        let node;
+        let element;
 
-        while ((node = walker.nextNode())) {
-            if (Utils.belongsToThisContainer(this.container, node)) {
-                const template = node.textContent;
-                const dependencies = this.extractInterpolationDependencies(template);
-                interpolationMap.set(node, { template, dependencies });
+        while ((element = walker.nextNode())) {
+            // Skip elements that are already in the map
+            if (interpolationMap.has(element)) {
+                continue;
             }
+
+            // Skip elements that don't belong to this container
+            if (!Utils.belongsToThisContainer(this.container, element)) {
+                continue;
+            }
+
+            interpolationMap.set(element, {
+                template: element.textContent,
+                dependencies: this.extractInterpolationDependencies(element.textContent)
+            });
         }
 
         return interpolationMap;
-    };
-
-    /**
-     * Scans the container for elements with data-pac-bind attributes and extracts
-     * their binding information along with expression dependencies.
-     * @returns {Array<Object>}
-     */
-    Context.prototype.scanAttributeBindings = function() {
-        const self = this;
-        const elements = this.container.querySelectorAll('[data-pac-bind]');
-        const interpolationMap = [];
-
-        elements.forEach(element => {
-            // Skip elements that don't belong to this container
-            if (!Utils.belongsToThisContainer(self.container, element)) {
-                return;
-            }
-
-            const bindingString = element.getAttribute('data-pac-bind');
-            const bindings = ExpressionParser.parseBindingString(bindingString);
-
-            // Filter out event handlers and foreach loops, keep only data bindings
-            const dataBindings = bindings.filter(binding =>
-                binding.type !== 'click' &&
-                binding.type !== 'foreach' &&
-                binding.target
-            );
-
-            if (dataBindings.length === 0) {
-                return;
-            }
-
-            // Parse expression dependencies for each binding
-            const bindingsWithDependencies = dataBindings.map(binding => ({
-                ...binding,
-                dependencies: this.extractDependencies(binding.target)
-            }));
-
-            interpolationMap.push({
-                element,
-                bindingString,
-                bindings: bindingsWithDependencies
-            });
-        });
-
-        return interpolationMap;
-    };
-
-    /**
-     * Scans the container for elements with data-pac-bind foreach
-     * their binding information along with expression dependencies.
-     * @returns {Array<Object>}
-     */
-    Context.prototype.scanForeachBindings = function() {
-        const self = this;
-        const elements = this.container.querySelectorAll('[data-pac-bind*="foreach:"]');
-        const interpolationMap = [];
-
-        elements.forEach(element => {
-            // Skip elements that don't belong to this container
-            if (!Utils.belongsToThisContainer(self.container, element)) {
-                return;
-            }
-
-            const bindingString = element.getAttribute('data-pac-bind');
-            const bindings = ExpressionParser.parseBindingString(bindingString);
-
-            // Filter out event handlers and foreach loops, keep only data bindings
-            const foreachBindings  = bindings.filter(binding =>
-                binding.type === 'foreach' &&
-                binding.target
-            );
-
-            if (foreachBindings .length === 0) {
-                return;
-            }
-
-            // Parse expression dependencies for each binding
-            interpolationMap.push({
-                element,
-                bindingString,
-                bindings: foreachBindings.map(binding => ({
-                    ...binding,
-                    dependencies: this.extractDependencies(binding.target)
-                }))
-            });
-        });
-
-        return interpolationMap;
-    };
-
-    /**
-     * Scans the container for elements with data-pac-bind attributes and extracts
-     * only their click binding information along with expression dependencies.
-     * @returns {Array<Object>}
-     */
-    Context.prototype.scanClickBindings = function() {
-        const self = this;
-        const elements = this.container.querySelectorAll('[data-pac-bind]');
-        const clickBindingsMap = [];
-
-        elements.forEach(element => {
-            // Skip elements that don't belong to this container
-            if (!Utils.belongsToThisContainer(self.container, element)) {
-                return;
-            }
-
-            // Filter to keep only click bindings
-            const bindingString = element.getAttribute('data-pac-bind');
-            const bindings = ExpressionParser.parseBindingString(bindingString);
-            const clickBindings = bindings.filter(binding => binding.type === 'click');
-
-            if (clickBindings.length === 0) {
-                return;
-            }
-
-            // Parse expression dependencies for each click binding
-            const bindingsWithDependencies = clickBindings.map(binding => ({
-                ...binding,
-                dependencies: this.extractDependencies(binding.target)
-            }));
-
-            clickBindingsMap.push({
-                element,
-                bindingString,
-                bindings: bindingsWithDependencies
-            });
-        });
-
-        return clickBindingsMap;
     };
 
     /**
