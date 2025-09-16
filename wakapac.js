@@ -1621,7 +1621,7 @@
 
                 // Extend the existing mappingData with foreach-specific information
                 Object.assign(mappingData, {
-                    arrayExpr: bindings.foreach.target,  // e.g., "todos"
+                    foreachExpr: bindings.foreach.target,  // e.g., "todos"
                     foreachId: foreachId,
                     depth: self.calculateForEachDepth(element),
                     parentElement: self.findParentForeachElement(element),
@@ -2010,9 +2010,15 @@
     }
 
     Context.prototype.renderForeach = function(foreachElement) {
-        const context = this.foreachContextRegistry.get(foreachElement);
+        const mappingData = this.interpolationMap.get(foreachElement);
+
+        if (!mappingData || !mappingData.foreachId) {
+            console.warn('No foreach binding found for element');
+            return;
+        }
+
         const array = ExpressionParser.evaluate(
-            ExpressionParser.parseExpression(context.arrayExpr),
+            ExpressionCache.parseExpression(mappingData.foreachExpr),
             this.abstraction
         );
 
@@ -2021,20 +2027,20 @@
         array.forEach((item, index) => {
             // Get parent scope if this is nested
             let parentScope = this.abstraction;
-            if (context.parentScope) {
-                const parentContext = this.foreachContextRegistry.get(context.parentScope);
-                if (parentContext && parentContext.currentScope) {
-                    parentScope = parentContext.currentScope;
+            if (mappingData.parentElement) {
+                const parentMappingData = this.interpolationMap.get(mappingData.parentElement);
+                if (parentMappingData && parentMappingData.currentScope) {
+                    parentScope = parentMappingData.currentScope;
                 }
             }
 
             // Create scope with item and index variables
             const scope = Object.create(parentScope);
-            scope[context.itemVar] = item;
-            scope[context.indexVar] = index;
+            scope[mappingData.itemVar] = item;
+            scope[mappingData.indexVar] = index;
 
             // Clone template and process interpolations
-            const itemHTML = context.template.replace(INTERPOLATION_REGEX, (match, expr) => {
+            const itemHTML = mappingData.template.replace(INTERPOLATION_REGEX, (match, expr) => {
                 const result = ExpressionParser.evaluate(
                     ExpressionParser.parseExpression(expr),
                     scope
@@ -2045,7 +2051,7 @@
 
             // Add with comment markers
             foreachElement.innerHTML +=
-                `<!-- pac-foreach-item: ${context.foreachId}, index=${index} -->` +
+                `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${index} -->` +
                 itemHTML +
                 `<!-- /pac-foreach-item -->`;
         });
