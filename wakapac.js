@@ -1610,6 +1610,7 @@
         this.clickInterpolationMap = this.scanClickBindings();
         this.textInterpolationMap = this.scanTextBindings();
         this.attributeInterpolationMap = this.scanAttributeBindings();
+        this.foreachInterpolationMap = this.scanForeachBindings();
 
         // Handle click events
         this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
@@ -1840,6 +1841,49 @@
                 element,
                 bindingString,
                 bindings: bindingsWithDependencies
+            });
+        });
+
+        return interpolationMap;
+    };
+
+    /**
+     * Scans the container for elements with data-pac-bind foreach
+     * their binding information along with expression dependencies.
+     * @returns {Array<Object>}
+     */
+    Context.prototype.scanForeachBindings = function() {
+        const self = this;
+        const elements = this.container.querySelectorAll('[data-pac-bind*="foreach:"]');
+        const interpolationMap = [];
+
+        elements.forEach(element => {
+            // Skip elements that don't belong to this container
+            if (!Utils.belongsToThisContainer(self.container, element)) {
+                return;
+            }
+
+            const bindingString = element.getAttribute('data-pac-bind');
+            const bindings = ExpressionParser.parseBindingString(bindingString);
+
+            // Filter out event handlers and foreach loops, keep only data bindings
+            const foreachBindings  = bindings.filter(binding =>
+                binding.type === 'foreach' &&
+                binding.target
+            );
+
+            if (foreachBindings .length === 0) {
+                return;
+            }
+
+            // Parse expression dependencies for each binding
+            interpolationMap.push({
+                element,
+                bindingString,
+                bindings: foreachBindings.map(binding => ({
+                    ...binding,
+                    dependencies: this.extractDependencies(binding.target)
+                }))
             });
         });
 
