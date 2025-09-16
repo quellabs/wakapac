@@ -1727,16 +1727,23 @@
     Context.prototype.handleAttributeChanges = function(event, pathsToCheck) {
         const self = this;
 
-        this.attributeInterpolationMap.forEach(mappingData => {
-            const { element, bindings } = mappingData;
+        this.interpolationMap.forEach((mappingData, element) => {
+            const { bindings } = mappingData;
 
-            // Check each binding individually and only update those that need it
-            bindings.forEach(binding => {
-                // Check if any of the paths that changed affect this node
-                if (binding.dependencies.some(dependency =>
+            // Check each binding type individually
+            Object.keys(bindings).forEach(bindingType => {
+                // Skip foreach and click bindings (handled separately)
+                if (['foreach', 'click'].includes(bindingType)) {
+                    return;
+                }
+
+                const bindingData = bindings[bindingType];
+
+                // Check if any of the paths that changed affect this binding
+                if (bindingData.dependencies.some(dependency =>
                     pathsToCheck.includes(dependency)
                 )) {
-                    self.domUpdater.updateAttributeBinding(element, binding, self.abstraction);
+                    self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, self.abstraction);
                 }
             });
         });
