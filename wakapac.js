@@ -1610,7 +1610,25 @@
         this.clickInterpolationMap = this.scanClickBindings();
         this.textInterpolationMap = this.scanTextBindings();
         this.attributeInterpolationMap = this.scanAttributeBindings();
-        this.foreachInterpolationMap = this.scanForeachBindings();
+
+        // Populate the foreach map
+        this.foreachContextRegistry = new WeakMap();
+
+        this.scanForeachBindings().forEach(mappingData => {
+            const { element, bindings } = mappingData;
+
+            this.foreachContextRegistry.set(element, {
+                arrayExpr: bindings[0].target,  // e.g., "todos"
+                foreachId: self.uniqid('foreach'),
+                depth: self.calculateForEachDepth(element),
+                parentScope: self.findParentForeachElement(element),
+                template: element.innerHTML,
+                itemVar: element.getAttribute('data-pac-item') || 'item',
+                indexVar: element.getAttribute('data-pac-index') || 'index'
+            });
+        });
+
+        console.log(this.foreachContextRegistry);
 
         // Handle click events
         this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
@@ -1622,7 +1640,7 @@
         this.container.addEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
 
-        // First time setup
+        // Populate items for the first time
         this.textInterpolationMap.forEach((mappingData, textNode) => {
             self.domUpdater.updateTextNode(textNode, mappingData.template, self.abstraction);
         });
@@ -1634,6 +1652,39 @@
                 self.domUpdater.updateAttributeBinding(element, binding, self.abstraction);
             })
         });
+    }
+
+    Context.prototype.calculateForEachDepth = function(element) {
+        let depth = 0;
+        let current = element.parentElement;
+
+        while (current && current !== this.container) {
+            // Check if this ancestor has a foreach binding
+            if (current.hasAttribute('data-pac-bind') &&
+                current.getAttribute('data-pac-bind').includes('foreach:')) {
+                depth++;
+            }
+
+            current = current.parentElement;
+        }
+
+        return depth;
+    }
+
+    Context.prototype.findParentForeachElement = function(element) {
+        let current = element.parentElement;
+
+        while (current && current !== this.container) {
+            // Check if this ancestor has a foreach binding
+            if (current.hasAttribute('data-pac-bind') &&
+                current.getAttribute('data-pac-bind').includes('foreach:')) {
+                return current;
+            }
+
+            current = current.parentElement;
+        }
+
+        return null;
     }
 
     Context.prototype.destroy = function() {
