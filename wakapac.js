@@ -1013,27 +1013,14 @@
             throw new Error(message + ` at token: ${JSON.stringify(this.peek())}`);
         },
 
-        lookupInScopeChain(ctx, name) {
-            let cur = ctx;
-
-            while (cur && cur !== Object.prototype) {
-                if (Object.prototype.hasOwnProperty.call(cur, name)) {
-                    return cur[name];
-                }
-
-                cur = Object.getPrototypeOf(cur);
-            }
-
-            return undefined;
-        },
-
         /**
          * Evaluates a parsed expression in the given context
          * @param {Object} parsedExpr - Parsed expression object
          * @param {Object} context - Evaluation context
+         * @param scopeResolver
          * @returns {*} Evaluated result
          */
-        evaluate(parsedExpr, context) {
+        evaluate(parsedExpr, context, scopeResolver = null) {
             if (!parsedExpr) {
                 return undefined;
             }
@@ -1043,29 +1030,27 @@
                     return parsedExpr.value;
 
                 case 'property':
-                    return this.getProperty(parsedExpr.path, context);
+                    return this.getProperty(parsedExpr.path, context, scopeResolver);
 
                 case 'parentheses':
-                    return this.evaluate(parsedExpr.inner, context);
+                    return this.evaluate(parsedExpr.inner, context, scopeResolver);
 
                 case 'object':
-                    return this.evaluateObjectLiteral(parsedExpr, context);
+                    return this.evaluateObjectLiteral(parsedExpr, context, scopeResolver);
 
                 case 'ternary': {
-                    const condition = this.evaluate(parsedExpr.condition, context);
-
+                    const condition = this.evaluate(parsedExpr.condition, context, scopeResolver);
                     return condition ?
-                        this.evaluate(parsedExpr.trueValue, context) :
-                        this.evaluate(parsedExpr.falseValue, context);
+                        this.evaluate(parsedExpr.trueValue, context, scopeResolver) :
+                        this.evaluate(parsedExpr.falseValue, context, scopeResolver);
                 }
 
                 case 'logical': {
-                    const leftLogical = this.evaluate(parsedExpr.left, context);
-
+                    const leftLogical = this.evaluate(parsedExpr.left, context, scopeResolver);
                     if (parsedExpr.operator === '&&') {
-                        return leftLogical ? this.evaluate(parsedExpr.right, context) : false;
+                        return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : false;
                     } else if (parsedExpr.operator === '||') {
-                        return leftLogical ? true : this.evaluate(parsedExpr.right, context);
+                        return leftLogical ? true : this.evaluate(parsedExpr.right, context, scopeResolver);
                     } else {
                         return false;
                     }
@@ -1073,14 +1058,13 @@
 
                 case 'comparison':
                 case 'arithmetic': {
-                    const leftVal = this.evaluate(parsedExpr.left, context);
-                    const rightVal = this.evaluate(parsedExpr.right, context);
+                    const leftVal = this.evaluate(parsedExpr.left, context, scopeResolver);
+                    const rightVal = this.evaluate(parsedExpr.right, context, scopeResolver);
                     return this.performOperation(leftVal, parsedExpr.operator, rightVal);
                 }
 
                 case 'unary': {
-                    const operandValue = this.evaluate(parsedExpr.operand, context);
-
+                    const operandValue = this.evaluate(parsedExpr.operand, context, scopeResolver);
                     switch (parsedExpr.operator) {
                         case '!':
                             return !operandValue;
@@ -1101,16 +1085,23 @@
             }
         },
 
-        getProperty(path, obj) {
+        getProperty(path, obj, scopeResolver  = null) {
             if (!obj || !path) {
                 return undefined;
             }
 
-            if (path.indexOf('.') === -1) {
-                return (path in obj) ? obj[path] : undefined;
+            let resolvedPath = path;
+
+            // Use context to resolve scoped paths if available
+            if (scopeResolver  && scopeResolver.resolveScopedPath) {
+                resolvedPath = scopeResolver.resolveScopedPath(path);
             }
 
-            const parts = path.split('.');
+            if (resolvedPath.indexOf('.') === -1) {
+                return (resolvedPath in obj) ? obj[resolvedPath] : undefined;
+            }
+
+            const parts = resolvedPath.split('.');
             let current = obj;
 
             for (let i = 0; i < parts.length; i++) {
@@ -1124,12 +1115,12 @@
             return current;
         },
 
-        evaluateObjectLiteral(objectExpr, context) {
+        evaluateObjectLiteral(objectExpr, context, resolverContext = null) {
             const result = {};
 
             if (objectExpr.pairs) {
                 objectExpr.pairs.forEach(({key, value}) => {
-                    result[key] = this.evaluate(value, context);
+                    result[key] = this.evaluate(value, context, resolverContext);
                 });
             }
 
@@ -1430,15 +1421,23 @@
     // DOM UPDATER - Handles ALL binding applications
     // ========================================================================
 
-    function DomUpdater(container) {
-        this.container = container;
+    function DomUpdater(context) {
+        this.context = context;
     }
 
-    DomUpdater.prototype.updateTextNode = function (element, template, context) {
+    DomUpdater.prototype.updateTextNode = function (element, template) {
+        const self = this;
+
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
             try {
-                const parsed = ExpressionParser.parseExpression(expression.trim());
-                const result = ExpressionParser.evaluate(parsed, context);
+                const parsed = ExpressionCache.parseExpression(expression);
+
+                const scopeResolver = {
+                    resolveScopedPath: (path) => self.context.resolveScopedPath(path, element)
+                };
+
+                // Get abstraction from context instead of parameter
+                const result = ExpressionParser.evaluate(parsed, self.context.abstraction, scopeResolver);
                 return result != null ? String(result) : '';
             } catch (error) {
                 return match;
@@ -1450,11 +1449,20 @@
         }
     };
 
-    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, context) {
+    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData) {
         try {
+            // Parse the expression
             const parsed = ExpressionCache.parseExpression(bindingData.target);
-            const value = ExpressionParser.evaluate(parsed, context);
 
+            // Create resolver context for this element
+            const scopeResolver = {
+                resolveScopedPath: (path) => this.context.resolveScopedPath(path, element)
+            };
+
+            // Evaluate the expression
+            const value = ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
+            
+            // Handle the result
             switch (bindingType) {
                 case 'value':
                     this.applyValueBinding(element, value);
@@ -1521,9 +1529,11 @@
         } else {
             if (!element.hasAttribute('data-pac-hidden')) {
                 const currentDisplay = getComputedStyle(element).display;
+
                 if (currentDisplay !== 'none') {
                     element.setAttribute('data-pac-orig-display', currentDisplay);
                 }
+
                 element.style.display = 'none';
                 element.setAttribute('data-pac-hidden', 'true');
             }
@@ -1605,7 +1615,7 @@
         this.parent = parent;
         this.container = container;
         this.abstraction = this.createReactiveAbstraction();
-        this.domUpdater = new DomUpdater(this.container);
+        this.domUpdater = new DomUpdater(this);
         this.dependencies = this.getDependencies();
         this.interpolationMap = this.scanBindings(this.container);
         this.textInterpolationMap = this.scanTextBindings(this.container);
@@ -1644,7 +1654,7 @@
 
         // Populate items for the first time
         this.textInterpolationMap.forEach((mappingData, textNode) => {
-            self.domUpdater.updateTextNode(textNode, mappingData.template, self.abstraction);
+            self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
         this.interpolationMap.forEach((mappingData, element) => {
@@ -1658,7 +1668,7 @@
                 }
 
                 const bindingData = mappingData.bindings[bindingType];
-                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, self.abstraction);
+                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
             });
         });
 
@@ -1743,7 +1753,7 @@
                 if (bindingData.dependencies.some(dependency =>
                     pathsToCheck.includes(dependency)
                 )) {
-                    self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, self.abstraction);
+                    self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
                 }
             });
         });
@@ -1757,7 +1767,7 @@
             if (mappingData.dependencies.some(dep =>
                 pathsToCheck.includes(dep)
             )) {
-                self.domUpdater.updateTextNode(textNode, mappingData.template, self.abstraction);
+                self.domUpdater.updateTextNode(textNode, mappingData.template);
             }
         });
     };
@@ -2017,9 +2027,15 @@
             return;
         }
 
+        // Create scope resolver for this foreach element
+        const scopeResolver = {
+            resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
+        };
+
         const array = ExpressionParser.evaluate(
             ExpressionCache.parseExpression(mappingData.foreachExpr),
-            this.abstraction
+            this.abstraction,
+            scopeResolver
         );
 
         foreachElement.innerHTML = '';
@@ -2027,6 +2043,7 @@
         array.forEach((item, index) => {
             // Get parent scope if this is nested
             let parentScope = this.abstraction;
+
             if (mappingData.parentElement) {
                 const parentMappingData = this.interpolationMap.get(mappingData.parentElement);
                 if (parentMappingData && parentMappingData.currentScope) {
@@ -2055,8 +2072,196 @@
                 itemHTML +
                 `<!-- /pac-foreach-item -->`;
         });
+    }
+
+    /**
+     * Resolves a scoped path by automatically finding context from the DOM element
+     * @param {string} scopedPath - The scoped path to resolve (e.g., "sub_item.text")
+     * @param {Element} element - The DOM element containing the expression (text node or bound element)
+     * @returns {string} The resolved actual data path or original path if no foreach context found
+     */
+    Context.prototype.resolveScopedPath = function(scopedPath, element) {
+        // If no dot in path, it's just a variable name - no resolution needed
+        if (!scopedPath.includes('.')) {
+            return scopedPath;
+        }
+
+        // Find the foreach element that defines this scoped variable
+        const foreachElement = this.findForeachElementForScopedPath(scopedPath, element);
+
+        if (!foreachElement) {
+            return scopedPath; // Return original path if no foreach context found
+        }
+
+        const mappingData = this.interpolationMap.get(foreachElement);
+        if (!mappingData || !mappingData.bindings.foreach) {
+            return scopedPath; // Return original path if mapping data invalid
+        }
+
+        // Extract current index from HTML comments for this foreach
+        const currentIndex = this.extractCurrentIndexFromComments(element, mappingData.foreachId);
+
+        if (currentIndex === null) {
+            return scopedPath; // Return original path if index not found
+        }
+
+        // Extract the property path after the item variable
+        const propertyPath = scopedPath.substring(mappingData.itemVar.length + 1);
+
+        // Resolve the array expression using parent relationships and HTML comments
+        const resolvedExpr = this.resolveArrayExpression(mappingData.foreachExpr, foreachElement, element);
+
+        // Build the final resolved path
+        return resolvedExpr + '[' + currentIndex + ']' + (propertyPath ? '.' + propertyPath : '');
     };
-    
+
+    /**
+     * Finds the foreach element that defines the given scoped variable
+     * @param {string} scopedPath - The scoped path (e.g., "sub_item.text")
+     * @param {Element} startElement - The DOM element to search from
+     * @returns {Element|null} The foreach element or null if not found
+     */
+    Context.prototype.findForeachElementForScopedPath = function(scopedPath, startElement) {
+        const rootVariable = scopedPath.split('.')[0];
+
+        // Start from text node's parent if needed
+        let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
+
+        // Walk up from current element to find foreach that defines this variable
+        while (current && current !== this.container) {
+            const mappingData = this.interpolationMap.get(current);
+
+            if (mappingData && mappingData.bindings && mappingData.bindings.foreach) {
+                if (mappingData.itemVar === rootVariable) {
+                    return current;
+                }
+            }
+
+            current = current.parentElement;
+        }
+
+        return null;
+    };
+
+    /**
+     * Extracts the current item index from HTML comments by walking up from element
+     * @param {Element} startElement - Element to start searching from
+     * @param {string} foreachId - The foreach ID to look for in comments
+     * @returns {number|null} The current index or null if not found
+     */
+    Context.prototype.extractCurrentIndexFromComments = function(startElement, foreachId) {
+        // Start from text node's parent if needed
+        let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
+
+        // Walk up the DOM to find this foreach's comment marker
+        while (current && current !== this.container) {
+            // Check previous siblings for comment markers
+            let sibling = current.previousSibling;
+
+            while (sibling) {
+                if (sibling.nodeType === Node.COMMENT_NODE) {
+                    const commentText = sibling.textContent.trim();
+
+                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X"
+                    const match = commentText.match(/pac-foreach-item:\s*([^,]+),\s*index=(\d+)/);
+
+                    if (match && match[1].trim() === foreachId) {
+                        return parseInt(match[2], 10);
+                    }
+                }
+                sibling = sibling.previousSibling;
+            }
+
+            current = current.parentElement;
+        }
+
+        return null;
+    };
+
+    /**
+     * Resolves an array expression by substituting parent item variables with their actual paths
+     * @param {string} arrayExpr - The array expression to resolve (e.g., "item.subitems")
+     * @param {Element} foreachElement - The foreach element context
+     * @param {Element} contextElement - The DOM element for context (to find parent indices)
+     * @returns {string} The resolved array expression
+     */
+    Context.prototype.resolveArrayExpression = function(arrayExpr, foreachElement, contextElement) {
+        // If the array expression doesn't contain any variables to substitute, return as-is
+        if (!arrayExpr.includes('.')) {
+            return arrayExpr;
+        }
+
+        const mappingData = this.interpolationMap.get(foreachElement);
+        if (!mappingData || !mappingData.parentElement) {
+            return arrayExpr;
+        }
+
+        const parentElement = mappingData.parentElement;
+        const parentMapping = this.interpolationMap.get(parentElement);
+
+        if (!parentMapping || !parentMapping.bindings.foreach) {
+            return arrayExpr;
+        }
+
+        // Check if the array expression starts with the parent's item variable
+        if (arrayExpr.startsWith(parentMapping.itemVar + '.')) {
+            // Extract parent index from HTML comments
+            const parentIndex = this.extractParentIndexFromComments(contextElement, parentMapping.foreachId);
+
+            if (parentIndex !== null) {
+                // Recursively resolve the parent expression first
+                const parentResolvedExpr = this.resolveArrayExpression(
+                    parentMapping.foreachExpr,
+                    parentElement,
+                    contextElement
+                );
+
+                // Replace the item variable with the resolved path + index
+                return arrayExpr.replace(
+                    parentMapping.itemVar + '.',
+                    parentResolvedExpr + '[' + parentIndex + '].'
+                );
+            }
+        }
+
+        return arrayExpr;
+    };
+
+    /**
+     * Extracts parent index from HTML comments by walking up the DOM
+     * @param {Element} startElement - Element to start searching from
+     * @param {string} foreachId - The foreach ID to look for in comments
+     * @returns {number|null} The parent index or null if not found
+     */
+    Context.prototype.extractParentIndexFromComments = function(startElement, foreachId) {
+        // Start from text node's parent if needed
+        let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
+
+        // Walk up the DOM to find the parent foreach item
+        while (current && current !== this.container) {
+            // Check previous siblings for comment markers
+            let sibling = current.previousSibling;
+
+            while (sibling) {
+                if (sibling.nodeType === Node.COMMENT_NODE) {
+                    const commentText = sibling.textContent.trim();
+
+                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X"
+                    const match = commentText.match(/pac-foreach-item:\s*([^,]+),\s*index=(\d+)/);
+
+                    if (match && match[1].trim() === foreachId) {
+                        return parseInt(match[2], 10);
+                    }
+                }
+                sibling = sibling.previousSibling;
+            }
+
+            current = current.parentElement;
+        }
+
+        return null;
+    };
+
     // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
