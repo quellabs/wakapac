@@ -1880,6 +1880,13 @@
                 }
             });
         });
+
+        pathsToCheck.forEach(path => {
+            const foreachElements = this.findForeachElementsByArrayPath(path);
+            foreachElements.forEach(element => {
+                this.renderForeach(element);
+            });
+        });
     };
 
     Context.prototype.handleTextInterpolation = function(event, pathsToCheck) {
@@ -2041,6 +2048,9 @@
         // Example: ['todos', '0', 'completed'] becomes 'todos.0.completed'
         const pathString = this.pathArrayToString(event.detail.path);
 
+        console.log('Property changed:', pathString); // Add this
+        console.log('Dependencies for', pathString, ':', this.dependencies.get(pathString)); // Add this
+
         // Initialize the list of dependency paths that need DOM updates
         // Always include the exact path that changed
         const pathsToCheck = [pathString];
@@ -2050,6 +2060,8 @@
         if (this.dependencies.has(pathString)) {
             pathsToCheck.push(...this.dependencies.get(pathString));
         }
+
+        console.log('Final pathsToCheck:', pathsToCheck); // Add this
 
         // CRITICAL FIX: Also check root-level dependencies
         // Many computed properties depend on the root collection rather than individual items.
@@ -2291,6 +2303,8 @@
      * @returns {void}
      */
     Context.prototype.renderForeach = function(foreachElement) {
+        console.log('renderForeach');
+
         const mappingData = this.interpolationMap.get(foreachElement);
 
         if (!mappingData || !mappingData.foreachId) {
