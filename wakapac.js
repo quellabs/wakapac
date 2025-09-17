@@ -416,7 +416,7 @@
                 return;
             }
 
-            container.dispatchEvent(new CustomEvent(eventName, {
+            const customEvent = new CustomEvent(eventName, {
                 detail: {
                     timestamp: Date.now(),
                     id: originalEvent.target.id || null,
@@ -428,7 +428,18 @@
                     bindString: originalEvent.target.getAttribute('data-pac-bind') ?? '',
                     extra: extra
                 }
-            }));
+            });
+
+            // Forward preventDefault to the original event
+            const originalPreventDefault = customEvent.preventDefault;
+            
+            customEvent.preventDefault = function() {
+                originalPreventDefault.call(this);
+                originalEvent.preventDefault();
+            };
+
+            // Dispatch ecvent
+            container.dispatchEvent(customEvent);
         }
     }
 
@@ -1656,6 +1667,7 @@
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
         this.dependencies = this.getDependencies();
+        console.log('Dependencies map:', this.dependencies);
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
 
@@ -1984,6 +1996,8 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Context.prototype.handleReactiveChange = function(event) {
+        console.log('⚡ handleReactiveChange called for path:', event.detail.path.join('.'));
+
         // Convert the property path array to a dot-notation string for dependency lookup
         // Example: ['todos', '0', 'completed'] becomes 'todos.0.completed'
         const pathString = event.detail.path.join('.');
@@ -2018,13 +2032,13 @@
     }
 
     Context.prototype.handleArrayChange = function(event) {
+        console.log('🔄 handleArrayChange called');
         const pathString = event.detail.path.join('.');
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
-        console.log(pathString);
-        console.table(foreachElements);
-
-        foreachElements.forEach(element => {
+        console.log('🔄 Found elements to update:', foreachElements.length);
+        foreachElements.forEach((element, index) => {
+            console.log(`🔄 Rendering element ${index}`);
             this.renderForeach(element);
         });
     };
