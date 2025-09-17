@@ -1667,7 +1667,6 @@
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
         this.dependencies = this.getDependencies();
-        console.log('Dependencies map:', this.dependencies);
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
 
@@ -1742,9 +1741,15 @@
                 const foreachId = self.uniqid('foreach');
                 element.setAttribute('data-pac-foreach-id', foreachId);
 
+                // Auto-detect and set the source array
+                const foreachExpr = bindings.foreach.target;
+                const sourceArray = this.inferArrayRoot(foreachExpr);
+                element.setAttribute('data-pac-array', sourceArray);
+
                 // Extend the existing mappingData with foreach-specific information
                 Object.assign(mappingData, {
                     foreachExpr: bindings.foreach.target,
+                    sourceArray: sourceArray,
                     foreachId: foreachId,
                     depth: self.calculateForEachDepth(element),
                     template: element.innerHTML,
@@ -1811,6 +1816,27 @@
         });
 
         return dependencies;
+    };
+
+    /**
+     * Try to infer which array property in the abstraction is the "source" array
+     * behind a given computed property (for example, linking `filteredTodos` back to `todos`).
+     * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`).
+     * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
+     */
+    Context.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
+        // Step 1: Try dependency map (cheap and reliable if set up correctly).
+        for (const [rootProperty, dependentList] of this.dependencies) {
+            const rootValue = this.abstraction[rootProperty];
+            const isArrayRoot = Array.isArray(rootValue);
+
+            if (dependentList.includes(computedName) && isArrayRoot) {
+                return rootProperty; // e.g. "todos"
+            }
+        }
+
+        // Nothing matched
+        return computedName;
     };
 
     Context.prototype.handleAttributeChanges = function(event, pathsToCheck) {
@@ -1996,8 +2022,6 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Context.prototype.handleReactiveChange = function(event) {
-        console.log('⚡ handleReactiveChange called for path:', event.detail.path.join('.'));
-
         // Convert the property path array to a dot-notation string for dependency lookup
         // Example: ['todos', '0', 'completed'] becomes 'todos.0.completed'
         const pathString = this.pathArrayToString(event.detail.path);
@@ -2021,8 +2045,6 @@
         if (this.dependencies.has(rootProperty)) {
             pathsToCheck.push(...this.dependencies.get(rootProperty));
         }
-
-        console.log(pathsToCheck);
 
         // Trigger DOM updates for all affected text interpolations
         // This handles {{expression}} patterns in text content
@@ -2055,13 +2077,10 @@
     };
 
     Context.prototype.handleArrayChange = function(event) {
-        console.log('🔄 handleArrayChange called');
         const pathString = event.detail.path.join('.');
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
-        console.log('🔄 Found elements to update:', foreachElements.length);
         foreachElements.forEach((element, index) => {
-            console.log(`🔄 Rendering element ${index}`);
             this.renderForeach(element);
         });
     };
