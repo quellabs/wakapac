@@ -374,12 +374,25 @@
 
             // Change event (when input element loses focus)
             document.addEventListener('change', function (event) {
-                self.dispatchTrackedEvent('pac:dom:change', event);
+                // Only handle change events for select, radio, and checkbox
+                if (
+                    event.target.tagName === 'SELECT' ||
+                    event.target.type === 'radio' ||
+                    event.target.type === 'checkbox'
+                ) {
+                    self.dispatchTrackedEvent('pac:dom:change', event);
+                }
             });
 
             // Input event (when user types)
             document.addEventListener('input', function (event) {
-                self.dispatchTrackedEvent('pac:dom:change', event);
+                // Only handle input events for text inputs and textareas
+                if (
+                    event.target.tagName === 'INPUT' &&
+                    !['radio', 'checkbox'].includes(event.target.type) || event.target.tagName === 'TEXTAREA'
+                ) {
+                    self.dispatchTrackedEvent('pac:dom:change', event);
+                }
             });
 
             // Submit event (when user submits form)
@@ -1525,7 +1538,12 @@
 
     DomUpdater.prototype.applyCheckedBinding = function (element, value) {
         if (element.type === 'checkbox' || element.type === 'radio') {
-            element.checked = Boolean(value);
+            const newChecked = Boolean(value);
+
+            // Only update if the value is actually different
+            if (element.checked !== newChecked) {
+                element.checked = newChecked;
+            }
         }
     };
 
@@ -1856,6 +1874,7 @@
     };
 
     Context.prototype.handleDomChange = function(event) {
+        console.log('x');
         const self = this;
         const targetElement = event.detail.target;
 
