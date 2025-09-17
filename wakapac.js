@@ -1669,6 +1669,7 @@
         this.dependencies = this.getDependencies();
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
+        this.foreachArrayCache = new WeakMap();
 
         // Scan the container for items and store them in interpolationMap and textInterpolationMap
         this.scanAndRegisterNewElements(this.container);
@@ -2037,38 +2038,43 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Context.prototype.handleReactiveChange = function(event) {
-        // Convert the property path array to a dot-notation string for dependency lookup
-        // Example: ['todos', '0', 'completed'] becomes 'todos.0.completed'
         const pathString = this.pathArrayToString(event.detail.path);
-
-        // Initialize the list of dependency paths that need DOM updates
-        // Always include the exact path that changed
         const pathsToCheck = [pathString];
 
-        // Check for computed properties that depend on this exact property path
-        // Example: If "todos.0.completed" has registered dependencies, include them
         if (this.dependencies.has(pathString)) {
             pathsToCheck.push(...this.dependencies.get(pathString));
         }
 
-        // CRITICAL FIX: Also check root-level dependencies
-        // Many computed properties depend on the root collection rather than individual items.
-        // When todos[0].completed changes, computed properties like "completedCount" that
-        // depend on the entire "todos" array also need to be recalculated and updated.
-        // This ensures collection-level computed properties stay synchronized with item changes.
-        const rootProperty = event.detail.path[0]; // Extract first segment
+        const rootProperty = event.detail.path[0];
         if (this.dependencies.has(rootProperty)) {
             pathsToCheck.push(...this.dependencies.get(rootProperty));
         }
 
-        // Trigger DOM updates for all affected text interpolations
-        // This handles {{expression}} patterns in text content
         this.handleTextInterpolation(event, pathsToCheck);
-
-        // Trigger DOM updates for all affected attribute bindings
-        // This handles data-pac-bind attribute expressions
         this.handleAttributeChanges(event, pathsToCheck);
-    }
+
+        // Handle foreach rebuilds
+        pathsToCheck.forEach(path => {
+            // Skip the original change unless it's a direct array assignment
+            if (path === pathString && event.detail.path.length > 1) {
+                return;
+            }
+
+            // Only check if this could be an array-returning computed property
+            const isComputedFunction = typeof this.abstraction.computed?.[path] === 'function';
+            const isDirectArray = event.detail.path.length === 1 && Array.isArray(this.abstraction[path]);
+
+            if (isComputedFunction || isDirectArray) {
+                const foreachElements = this.findForeachElementsByArrayPath(path);
+
+                foreachElements.forEach(element => {
+                    if (this.shouldRebuildForeach(element)) {
+                        this.renderForeach(element);
+                    }
+                });
+            }
+        });
+    };
 
     Context.prototype.pathArrayToString = function (pathArray) {
         if (pathArray.length === 0) {
@@ -2340,6 +2346,9 @@
                 return;
             }
 
+            // Add to cache
+            this.foreachArrayCache.set(foreachElement, array);
+
             // Clear existing content and rebuild from scratch
             foreachElement.innerHTML = '';
 
@@ -2410,6 +2419,48 @@
 
         // Build the final resolved path
         return resolvedExpr + '[' + currentIndex + ']' + (propertyPath ? '.' + propertyPath : '');
+    };
+
+    Context.prototype.shouldRebuildForeach = function(foreachElement) {
+        const mappingData = this.interpolationMap.get(foreachElement);
+
+        if (!mappingData) {
+            return false;
+        }
+
+        const scopeResolver = {
+            resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
+        };
+
+        const newArray = ExpressionParser.evaluate(
+            ExpressionCache.parseExpression(mappingData.foreachExpr),
+            this.abstraction,
+            scopeResolver
+        );
+
+        if (!Array.isArray(newArray)) {
+            return false;
+        }
+
+        // Get the previous array from cache
+        const previousArray = this.foreachArrayCache.get(foreachElement);
+
+        if (!previousArray) {
+            return true;
+        }
+
+        if (newArray.length !== previousArray.length) {
+            return true;
+        }
+
+        // Check if the actual items changed (by reference)
+        for (let i = 0; i < newArray.length; i++) {
+            if (newArray[i] !== previousArray[i]) {
+                return true;
+            }
+        }
+
+        return false;
     };
 
     /**
