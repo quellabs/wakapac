@@ -279,7 +279,19 @@
                         return val;
                     }
 
-                    // Return the value directly - no lazy wrapping
+                    // CRITICAL FIX: Lazy wrapping of nested objects and arrays
+                    // If the value is an object/array and not already reactive, wrap it in a proxy
+                    if (val && typeof val === 'object' && !val._isReactive) {
+                        const propertyPath = currentPath.concat([prop]);
+                        const proxiedVal = createProxy(val, propertyPath);
+                        proxiedVal._isReactive = true;
+
+                        // Update the original object with the proxy
+                        target[prop] = proxiedVal;
+
+                        return proxiedVal;
+                    }
+
                     return val;
                 },
 
@@ -1771,9 +1783,20 @@
                 const bindingData = bindings[bindingType];
 
                 // Check if any of the paths that changed affect this binding
-                if (bindingData.dependencies.some(dependency =>
-                    pathsToCheck.includes(dependency)
-                )) {
+                // Need to check both exact matches and root property matches
+                const shouldUpdate = bindingData.dependencies.some(dependency => {
+                    // Exact match
+                    if (pathsToCheck.includes(dependency)) {
+                        return true;
+                    }
+
+                    // Check if the dependency is a root of the changed path
+                    // e.g., "todos" dependency should match "todos.0.completed" change
+                    const pathString = event.detail.path.join('.');
+                    return pathString.startsWith(dependency + '.') || pathString.startsWith(dependency + '[');
+                });
+
+                if (shouldUpdate) {
                     self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
                 }
             });
@@ -1785,9 +1808,20 @@
 
         self.textInterpolationMap.forEach((mappingData, textNode) => {
             // Check if any of the paths that changed affect this node
-            if (mappingData.dependencies.some(dep =>
-                pathsToCheck.includes(dep)
-            )) {
+            // Need to check both exact matches and root property matches
+            const shouldUpdate = mappingData.dependencies.some(dep => {
+                // Exact match
+                if (pathsToCheck.includes(dep)) {
+                    return true;
+                }
+
+                // Check if the dependency is a root of the changed path
+                // e.g., "todos" dependency should match "todos.0.completed" change
+                const pathString = event.detail.path.join('.');
+                return pathString.startsWith(dep + '.') || pathString.startsWith(dep + '[');
+            });
+
+            if (shouldUpdate) {
                 self.domUpdater.updateTextNode(textNode, mappingData.template);
             }
         });
@@ -1828,32 +1862,59 @@
         // Get the mapping data for this specific element
         const mappingData = this.interpolationMap.get(targetElement);
 
-        // If no mapping data found or no value binding, return early
-        if (!mappingData || !mappingData.bindings.value) {
+        // If no mapping data found, return early
+        if (!mappingData) {
             return;
         }
 
-        // Get the value binding data
-        const valueBinding = mappingData.bindings.value;
+        // Handle value binding (for inputs, selects, textareas)
+        if (mappingData.bindings.value) {
+            const valueBinding = mappingData.bindings.value;
+            const resolvedPath = self.resolveScopedPath(valueBinding.target, targetElement);
 
-        // Check if the target property exists in abstraction and update it
-        if (valueBinding.target in self.abstraction) {
-            self.abstraction[valueBinding.target] = event.detail.value;
+            // Use the nested property setter to handle complex paths
+            self.setNestedProperty(resolvedPath, event.detail.value);
+        }
+
+        // Handle checked binding (for checkboxes and radio buttons)
+        if (mappingData.bindings.checked) {
+            const checkedBinding = mappingData.bindings.checked;
+            const resolvedPath = self.resolveScopedPath(checkedBinding.target, targetElement);
+
+            let newValue;
+            if (targetElement.type === 'checkbox') {
+                newValue = event.detail.target.checked;
+            } else if (targetElement.type === 'radio' && event.detail.target.checked) {
+                newValue = event.detail.value;
+            } else {
+                return; // Don't update for unchecked radio buttons
+            }
+
+            // Use the nested property setter to handle complex paths
+            self.setNestedProperty(resolvedPath, newValue);
         }
     };
 
     Context.prototype.handleReactiveChange = function(event) {
-        // Add dependencies to path
         const pathString = event.detail.path.join('.');
         const pathsToCheck = [pathString];
 
+        // Add computed dependencies for this exact path
         if (this.dependencies.has(pathString)) {
             pathsToCheck.push(...this.dependencies.get(pathString));
+        }
+
+        // CRITICAL FIX: Also check root-level dependencies
+        // When todos[0].completed changes, we need to check dependencies of "todos"
+        const rootProperty = event.detail.path[0];
+        if (this.dependencies.has(rootProperty)) {
+            pathsToCheck.push(...this.dependencies.get(rootProperty));
         }
 
         this.handleTextInterpolation(event, pathsToCheck);
         this.handleAttributeChanges(event, pathsToCheck);
     }
+
 
     /**
      * Scans the container for elements with data-pac-bind attributes and extracts
@@ -2319,6 +2380,33 @@
         textNodesToRemove.forEach(textNode => {
             this.textInterpolationMap.delete(textNode);
         });
+    };
+
+    /**
+     * Sets a nested property value on the reactive abstraction
+     * @param {string} path - The property path (e.g., "todos[0].completed")
+     * @param {*} value - The value to set
+     */
+    Context.prototype.setNestedProperty = function (path, value) {
+        const parts = path.split(/[.\[\]]+/).filter(Boolean);
+        let current = this.abstraction;
+
+        for (let i = 0; i < parts.length - 1; i++) {
+            const part = parts[i];
+            const nextPart = parts[i + 1];
+
+            // If current part doesn't exist, create it
+            if (!(part in current)) {
+                // Create array if next part is numeric, object otherwise
+                current[part] = /^\d+$/.test(nextPart) ? [] : {};
+            }
+
+            current = current[part];
+        }
+
+        // Set the final property
+        const finalPart = parts[parts.length - 1];
+        current[finalPart] = value;
     };
 
     // ========================================================================
