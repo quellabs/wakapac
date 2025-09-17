@@ -2019,11 +2019,14 @@
 
     Context.prototype.handleArrayChange = function(event) {
         const pathString = event.detail.path.join('.');
-        const foreachElement = this.findForeachElementByArrayPath(pathString);
+        const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
-        if (foreachElement) {
-            this.renderForeach(foreachElement);
-        }
+        console.log(pathString);
+        console.table(foreachElements);
+
+        foreachElements.forEach(element => {
+            this.renderForeach(element);
+        });
     };
 
     /**
@@ -2366,31 +2369,30 @@
         return null;
     };
 
-    Context.prototype.findForeachElementByArrayPath = function(arrayPath) {
+    Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
+        // Find all computed properties that depend on the changed array
+        const dependentProperties = [];
+        if (this.dependencies.has(arrayPath)) {
+            dependentProperties.push(...this.dependencies.get(arrayPath));
+        }
+
+        // Also include the array path itself
+        dependentProperties.push(arrayPath);
+
+        // Now find foreach elements bound to any of these properties
+        const elementsToUpdate = [];
+
         for (const [element, mappingData] of this.interpolationMap) {
             if (mappingData.bindings && mappingData.bindings.foreach) {
                 const foreachExpr = mappingData.bindings.foreach.target;
 
-                // Direct match
-                if (foreachExpr === arrayPath) {
-                    return element;
-                }
-
-                // Check if it's a computed property that depends on the changed array
-                const computed = this.originalAbstraction.computed || {};
-
-                if (computed[foreachExpr]) {
-                    const dependencies = this.extractDependencies(foreachExpr);
-
-                    console.log(dependencies);
-
-                    if (dependencies.includes(arrayPath)) {
-                        return element;
-                    }
+                if (dependentProperties.includes(foreachExpr)) {
+                    elementsToUpdate.push(element);
                 }
             }
         }
-        return null;
+
+        return elementsToUpdate;
     };
 
     Context.prototype.extractClosestForeachContext = function(startElement) {
