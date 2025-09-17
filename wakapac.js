@@ -2191,6 +2191,11 @@
         return null;
     }
 
+    /**
+     * Renders a foreach loop by evaluating its array expression and generating DOM content.
+     * @param {Element} foreachElement - DOM element with foreach binding
+     * @returns {void}
+     */
     Context.prototype.renderForeach = function(foreachElement) {
         const mappingData = this.interpolationMap.get(foreachElement);
 
@@ -2200,32 +2205,78 @@
         }
 
         // Clean up old elements from maps before clearing innerHTML
+        // This prevents memory leaks when re-rendering dynamic content
         this.cleanupForeachMaps(foreachElement);
 
         // Create scope resolver for this foreach element
+        // This handles variable resolution in nested contexts (e.g., converting "todo.subs" to "todos[0].subs")
         const scopeResolver = {
             resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
         };
 
-        const array = ExpressionParser.evaluate(
-            ExpressionCache.parseExpression(mappingData.foreachExpr),
-            this.abstraction,
-            scopeResolver
-        );
+        try {
+            // Evaluate the foreach expression (e.g., "todos" or "todo.subs")
+            const array = ExpressionParser.evaluate(
+                ExpressionCache.parseExpression(mappingData.foreachExpr),
+                this.abstraction,
+                scopeResolver
+            );
 
-        foreachElement.innerHTML = '';
+            // TIMING FIX: Handle the case where parent context doesn't exist yet
+            // If array is null/undefined, this indicates that the foreach expression
+            // depends on a parent context that hasn't been established yet.
+            //
+            // Examples where this occurs:
+            // - "todo.subs" when "todo" variable doesn't exist (nested foreach before parent renders)
+            // - "item.children" when "item" is scoped to a parent loop that hasn't created context
+            //
+            // Strategy: Silently skip rendering now, let natural retry handle it later
+            // When parent foreach renders and calls scanAndRegisterNewElements(), this
+            // method will be called again with proper context available.
+            if (!array) {
+                // Don't clear innerHTML - preserve template for when context becomes available
+                // Don't log errors - this is expected behavior during initialization
+                return;
+            }
 
-        array.forEach((item, index) => {
-            foreachElement.innerHTML +=
-                `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${index} -->` +
-                mappingData.template +
-                `<!-- /pac-foreach-item -->`;
-        });
+            // Validate that the resolved expression is actually an array
+            if (!Array.isArray(array)) {
+                console.warn(`Foreach expression "${mappingData.foreachExpr}" did not evaluate to an array, got:`, typeof array, array);
+                foreachElement.innerHTML = ''; // Clear invalid content
+                return;
+            }
 
-        // Scan and register new elements
-        this.scanAndRegisterNewElements(foreachElement);
-    }
+            // Clear existing content and rebuild from scratch
+            foreachElement.innerHTML = '';
 
+            // Generate DOM content for each array item
+            // HTML comments mark the boundaries and context for each iteration
+            array.forEach((item, index) => {
+                foreachElement.innerHTML +=
+                    `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${index} -->` +
+                    mappingData.template + // Original template with bindings like {{subItem.id}}
+                    `<!-- /pac-foreach-item -->`;
+            });
+
+            // Recursively scan the newly generated content for bindings and nested foreach elements
+            // This is where the "natural retry" happens - nested foreach elements found here
+            // will now have proper parent context available for successful rendering
+            this.scanAndRegisterNewElements(foreachElement);
+
+        } catch (error) {
+            console.error(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
+            // Don't clear innerHTML on error during initial scan - preserve template
+            // The error might resolve itself when parent context becomes available
+        }
+    };
+
+    /**
+     * Resolves a scoped path (e.g., 'item.name') to its actual data path by finding
+     * the corresponding foreach element and building the indexed path.
+     * @param {string} scopedPath - The scoped variable path to resolve (e.g., 'item.name')
+     * @param {Element} element - The DOM element context for scope resolution
+     * @returns {string} The resolved path with array indices (e.g., 'users[0].name') or original path if no resolution needed
+     */
     Context.prototype.resolveScopedPath = function(scopedPath, element) {
         // If no dot in path, it's just a variable name - no resolution needed
         if (!scopedPath.includes('.')) {
@@ -2239,6 +2290,11 @@
             return scopedPath;
         }
 
+        /**
+         * Get the interpolation mapping data for this foreach element.
+         * This contains bindings, item variable name, and foreach ID needed for resolution.
+         * @type {Object|undefined} mappingData - Contains bindings, itemVar, and foreachId properties
+         */
         const mappingData = this.interpolationMap.get(foreachElement);
 
         if (!mappingData || !mappingData.bindings || !mappingData.bindings.foreach) {
@@ -2369,6 +2425,7 @@
                         return parseInt(match[2], 10);
                     }
                 }
+
                 sibling = sibling.previousSibling;
             }
 
@@ -2376,7 +2433,7 @@
         }
 
         return null;
-    };
+    }
 
     /**
      * Extracts parent index from HTML comments by walking up the DOM
