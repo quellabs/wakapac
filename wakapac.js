@@ -418,13 +418,20 @@
                 }
             });
 
-            // Forward preventDefault to the original event
-            const originalPreventDefault = customEvent.preventDefault;
+            // Forward event methods to the original event
+            const methodsToForward = ['preventDefault', 'stopPropagation', 'stopImmediatePropagation'];
 
-            customEvent.preventDefault = function() {
-                originalPreventDefault.call(this);
-                originalEvent.preventDefault();
-            };
+            methodsToForward.forEach(methodName => {
+                const originalMethod = customEvent[methodName];
+
+                customEvent[methodName] = function() {
+                    originalMethod.call(this);
+
+                    if (originalEvent[methodName]) {
+                        originalEvent[methodName].call(originalEvent);
+                    }
+                };
+            });
 
             // Dispatch ecvent
             container.dispatchEvent(customEvent);
