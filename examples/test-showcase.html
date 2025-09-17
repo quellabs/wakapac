@@ -287,7 +287,7 @@
             <h3>📋 Todo List (Deep Reactivity)</h3>
             <p><strong>Total:</strong> {{todoCount}} | <strong>Active:</strong> {{activeCount}} | <strong>Completed:</strong> {{completedCount}}</p>
 
-            <form data-pac-bind="submit:addTodo">
+            <form data-pac-bind="submit: addTodo">
                 <input type="text" data-pac-bind="value:newTodo" placeholder="Add new todo..." style="width: 200px;" />
                 <button type="submit" class="btn-success">➕ Add</button>
             </form>
@@ -572,21 +572,23 @@
         },
 
         addTodo(event) {
+            console.log('WOP');
+
             event.preventDefault();
+
             if (this.newTodo.trim()) {
                 console.log('Adding todo:', this.newTodo);
-                console.log('Current todos before:', this.todos.length);
+                console.log('Current todos before:', this.todos);
+                console.log('todos is reactive before push:', this.todos._isReactive);
 
-                // Demonstrate deep reactivity - this push will trigger updates
+                // This should trigger the array method interception
                 this.todos.push({
                     id: Date.now(),
                     text: this.newTodo.trim(),
                     completed: false
                 });
 
-                console.log('Current todos after:', this.todos.length);
-                console.log('Filtered todos:', this.filteredTodos);
-
+                console.log('todos after push:', this.todos);
                 this.newTodo = '';
             }
         },
@@ -637,6 +639,11 @@
         }
         */
     });
+
+    console.log('todos is reactive:', todoApp.todos._isReactive);
+    console.log('todos push method:', typeof todoApp.todos.push);
+
+
 
     // Hierarchical Communication Components
     const grandchildPAC = wakaPAC('#grandchild-app', {
@@ -1102,6 +1109,7 @@
     logMessage('parent', 'Parent PAC Unit initialized');
     logMessage('child', 'Child PAC Unit initialized');
     logMessage('grandchild', 'Grandchild PAC Unit initialized');
+
 </script>
 
 </body>

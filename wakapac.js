@@ -229,29 +229,29 @@
                     const val = target[prop];
 
                     // Handle array methods first
+                    // In makeDeepReactiveProxy, find this section and add logging:
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
+                            console.log(`🔵 Array method ${prop} intercepted on array:`, target);
+                            console.log('🔵 Arguments:', Array.from(arguments));
+                            console.log('Container for event dispatch:', container);
+
                             // For methods that add items, proxy the arguments first
                             if (prop === 'push' || prop === 'unshift') {
-                                for (let i = 0; i < arguments.length; i++) {
-                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
-                                        arguments[i] = createProxy(arguments[i], currentPath.concat([target.length + i]));
-                                        arguments[i]._isReactive = true;
-                                    }
-                                }
-                            } else if (prop === 'splice' && arguments.length > 2) {
-                                // For splice, items to add start at index 2
-                                for (let i = 2; i < arguments.length; i++) {
-                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
-                                        arguments[i] = createProxy(arguments[i], currentPath.concat([arguments[0] + i - 2]));
-                                        arguments[i]._isReactive = true;
-                                    }
-                                }
+                                // ... existing code ...
                             }
 
                             const oldArray = Array.prototype.slice.call(target);
                             const result = Array.prototype[prop].apply(target, arguments);
                             const newArray = Array.prototype.slice.call(target);
+
+                            console.log('🔵 About to dispatch pac:array-change event');
+                            console.log('🔵 Event detail:', {
+                                path: currentPath,
+                                oldValue: oldArray,
+                                newValue: newArray,
+                                method: prop
+                            });
 
                             // Dispatch array-specific event
                             container.dispatchEvent(new CustomEvent("pac:array-change", {
@@ -262,6 +262,8 @@
                                     method: prop
                                 }
                             }));
+
+                            console.log('🔵 Event dispatched');
 
                             return result;
                         };
@@ -313,6 +315,8 @@
 
                     // Dispatch array-specific event if this is an array assignment
                     if (Array.isArray(newValue)) {
+                        console.log('Dispatching pac:array-change event 2');
+
                         container.dispatchEvent(new CustomEvent("pac:array-change", {
                             detail: {
                                 path: propertyPath,
@@ -1663,12 +1667,14 @@
 
         // Handle click events
         this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
+        this.boundHandleDomSubmit = function(event) { self.handleDomSubmit(event); };
         this.boundHandleDomChange = function(event) { self.handleDomChange(event); };
         this.boundHandleReactiveChange = function(event) { self.handleReactiveChange(event); };
         this.boundHandleArrayChange = function(event) { self.handleArrayChange(event); };
 
         // Add listeners using the stored references
         this.container.addEventListener('pac:dom:click', this.boundHandleDomClicks);
+        this.container.addEventListener('pac:dom:submit', this.boundHandleDomSubmit);
         this.container.addEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
         this.container.addEventListener('pac:array-change', this.boundHandleArrayChange);
@@ -1677,12 +1683,14 @@
     Context.prototype.destroy = function() {
         // Now you can remove them
         this.container.removeEventListener('pac:dom:click', this.boundHandleDomClicks);
+        this.container.removeEventListener('pac:dom:submit', this.boundHandleDomSubmit);
         this.container.removeEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.removeEventListener('pac:change', this.boundHandleReactiveChange);
         this.container.removeEventListener('pac:array-change', this.boundHandleArrayChange);
 
         // Clear references
         this.boundHandleDomClicks = null;
+        this.boundHandleDomSubmit = null;
         this.boundHandleDomChange = null;
         this.boundHandleReactiveChange = null;
         this.boundHandleArrayChange = null;
@@ -1916,6 +1924,24 @@
         }
     }
 
+    Context.prototype.handleDomSubmit = function(event) {
+        const mappingData = this.interpolationMap.get(event.detail.target);
+        if (!mappingData?.bindings?.submit) {
+            return;
+        }
+
+        const method = this.abstraction[mappingData.bindings.submit.target];
+        if (typeof method !== 'function') {
+            return;
+        }
+
+        try {
+            method.call(this.abstraction, event);
+        } catch (error) {
+            console.error(`Error executing submit binding '${mappingData.bindings.submit.target}':`, error);
+        }
+    };
+
     Context.prototype.handleDomChange = function(event) {
         const self = this;
         const targetElement = event.detail.target;
@@ -1995,11 +2021,27 @@
     }
 
     Context.prototype.handleArrayChange = function(event) {
+        console.log('🟢 handleArrayChange called with event:', event.detail);
+        
         // Get the path that changed
-        const pathString = event.detail.path.join('.');
+        let arrayPath  = event.detail.path.join('.');
+
+        // If path is empty, find the property by array reference
+        if (arrayPath === '') {
+            const newArray = event.detail.newValue;
+
+            for (const [key, value] of Object.entries(this.abstraction)) {
+                if (value === newArray) {
+                    arrayPath = key;
+                    break;
+                }
+            }
+        }
+
+        console.log(arrayPath);
 
         // Find the foreach element that corresponds to this array path
-        const foreachElement = this.findForeachElementByArrayPath(pathString);
+        const foreachElement = this.findForeachElementByArrayPath(arrayPath);
 
         if (foreachElement) {
             this.renderForeach(foreachElement);
@@ -2619,7 +2661,7 @@
 
         // Return the reactive abstraction directly, not a copy
         window.PACRegistry.register(selector, control);
-        return controlUnit.abstraction;
+        return controlUnit.context.abstraction;
     }
 
     // ========================================================================
