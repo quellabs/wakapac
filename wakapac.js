@@ -1722,7 +1722,6 @@
                     foreachExpr: bindings.foreach.target,
                     foreachId: foreachId,
                     depth: self.calculateForEachDepth(element),
-                    parentElement: self.findParentForeachElement(element),
                     template: element.innerHTML,
                     itemVar: element.getAttribute('data-pac-item') || 'item',
                     indexVar: element.getAttribute('data-pac-index') || 'index'
@@ -1849,70 +1848,63 @@
         });
     };
 
+    /**
+     * Handles DOM click events by executing bound abstraction methods.
+     * Supports both regular click handlers and foreach context-aware handlers.
+     * @param {CustomEvent} event - Custom event containing click details
+     * @param {Element} event.detail.target - The DOM element that was clicked
+     * @throws {Error} Logs errors if method execution fails
+     */
     Context.prototype.handleDomClicks = function(event) {
-        const self = this;
-        const targetElement = event.detail.target;
-
-        // Get the mapping data for this specific element
-        const mappingData = this.interpolationMap.get(targetElement);
-
-        // If no mapping data found or no click binding, return early
-        if (!mappingData || !mappingData.bindings.click) {
+        // Get interpolation data for the clicked element
+        const mappingData = this.interpolationMap.get(event.detail.target);
+        if (!mappingData?.bindings?.click) {
             return;
         }
 
-        // Get the click binding data
-        const clickBinding = mappingData.bindings.click;
-
-        // Fetch target function from abstraction
-        const method = self.abstraction[clickBinding.target];
-
-        // Check if the function is inside the abstraction
+        // Resolve the target method from the abstraction object
+        const method = this.abstraction[mappingData.bindings.click.target];
         if (typeof method !== 'function') {
             return;
         }
 
         try {
-            // Check if we're inside a foreach context
-            const contextInfo = this.extractClosestForeachContext(targetElement);
+            // Check if click occurred within a foreach loop context
+            const contextInfo = this.extractClosestForeachContext(event.detail.target);
 
-            if (contextInfo) {
-                // Find the foreach element to get the array
-                let foreachElement = null;
-                this.interpolationMap.forEach((mappingData, el) => {
-                    if (mappingData.foreachId === contextInfo.foreachId) {
-                        foreachElement = el;
-                    }
-                });
-
-                if (foreachElement) {
-                    const foreachMappingData = this.interpolationMap.get(foreachElement);
-
-                    // Resolve the array
-                    const scopeResolver = {
-                        resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
-                    };
-
-                    const array = ExpressionParser.evaluate(
-                        ExpressionCache.parseExpression(foreachMappingData.foreachExpr),
-                        this.abstraction,
-                        scopeResolver
-                    );
-
-                    const item = array[contextInfo.index];
-
-                    // Call with foreach parameters: (item, index, event)
-                    method.call(self.abstraction, item, contextInfo.index, event);
-                } else {
-                    // Fallback: call with just the event
-                    method.call(self.abstraction, event);
-                }
-            } else {
-                // Call with just the event
-                method.call(self.abstraction, event);
+            // Simple case: call method with just the event
+            if (!contextInfo) {
+                method.call(this.abstraction, event);
+                return;
             }
+
+            // Find the foreach element that contains this click target
+            const foreachElement = Array.from(this.interpolationMap.entries())
+                .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
+
+            if (!foreachElement) {
+                // Fallback to simple call if foreach element not found
+                method.call(this.abstraction, event);
+                return;
+            }
+
+            // Get the foreach configuration and set up scope resolution
+            const foreachData = this.interpolationMap.get(foreachElement);
+            const scopeResolver = {
+                resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
+            };
+
+            // Evaluate the foreach expression to get the source array
+            const array = ExpressionParser.evaluate(
+                ExpressionCache.parseExpression(foreachData.foreachExpr),
+                this.abstraction,
+                scopeResolver
+            );
+
+            // Call method with foreach context: (arrayItem, index, originalEvent)
+            method.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
         } catch (error) {
-            console.error(`Error executing click binding '${clickBinding.target}':`, error);
+            console.error(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
         }
     }
 
@@ -2458,12 +2450,12 @@
             return arrayExpr;
         }
 
-        const mappingData = this.interpolationMap.get(foreachElement);
-        if (!mappingData || !mappingData.parentElement) {
+        const parentElement = this.findParentForeachElement(foreachElement);
+
+        if (!parentElement) {
             return arrayExpr;
         }
 
-        const parentElement = mappingData.parentElement;
         const parentMapping = this.interpolationMap.get(parentElement);
 
         if (!parentMapping || !parentMapping.bindings.foreach) {
