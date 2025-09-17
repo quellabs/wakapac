@@ -1841,6 +1841,7 @@
 
     Context.prototype.handleAttributeChanges = function(event, pathsToCheck) {
         const self = this;
+        const changedRoot = event.detail.path[0]; // e.g., "todos"
 
         this.interpolationMap.forEach((mappingData, element) => {
             const { bindings } = mappingData;
@@ -1856,17 +1857,23 @@
 
                 // Check if any of the paths that changed affect this binding
                 // Need to check both exact matches and root property matches
-                const shouldUpdate = bindingData.dependencies.some(dependency => {
-                    // Exact match
-                    if (pathsToCheck.includes(dependency)) {
-                        return true;
-                    }
-
-                    // Check if the dependency is a root of the changed path
-                    // e.g., "todos" dependency should match "todos.0.completed" change
-                    const pathString = event.detail.path.join('.');
-                    return pathString.startsWith(dependency + '.') || pathString.startsWith(dependency + '[');
+                let shouldUpdate = bindingData.dependencies.some(dependency => {
+                    return pathsToCheck.includes(dependency) ||
+                        event.detail.path.join('.').startsWith(dependency + '.') ||
+                        event.detail.path.join('.').startsWith(dependency + '[');
                 });
+
+                // Also check if element is in a foreach container affected by the change
+                if (!shouldUpdate) {
+                    const foreachContainer = element.closest('[data-pac-foreach-id]');
+
+                    if (foreachContainer) {
+                        const containerData = self.interpolationMap.get(foreachContainer);
+                        if (containerData && containerData.sourceArray === changedRoot) {
+                            shouldUpdate = true;
+                        }
+                    }
+                }
 
                 if (shouldUpdate) {
                     self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
@@ -1877,21 +1884,29 @@
 
     Context.prototype.handleTextInterpolation = function(event, pathsToCheck) {
         const self = this;
+        const changedRoot = event.detail.path[0];
 
         self.textInterpolationMap.forEach((mappingData, textNode) => {
             // Check if any of the paths that changed affect this node
             // Need to check both exact matches and root property matches
-            const shouldUpdate = mappingData.dependencies.some(dep => {
-                // Exact match
-                if (pathsToCheck.includes(dep)) {
-                    return true;
-                }
-
-                // Check if the dependency is a root of the changed path
-                // e.g., "todos" dependency should match "todos.0.completed" change
-                const pathString = event.detail.path.join('.');
-                return pathString.startsWith(dep + '.') || pathString.startsWith(dep + '[');
+            let shouldUpdate = mappingData.dependencies.some(dep => {
+                return pathsToCheck.includes(dep) ||
+                    event.detail.path.join('.').startsWith(dep + '.') ||
+                    event.detail.path.join('.').startsWith(dep + '[');
             });
+
+            // Check foreach container
+            if (!shouldUpdate) {
+                const foreachContainer = textNode.parentElement?.closest('[data-pac-foreach-id]');
+
+                if (foreachContainer) {
+                    const containerData = self.interpolationMap.get(foreachContainer);
+
+                    if (containerData && containerData.sourceArray === changedRoot) {
+                        shouldUpdate = true;
+                    }
+                }
+            }
 
             if (shouldUpdate) {
                 self.domUpdater.updateTextNode(textNode, mappingData.template);
@@ -2426,23 +2441,12 @@
     };
 
     Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
-        // Find all computed properties that depend on the changed array
-        const dependentProperties = [];
-        if (this.dependencies.has(arrayPath)) {
-            dependentProperties.push(...this.dependencies.get(arrayPath));
-        }
-
-        // Also include the array path itself
-        dependentProperties.push(arrayPath);
-
-        // Now find foreach elements bound to any of these properties
         const elementsToUpdate = [];
 
         for (const [element, mappingData] of this.interpolationMap) {
             if (mappingData.bindings && mappingData.bindings.foreach) {
-                const foreachExpr = mappingData.bindings.foreach.target;
-
-                if (dependentProperties.includes(foreachExpr)) {
+                // Check both direct expression match and source array match
+                if (mappingData.foreachExpr === arrayPath || mappingData.sourceArray === arrayPath) {
                     elementsToUpdate.push(element);
                 }
             }
