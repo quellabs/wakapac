@@ -232,26 +232,27 @@
                     // In makeDeepReactiveProxy, find this section and add logging:
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
-                            console.log(`🔵 Array method ${prop} intercepted on array:`, target);
-                            console.log('🔵 Arguments:', Array.from(arguments));
-                            console.log('Container for event dispatch:', container);
-
                             // For methods that add items, proxy the arguments first
                             if (prop === 'push' || prop === 'unshift') {
-                                // ... existing code ...
+                                for (let i = 0; i < arguments.length; i++) {
+                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
+                                        arguments[i] = createProxy(arguments[i], currentPath.concat([target.length + i]));
+                                        arguments[i]._isReactive = true;
+                                    }
+                                }
+                            } else if (prop === 'splice' && arguments.length > 2) {
+                                // For splice, items to add start at index 2
+                                for (let i = 2; i < arguments.length; i++) {
+                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
+                                        arguments[i] = createProxy(arguments[i], currentPath.concat([arguments[0] + i - 2]));
+                                        arguments[i]._isReactive = true;
+                                    }
+                                }
                             }
 
                             const oldArray = Array.prototype.slice.call(target);
                             const result = Array.prototype[prop].apply(target, arguments);
                             const newArray = Array.prototype.slice.call(target);
-
-                            console.log('🔵 About to dispatch pac:array-change event');
-                            console.log('🔵 Event detail:', {
-                                path: currentPath,
-                                oldValue: oldArray,
-                                newValue: newArray,
-                                method: prop
-                            });
 
                             // Dispatch array-specific event
                             container.dispatchEvent(new CustomEvent("pac:array-change", {
@@ -262,8 +263,6 @@
                                     method: prop
                                 }
                             }));
-
-                            console.log('🔵 Event dispatched');
 
                             return result;
                         };
@@ -315,8 +314,6 @@
 
                     // Dispatch array-specific event if this is an array assignment
                     if (Array.isArray(newValue)) {
-                        console.log('Dispatching pac:array-change event 2');
-
                         container.dispatchEvent(new CustomEvent("pac:array-change", {
                             detail: {
                                 path: propertyPath,
@@ -2021,27 +2018,8 @@
     }
 
     Context.prototype.handleArrayChange = function(event) {
-        console.log('🟢 handleArrayChange called with event:', event.detail);
-        
-        // Get the path that changed
-        let arrayPath  = event.detail.path.join('.');
-
-        // If path is empty, find the property by array reference
-        if (arrayPath === '') {
-            const newArray = event.detail.newValue;
-
-            for (const [key, value] of Object.entries(this.abstraction)) {
-                if (value === newArray) {
-                    arrayPath = key;
-                    break;
-                }
-            }
-        }
-
-        console.log(arrayPath);
-
-        // Find the foreach element that corresponds to this array path
-        const foreachElement = this.findForeachElementByArrayPath(arrayPath);
+        const pathString = event.detail.path.join('.');
+        const foreachElement = this.findForeachElementByArrayPath(pathString);
 
         if (foreachElement) {
             this.renderForeach(foreachElement);
@@ -2389,22 +2367,29 @@
     };
 
     Context.prototype.findForeachElementByArrayPath = function(arrayPath) {
-        // Iterate through all foreach elements to find one that binds to this array
         for (const [element, mappingData] of this.interpolationMap) {
             if (mappingData.bindings && mappingData.bindings.foreach) {
-                // Resolve the foreach expression to get the actual data path
                 const foreachExpr = mappingData.bindings.foreach.target;
-                const resolvedForeachPath = this.resolveScopedPath(foreachExpr, element);
 
-                // Check if the resolved foreach path matches our array path
-                if (resolvedForeachPath === arrayPath ||
-                    arrayPath.startsWith(resolvedForeachPath + '.') ||
-                    arrayPath.startsWith(resolvedForeachPath + '[')) {
+                // Direct match
+                if (foreachExpr === arrayPath) {
                     return element;
+                }
+
+                // Check if it's a computed property that depends on the changed array
+                const computed = this.originalAbstraction.computed || {};
+
+                if (computed[foreachExpr]) {
+                    const dependencies = this.extractDependencies(foreachExpr);
+
+                    console.log(dependencies);
+
+                    if (dependencies.includes(arrayPath)) {
+                        return element;
+                    }
                 }
             }
         }
-
         return null;
     };
 

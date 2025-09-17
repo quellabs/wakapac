@@ -572,15 +572,9 @@
         },
 
         addTodo(event) {
-            console.log('WOP');
-
             event.preventDefault();
 
             if (this.newTodo.trim()) {
-                console.log('Adding todo:', this.newTodo);
-                console.log('Current todos before:', this.todos);
-                console.log('todos is reactive before push:', this.todos._isReactive);
-
                 // This should trigger the array method interception
                 this.todos.push({
                     id: Date.now(),
@@ -588,7 +582,6 @@
                     completed: false
                 });
 
-                console.log('todos after push:', this.todos);
                 this.newTodo = '';
             }
         },
@@ -618,11 +611,8 @@
         },
 
         toggleAllTodos() {
-            console.log('toggleAllTodos called');
             const allCompleted = this.allCompleted;
-            console.log('allCompleted:', allCompleted);
             this.todos.forEach((todo, index) => {
-                console.log(`Setting todo ${index} completed from ${todo.completed} to ${!allCompleted}`);
                 todo.completed = !allCompleted;
             });
         }
@@ -639,11 +629,6 @@
         }
         */
     });
-
-    console.log('todos is reactive:', todoApp.todos._isReactive);
-    console.log('todos push method:', typeof todoApp.todos.push);
-
-
 
     // Hierarchical Communication Components
     const grandchildPAC = wakaPAC('#grandchild-app', {
