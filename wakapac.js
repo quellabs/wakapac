@@ -46,51 +46,39 @@
     const Utils = {
 
         /**
-         * Determines if an element belongs to the specified PAC container, with performance optimizations.
-         * Uses WeakMap caching to avoid repeated DOM traversals for the same elements.
+         * Determines if an element belongs to the specified PAC container.
+         * Simplified version that avoids cache complexity while fixing core issues.
          * @param {Element} container - The PAC container element with data-pac-container attribute
          * @param {Node} element - The element to check (can be Element or Text node)
          * @returns {boolean} True if element belongs to this container, false otherwise
          */
         belongsToThisContainer(container, element) {
-            // Initialize WeakMap cache on first use - automatically garbage collected when elements are removed
-            if (!this._cache) {
-                this._cache = new WeakMap();
-            }
+            // Handle text nodes by checking their parent element
+            const targetElement = element.nodeType === Node.TEXT_NODE ? element.parentElement : element;
 
-            // Check cache first - O(1) lookup avoids expensive DOM traversals
-            const cached = this._cache.get(element);
-
-            // Cache hit: element belongs to this container
-            if (cached === container) {
-                return true;
-            }
-
-            // Cache hit: element doesn't belong to any container
-            if (cached === false) {
+            if (!targetElement) {
                 return false;
             }
 
-            // Determine if element belongs to container
-            let belongs;
-
-            if (element.nodeType === Node.TEXT_NODE) {
-                // Text nodes don't have closest() method, so check their parent element
-                const parent = element.parentElement;
-
-                belongs = parent &&
-                    container.contains(parent) &&  // Fast containment check first
-                    parent.closest('[data-pac-container]') === container;  // Verify correct container
-            } else {
-                // Element nodes: check containment then verify it's not in a nested container
-                belongs = container.contains(element) &&  // Fast containment check first
-                    element.closest('[data-pac-container]') === container;  // Verify correct container
+            // Fast containment check first - if not contained, definitely doesn't belong
+            if (!container.contains(targetElement)) {
+                return false;
             }
 
-            // Cache result: store container reference if belongs, false if not
-            // WeakMap automatically cleans up when element is garbage collected
-            this._cache.set(element, belongs ? container : false);
-            return belongs;
+            // Walk up from target to find the closest PAC container
+            let current = targetElement;
+
+            while (current && current !== document.body) {
+                if (current.hasAttribute('data-pac-container')) {
+                    // Found a container - check if it's the one we're looking for
+                    return current === container;
+                }
+
+                current = current.parentElement;
+            }
+
+            // No container found in ancestry - doesn't belong to any container
+            return false;
         },
 
         /**
