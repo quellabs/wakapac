@@ -373,8 +373,8 @@
             });
 
             // Change event (when input element loses focus)
+            // Only handle change events for select, radio, and checkbox
             document.addEventListener('change', function (event) {
-                // Only handle change events for select, radio, and checkbox
                 if (
                     event.target.tagName === 'SELECT' ||
                     event.target.type === 'radio' ||
@@ -385,8 +385,8 @@
             });
 
             // Input event (when user types)
+            // Only handle input events for text inputs and textareas
             document.addEventListener('input', function (event) {
-                // Only handle input events for text inputs and textareas
                 if (
                     event.target.tagName === 'INPUT' &&
                     !['radio', 'checkbox'].includes(event.target.type) || event.target.tagName === 'TEXTAREA'
@@ -1874,7 +1874,6 @@
     };
 
     Context.prototype.handleDomChange = function(event) {
-        console.log('x');
         const self = this;
         const targetElement = event.detail.target;
 
@@ -1900,40 +1899,57 @@
             const checkedBinding = mappingData.bindings.checked;
             const resolvedPath = self.resolveScopedPath(checkedBinding.target, targetElement);
 
-            let newValue;
             if (targetElement.type === 'checkbox') {
-                newValue = event.detail.target.checked;
+                self.setNestedProperty(resolvedPath, event.detail.target.checked)
             } else if (targetElement.type === 'radio' && event.detail.target.checked) {
-                newValue = event.detail.value;
-            } else {
-                return; // Don't update for unchecked radio buttons
+                self.setNestedProperty(resolvedPath, event.detail.value)
             }
-
-            // Use the nested property setter to handle complex paths
-            self.setNestedProperty(resolvedPath, newValue);
         }
     };
 
+    /**
+     * Handles reactive data changes by determining which DOM elements need updates.
+     * This is the central event handler that responds to property changes in the reactive
+     * abstraction and coordinates DOM updates for both text interpolations and attribute bindings.
+     * @param {CustomEvent} event - The pac:change event containing change details
+     * @param {Object} event.detail - Event payload
+     * @param {string[]} event.detail.path - Array representing the property path that changed (e.g., ['todos', '0', 'completed'])
+     * @param {*} event.detail.oldValue - The previous value before the change
+     * @param {*} event.detail.newValue - The new value after the change
+     */
     Context.prototype.handleReactiveChange = function(event) {
+        // Convert the property path array to a dot-notation string for dependency lookup
+        // Example: ['todos', '0', 'completed'] becomes 'todos.0.completed'
         const pathString = event.detail.path.join('.');
+
+        // Initialize the list of dependency paths that need DOM updates
+        // Always include the exact path that changed
         const pathsToCheck = [pathString];
 
-        // Add computed dependencies for this exact path
+        // Check for computed properties that depend on this exact property path
+        // Example: If "todos.0.completed" has registered dependencies, include them
         if (this.dependencies.has(pathString)) {
             pathsToCheck.push(...this.dependencies.get(pathString));
         }
 
         // CRITICAL FIX: Also check root-level dependencies
-        // When todos[0].completed changes, we need to check dependencies of "todos"
-        const rootProperty = event.detail.path[0];
+        // Many computed properties depend on the root collection rather than individual items.
+        // When todos[0].completed changes, computed properties like "completedCount" that
+        // depend on the entire "todos" array also need to be recalculated and updated.
+        // This ensures collection-level computed properties stay synchronized with item changes.
+        const rootProperty = event.detail.path[0]; // Extract first segment
         if (this.dependencies.has(rootProperty)) {
             pathsToCheck.push(...this.dependencies.get(rootProperty));
         }
 
+        // Trigger DOM updates for all affected text interpolations
+        // This handles {{expression}} patterns in text content
         this.handleTextInterpolation(event, pathsToCheck);
+
+        // Trigger DOM updates for all affected attribute bindings
+        // This handles data-pac-bind attribute expressions
         this.handleAttributeChanges(event, pathsToCheck);
     }
-
 
     /**
      * Scans the container for elements with data-pac-bind attributes and extracts
