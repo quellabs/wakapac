@@ -1669,7 +1669,6 @@
         this.dependencies = this.getDependencies();
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
-        this.foreachArrayCache = new WeakMap();
 
         // Scan the container for items and store them in interpolationMap and textInterpolationMap
         this.scanAndRegisterNewElements(this.container);
@@ -2346,8 +2345,8 @@
                 return;
             }
 
-            // Add to cache
-            this.foreachArrayCache.set(foreachElement, array);
+            // Store array to be able to compare later
+            foreachElement._pacPreviousArray = array;
 
             // Clear existing content and rebuild from scratch
             foreachElement.innerHTML = '';
@@ -2423,7 +2422,6 @@
 
     Context.prototype.shouldRebuildForeach = function(foreachElement) {
         const mappingData = this.interpolationMap.get(foreachElement);
-
         if (!mappingData) {
             return false;
         }
@@ -2442,9 +2440,8 @@
             return false;
         }
 
-        // Get the previous array from cache
-        const previousArray = this.foreachArrayCache.get(foreachElement);
-
+        // Get previous array from element attribute/property
+        const previousArray = foreachElement._pacPreviousArray;
         if (!previousArray) {
             return true;
         }
