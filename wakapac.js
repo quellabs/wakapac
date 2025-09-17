@@ -1617,30 +1617,11 @@
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
         this.dependencies = this.getDependencies();
-        this.interpolationMap = this.scanBindings(this.container);
-        this.textInterpolationMap = this.scanTextBindings(this.container);
+        this.interpolationMap = new Map();
+        this.textInterpolationMap = new Map();
 
-        this.interpolationMap.forEach((mappingData, element) => {
-            const { bindings } = mappingData;
-
-            // Check if this element has a foreach binding
-            if (bindings.foreach) {
-                // Set the ID as an attribute for debugging/identification
-                const foreachId = self.uniqid('foreach');
-                element.setAttribute('data-pac-foreach-id', foreachId);
-
-                // Extend the existing mappingData with foreach-specific information
-                Object.assign(mappingData, {
-                    foreachExpr: bindings.foreach.target,  // e.g., "todos"
-                    foreachId: foreachId,
-                    depth: self.calculateForEachDepth(element),
-                    parentElement: self.findParentForeachElement(element),
-                    template: element.innerHTML,
-                    itemVar: element.getAttribute('data-pac-item') || 'item',
-                    indexVar: element.getAttribute('data-pac-index') || 'index'
-                });
-            }
-        });
+        // Scan the container for items and store them in interpolationMap and textInterpolationMap
+        this.scanAndRegisterNewElements(this.container);
 
         // Handle click events
         this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
@@ -1651,38 +1632,6 @@
         this.container.addEventListener('pac:dom:click', this.boundHandleDomClicks);
         this.container.addEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
-
-        // Populate items for the first time
-        this.textInterpolationMap.forEach((mappingData, textNode) => {
-            self.domUpdater.updateTextNode(textNode, mappingData.template);
-        });
-
-        this.interpolationMap.forEach((mappingData, element) => {
-            Object.keys(mappingData.bindings).forEach(bindingType => {
-                // Skip foreach and click bindings
-                if (
-                    bindingType === 'foreach' ||
-                    bindingType === 'click'
-                ) {
-                    return;
-                }
-
-                const bindingData = mappingData.bindings[bindingType];
-                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
-            });
-        });
-
-        // Filter foreach bindings, sort by depth (deepest first), then render
-        Array.from(this.interpolationMap.entries())
-            .filter(([, mappingData]) => mappingData.bindings.foreach)
-            .sort(([, mappingDataA], [, mappingDataB]) => {
-                const depthA = mappingDataA.depth;
-                const depthB = mappingDataB.depth;
-                return depthB - depthA; // deepest first
-            })
-            .forEach(([element]) => {
-                this.renderForeach(element);
-            });
     }
 
     Context.prototype.destroy = function() {
@@ -1702,6 +1651,78 @@
         const id = sec.toString(16).replace(/\./g, "").padEnd(14, "0");
         return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
     }
+
+    /**
+     * Scans and registers newly created content within a foreach container
+     * @param {Element} parentElement - The foreach container element
+     */
+    Context.prototype.scanAndRegisterNewElements = function(parentElement) {
+        const self = this;
+
+        // Scan for new bound elements within this container
+        const newBindings = this.scanBindings(parentElement);
+        const newTextBindings = this.scanTextBindings(parentElement);
+
+        // Add new bindings to main maps
+        newBindings.forEach((mappingData, element) => {
+            if (element !== parentElement) { // Don't re-add the foreach element itself
+                this.interpolationMap.set(element, mappingData);
+            }
+        });
+
+        newTextBindings.forEach((mappingData, textNode) => {
+            this.textInterpolationMap.set(textNode, mappingData);
+        });
+
+        // Process nested foreach elements
+        newBindings.forEach((mappingData, element) => {
+            const { bindings } = mappingData;
+
+            if (bindings.foreach && element !== parentElement) {
+                // Set the ID as an attribute for debugging/identification
+                const foreachId = self.uniqid('foreach');
+                element.setAttribute('data-pac-foreach-id', foreachId);
+
+                // Extend the existing mappingData with foreach-specific information
+                Object.assign(mappingData, {
+                    foreachExpr: bindings.foreach.target,
+                    foreachId: foreachId,
+                    depth: self.calculateForEachDepth(element),
+                    parentElement: self.findParentForeachElement(element),
+                    template: element.innerHTML,
+                    itemVar: element.getAttribute('data-pac-item') || 'item',
+                    indexVar: element.getAttribute('data-pac-index') || 'index'
+                });
+            }
+        });
+
+        // Apply initial bindings to new elements
+        newBindings.forEach((mappingData, element) => {
+            Object.keys(mappingData.bindings).forEach(bindingType => {
+                const bindingData = mappingData.bindings[bindingType];
+                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
+            });
+        });
+
+        // Apply text interpolations
+        newTextBindings.forEach((mappingData, textNode) => {
+            self.domUpdater.updateTextNode(textNode, mappingData.template);
+        });
+
+        // Handle nested foreach rendering (sort by depth, deepest first)
+        Array.from(newBindings.entries())
+            .filter(([element, mappingData]) =>
+                mappingData.bindings.foreach && element !== parentElement
+            )
+            .sort(([, mappingDataA], [, mappingDataB]) => {
+                const depthA = mappingDataA.depth;
+                const depthB = mappingDataB.depth;
+                return depthB - depthA; // deepest first
+            })
+            .forEach(([element]) => {
+                this.renderForeach(element);
+            });
+    };
 
     Context.prototype.getDependencies = function() {
         const dependencies = new Map();
@@ -2027,6 +2048,9 @@
             return;
         }
 
+        // Clean up old elements from maps before clearing innerHTML
+        this.cleanupForeachMaps(foreachElement);
+
         // Create scope resolver for this foreach element
         const scopeResolver = {
             resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
@@ -2072,6 +2096,9 @@
                 itemHTML +
                 `<!-- /pac-foreach-item -->`;
         });
+
+        // Scan and register new elements
+        this.scanAndRegisterNewElements(foreachElement);
     }
 
     /**
@@ -2253,6 +2280,7 @@
                         return parseInt(match[2], 10);
                     }
                 }
+
                 sibling = sibling.previousSibling;
             }
 
@@ -2260,6 +2288,37 @@
         }
 
         return null;
+    };
+
+    /**
+     * Removes all child elements of a foreach container from interpolation maps
+     * @param {Element} foreachElement - The foreach container element
+     */
+    Context.prototype.cleanupForeachMaps = function(foreachElement) {
+        const elementsToRemove = [];
+        const textNodesToRemove = [];
+
+        // Find all elements that belong to this foreach container
+        this.interpolationMap.forEach((mappingData, element) => {
+            if (foreachElement.contains(element) && element !== foreachElement) {
+                elementsToRemove.push(element);
+            }
+        });
+
+        this.textInterpolationMap.forEach((mappingData, textNode) => {
+            if (foreachElement.contains(textNode)) {
+                textNodesToRemove.push(textNode);
+            }
+        });
+
+        // Remove them from the maps
+        elementsToRemove.forEach(element => {
+            this.interpolationMap.delete(element);
+        });
+
+        textNodesToRemove.forEach(textNode => {
+            this.textInterpolationMap.delete(textNode);
+        });
     };
 
     // ========================================================================
