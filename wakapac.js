@@ -1455,16 +1455,20 @@
 
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
             try {
+                // Parse the expression
                 const parsed = ExpressionCache.parseExpression(expression);
 
+                // Resolve the scope - use parentElement for text nodes
+                const contextElement = element.nodeType === Node.TEXT_NODE ? element.parentElement : element;
                 const scopeResolver = {
-                    resolveScopedPath: (path) => self.context.resolveScopedPath(path, element)
+                    resolveScopedPath: (path) => self.context.resolveScopedPath(path, contextElement)
                 };
 
-                // Get abstraction from context instead of parameter
+                // Evaluate the expression using the scope resolver
                 const result = ExpressionParser.evaluate(parsed, self.context.abstraction, scopeResolver);
                 return result != null ? String(result) : '';
             } catch (error) {
+                console.warn('Error in text interpolation:', expression, error);
                 return match;
             }
         });
@@ -1739,6 +1743,7 @@
 
         // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
+            console.log(textNode, mappingData.template);
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
@@ -2224,6 +2229,7 @@
             scope[mappingData.indexVar] = index;
 
             // Clone template and process interpolations
+            /*
             const itemHTML = mappingData.template.replace(INTERPOLATION_REGEX, (match, expr) => {
                 const result = ExpressionParser.evaluate(
                     ExpressionParser.parseExpression(expr),
@@ -2232,11 +2238,14 @@
 
                 return result != null ? String(result) : '';
             });
+            */
+
+            console.log(mappingData.template);
 
             // Add with comment markers
             foreachElement.innerHTML +=
                 `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${index} -->` +
-                itemHTML +
+                mappingData.template +
                 `<!-- /pac-foreach-item -->`;
         });
 
