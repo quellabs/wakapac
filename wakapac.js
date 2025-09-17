@@ -1657,11 +1657,13 @@
         this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
         this.boundHandleDomChange = function(event) { self.handleDomChange(event); };
         this.boundHandleReactiveChange = function(event) { self.handleReactiveChange(event); };
+        this.boundHandleArrayChange = function(event) { self.handleArrayChange(event); };
 
         // Add listeners using the stored references
         this.container.addEventListener('pac:dom:click', this.boundHandleDomClicks);
         this.container.addEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
+        this.container.addEventListener('pac:array-change', this.boundHandleArrayChange);
     }
 
     Context.prototype.destroy = function() {
@@ -1669,11 +1671,13 @@
         this.container.removeEventListener('pac:dom:click', this.boundHandleDomClicks);
         this.container.removeEventListener('pac:dom:change', this.boundHandleDomChange);
         this.container.removeEventListener('pac:change', this.boundHandleReactiveChange);
+        this.container.removeEventListener('pac:array-change', this.boundHandleArrayChange);
 
         // Clear references
         this.boundHandleDomClicks = null;
         this.boundHandleDomChange = null;
         this.boundHandleReactiveChange = null;
+        this.boundHandleArrayChange = null;
     }
 
     Context.prototype.uniqid = function(prefix = "", random = false) {
@@ -1863,15 +1867,54 @@
         // Fetch target function from abstraction
         const method = self.abstraction[clickBinding.target];
 
-        // Check if the function is inside the abstraction. If so, call it
-        if (typeof method === 'function') {
-            try {
-                method.call(self.abstraction, event);
-            } catch (error) {
-                console.error(`Error executing click binding '${clickBinding.target}':`, error);
-            }
+        // Check if the function is inside the abstraction
+        if (typeof method !== 'function') {
+            return;
         }
-    };
+
+        try {
+            // Check if we're inside a foreach context
+            const contextInfo = this.extractClosestForeachContext(targetElement);
+
+            if (contextInfo) {
+                // Find the foreach element to get the array
+                let foreachElement = null;
+                this.interpolationMap.forEach((mappingData, el) => {
+                    if (mappingData.foreachId === contextInfo.foreachId) {
+                        foreachElement = el;
+                    }
+                });
+
+                if (foreachElement) {
+                    const foreachMappingData = this.interpolationMap.get(foreachElement);
+
+                    // Resolve the array
+                    const scopeResolver = {
+                        resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
+                    };
+
+                    const array = ExpressionParser.evaluate(
+                        ExpressionCache.parseExpression(foreachMappingData.foreachExpr),
+                        this.abstraction,
+                        scopeResolver
+                    );
+
+                    const item = array[contextInfo.index];
+
+                    // Call with foreach parameters: (item, index, event)
+                    method.call(self.abstraction, item, contextInfo.index, event);
+                } else {
+                    // Fallback: call with just the event
+                    method.call(self.abstraction, event);
+                }
+            } else {
+                // Call with just the event
+                method.call(self.abstraction, event);
+            }
+        } catch (error) {
+            console.error(`Error executing click binding '${clickBinding.target}':`, error);
+        }
+    }
 
     Context.prototype.handleDomChange = function(event) {
         const self = this;
@@ -1950,6 +1993,18 @@
         // This handles data-pac-bind attribute expressions
         this.handleAttributeChanges(event, pathsToCheck);
     }
+
+    Context.prototype.handleArrayChange = function(event) {
+        // Get the path that changed
+        const pathString = event.detail.path.join('.');
+
+        // Find the foreach element that corresponds to this array path
+        const foreachElement = this.findForeachElementByArrayPath(pathString);
+
+        if (foreachElement) {
+            this.renderForeach(foreachElement);
+        }
+    };
 
     /**
      * Scans the container for elements with data-pac-bind attributes and extracts
@@ -2266,6 +2321,59 @@
         return null;
     };
 
+    Context.prototype.findForeachElementByArrayPath = function(arrayPath) {
+        // Iterate through all foreach elements to find one that binds to this array
+        for (const [element, mappingData] of this.interpolationMap) {
+            if (mappingData.bindings && mappingData.bindings.foreach) {
+                // Resolve the foreach expression to get the actual data path
+                const foreachExpr = mappingData.bindings.foreach.target;
+                const resolvedForeachPath = this.resolveScopedPath(foreachExpr, element);
+
+                // Check if the resolved foreach path matches our array path
+                if (resolvedForeachPath === arrayPath ||
+                    arrayPath.startsWith(resolvedForeachPath + '.') ||
+                    arrayPath.startsWith(resolvedForeachPath + '[')) {
+                    return element;
+                }
+            }
+        }
+
+        return null;
+    };
+
+    Context.prototype.extractClosestForeachContext = function(startElement) {
+        // Start from the element and walk up the DOM tree
+        let current = startElement;
+
+        while (current && current !== this.container) {
+            // Check previous siblings for comment markers
+            let sibling = current.previousSibling;
+
+            while (sibling) {
+                if (sibling.nodeType === Node.COMMENT_NODE) {
+                    const commentText = sibling.textContent.trim();
+
+                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X"
+                    const match = commentText.match(/pac-foreach-item:\s*([^,]+),\s*index=(\d+)/);
+
+                    if (match) {
+                        return {
+                            foreachId: match[1].trim(),
+                            index: parseInt(match[2], 10)
+                        };
+                    }
+                }
+
+                sibling = sibling.previousSibling;
+            }
+
+            // Move up to parent element
+            current = current.parentElement;
+        }
+
+        return null;
+    };
+    
     /**
      * Extracts the current item index from HTML comments by walking up from element
      * @param {Element} startElement - Element to start searching from
@@ -2292,6 +2400,42 @@
                         return parseInt(match[2], 10);
                     }
                 }
+                sibling = sibling.previousSibling;
+            }
+
+            current = current.parentElement;
+        }
+
+        return null;
+    };
+
+    /**
+     * Extracts parent index from HTML comments by walking up the DOM
+     * @param {Element} startElement - Element to start searching from
+     * @param {string} foreachId - The foreach ID to look for in comments
+     * @returns {number|null} The parent index or null if not found
+     */
+    Context.prototype.extractParentIndexFromComments = function(startElement, foreachId) {
+        // Start from text node's parent if needed
+        let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
+
+        // Walk up the DOM to find the parent foreach item
+        while (current && current !== this.container) {
+            // Check previous siblings for comment markers
+            let sibling = current.previousSibling;
+
+            while (sibling) {
+                if (sibling.nodeType === Node.COMMENT_NODE) {
+                    const commentText = sibling.textContent.trim();
+
+                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X"
+                    const match = commentText.match(/pac-foreach-item:\s*([^,]+),\s*index=(\d+)/);
+
+                    if (match && match[1].trim() === foreachId) {
+                        return parseInt(match[2], 10);
+                    }
+                }
+
                 sibling = sibling.previousSibling;
             }
 
@@ -2348,42 +2492,6 @@
         }
 
         return arrayExpr;
-    };
-
-    /**
-     * Extracts parent index from HTML comments by walking up the DOM
-     * @param {Element} startElement - Element to start searching from
-     * @param {string} foreachId - The foreach ID to look for in comments
-     * @returns {number|null} The parent index or null if not found
-     */
-    Context.prototype.extractParentIndexFromComments = function(startElement, foreachId) {
-        // Start from text node's parent if needed
-        let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
-
-        // Walk up the DOM to find the parent foreach item
-        while (current && current !== this.container) {
-            // Check previous siblings for comment markers
-            let sibling = current.previousSibling;
-
-            while (sibling) {
-                if (sibling.nodeType === Node.COMMENT_NODE) {
-                    const commentText = sibling.textContent.trim();
-
-                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X"
-                    const match = commentText.match(/pac-foreach-item:\s*([^,]+),\s*index=(\d+)/);
-
-                    if (match && match[1].trim() === foreachId) {
-                        return parseInt(match[2], 10);
-                    }
-                }
-
-                sibling = sibling.previousSibling;
-            }
-
-            current = current.parentElement;
-        }
-
-        return null;
     };
 
     /**
