@@ -432,7 +432,7 @@
 
             // Forward preventDefault to the original event
             const originalPreventDefault = customEvent.preventDefault;
-            
+
             customEvent.preventDefault = function() {
                 originalPreventDefault.call(this);
                 originalEvent.preventDefault();
@@ -2000,7 +2000,7 @@
 
         // Convert the property path array to a dot-notation string for dependency lookup
         // Example: ['todos', '0', 'completed'] becomes 'todos.0.completed'
-        const pathString = event.detail.path.join('.');
+        const pathString = this.pathArrayToString(event.detail.path);
 
         // Initialize the list of dependency paths that need DOM updates
         // Always include the exact path that changed
@@ -2022,6 +2022,8 @@
             pathsToCheck.push(...this.dependencies.get(rootProperty));
         }
 
+        console.log(pathsToCheck);
+
         // Trigger DOM updates for all affected text interpolations
         // This handles {{expression}} patterns in text content
         this.handleTextInterpolation(event, pathsToCheck);
@@ -2030,6 +2032,27 @@
         // This handles data-pac-bind attribute expressions
         this.handleAttributeChanges(event, pathsToCheck);
     }
+
+    Context.prototype.pathArrayToString = function (pathArray) {
+        if (pathArray.length === 0) {
+            return '';
+        }
+
+        let result = pathArray[0]; // Start with root property
+
+        for (let i = 1; i < pathArray.length; i++) {
+            const part = pathArray[i];
+            if (/^\d+$/.test(part)) {
+                // Numeric index - use bracket notation
+                result += `[${part}]`;
+            } else {
+                // Property name - use dot notation
+                result += `.${part}`;
+            }
+        }
+
+        return result;
+    };
 
     Context.prototype.handleArrayChange = function(event) {
         console.log('🔄 handleArrayChange called');
