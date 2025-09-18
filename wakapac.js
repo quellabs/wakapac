@@ -206,6 +206,111 @@
         },
 
         /**
+         * Checks if an element is at least partially visible in the viewport
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if element intersects with viewport
+         */
+        isElementVisible(element) {
+            const rect = element.getBoundingClientRect();
+            const viewHeight = window.innerHeight;
+            const viewWidth = window.innerWidth;
+
+            return (
+                rect.top < viewHeight &&
+                rect.bottom > 0 &&
+                rect.left < viewWidth &&
+                rect.right > 0
+            );
+        },
+
+        /**
+         * Checks if an element is completely visible in the viewport
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if entire element is within viewport bounds
+         */
+        isElementFullyVisible(element) {
+            const rect = element.getBoundingClientRect();
+            const viewHeight = window.innerHeight;
+            const viewWidth = window.innerWidth;
+
+            return (
+                rect.top >= 0 &&
+                rect.left >= 0 &&
+                rect.bottom <= viewHeight &&
+                rect.right <= viewWidth
+            );
+        },
+
+        /**
+         * Checks if an element has direct focus (is the activeElement)
+         * @param {HTMLElement} element - The element to check
+         * @returns {boolean} True if the element is currently focused
+         */
+        isElementDirectlyFocused(element) {
+            return element === document.activeElement;
+        },
+
+        /**
+         * Checks if an element or any of its descendants has focus
+         * @param {HTMLElement} element - The container element to check
+         * @returns {boolean} True if focus is within the element's boundaries
+         */
+        isElementFocusWithin(element) {
+            return element === document.activeElement ||
+                element.contains(document.activeElement);
+        },
+
+        /**
+         * Gets the global position of an element within the document
+         * @param {string|Element} elementOrId - Element ID (with or without #) or DOM element
+         * @returns {Object|null} Object with x, y properties, or null if not found
+         */
+        getElementPosition(elementOrId) {
+            let element;
+
+            // Handle different input types
+            if (typeof elementOrId === 'string') {
+                // Remove # prefix if present
+                const id = elementOrId.startsWith('#') ? elementOrId.slice(1) : elementOrId;
+                element = document.getElementById(id);
+            } else if (elementOrId && elementOrId.nodeType === Node.ELEMENT_NODE) {
+                element = elementOrId;
+            } else {
+                return null;
+            }
+
+            if (!element) {
+                return null;
+            }
+
+            // Get bounding rect relative to viewport
+            const rect = element.getBoundingClientRect();
+
+            // Add current scroll position to get global document coordinates
+            const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
+            const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+
+            return {
+                x: rect.left + scrollX,
+                y: rect.top + scrollY
+            };
+        },
+
+        /**
+         * Detects current network quality
+         * @returns {*|string}
+         */
+        getNetworkEffectiveType() {
+            if (!navigator.onLine) {
+                return 'offline';
+            } else if ('connection' in navigator && navigator.connection?.effectiveType) {
+                return navigator.connection.effectiveType;
+            } else {
+                return '4g';
+            }
+        },
+
+        /**
          * Reads the current value from a DOM element (input, select, textarea, etc.)
          * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
          * @returns {string|boolean} The element's value (string for most inputs, boolean for checkboxes)
@@ -2790,6 +2895,9 @@
     Context.prototype.createReactiveAbstraction = function() {
         const self = this;
 
+        // Inject system properties
+        this.injectSystemProperties(this.originalAbstraction);
+
         // Create reactive proxy directly from original abstraction
         const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
 
@@ -2817,6 +2925,58 @@
         });
 
         return proxiedReactive;
+    };
+
+    /**
+     * Injects system properties into the abstraction
+     * @param {Object} abstraction - The abstraction to enhance
+     */
+    Context.prototype.injectSystemProperties = function(abstraction) {
+        // Initialize online/offline state and network quality
+        abstraction.browserOnline = navigator.onLine;
+        abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
+
+        // Initialize page visibility state - tracks if the browser tab/window is currently visible
+        // Useful for pausing animations or reducing CPU usage when user switches tabs
+        abstraction.browserVisible = !document.hidden;
+
+        // Initialize current horizontal/vertical scroll position in pixels from left/top of document
+        abstraction.browserScrollX  = window.scrollX;
+        abstraction.browserScrollY = window.scrollY;
+
+        // Initialize current viewport width & height - the visible area of the browser window
+        // Updates automatically when user resizes window or rotates mobile device
+        abstraction.browserViewportHeight = window.innerHeight;
+        abstraction.browserViewportWidth = window.innerWidth;
+
+        // Initialize total document width/height including content outside the viewport
+        // Useful for calculating scroll percentages or infinite scroll triggers
+        abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
+        abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+
+        // Container scroll properties
+        abstraction.containerIsScrollable =  false;                               // Can scroll in any direction
+        abstraction.containerScrollX = this.container.scrollLeft;                 // Current horizontal scroll position
+        abstraction.containerScrollY = this.container.scrollTop;                  // Current vertical scroll position
+        abstraction.containerScrollContentWidth = this.container.scrollWidth;     // Total scrollable content width
+        abstraction.containerScrollContentHeight = this.container.scrollHeight;   // Total scrollable content height
+        abstraction.containerScrollWindow = {
+            top: 0,        // scrollTop
+            left: 0,       // scrollLeft
+            right: 0,      // scrollWidth
+            bottom: 0,     // scrollHeight
+            x: 0,          // scrollLeft (alias)
+            y: 0           // scrollTop (alias)
+        };
+
+        // Per-container viewport visibility properties
+        abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
+        abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
+        abstraction.containerVisible = Utils.isElementVisible(this.container);
+        abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
+        abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
+        abstraction.containerWidth = this.container.clientWidth;
+        abstraction.containerHeight = this.container.clientHeight;
     };
 
     Context.prototype.calculateForEachDepth = function(element) {
