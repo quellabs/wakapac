@@ -297,6 +297,29 @@
         },
 
         /**
+         * Converts a DOMRect object to a plain JavaScript object
+         * @param {DOMRect} domRect - The DOMRect object to convert
+         * @returns {Object} Plain object containing all DOMRect properties
+         */
+        domRectToSimpleObject(domRect) {
+            return {
+                // Position relative to viewport
+                top: domRect.top,           // Distance from top of viewport
+                left: domRect.left,         // Distance from left of viewport
+                right: domRect.right,       // Distance from left of viewport to right edge
+                bottom: domRect.bottom,     // Distance from top of viewport to bottom edge
+
+                // Dimensions
+                width: domRect.width,       // Width of the element
+                height: domRect.height,     // Height of the element
+
+                // Alternative position properties (aliases)
+                x: domRect.x,               // Same as left, but included for DOMRect compatibility
+                y: domRect.y                // Same as top, but included for DOMRect compatibility
+            };
+        },
+
+        /**
          * Detects current network quality
          * @returns {*|string}
          */
@@ -613,6 +636,67 @@
             this._initialized = true;
 
             /**
+             * Handle document visibility changes (tab switches, window minimize, etc.)
+             * Updates browserVisible property for all PAC containers
+             */
+            document.addEventListener('visibilitychange', function(event) {
+                self.dispatchBrowserStateEvent('visibility', {
+                    visible: !document.hidden
+                });
+            });
+
+            /**
+             * Handle browser coming online
+             * Updates network state for all PAC containers
+             */
+            window.addEventListener('online', function(event) {
+                self.dispatchBrowserStateEvent('online', {
+                    online: true,
+                    networkType: Utils.getNetworkEffectiveType()
+                });
+            });
+
+            /**
+             * Handle browser going offline
+             * Updates network state for all PAC containers
+             */
+            window.addEventListener('offline', function(event) {
+                self.dispatchBrowserStateEvent('online', {
+                    online: false,
+                    networkType: 'offline'
+                });
+            });
+
+            /**
+             * Handle network connection changes (if supported)
+             * Updates network quality when connection type changes
+             */
+            if ('connection' in navigator && navigator.connection) {
+                navigator.connection.addEventListener('change', function(event) {
+                    self.dispatchBrowserStateEvent('online', {
+                        online: navigator.onLine,
+                        networkType: Utils.getNetworkEffectiveType()
+                    });
+                });
+            }
+
+            /**
+             * Handle focus entering any element (captures phase)
+             * Updates container focus states when focus moves into PAC containers
+             */
+            document.addEventListener('focusin', function(event) {
+                self.dispatchFocusEvent('focusin', event);
+            }, true);
+
+            /**
+             * Handle focus leaving any element (captures phase)
+             * Updates container focus states when focus moves out of PAC containers
+             */
+            document.addEventListener('focusout', function(event) {
+                self.dispatchFocusEvent('focusout', event);
+            }, true);
+
+            /**
              * Handle mouse button down events
              * Maps browser mouse button codes to application message types
              */
@@ -703,6 +787,49 @@
             document.addEventListener('submit', function (event) {
                 self.dispatchTrackedEvent(MSG_TYPES.MSG_SUBMIT, event);
             });
+
+            /**
+             * Handle scroll events (debounced for performance)
+             * Updates current scroll position for all PAC containers
+             */
+            let scrollTimeout;
+            window.addEventListener('scroll', function(event) {
+                if (scrollTimeout) {
+                    return;
+                }
+
+                scrollTimeout = setTimeout(() => {
+                    self.dispatchBrowserStateEvent('scroll', {
+                        scrollX: window.scrollX,
+                        scrollY: window.scrollY
+                    });
+                    scrollTimeout = null;
+                }, 16); // ~60fps
+            });
+
+            /**
+             * Handle window resize events (debounced for performance)
+             * Updates viewport/document dimensions and scroll position
+             */
+            let resizeTimeout;
+            window.addEventListener('resize', function(event) {
+                if (resizeTimeout) {
+                    return;
+                }
+
+                resizeTimeout = setTimeout(() => {
+                    self.dispatchBrowserStateEvent('resize', {
+                        viewportWidth: window.innerWidth,
+                        viewportHeight: window.innerHeight,
+                        documentWidth: document.documentElement.scrollWidth,
+                        documentHeight: document.documentElement.scrollHeight,
+                        scrollX: window.scrollX,
+                        scrollY: window.scrollY
+                    });
+
+                    resizeTimeout = null;
+                }, 100);
+            });
         },
 
         /**
@@ -774,6 +901,62 @@
 
             // Dispatch the custom event to the container
             container.dispatchEvent(customEvent);
+        },
+
+        /**
+         * Dispatches browser state events (visibility, online/offline, etc.) to all PAC containers
+         * @param {string} stateType - Type of state change ('visibility', 'online', etc.)
+         * @param {Object} stateData - State data to include in event
+         */
+        dispatchBrowserStateEvent(stateType, stateData) {
+            const containers = document.querySelectorAll('[data-pac-container]');
+
+            containers.forEach(container => {
+                const customEvent = new CustomEvent('pac:browser-state', {
+                    detail: {
+                        stateType: stateType,
+                        stateData: stateData,
+                        timestamp: Date.now(),
+                        target: container
+                    }
+                });
+
+                container.dispatchEvent(customEvent);
+            });
+        },
+
+        /**
+         * Dispatches focus state changes to relevant PAC containers
+         */
+        dispatchFocusEvent(focusType, originalEvent) {
+            const containers = document.querySelectorAll('[data-pac-container]');
+            const { target, relatedTarget } = originalEvent;
+
+            containers.forEach(container => {
+                if (!this.isContainerAffected(container, target, relatedTarget)) {
+                    return;
+                }
+
+                container.dispatchEvent(new CustomEvent('pac:focus-state', {
+                    detail: {
+                        focusType: focusType,
+                        target: target,
+                        relatedTarget: relatedTarget,
+                        timestamp: Date.now(),
+                        containerFocus: Utils.isElementDirectlyFocused(container),
+                        containerFocusWithin: Utils.isElementFocusWithin(container)
+                    }
+                }));
+            });
+        },
+
+        /**
+         * Checks if focus change affects the container
+         */
+        isContainerAffected(container, target, relatedTarget) {
+            const containsTarget = container.contains(target) || container === target;
+            const containsRelated = relatedTarget && (container.contains(relatedTarget) || container === relatedTarget);
+            return containsTarget || containsRelated;
         },
 
         /**
@@ -2253,6 +2436,9 @@
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
 
+        // Set up container-specific scroll tracking
+        this.setupContainerScrollTracking();
+
         // Scan the container for items and store them in interpolationMap and textInterpolationMap
         this.scanAndRegisterNewElements(this.container);
 
@@ -2263,6 +2449,8 @@
         this.container.addEventListener('pac:event', this.boundHandlePacEvent);
         this.container.addEventListener('pac:change', this.boundHandlePacEvent);
         this.container.addEventListener('pac:array-change', this.boundHandlePacEvent);
+        this.container.addEventListener('pac:browser-state', this.boundHandlePacEvent);
+        this.container.addEventListener('pac:focus-state', this.boundHandlePacEvent);
     }
 
     Context.prototype.destroy = function() {
@@ -2270,9 +2458,101 @@
         this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:focus-state', this.boundHandlePacEvent);
 
         // Clear references
         this.boundHandlePacEvent = null;
+    }
+
+    // Add debounce utility method
+    Context.prototype.debounce = function(func, wait) {
+        let timeout;
+
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    /**
+     * Sets up scroll event tracking for the container element with debounced handling.
+     * Creates an optimized scroll listener that updates container scroll state at ~60fps
+     * to prevent performance issues during rapid scroll events.
+     * @memberof {Object} - The parent class/object containing this method
+     * @method setupContainerScrollTracking
+     * @returns {void}
+     */
+    Context.prototype.setupContainerScrollTracking = function() {
+        // First time setup
+        requestAnimationFrame(() => this.updateContainerScrollState());
+
+        // Create debounced scroll handler for this container
+        const debouncedScrollHandler = this.debounce(() => {
+            this.updateContainerScrollState();
+        }, 16); // ~60fps
+
+        // Add scroll listener to this container
+        this.container.addEventListener('scroll', debouncedScrollHandler, { passive: true });
+
+        // Store reference for cleanup
+        this.containerScrollHandler = debouncedScrollHandler;
+    }
+
+    // Add new method to update container scroll state
+    Context.prototype.updateContainerScrollState = function() {
+        // Get scroll measurements
+        const scrollX = this.container.scrollLeft;
+        const scrollY = this.container.scrollTop;
+        const clientWidth = this.container.clientWidth;
+        const clientHeight = this.container.clientHeight;
+        const scrollContentWidth = this.container.scrollWidth;
+        const scrollContentHeight = this.container.scrollHeight;
+
+        // Calculate scrollable state (use existing containerWidth/Height for visible dimensions)
+        const isScrollable =
+            scrollContentWidth > this.abstraction.containerWidth ||
+            scrollContentHeight > this.abstraction.containerHeight;
+
+        // Update individual properties
+        this.abstraction.containerScrollX = scrollX;
+        this.abstraction.containerScrollY = scrollY;
+        this.abstraction.containerScrollContentWidth = scrollContentWidth;
+        this.abstraction.containerScrollContentHeight = scrollContentHeight;
+        this.abstraction.containerIsScrollable = isScrollable;
+
+        // Update scroll window object
+        Object.assign(this.abstraction.containerScrollWindow, {
+            top: scrollY,
+            left: scrollX,
+            right: scrollX + clientWidth,
+            bottom: scrollY + clientHeight,
+            x: scrollX,
+            y: scrollY
+        });
+    }
+
+    /**
+     * Manual visibility calculation using getBoundingClientRect().
+     * This is the fallback method used when IntersectionObserver isn't available
+     */
+    Context.prototype.updateContainerVisibility = function() {
+        // Get current state using Utils
+        const rect = Utils.domRectToSimpleObject(this.container.getBoundingClientRect());
+
+        // Set dimensions
+        this.abstraction.containerClientRect = rect;
+        this.abstraction.containerWidth = rect.width;
+        this.abstraction.containerHeight = rect.height;
+
+        // Use Utils for consistent visibility calculation
+        this.abstraction.containerVisible = Utils.isElementVisible(this.container);
+        this.abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
     }
 
     /**
@@ -2480,18 +2760,44 @@
         });
     };
 
+    /**
+     * Handles incoming events by dispatching them to appropriate handler methods based on event type.
+     * This is the central event routing mechanism for the Context system.
+     * @param {Object} event - The event object to be processed
+     * @param {string} event.type - The type of event, determines which handler is called
+     * @param {...*} event - Additional event properties vary by event type
+     */
     Context.prototype.handleEvent = function(event) {
+        // Route events to specialized handlers based on type
+        // Each event type corresponds to a different aspect of the PAC (Presentation-Abstraction-Control) architecture
         switch(event.type) {
+            // Handle general PAC events (likely business logic or component interactions)
             case 'pac:event':
                 this.handlePacEvent(event);
                 break;
 
+            // Handle array modification events (insertions, deletions, reordering)
             case 'pac:array-change':
                 this.handleArrayChange(event);
                 break;
 
+            // Handle reactive data binding changes (property updates, computed value changes)
             case 'pac:change':
                 this.handleReactiveChange(event);
+                break;
+
+            // Handle browser state changes (navigation, history, URL changes)
+            case 'pac:browser-state':
+                this.handleBrowserState(event);
+                break;
+
+            // Handle focus management events (element focus)
+            case 'pac:focus-state':
+                this.handleFocusState(event);
+                break;
+
+            default:
+                console.warn(`Unhandled event type ${event.type}`);
                 break;
         }
     };
@@ -2535,8 +2841,8 @@
                 break;
                 
             default :
-                // Log unhandled message types
-                console.warn(`[MSG_TYPES] ${event.detail.message}`);
+                console.warn(`Unhandled event type ${event.detail.message}`);
+                break;
         }
     }
 
@@ -2746,6 +3052,67 @@
                 });
             }
         });
+    };
+
+    /**
+     * Handles browser state change events and updates the context abstraction accordingly.
+     * This method processes various types of browser state changes including visibility,
+     * network connectivity, scroll position, and viewport dimensions.
+     * @param {CustomEvent} event - Browser state change event
+     * @param {Object} event.detail - Event payload containing state information
+     * @param {string} event.detail.stateType - Type of state change ('visibility'|'online'|'scroll'|'resize')
+     * @param {Object} event.detail.stateData - State-specific data object
+     */
+    Context.prototype.handleBrowserState = function(event) {
+        const { stateType, stateData } = event.detail;
+
+        switch(stateType) {
+            case 'visibility':
+                // Update browser visibility state
+                this.abstraction.browserVisible = stateData.visible;
+                break;
+
+            case 'online':
+                // Update network connectivity and connection type
+                this.abstraction.browserOnline = stateData.online;
+                this.abstraction.browserNetworkEffectiveType = stateData.networkType;
+                break;
+
+            case 'scroll':
+                // Update scroll position coordinates
+                this.abstraction.browserScrollX = stateData.scrollX;
+                this.abstraction.browserScrollY = stateData.scrollY;
+                break;
+
+            case 'resize':
+                // Update viewport dimensions and document size
+                this.abstraction.browserViewportWidth = stateData.viewportWidth;
+                this.abstraction.browserViewportHeight = stateData.viewportHeight;
+                this.abstraction.browserDocumentWidth = stateData.documentWidth;
+                this.abstraction.browserDocumentHeight = stateData.documentHeight;
+
+                // Update scroll position (resize can change scroll)
+                this.abstraction.browserScrollX = stateData.scrollX;
+                this.abstraction.browserScrollY = stateData.scrollY;
+
+                // Recalculate container visibility after dimension changes
+                this.updateContainerVisibility();
+                break;
+
+            default:
+                console.warn('Unknown browser state message ' + stateType);
+                break;
+        }
+    };
+
+    /**
+     * Update focus properties directly from the event detail
+     * These are pre-calculated in DomUpdateTracker to avoid redundant computations
+     * @param event
+     */
+    Context.prototype.handleFocusState = function(event) {
+        this.abstraction.containerFocus = event.detail.containerFocus;
+        this.abstraction.containerFocusWithin = event.detail.containerFocusWithin;
     };
 
     /**
@@ -3044,13 +3411,6 @@
             );
 
             // TIMING FIX: Handle the case where parent context doesn't exist yet
-            // If array is null/undefined, this indicates that the foreach expression
-            // depends on a parent context that hasn't been established yet.
-            //
-            // Examples where this occurs:
-            // - "todo.subs" when "todo" variable doesn't exist (nested foreach before parent renders)
-            // - "item.children" when "item" is scoped to a parent loop that hasn't created context
-            //
             // Strategy: Silently skip rendering now, let natural retry handle it later
             // When parent foreach renders and calls scanAndRegisterNewElements(), this
             // method will be called again with proper context available.
@@ -3313,10 +3673,8 @@
     /**
      * Extracts the closest foreach context information by walking up the DOM tree
      * from a starting element, looking for comment markers that identify foreach items.
-     *
      * @param {Element} startElement - The DOM element to start searching from
-     * @returns {number|null} Foreach context object with foreachId, index, and renderIndex,
-     *                        or null if no foreach context is found
+     * @returns {number|null} Foreach context object with foreachId, index, and renderIndex or null
      * @returns {string} returns.foreachId - The identifier of the foreach loop
      * @returns {number} returns.index - The logical index in the data array
      * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
