@@ -26,6 +26,11 @@
     const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
     const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
 
+    const BOOLEAN_ATTRIBUTES = [
+        'readonly', 'required', 'selected', 'checked',
+        'hidden', 'multiple', 'autofocus'
+    ];
+
     /**
      * All binding types
      * @type {string[]}
@@ -44,6 +49,39 @@
      * @namespace Utils
      */
     const Utils = {
+
+
+        /**
+         * Converts an array of path segments into a JavaScript property access string.
+         * Handles both dot notation for properties and bracket notation for numeric indices.
+         * @param {string[]} pathArray - Array of path segments representing object property access
+         * @returns {string} Formatted property access string (e.g., "user.settings[0].name")
+         */
+        pathArrayToString(pathArray) {
+            // Handle empty array case
+            if (pathArray.length === 0) {
+                return '';
+            }
+
+            // Start with the root property (no dot prefix needed)
+            let result = pathArray[0];
+
+            // Process remaining path segments
+            for (let i = 1; i < pathArray.length; i++) {
+                const part = pathArray[i];
+
+                // Check if current segment is a numeric index using regex
+                if (/^\d+$/.test(part)) {
+                    // Numeric index - use bracket notation for array access
+                    result += `[${part}]`;
+                } else {
+                    // Property name - use dot notation for object property access
+                    result += `.${part}`;
+                }
+            }
+
+            return result;
+        },
 
         /**
          * Determines if an element belongs to the specified PAC container.
@@ -1603,18 +1641,15 @@
         // Object syntax: { color: 'red', fontSize: '16px' }
         // Check if value is an object (preferred object syntax)
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-            // Iterate through each style property in the object
-            Object.keys(value).forEach(styleProp => {
-                // Only set non-null/undefined values to avoid clearing styles accidentally
-                if (value[styleProp] != null) {
-                    // Check if this is a CSS custom property (starts with --)
-                    if (styleProp.startsWith('--')) {
-                        element.style.setProperty(styleProp, value[styleProp]); // CSS custom properties
+            for (const prop in value) {
+                if (value[prop] != null) {
+                    if (prop.startsWith('--')) {
+                        element.style.setProperty(prop, value[prop]);
                     } else {
-                        element.style[styleProp] = value[styleProp]; // regular CSS properties
+                        element.style[prop] = value[prop];
                     }
                 }
-            });
+            }
 
             return;
         }
@@ -1627,11 +1662,6 @@
     };
 
     DomUpdater.prototype.applyAttributeBinding = function (element, attribute, value) {
-        const BOOLEAN_ATTRIBUTES = [
-            'readonly', 'required', 'selected', 'checked',
-            'hidden', 'multiple', 'autofocus'
-        ];
-
         if (attribute === 'enable') {
             // Handle 'enable' as reverse of 'disabled'
             element.toggleAttribute('disabled', !value);
@@ -1792,6 +1822,7 @@
                 if (typeof prop === 'string') {
                     accessed.add(prop);
                 }
+
                 return target[prop];
             }
         });
@@ -1890,7 +1921,7 @@
                     event.detail.path.join('.').startsWith(dep + '[');
             });
 
-            // Check foreach container
+            // Also check if element is in a foreach container affected by the change
             if (!shouldUpdate) {
                 const foreachContainer = textNode.parentElement?.closest('[data-pac-foreach-id]');
 
@@ -1969,54 +2000,89 @@
         }
     }
 
+    /**
+     * Handles DOM submit events by executing bound abstraction methods.
+     * @param {CustomEvent} event - The DOM submit event containing target element details
+     * @param {Object} event.detail - Event detail object
+     * @param {HTMLElement} event.detail.target - The DOM element that triggered the submit
+     * @returns {void}
+     */
     Context.prototype.handleDomSubmit = function(event) {
+        // Retrieve mapping data for the target element from the interpolation map
         const mappingData = this.interpolationMap.get(event.detail.target);
+
+        // Early return if no mapping exists or no submit binding is configured
         if (!mappingData?.bindings?.submit) {
             return;
         }
 
+        // Get the method reference from the abstraction object using the binding target
         const method = this.abstraction[mappingData.bindings.submit.target];
+
+        // Verify the target is actually a callable function
         if (typeof method !== 'function') {
             return;
         }
 
         try {
+            // Execute the bound method with the abstraction as context and pass the event
             method.call(this.abstraction, event);
         } catch (error) {
+            // Log execution errors with context for debugging
             console.error(`Error executing submit binding '${mappingData.bindings.submit.target}':`, error);
         }
     };
 
+    /**
+     * Handles DOM change events for data-bound elements, updating the underlying data model
+     * when form controls change their values. This enables two-way data binding by listening
+     * for custom DOM change events and propagating changes back to the data context.
+     * @param {CustomEvent} event - The DOM change event containing target element and new value
+     * @param {Element} event.detail.target - The DOM element that changed
+     * @param {*} event.detail.value - The new value from the changed element
+     */
     Context.prototype.handleDomChange = function(event) {
         const self = this;
         const targetElement = event.detail.target;
 
-        // Get the mapping data for this specific element
+        // Get the mapping data for this specific element from the interpolation map
+        // This contains all the binding information (value, checked, etc.) for the element
         const mappingData = this.interpolationMap.get(targetElement);
 
-        // If no mapping data found, return early
+        // If no mapping data found, this element isn't data-bound so nothing to do
         if (!mappingData) {
             return;
         }
 
         // Handle value binding (for inputs, selects, textareas)
+        // This covers most form controls that have a "value" property
         if (mappingData.bindings.value) {
+            // Fetch value binding
             const valueBinding = mappingData.bindings.value;
+
+            // Resolve the target path considering any scoped context (e.g., loops, nested objects)
             const resolvedPath = self.resolveScopedPath(valueBinding.target, targetElement);
 
-            // Use the nested property setter to handle complex paths
+            // Update the data model using nested property setter to handle complex object paths
+            // e.g., "user.profile.name" gets properly set in the nested object structure
             self.setNestedProperty(resolvedPath, event.detail.value);
         }
 
         // Handle checked binding (for checkboxes and radio buttons)
+        // These controls have special behavior different from regular value binding
         if (mappingData.bindings.checked) {
+            // Fetch checked binding
             const checkedBinding = mappingData.bindings.checked;
+
+            // Resolve the target path for the checked property binding
             const resolvedPath = self.resolveScopedPath(checkedBinding.target, targetElement);
 
+            // Checkbox: set boolean value based on checked state
+            // Radio button: only update when this radio is selected, use its value
             if (targetElement.type === 'checkbox') {
-                self.setNestedProperty(resolvedPath, event.detail.target.checked)
+                self.setNestedProperty(resolvedPath, event.detail.target.checked);
             } else if (targetElement.type === 'radio' && event.detail.target.checked) {
-                self.setNestedProperty(resolvedPath, event.detail.value)
+                self.setNestedProperty(resolvedPath, event.detail.value);
             }
         }
     };
@@ -2032,35 +2098,47 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Context.prototype.handleReactiveChange = function(event) {
-        const pathString = this.pathArrayToString(event.detail.path);
+        // Convert the change path array to a string for dependency lookups
+        const pathString = Utils.pathArrayToString(event.detail.path);
         const pathsToCheck = [pathString];
 
+        // Check if the changed path has any registered dependencies and include them
         if (this.dependencies.has(pathString)) {
             pathsToCheck.push(...this.dependencies.get(pathString));
         }
 
+        // Also check dependencies for the root property (first segment of the path)
+        // This handles cases where nested changes should trigger root-level dependencies
         const rootProperty = event.detail.path[0];
         if (this.dependencies.has(rootProperty)) {
             pathsToCheck.push(...this.dependencies.get(rootProperty));
         }
 
+        // Update text interpolations ({{variable}} expressions) that depend on changed paths
         this.handleTextInterpolation(event, pathsToCheck);
+
+        // Update HTML attributes that are bound to changed paths
         this.handleAttributeChanges(event, pathsToCheck);
 
-        // Handle foreach rebuilds
+        // Handle foreach loop rebuilds when array data changes
         pathsToCheck.forEach(path => {
-            // Skip the original change unless it's a direct array assignment
+            // Skip nested property changes unless it's a direct array assignment
+            // This prevents unnecessary rebuilds when individual array items change
             if (path === pathString && event.detail.path.length > 1) {
                 return;
             }
 
-            // Only check if this could be an array-returning computed property
+            // Determine if this path could represent an array that needs foreach rebuilding
+            // Check both computed functions (that might return arrays) and direct array properties
             const isComputedFunction = typeof this.abstraction.computed?.[path] === 'function';
             const isDirectArray = event.detail.path.length === 1 && Array.isArray(this.abstraction[path]);
 
+            // Only proceed if this path could contain array data for foreach loops
             if (isComputedFunction || isDirectArray) {
+                // Find all DOM elements with foreach directives that use this array path
                 const foreachElements = this.findForeachElementsByArrayPath(path);
 
+                // Rebuild each foreach element if conditions are met
                 foreachElements.forEach(element => {
                     if (this.shouldRebuildForeach(element)) {
                         this.renderForeach(element);
@@ -2070,32 +2148,26 @@
         });
     };
 
-    Context.prototype.pathArrayToString = function (pathArray) {
-        if (pathArray.length === 0) {
-            return '';
-        }
-
-        let result = pathArray[0]; // Start with root property
-
-        for (let i = 1; i < pathArray.length; i++) {
-            const part = pathArray[i];
-            if (/^\d+$/.test(part)) {
-                // Numeric index - use bracket notation
-                result += `[${part}]`;
-            } else {
-                // Property name - use dot notation
-                result += `.${part}`;
-            }
-        }
-
-        return result;
-    };
-
+    /**
+     * Handles array change events by re-rendering associated foreach elements.
+     * @param {CustomEvent} event - The array change event containing details about the modification
+     * @param {Object} event.detail - The event detail object
+     * @param {Array<string|number>} event.detail.path - Array representing the path to the changed array
+     */
     Context.prototype.handleArrayChange = function(event) {
-        const pathString = event.detail.path.join('.');
+        // Convert the array path to a dot-notation string for easier matching
+        // e.g., ['users', 0, 'orders'] becomes 'users.0.orders'
+        const pathString = Utils.pathArrayToString(event.detail.path);
+
+        // Locate all DOM elements with foreach directives that are bound to this array path
+        // This method searches the DOM for elements whose foreach binding matches the changed array
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
-        foreachElements.forEach((element, index) => {
+        // Re-render each affected foreach element to reflect the array changes
+        // The index parameter is provided by forEach but not used in this implementation
+        foreachElements.forEach((element) => {
+            // Trigger a complete re-render of the foreach element
+            // This will recreate child elements based on the updated array data
             this.renderForeach(element);
         });
     };
