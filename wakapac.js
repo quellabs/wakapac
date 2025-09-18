@@ -493,17 +493,24 @@
     // ============================================================================
 
     const DomUpdateTracker = {
+        /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
         initialize() {
+            // Store reference to this object for use in closures
             const self = this;
 
+            // Prevent double initialization
             if (this._initialized) {
                 return;
             }
 
             this._initialized = true;
 
+            /**
+             * Handle mouse button down events
+             * Maps browser mouse button codes to application message types
+             */
             document.addEventListener('mousedown', function (event) {
                 let messageType;
 
@@ -520,6 +527,10 @@
                 self.dispatchTrackedEvent(messageType, event);
             });
 
+            /**
+             * Handle mouse button up events
+             * Maps browser mouse button codes to application message types
+             */
             document.addEventListener('mouseup', function (event) {
                 let messageType;
 
@@ -536,8 +547,25 @@
                 self.dispatchTrackedEvent(messageType, event);
             });
 
-            // Change event (when input element loses focus)
-            // Only handle change events for select, radio, and checkbox
+            /**
+             * Handle keyboard key release events
+             * Tracks when user releases any key
+             */
+            document.addEventListener('keyup', function (event) {
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_KEYUP, event);
+            });
+
+            /**
+             * Handle keyboard key press events
+             * Tracks when user presses any key down
+             */
+            document.addEventListener('keydown', function (event) {
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_KEYDOWN, event);
+            });
+
+            /**
+             * Handle form element change events
+             */
             document.addEventListener('change', function (event) {
                 if (
                     event.target.tagName === 'SELECT' ||
@@ -548,18 +576,25 @@
                 }
             });
 
-            // Input event (when user types)
-            // Only handle input events for text inputs and textareas
+            /**
+             * Handle real-time input events for text fields
+             * Tracks continuous user typing in text inputs and textareas.
+             * Excludes radio buttons and checkboxes which use 'change' event instead.
+             */
             document.addEventListener('input', function (event) {
+                // Handle text inputs (excluding radio/checkbox) and textareas
                 if (
-                    event.target.tagName === 'INPUT' &&
-                    !['radio', 'checkbox'].includes(event.target.type) || event.target.tagName === 'TEXTAREA'
+                    (event.target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(event.target.type)) ||
+                    event.target.tagName === 'TEXTAREA'
                 ) {
                     self.dispatchTrackedEvent(MSG_TYPES.MSG_CHAR, event);
                 }
             });
 
-            // Submit event (when user submits form)
+            /**
+             * Handle form submission events
+             * Tracks when user submits any form on the page
+             */
             document.addEventListener('submit', function (event) {
                 self.dispatchTrackedEvent(MSG_TYPES.MSG_SUBMIT, event);
             });
@@ -2359,6 +2394,11 @@
                 // Mouse button down events - no action taken
                 break;
 
+            case MSG_TYPES.MSG_KEYUP:
+            case MSG_TYPES.MSG_KEYDOWN:
+                // Raw key events - no action taken
+                break;
+
             case MSG_TYPES.MSG_LBUTTONUP:
             case MSG_TYPES.MSG_MBUTTONUP:
             case MSG_TYPES.MSG_RBUTTONUP:
@@ -2376,7 +2416,7 @@
                 // Input change and character events
                 this.handleDomChange(event);
                 break;
-
+                
             default :
                 // Log unhandled message types
                 console.warn(`[MSG_TYPES] ${event.detail.message}`);
