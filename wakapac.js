@@ -25,6 +25,7 @@
 
     const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
     const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
+    const FOREACH_INDEX_REGEX = /pac-foreach-item:\s*([^,]+),\s*index=(\d+),\s*renderIndex=(\d+)/;
 
     /**
      * HTML attributes that are boolean (present = true, absent = false)
@@ -2460,8 +2461,9 @@
                 // Find the original index in the source array
                 const originalIndex = this.findOriginalIndex(item, sourceArray, renderIndex);
 
+                // Build the HTML
                 foreachElement.innerHTML +=
-                    `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex} -->` +
+                    `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
                     mappingData.template + // Original template with bindings like {{subItem.id}}
                     `<!-- /pac-foreach-item -->`;
             });
@@ -2569,7 +2571,6 @@
          * @type {Object|undefined} mappingData - Contains bindings, itemVar, and foreachId properties
          */
         const mappingData = this.interpolationMap.get(foreachElement);
-
         if (!mappingData || !mappingData.bindings || !mappingData.bindings.foreach) {
             return scopedPath;
         }
@@ -2591,43 +2592,57 @@
         return resolvedExpr + '[' + currentIndex + ']' + (propertyPath ? '.' + propertyPath : '');
     };
 
+    /**
+     * Determines whether a foreach element needs to be rebuilt based on array changes
+     * @param {Element} foreachElement - The DOM element with foreach directive
+     * @returns {boolean} True if the foreach should be rebuilt, false otherwise
+     */
     Context.prototype.shouldRebuildForeach = function(foreachElement) {
+        // Get the mapping data for this foreach element from the interpolation map
         const mappingData = this.interpolationMap.get(foreachElement);
         if (!mappingData) {
+            // No mapping data means this isn't a valid foreach element
             return false;
         }
 
+        // Create scope resolver to handle scoped path resolution within foreach context
         const scopeResolver = {
             resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
         };
 
+        // Evaluate the foreach expression to get the current array
         const newArray = ExpressionParser.evaluate(
             ExpressionCache.parseExpression(mappingData.foreachExpr),
             this.abstraction,
             scopeResolver
         );
 
+        // If evaluation doesn't result in an array, no rebuild needed
         if (!Array.isArray(newArray)) {
             return false;
         }
 
-        // Get previous array from element attribute/property
+        // Get the previously cached array from the element's internal property
         const previousArray = foreachElement._pacPreviousArray;
         if (!previousArray) {
+            // First time rendering - rebuild required
             return true;
         }
 
+        // Quick length comparison - if lengths differ, rebuild needed
         if (newArray.length !== previousArray.length) {
             return true;
         }
 
-        // Check if the actual items changed (by reference)
+        // Check if any array items changed by reference comparison
+        // This catches object mutations and item replacements
         for (let i = 0; i < newArray.length; i++) {
             if (newArray[i] !== previousArray[i]) {
                 return true;
             }
         }
 
+        // Arrays are identical - no rebuild needed
         return false;
     };
 
@@ -2674,6 +2689,17 @@
         return elementsToUpdate;
     };
 
+    /**
+     * Extracts the closest foreach context information by walking up the DOM tree
+     * from a starting element, looking for comment markers that identify foreach items.
+     *
+     * @param {Element} startElement - The DOM element to start searching from
+     * @returns {number|null} Foreach context object with foreachId, index, and renderIndex,
+     *                        or null if no foreach context is found
+     * @returns {string} returns.foreachId - The identifier of the foreach loop
+     * @returns {number} returns.index - The logical index in the data array
+     * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
+     */
     Context.prototype.extractClosestForeachContext = function(startElement) {
         // Start from the element and walk up the DOM tree
         let current = startElement;
@@ -2683,27 +2709,32 @@
             let sibling = current.previousSibling;
 
             while (sibling) {
+                // Only process comment nodes
                 if (sibling.nodeType === Node.COMMENT_NODE) {
                     const commentText = sibling.textContent.trim();
 
-                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X"
-                    const match = commentText.match(/pac-foreach-item:\s*([^,]+),\s*index=(\d+)/);
+                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X, renderIndex=Y"
+                    // This regex captures the foreach ID and both index values
+                    const match = commentText.match(FOREACH_INDEX_REGEX);
 
                     if (match) {
                         return {
                             foreachId: match[1].trim(),
-                            index: parseInt(match[2], 10)
+                            index: parseInt(match[2], 10),      // Convert string to integer
+                            renderIndex: parseInt(match[3], 10) // Convert string to integer
                         };
                     }
                 }
 
+                // Move to the next previous sibling
                 sibling = sibling.previousSibling;
             }
 
-            // Move up to parent element
+            // Move up to parent element to continue searching
             current = current.parentElement;
         }
 
+        // No foreach context found in the entire tree up to container
         return null;
     };
     
@@ -2726,8 +2757,8 @@
                 if (sibling.nodeType === Node.COMMENT_NODE) {
                     const commentText = sibling.textContent.trim();
 
-                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X"
-                    const match = commentText.match(/pac-foreach-item:\s*([^,]+),\s*index=(\d+)/);
+                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X, renderIndex=Y"
+                    const match = commentText.match(FOREACH_INDEX_REGEX);
 
                     if (match && match[1].trim() === foreachId) {
                         return parseInt(match[2], 10);
@@ -2762,8 +2793,8 @@
                 if (sibling.nodeType === Node.COMMENT_NODE) {
                     const commentText = sibling.textContent.trim();
 
-                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X"
-                    const match = commentText.match(/pac-foreach-item:\s*([^,]+),\s*index=(\d+)/);
+                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X, renderIndex=Y"
+                    const match = commentText.match(FOREACH_INDEX_REGEX);
 
                     if (match && match[1].trim() === foreachId) {
                         return parseInt(match[2], 10);
