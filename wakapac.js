@@ -467,7 +467,31 @@
             this._initialized = true;
 
             document.addEventListener('click', function (event) {
+                // Dispatch mouse event to eventProc
+                // Determine mouse event type
+                let eventType;
+
+                if (event.type === 'mousedown') {
+                    if (event.button === 0) {
+                        eventType = 'EVENT_LBUTTONDOWN';
+                    } else if (event.button === 1) {
+                        eventType = 'EVENT_MBUTTONDOWN';
+                    } else if (event.button === 2) {
+                        eventType = 'EVENT_RBUTTONDOWN';
+                    }
+                } else if (event.type === 'mouseup') {
+                    if (event.button === 0) {
+                        eventType = 'EVENT_LBUTTONUP';
+                    } else if (event.button === 1) {
+                        eventType = 'EVENT_MBUTTONUP';
+                    } else if (event.button === 2) {
+                        eventType = 'EVENT_RBUTTONUP';
+                    }
+                }
+
                 self.dispatchTrackedEvent('pac:dom:click', event, {
+                    eventType: eventType,             // Win32-esque button type
+                    type: event.type,                 // 'mousedown' or 'mouseup'
                     clientX: event.clientX ?? null,   // Relative to viewport
                     clientY: event.clientY ?? null,
                     pageX: event.pageX ?? null,       // Relative to document
