@@ -60,9 +60,9 @@
 
     const MK_LBUTTON = 0x0001;
     const MK_RBUTTON = 0x0002;
-    const MK_SHIFT = 0x0004;
-    const MK_CONTROL = 0x0008;
-    const MK_MBUTTON = 0x0010;
+    const MK_MBUTTON = 0x004;
+    const MK_SHIFT = 0x0008;
+    const MK_CONTROL = 0x0010;
     const MK_ALT = 0x0020;
 
     /**
