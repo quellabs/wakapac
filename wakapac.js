@@ -565,57 +565,90 @@
             });
         },
 
+        /**
+         * Creates a custom event that wraps the original DOM event with additional
+         * tracking data including Win32-style wParam/lParam values, timestamps,
+         * and extended metadata. The event is dispatched to the nearest container
+         * element with a [data-pac-container] attribute.
+         * @param {string} messageType - The Win32 message type (e.g., MSG_LBUTTONDOWN, MSG_KEYUP)
+         * @param {Event} originalEvent - The original DOM event to wrap
+         * @param {Object} [extended={}] - Additional extended data to include in the event detail
+         * @returns {void}
+         */
         dispatchTrackedEvent(messageType, originalEvent, extended = {}) {
+            // Find the nearest container element that should receive the event
             const container = originalEvent.target.closest('[data-pac-container]');
 
+            // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
                 return;
             }
 
+            // Build Win32-style parameters based on the message type and original event
             const params = this.buildParams(messageType, originalEvent);
 
+            // Create the custom event with comprehensive tracking data
             const customEvent = new CustomEvent('pac:event', {
                 detail: {
-                    // Core Win32-style data
+                    // Core Win32-style message data
                     message: messageType,
                     wParam: params.wParam,
                     lParam: params.lParam,
 
-                    // Standard fields for all events
+                    // Standard tracking fields for all events
                     timestamp: Date.now(),
                     target: originalEvent.target,
                     id: originalEvent.target.id || null,
                     value: Utils.readDOMValue(originalEvent.target),
 
-                    // Original event
+                    // Reference to the original DOM event for debugging/advanced usage
                     originalEvent: originalEvent,
 
-                    // Extended data
+                    // Additional extended data provided by caller
                     extended: extended,
                 }
             });
 
-            // Forward event methods to the original event
+            // Forward event control methods to the original event
+            // This allows consumers to call preventDefault() on the custom event
+            // and have it affect the original event
             const methodsToForward = ['preventDefault', 'stopPropagation', 'stopImmediatePropagation'];
 
             methodsToForward.forEach(methodName => {
-                const originalMethod = customEvent[methodName];
+                // Store reference to the custom event's original method
+                const originalCustomMethod = customEvent[methodName];
 
+                // Override the method to call both the custom event method and original event method
                 customEvent[methodName] = function() {
-                    originalMethod.call(this);
+                    // Call the custom event's method first (if it exists)
+                    if (originalCustomMethod) {
+                        originalCustomMethod.call(this);
+                    }
 
+                    // Then call the original event's method (if it exists)
                     if (originalEvent[methodName]) {
                         originalEvent[methodName].call(originalEvent);
                     }
                 };
             });
 
-            // Dispatch event
+            // Dispatch the custom event to the container
             container.dispatchEvent(customEvent);
         },
 
+        /**
+         * Converts DOM event data into Win32 message format for consistent handling
+         * across different event types. Each message type has specific parameter
+         * encoding rules that match Win32 conventions.
+         * @param {string} messageType - The Win32 message type constant
+         * @param {Event} event - The original DOM event containing the raw data
+         * @returns {Object} Object containing wParam and lParam values
+         * @returns {number} returns.wParam - The wParam value (typically flags or primary data)
+         * @returns {number|Object} returns.lParam - The lParam value (typically coordinates or secondary data)
+         */
         buildParams(messageType, event) {
             switch(messageType) {
+                // Mouse button events - encode button states and coordinates
                 case MSG_TYPES.MSG_LBUTTONDOWN:
                 case MSG_TYPES.MSG_RBUTTONDOWN:
                 case MSG_TYPES.MSG_MBUTTONDOWN:
@@ -623,43 +656,68 @@
                 case MSG_TYPES.MSG_RBUTTONUP:
                 case MSG_TYPES.MSG_MBUTTONUP:
                     return {
-                        wParam: this.buildMouseWParam(event),
-                        lParam: this.buildMouseLParam(event)
+                        wParam: this.buildMouseWParam(event),  // Mouse button and modifier key flags
+                        lParam: this.buildMouseLParam(event)   // Packed x,y coordinates
                     };
 
+                // Keyboard events - encode key codes and modifier states
                 case MSG_TYPES.MSG_KEYDOWN:
                 case MSG_TYPES.MSG_KEYUP:
                     return {
-                        wParam: event.keyCode || event.which,
-                        lParam: this.buildKeyboardLParam(event)
+                        wParam: event.keyCode || event.which || 0,  // Virtual key code (fallback to 0 if undefined)
+                        lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
                     };
 
+                // Character and input change events - encode text length
                 case MSG_TYPES.MSG_CHAR:
                 case MSG_TYPES.MSG_CHANGE:
                     return {
-                        wParam: event.target.value.length,
-                        lParam: 0
+                        wParam: (event.target && event.target.value) ? event.target.value.length : 0,  // Text length
+                        lParam: 0  // Not used for these message types
                     };
 
-                case MSG_TYPES.MSG_SUBMIT : {
-                    const formData = new FormData(event.target);
-                    const formObject = Object.fromEntries(formData.entries());
+                // Form submission events - encode form data
+                case MSG_TYPES.MSG_SUBMIT: {
+                    // Safety check for form element
+                    if (!event.target || typeof event.target.elements === 'undefined') {
+                        return {
+                            wParam: null,
+                            lParam: {}
+                        };
+                    }
 
-                    return {
-                        wParam: event.target.id || null,
-                        lParam: formObject
-                    };
+                    try {
+                        // Extract form data into a plain object
+                        const formData = new FormData(event.target);
+                        const formObject = Object.fromEntries(formData.entries());
+
+                        return {
+                            wParam: event.target.id || null,  // Form ID for identification
+                            lParam: formObject                 // Serialized form data
+                        };
+                    } catch (error) {
+                        // Handle FormData creation failures gracefully
+                        console.warn('Failed to extract form data:', error);
+                        return {
+                            wParam: event.target.id || null,
+                            lParam: {}
+                        };
+                    }
                 }
 
+                // Default case for unhandled message types
                 default:
-                    return { wParam: 0, lParam: 0 };
+                    return {
+                        wParam: 0,
+                        lParam: 0
+                    };
             }
         },
 
         /**
          * Builds wParam for mouse messages following Win32 WM_LBUTTONDOWN format
          * Contains key state flags indicating which modifier keys and mouse buttons are pressed
-         * @param {MouseEvent} event - The mouse event
+         * @param {Event} event - The mouse event
          * @returns {number} wParam value with packed key state flags
          */
         buildMouseWParam(event) {
@@ -2286,31 +2344,41 @@
         });
     };
 
+    /**
+     * Handles PAC events based on message type
+     * @param {CustomEvent} event - The PAC event containing message details
+     * @param {Object} event.detail - Event detail object
+     * @param {string} event.detail.message - Message type from MSG_TYPES constants
+     * @returns {void}
+     */
     Context.prototype.handlePacEvent = function(event) {
-        console.log(event.detail);
-
         switch(event.detail.message) {
             case MSG_TYPES.MSG_LBUTTONDOWN:
             case MSG_TYPES.MSG_MBUTTONDOWN:
             case MSG_TYPES.MSG_RBUTTONDOWN:
+                // Mouse button down events - no action taken
                 break;
 
             case MSG_TYPES.MSG_LBUTTONUP:
             case MSG_TYPES.MSG_MBUTTONUP:
             case MSG_TYPES.MSG_RBUTTONUP:
+                // Mouse button up events - handle DOM clicks
                 this.handleDomClicks(event);
                 break;
 
             case MSG_TYPES.MSG_SUBMIT:
+                // Form submission events
                 this.handleDomSubmit(event);
                 break;
 
             case MSG_TYPES.MSG_CHANGE:
             case MSG_TYPES.MSG_CHAR:
+                // Input change and character events
                 this.handleDomChange(event);
                 break;
-                
+
             default :
+                // Log unhandled message types
                 console.warn(`[MSG_TYPES] ${event.detail.message}`);
         }
     }
