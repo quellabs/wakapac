@@ -2152,26 +2152,22 @@
         this.scanAndRegisterNewElements(this.container);
 
         // Handle click events
-        this.boundHandlePacEvent = function(event) { self.handlePacEvent(event); };
-        this.boundHandleReactiveChange = function(event) { self.handleReactiveChange(event); };
-        this.boundHandleArrayChange = function(event) { self.handleArrayChange(event); };
+        this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
 
         // Add listeners using the stored references
         this.container.addEventListener('pac:event', this.boundHandlePacEvent);
-        this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
-        this.container.addEventListener('pac:array-change', this.boundHandleArrayChange);
+        this.container.addEventListener('pac:change', this.boundHandlePacEvent);
+        this.container.addEventListener('pac:array-change', this.boundHandlePacEvent);
     }
 
     Context.prototype.destroy = function() {
         // Now you can remove them
         this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:change', this.boundHandleReactiveChange);
-        this.container.removeEventListener('pac:array-change', this.boundHandleArrayChange);
+        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
 
         // Clear references
         this.boundHandlePacEvent = null;
-        this.boundHandleReactiveChange = null;
-        this.boundHandleArrayChange = null;
     }
 
     /**
@@ -2377,6 +2373,22 @@
                 self.domUpdater.updateTextNode(textNode, mappingData.template);
             }
         });
+    };
+
+    Context.prototype.handleEvent = function(event) {
+        switch(event.type) {
+            case 'pac:event':
+                this.handlePacEvent(event);
+                break;
+
+            case 'pac:array-change':
+                this.handleArrayChange(event);
+                break;
+
+            case 'pac:change':
+                this.handleReactiveChange(event);
+                break;
+        }
     };
 
     /**
