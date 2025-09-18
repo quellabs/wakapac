@@ -53,6 +53,26 @@
     const Utils = {
 
         /**
+         * Generates a unique identifier string based on current timestamp and optional random component
+         * @param {string} [prefix=""] - Optional prefix to prepend to the generated ID
+         * @param {boolean} [random=false] - Whether to append a random suffix for additional uniqueness
+         * @returns {string} A unique identifier in hexadecimal format
+         */
+        uniqid(prefix = "", random = false) {
+            // Get current timestamp in milliseconds and add sub-millisecond precision
+            // Date.now() * 1000 converts ms to microseconds, Math.random() * 1000 adds fractional component
+            const sec = Date.now() * 1000 + Math.random() * 1000;
+
+            // Convert to hexadecimal string, remove decimal points, and ensure minimum 14 character length
+            // The padEnd ensures consistent length even if the hex conversion results in fewer digits
+            const id = sec.toString(16).replace(/\./g, "").padEnd(14, "0");
+
+            // Combine prefix + base ID + optional random suffix.
+            // Random suffix is a truncated 8-digit random number for additional entropy
+            return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
+        },
+
+        /**
          * Sets a nested property value on the reactive abstraction
          * @param {string} path - The property path (e.g., "todos[0].completed")
          * @param {*} value - The value to set
@@ -1559,6 +1579,13 @@
         this.context = context;
     }
 
+    /**
+     * Updates a text node by interpolating expressions within the template string.
+     * Replaces interpolation patterns with evaluated expression results.
+     * @param {Text|Node} element - The text node or element to update
+     * @param {string} template - Template string containing interpolation expressions (e.g., "Hello {{name}}")
+     * @returns {void}
+     */
     DomUpdater.prototype.updateTextNode = function (element, template) {
         const self = this;
 
@@ -1587,6 +1614,15 @@
         }
     };
 
+    /**
+     * Updates an element's attribute or property based on data binding configuration.
+     * Evaluates the binding expression and applies the result using the appropriate binding method.
+     * @param {Element} element - The DOM element to update
+     * @param {string} bindingType - Type of binding (value, checked, visible, class, style, or attribute name)
+     * @param {Object} bindingData - Binding configuration object
+     * @param {string} bindingData.target - Expression string to evaluate for the binding value
+     * @returns {void}
+     */
     DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData) {
         try {
             // Parse the expression
@@ -1599,7 +1635,7 @@
 
             // Evaluate the expression
             const value = ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
-            
+
             // Handle the result
             switch (bindingType) {
                 case 'value':
@@ -1631,7 +1667,13 @@
         }
     };
 
-    // All binding application methods - centralized in DomUpdater
+    /**
+     * Applies value binding to form elements, handling different input types appropriately.
+     * For radio buttons, sets checked state based on value match. For other elements,
+     * updates the value property if it has changed.
+     * @param {HTMLElement} element - The DOM element to update
+     * @param {*} value - The value to bind to the element
+     */
     DomUpdater.prototype.applyValueBinding = function (element, value) {
         // Handle radio buttons specially - they should be checked/unchecked based on value match
         if (element.type === 'radio') {
@@ -1649,6 +1691,13 @@
         }
     };
 
+    /**
+     * Applies checked binding to checkbox and radio input elements.
+     * Only updates the checked property when the value actually differs to avoid
+     * unnecessary DOM mutations.
+     * @param {HTMLElement} element - The DOM element to update (should be checkbox or radio)
+     * @param {*} value - The value to determine checked state (will be converted to boolean)
+     */
     DomUpdater.prototype.applyCheckedBinding = function (element, value) {
         if (element.type === 'checkbox' || element.type === 'radio') {
             const newChecked = Boolean(value);
@@ -1660,6 +1709,13 @@
         }
     };
 
+    /**
+     * Applies visibility binding to elements by managing display CSS property.
+     * Preserves original display value when hiding elements and restores it when showing.
+     * Uses data attributes to track hidden state and original display value.
+     * @param {HTMLElement} element - The DOM element to show or hide
+     * @param {*} value - Truthy values show the element, falsy values hide it
+     */
     DomUpdater.prototype.applyVisibleBinding = function (element, value) {
         const shouldShow = !!value;
 
@@ -1683,10 +1739,16 @@
         }
     };
 
+    /**
+     * Applies class binding to an element using either string or object syntax.
+     * String syntax replaces all classes, object syntax toggles individual classes.
+     * @param {Element} element - The DOM element to update
+     * @param {string|Object<string, boolean>} value - Class value as string or object
+     * @param {string} value - When string: replaces element.className entirely
+     * @param {Object<string, boolean>} value - When object: keys are class names, values determine add/remove
+     */
     DomUpdater.prototype.applyClassBinding = function (element, value) {
-        if (typeof value === 'string') {
-            element.className = value;
-        } else if (typeof value === 'object' && value !== null) {
+        if (typeof value === 'object' && value !== null) {
             Object.keys(value).forEach(className => {
                 if (value[className]) {
                     element.classList.add(className);
@@ -1694,9 +1756,23 @@
                     element.classList.remove(className);
                 }
             });
+
+            return;
+        }
+
+        if (typeof value === 'string') {
+            element.className = value;
         }
     };
 
+    /**
+     * Applies style binding to an element using either object or string syntax.
+     * Object syntax is preferred for performance and supports CSS custom properties.
+     * @param {Element} element - The DOM element to update
+     * @param {Object<string, string|number|null>|string} value - Style value as object or CSS string
+     * @param {Object<string, string|number|null>} value - When object: property names mapped to values, supports CSS custom properties (--prop)
+     * @param {string} value - When string: sets entire cssText (less efficient, backwards compatible)
+     */
     DomUpdater.prototype.applyStyleBinding = function (element, value) {
         // Object syntax: { color: 'red', fontSize: '16px' }
         // Check if value is an object (preferred object syntax)
@@ -1721,6 +1797,13 @@
         }
     };
 
+    /**
+     * Applies attribute binding to an element with special handling for boolean attributes.
+     * Supports 'enable' as reverse of 'disabled' attribute.
+     * @param {Element} element - The DOM element to update
+     * @param {string} attribute - The attribute name to set
+     * @param {*} value - The attribute value (null/undefined removes attribute)
+     */
     DomUpdater.prototype.applyAttributeBinding = function (element, attribute, value) {
         if (attribute === 'enable') {
             // Handle 'enable' as reverse of 'disabled'
@@ -1743,7 +1826,7 @@
 
         // Ensure container has the required attribute
         if (!container.hasAttribute('data-pac-container')) {
-            container.setAttribute('data-pac-container', this.uniqid());
+            container.setAttribute('data-pac-container', Utils.uniqid());
         }
 
         this.originalAbstraction = abstraction;
@@ -1789,12 +1872,6 @@
         this.boundHandleArrayChange = null;
     }
 
-    Context.prototype.uniqid = function(prefix = "", random = false) {
-        const sec = Date.now() * 1000 + Math.random() * 1000;
-        const id = sec.toString(16).replace(/\./g, "").padEnd(14, "0");
-        return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
-    }
-
     /**
      * Scans and registers newly created content within a foreach container
      * @param {Element} parentElement - The foreach container element
@@ -1823,7 +1900,7 @@
 
             if (bindings.foreach && element !== parentElement) {
                 // Set the ID as an attribute for debugging/identification
-                const foreachId = self.uniqid('foreach');
+                const foreachId = Utils.uniqid('foreach');
                 element.setAttribute('data-pac-foreach-id', foreachId);
 
                 // Auto-detect and set the source array
