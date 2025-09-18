@@ -2340,7 +2340,7 @@
      */
     Context.prototype.extractDependencies = function(expression) {
         try {
-            const parsed = ExpressionParser.parseExpression(expression);
+            const parsed = ExpressionCache.parseExpression(expression);
             return parsed?.dependencies || [];
         } catch (error) {
             console.warn('Failed to parse binding dependencies:', expression, error);
