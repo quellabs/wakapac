@@ -63,9 +63,9 @@
             // Date.now() * 1000 converts ms to microseconds, Math.random() * 1000 adds fractional component
             const sec = Date.now() * 1000 + Math.random() * 1000;
 
-            // Convert to hexadecimal string, remove decimal points, and ensure minimum 14 character length
+            // Convert to hexadecimal string and ensure minimum 14 character length
             // The padEnd ensures consistent length even if the hex conversion results in fewer digits
-            const id = sec.toString(16).replace(/\./g, "").padEnd(14, "0");
+            const id = sec.toString(16).padEnd(14, "0");
 
             // Combine prefix + base ID + optional random suffix.
             // Random suffix is a truncated 8-digit random number for additional entropy
