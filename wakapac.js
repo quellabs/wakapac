@@ -133,38 +133,38 @@
 
         /**
          * Determines if an element belongs to the specified PAC container.
-         * Simplified version that avoids cache complexity while fixing core issues.
          * @param {Element} container - The PAC container element with data-pac-container attribute
          * @param {Node} element - The element to check (can be Element or Text node)
          * @returns {boolean} True if element belongs to this container, false otherwise
          */
-        belongsToThisContainer(container, element) {
-            // Handle text nodes by checking their parent element
-            const targetElement = element.nodeType === Node.TEXT_NODE ? element.parentElement : element;
-
-            if (!targetElement) {
+        belongsToPacContainer(container, element) {
+            // Early validation: ensure container is an Element with required attribute
+            if (!(container instanceof Element) || !container.hasAttribute('data-pac-container')) {
                 return false;
             }
 
-            // Fast containment check first - if not contained, definitely doesn't belong
+            // Handle Text nodes by getting their parent element for containment checking
+            const targetElement = element && element.nodeType === Node.TEXT_NODE
+                ? element.parentElement
+                : element;
+
+            // Validate that we have a valid Element to work with
+            if (!(targetElement instanceof Element)) {
+                return false;
+            }
+
+            // Quick containment check - if not contained, definitely doesn't belong
             if (!container.contains(targetElement)) {
                 return false;
             }
 
-            // Walk up from target to find the closest PAC container
-            let current = targetElement;
+            // Find the closest ancestor (or self) that has the PAC container attribute
+            // This ensures we're checking against the actual owning container
+            const owningContainer = targetElement.closest('[data-pac-container]');
 
-            while (current && current !== document.body) {
-                if (current.hasAttribute('data-pac-container')) {
-                    // Found a container - check if it's the one we're looking for
-                    return current === container;
-                }
-
-                current = current.parentElement;
-            }
-
-            // No container found in ancestry - doesn't belong to any container
-            return false;
+            // Return true only if the owning container is exactly our target container
+            // This prevents false positives when nested PAC containers exist
+            return owningContainer === container;
         },
 
         /**
@@ -2326,7 +2326,7 @@
             }
 
             // Skip elements that don't belong to this container
-            if (!Utils.belongsToThisContainer(self.container, element)) {
+            if (!Utils.belongsToPacContainer(self.container, element)) {
                 return;
             }
 
@@ -2378,7 +2378,7 @@
             }
 
             // Skip elements that don't belong to this container
-            if (!Utils.belongsToThisContainer(this.container, element)) {
+            if (!Utils.belongsToPacContainer(this.container, element)) {
                 continue;
             }
 
