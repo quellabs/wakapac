@@ -26,10 +26,11 @@
     const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
     const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
 
-    const BOOLEAN_ATTRIBUTES = [
-        'readonly', 'required', 'selected', 'checked',
-        'hidden', 'multiple', 'autofocus'
-    ];
+    /**
+     * HTML attributes that are boolean (present = true, absent = false)
+     * @constant {string[]}
+     */
+    const BOOLEAN_ATTRIBUTES = ["readonly", "required", "selected", "checked", "hidden", "multiple", "autofocus"];
 
     /**
      * All binding types
@@ -237,7 +238,39 @@
                     return true;
                 }
             }
-        }
+        },
+
+        /**
+         * Deep equality comparison optimized for performance
+         * @param {*} a - First value
+         * @param {*} b - Second value
+         * @returns {boolean} True if values are deeply equal
+         */
+        isEqual(a, b) {
+            if (a === b) {
+                return true;
+            }
+
+            if (Number.isNaN(a) && Number.isNaN(b)) {
+                return true;
+            }
+
+            if (!a || !b || typeof a !== 'object' || typeof b !== 'object') {
+                return false;
+            }
+
+            if (Array.isArray(a)) {
+                return Array.isArray(b) &&
+                    a.length === b.length &&
+                    a.every((item, i) => this.isEqual(item, b[i]));
+            }
+
+            const keysA = Object.keys(a);
+            const keysB = Object.keys(b);
+
+            return keysA.length === keysB.length &&
+                keysA.every(k => Object.hasOwn(b, k) && this.isEqual(a[k], b[k]));
+        },
     }
 
     // ========================================================================
@@ -2412,6 +2445,9 @@
                 return;
             }
 
+            // CRITICAL FIX: Get the source array to find original indices
+            const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array);
+
             // Store array to be able to compare later
             foreachElement._pacPreviousArray = array;
 
@@ -2420,9 +2456,12 @@
 
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
-            array.forEach((item, index) => {
+            array.forEach((item, renderIndex) => {
+                // Find the original index in the source array
+                const originalIndex = this.findOriginalIndex(item, sourceArray, renderIndex);
+
                 foreachElement.innerHTML +=
-                    `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${index} -->` +
+                    `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex} -->` +
                     mappingData.template + // Original template with bindings like {{subItem.id}}
                     `<!-- /pac-foreach-item -->`;
             });
@@ -2437,6 +2476,71 @@
             // Don't clear innerHTML on error during initial scan - preserve template
             // The error might resolve itself when parent context becomes available
         }
+    };
+
+    /**
+     * Gets the source array for a potentially filtered expression
+     * @param {string} foreachExpr - The foreach expression (e.g., "filteredTodos")
+     * @param {Array} currentArray - The current evaluated array
+     * @returns {Array} The source array or current array if no source found
+     */
+    Context.prototype.getSourceArrayForFiltered = function(foreachExpr, currentArray) {
+        // If it's a computed property, try to find the source array it's based on
+        if (this.originalAbstraction.computed && this.originalAbstraction.computed[foreachExpr]) {
+            // Look through dependencies to find array properties
+            const dependencies = this.dependencies.get(foreachExpr) || [];
+
+            for (const dep of dependencies) {
+                const sourceValue = this.abstraction[dep];
+                if (Array.isArray(sourceValue)) {
+                    return sourceValue;
+                }
+            }
+        }
+
+        // If foreachExpr is a direct array property, return it
+        if (Array.isArray(this.abstraction[foreachExpr])) {
+            return this.abstraction[foreachExpr];
+        }
+
+        // Fallback: return the current array
+        return currentArray;
+    };
+
+    /**
+     * Finds the original index of an item in the source array
+     * @param {*} item - The item to find
+     * @param {Array} sourceArray - The source array to search in
+     * @param {number} fallbackIndex - Fallback index if not found
+     * @returns {number} The original index in the source array
+     */
+    Context.prototype.findOriginalIndex = function(item, sourceArray, fallbackIndex) {
+        // Strategy 1: Direct reference comparison (works for object references)
+        for (let i = 0; i < sourceArray.length; i++) {
+            if (sourceArray[i] === item) {
+                return i;
+            }
+        }
+
+        // Strategy 2: ID-based comparison (common pattern in data)
+        if (item && typeof item === 'object' && item.id !== undefined) {
+            for (let i = 0; i < sourceArray.length; i++) {
+                const sourceItem = sourceArray[i];
+                if (sourceItem && typeof sourceItem === 'object' && sourceItem.id === item.id) {
+                    return i;
+                }
+            }
+        }
+
+        // Strategy 3: Deep equality comparison (for primitive values or value objects)
+        for (let i = 0; i < sourceArray.length; i++) {
+            if (Utils.isEqual(sourceArray[i], item)) {
+                return i;
+            }
+        }
+
+        // Strategy 4: Fallback to render index (maintains current behavior for edge cases)
+        return fallbackIndex;
     };
 
     /**
