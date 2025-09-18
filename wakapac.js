@@ -23,9 +23,47 @@
     // CONSTANTS AND CONFIGURATION
     // =============================================================================
 
+    /**
+     * Various repeated regular expressions
+     * @type {RegExp}
+     */
     const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
     const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
     const FOREACH_INDEX_REGEX = /pac-foreach-item:\s*([^,]+),\s*index=(\d+),\s*renderIndex=(\d+)/;
+
+    // Add to your constants section
+    const MSG_TYPES = {
+        // Unknown message (should never occur)
+        MSG_UNKNOWN: 0x0000,
+
+        // Mouse messages
+        MSG_LBUTTONDOWN: 0x0201,
+        MSG_LBUTTONUP: 0x0202,
+        MSG_RBUTTONDOWN: 0x0204,
+        MSG_RBUTTONUP: 0x0205,
+        MSG_MBUTTONDOWN: 0x0207,
+        MSG_MBUTTONUP: 0x0208,
+
+        // Input messages
+        MSG_CHAR: 0x0300,
+        MSG_CHANGE: 0x0301,
+        MSG_SUBMIT: 0x0302,
+
+        // Focus messages
+        MSG_FOCUS: 0x0007,
+        MSG_BLUR: 0x0008,
+
+        // Keyboard messages
+        MSG_KEYDOWN: 0x0100,
+        MSG_KEYUP: 0x0101
+    };
+
+    const MK_LBUTTON = 0x0001;
+    const MK_RBUTTON = 0x0002;
+    const MK_SHIFT = 0x0004;
+    const MK_CONTROL = 0x0008;
+    const MK_MBUTTON = 0x0010;
+    const MK_ALT = 0x0020;
 
     /**
      * HTML attributes that are boolean (present = true, absent = false)
@@ -466,41 +504,36 @@
 
             this._initialized = true;
 
-            document.addEventListener('click', function (event) {
-                // Dispatch mouse event to eventProc
-                // Determine mouse event type
-                let eventType;
+            document.addEventListener('mousedown', function (event) {
+                let messageType;
 
-                if (event.type === 'mousedown') {
-                    if (event.button === 0) {
-                        eventType = 'EVENT_LBUTTONDOWN';
-                    } else if (event.button === 1) {
-                        eventType = 'EVENT_MBUTTONDOWN';
-                    } else if (event.button === 2) {
-                        eventType = 'EVENT_RBUTTONDOWN';
-                    }
-                } else if (event.type === 'mouseup') {
-                    if (event.button === 0) {
-                        eventType = 'EVENT_LBUTTONUP';
-                    } else if (event.button === 1) {
-                        eventType = 'EVENT_MBUTTONUP';
-                    } else if (event.button === 2) {
-                        eventType = 'EVENT_RBUTTONUP';
-                    }
+                if (event.button === 0) {
+                    messageType = MSG_TYPES.MSG_LBUTTONDOWN;
+                } else if (event.button === 1) {
+                    messageType = MSG_TYPES.MSG_MBUTTONDOWN;
+                } else if (event.button === 2) {
+                    messageType = MSG_TYPES.MSG_RBUTTONDOWN;
+                } else {
+                    return; // Unknown button
                 }
 
-                self.dispatchTrackedEvent('pac:dom:click', event, {
-                    eventType: eventType,             // Win32-esque button type
-                    type: event.type,                 // 'mousedown' or 'mouseup'
-                    clientX: event.clientX ?? null,   // Relative to viewport
-                    clientY: event.clientY ?? null,
-                    pageX: event.pageX ?? null,       // Relative to document
-                    pageY: event.pageY ?? null,
-                    screenX: event.screenX ?? null,   // Relative to screen
-                    screenY: event.screenY ?? null,
-                    button: event.button ?? null,     // which button was pressed (0=left, 1=middle, 2=right, -1=none)
-                    buttons: event.buttons ?? null,   // bitmask of currently pressed buttons (1=left, 2=right, 4=middle)
-                });
+                self.dispatchTrackedEvent(messageType, event);
+            });
+
+            document.addEventListener('mouseup', function (event) {
+                let messageType;
+
+                if (event.button === 0) {
+                    messageType = MSG_TYPES.MSG_LBUTTONUP;
+                } else if (event.button === 1) {
+                    messageType = MSG_TYPES.MSG_MBUTTONUP;
+                } else if (event.button === 2) {
+                    messageType = MSG_TYPES.MSG_RBUTTONUP;
+                } else {
+                    return; // Unknown button
+                }
+
+                self.dispatchTrackedEvent(messageType, event);
             });
 
             // Change event (when input element loses focus)
@@ -511,7 +544,7 @@
                     event.target.type === 'radio' ||
                     event.target.type === 'checkbox'
                 ) {
-                    self.dispatchTrackedEvent('pac:dom:change', event);
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHANGE, event);
                 }
             });
 
@@ -522,41 +555,43 @@
                     event.target.tagName === 'INPUT' &&
                     !['radio', 'checkbox'].includes(event.target.type) || event.target.tagName === 'TEXTAREA'
                 ) {
-                    self.dispatchTrackedEvent('pac:dom:change', event);
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHAR, event);
                 }
             });
 
             // Submit event (when user submits form)
             document.addEventListener('submit', function (event) {
-                const formData = new FormData(event.target);
-                const formObject = Object.fromEntries(formData.entries());
-
-                self.dispatchTrackedEvent('pac:dom:submit', event, {
-                    formId: event.target.id || null,
-                    formData: formObject,
-                    elementCount: event.target.elements.length
-                });
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_SUBMIT, event);
             });
         },
 
-        dispatchTrackedEvent(eventName, originalEvent, extra = {}) {
+        dispatchTrackedEvent(messageType, originalEvent, extended = {}) {
             const container = originalEvent.target.closest('[data-pac-container]');
 
             if (!container) {
                 return;
             }
 
-            const customEvent = new CustomEvent(eventName, {
+            const params = this.buildParams(messageType, originalEvent);
+
+            const customEvent = new CustomEvent('pac:event', {
                 detail: {
+                    // Core Win32-style data
+                    message: messageType,
+                    wParam: params.wParam,
+                    lParam: params.lParam,
+
+                    // Standard fields for all events
                     timestamp: Date.now(),
-                    id: originalEvent.target.id || null,
-                    elementType: originalEvent.target.type || originalEvent.target.tagName.toLowerCase(),
-                    elementName: originalEvent.target.name || null,
                     target: originalEvent.target,
+                    id: originalEvent.target.id || null,
                     value: Utils.readDOMValue(originalEvent.target),
+
+                    // Original event
                     originalEvent: originalEvent,
-                    bindString: originalEvent.target.getAttribute('data-pac-bind') ?? '',
-                    extra: extra
+
+                    // Extended data
+                    extended: extended,
                 }
             });
 
@@ -575,8 +610,166 @@
                 };
             });
 
-            // Dispatch ecvent
+            // Dispatch event
             container.dispatchEvent(customEvent);
+        },
+
+        buildParams(messageType, event) {
+            switch(messageType) {
+                case MSG_TYPES.MSG_LBUTTONDOWN:
+                case MSG_TYPES.MSG_RBUTTONDOWN:
+                case MSG_TYPES.MSG_MBUTTONDOWN:
+                case MSG_TYPES.MSG_LBUTTONUP:
+                case MSG_TYPES.MSG_RBUTTONUP:
+                case MSG_TYPES.MSG_MBUTTONUP:
+                    return {
+                        wParam: this.buildMouseWParam(event),
+                        lParam: this.buildMouseLParam(event)
+                    };
+
+                case MSG_TYPES.MSG_KEYDOWN:
+                case MSG_TYPES.MSG_KEYUP:
+                    return {
+                        wParam: event.keyCode || event.which,
+                        lParam: this.buildKeyboardLParam(event)
+                    };
+
+                case MSG_TYPES.MSG_CHAR:
+                case MSG_TYPES.MSG_CHANGE:
+                    return {
+                        wParam: event.target.value.length,
+                        lParam: 0
+                    };
+
+                case MSG_TYPES.MSG_SUBMIT : {
+                    const formData = new FormData(event.target);
+                    const formObject = Object.fromEntries(formData.entries());
+
+                    return {
+                        wParam: event.target.id || null,
+                        lParam: formObject
+                    };
+                }
+
+                default:
+                    return { wParam: 0, lParam: 0 };
+            }
+        },
+
+        /**
+         * Builds wParam for mouse messages following Win32 WM_LBUTTONDOWN format
+         * Contains key state flags indicating which modifier keys and mouse buttons are pressed
+         * @param {MouseEvent} event - The mouse event
+         * @returns {number} wParam value with packed key state flags
+         */
+        buildMouseWParam(event) {
+            let wParam = 0;
+
+            // Modifier key states
+            if (event.ctrlKey) {
+                wParam |= MK_CONTROL;
+            }
+
+            if (event.shiftKey) {
+                wParam |= MK_SHIFT;
+            }
+
+            if (event.altKey) {
+                wParam |= MK_ALT;
+            }
+
+            // Mouse button states (which buttons are currently held down)
+            // Note: This shows ALL buttons held, not just the one that triggered the event
+            if (event.buttons & 1) {
+                wParam |= MK_LBUTTON;
+            }
+
+            if (event.buttons & 2) {
+                wParam |= MK_RBUTTON;
+            }
+
+            if (event.buttons & 4) {
+                wParam |= MK_MBUTTON;
+            }
+
+            return wParam;
+        },
+
+        /**
+         * Builds lParam for mouse messages following Win32 format
+         * Packs x,y coordinates into a single 32-bit value
+         * LOWORD (bits 0-15) = x-coordinate, HIWORD (bits 16-31) = y-coordinate
+         * @param {MouseEvent} event - The mouse event
+         * @returns {number} lParam value with packed coordinates
+         */
+        buildMouseLParam(event) {
+            // Use clientX/clientY for viewport-relative coordinates (most common)
+            // Alternative: pageX/pageY for document-relative coordinates
+            const x = Math.max(0, Math.min(0xFFFF, event.clientX || 0));
+            const y = Math.max(0, Math.min(0xFFFF, event.clientY || 0));
+
+            // Pack coordinates: high 16 bits = y, low 16 bits = x
+            return (y << 16) | x;
+        },
+
+        /**
+         * Builds lParam for keyboard messages - simplified for web use
+         * Only includes meaningful data available from JavaScript events
+         * @param {KeyboardEvent} event - The keyboard event
+         * @returns {number} lParam value with basic keyboard information
+         */
+        buildKeyboardLParam(event) {
+            let lParam = 0;
+
+            // Bits 0-15: Repeat count (1 for single press, higher for held keys)
+            const repeatCount = event.repeat ? 2 : 1;
+            lParam |= (repeatCount & 0xFFFF);
+
+            // Bit 24: Extended key flag (arrow keys, function keys, etc.)
+            if (this.isExtendedKey(event.code)) {
+                lParam |= (1 << 24);
+            }
+
+            // Bit 31: Transition state (0 for keydown, 1 for keyup)
+            if (event.type === 'keyup') {
+                lParam |= (1 << 31);
+            }
+
+            return lParam;
+        },
+
+        /**
+         * Determines if a key is an "extended" key in Win32 terms
+         * Extended keys include arrow keys, function keys, numpad keys, etc.
+         * @param {string} code - The KeyboardEvent.code value
+         * @returns {boolean} True if this is considered an extended key
+         */
+        isExtendedKey(code) {
+            if (!code) {
+                return false;
+            }
+
+            const extendedKeys = [
+                // Arrow keys
+                'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                
+                // Function keys
+                'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+                
+                // Navigation keys
+                'Home', 'End', 'PageUp', 'PageDown', 'Insert', 'Delete',
+                
+                // Numpad keys (when NumLock is on)
+                'NumpadEnter', 'NumpadDivide',
+
+                // Windows/Meta keys
+                'MetaLeft', 'MetaRight',
+
+                // Menu key
+                'ContextMenu'
+            ];
+
+            return extendedKeys.includes(code);
         }
     }
 
@@ -1866,32 +2059,24 @@
         this.scanAndRegisterNewElements(this.container);
 
         // Handle click events
-        this.boundHandleDomClicks = function(event) { self.handleDomClicks(event); };
-        this.boundHandleDomSubmit = function(event) { self.handleDomSubmit(event); };
-        this.boundHandleDomChange = function(event) { self.handleDomChange(event); };
+        this.boundHandlePacEvent = function(event) { self.handlePacEvent(event); };
         this.boundHandleReactiveChange = function(event) { self.handleReactiveChange(event); };
         this.boundHandleArrayChange = function(event) { self.handleArrayChange(event); };
 
         // Add listeners using the stored references
-        this.container.addEventListener('pac:dom:click', this.boundHandleDomClicks);
-        this.container.addEventListener('pac:dom:submit', this.boundHandleDomSubmit);
-        this.container.addEventListener('pac:dom:change', this.boundHandleDomChange);
+        this.container.addEventListener('pac:event', this.boundHandlePacEvent);
         this.container.addEventListener('pac:change', this.boundHandleReactiveChange);
         this.container.addEventListener('pac:array-change', this.boundHandleArrayChange);
     }
 
     Context.prototype.destroy = function() {
         // Now you can remove them
-        this.container.removeEventListener('pac:dom:click', this.boundHandleDomClicks);
-        this.container.removeEventListener('pac:dom:submit', this.boundHandleDomSubmit);
-        this.container.removeEventListener('pac:dom:change', this.boundHandleDomChange);
+        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:change', this.boundHandleReactiveChange);
         this.container.removeEventListener('pac:array-change', this.boundHandleArrayChange);
 
         // Clear references
-        this.boundHandleDomClicks = null;
-        this.boundHandleDomSubmit = null;
-        this.boundHandleDomChange = null;
+        this.boundHandlePacEvent = null;
         this.boundHandleReactiveChange = null;
         this.boundHandleArrayChange = null;
     }
@@ -2100,6 +2285,35 @@
             }
         });
     };
+
+    Context.prototype.handlePacEvent = function(event) {
+        console.log(event.detail);
+
+        switch(event.detail.message) {
+            case MSG_TYPES.MSG_LBUTTONDOWN:
+            case MSG_TYPES.MSG_MBUTTONDOWN:
+            case MSG_TYPES.MSG_RBUTTONDOWN:
+                break;
+
+            case MSG_TYPES.MSG_LBUTTONUP:
+            case MSG_TYPES.MSG_MBUTTONUP:
+            case MSG_TYPES.MSG_RBUTTONUP:
+                this.handleDomClicks(event);
+                break;
+
+            case MSG_TYPES.MSG_SUBMIT:
+                this.handleDomSubmit(event);
+                break;
+
+            case MSG_TYPES.MSG_CHANGE:
+            case MSG_TYPES.MSG_CHAR:
+                this.handleDomChange(event);
+                break;
+                
+            default :
+                console.warn(`[MSG_TYPES] ${event.detail.message}`);
+        }
+    }
 
     /**
      * Handles DOM click events by executing bound abstraction methods.
