@@ -52,6 +52,32 @@
      */
     const Utils = {
 
+        /**
+         * Sets a nested property value on the reactive abstraction
+         * @param {string} path - The property path (e.g., "todos[0].completed")
+         * @param {*} value - The value to set
+         * @param {object} current
+         */
+        setNestedProperty(path, value, current) {
+            const parts = path.split(/[.\[\]]+/).filter(Boolean);
+
+            for (let i = 0; i < parts.length - 1; i++) {
+                const part = parts[i];
+                const nextPart = parts[i + 1];
+
+                // If current part doesn't exist, create it
+                if (!(part in current)) {
+                    // Create array if next part is numeric, object otherwise
+                    current[part] = /^\d+$/.test(nextPart) ? [] : {};
+                }
+
+                current = current[part];
+            }
+
+            // Set the final property
+            const finalPart = parts[parts.length - 1];
+            current[finalPart] = value;
+        },
 
         /**
          * Converts an array of path segments into a JavaScript property access string.
@@ -2099,7 +2125,7 @@
 
             // Update the data model using nested property setter to handle complex object paths
             // e.g., "user.profile.name" gets properly set in the nested object structure
-            self.setNestedProperty(resolvedPath, event.detail.value);
+            Utils.setNestedProperty(resolvedPath, event.detail.value, this.abstraction);
         }
 
         // Handle checked binding (for checkboxes and radio buttons)
@@ -2114,9 +2140,9 @@
             // Checkbox: set boolean value based on checked state
             // Radio button: only update when this radio is selected, use its value
             if (targetElement.type === 'checkbox') {
-                self.setNestedProperty(resolvedPath, event.detail.target.checked);
+                Utils.setNestedProperty(resolvedPath, event.detail.target.checked, this.abstraction);
             } else if (targetElement.type === 'radio' && event.detail.target.checked) {
-                self.setNestedProperty(resolvedPath, event.detail.value);
+                Utils.setNestedProperty(resolvedPath, event.detail.value, this.abstraction);
             }
         }
     };
@@ -2852,33 +2878,6 @@
         textNodesToRemove.forEach(textNode => {
             this.textInterpolationMap.delete(textNode);
         });
-    };
-
-    /**
-     * Sets a nested property value on the reactive abstraction
-     * @param {string} path - The property path (e.g., "todos[0].completed")
-     * @param {*} value - The value to set
-     */
-    Context.prototype.setNestedProperty = function (path, value) {
-        const parts = path.split(/[.\[\]]+/).filter(Boolean);
-        let current = this.abstraction;
-
-        for (let i = 0; i < parts.length - 1; i++) {
-            const part = parts[i];
-            const nextPart = parts[i + 1];
-
-            // If current part doesn't exist, create it
-            if (!(part in current)) {
-                // Create array if next part is numeric, object otherwise
-                current[part] = /^\d+$/.test(nextPart) ? [] : {};
-            }
-
-            current = current[part];
-        }
-
-        // Set the final property
-        const finalPart = parts[parts.length - 1];
-        current[finalPart] = value;
     };
 
     // ========================================================================
