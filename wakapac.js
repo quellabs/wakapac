@@ -2576,7 +2576,7 @@
         }
 
         // Extract current index from HTML comments for this foreach
-        const currentIndex = this.extractCurrentIndexFromComments(element, mappingData.foreachId);
+        const currentIndex = this.extractIndexFromComments(element, mappingData.foreachId);
 
         if (currentIndex === null) {
             return scopedPath;
@@ -2737,54 +2737,18 @@
         // No foreach context found in the entire tree up to container
         return null;
     };
-    
+
     /**
-     * Extracts the current item index from HTML comments by walking up from element
+     * Extracts the index from HTML comments by walking up the DOM tree
      * @param {Element} startElement - Element to start searching from
      * @param {string} foreachId - The foreach ID to look for in comments
-     * @returns {number|null} The current index or null if not found
+     * @returns {number|null} The index or null if not found
      */
-    Context.prototype.extractCurrentIndexFromComments = function(startElement, foreachId) {
+    Context.prototype.extractIndexFromComments = function(startElement, foreachId) {
         // Start from text node's parent if needed
         let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
 
         // Walk up the DOM to find this foreach's comment marker
-        while (current && current !== this.container) {
-            // Check previous siblings for comment markers
-            let sibling = current.previousSibling;
-
-            while (sibling) {
-                if (sibling.nodeType === Node.COMMENT_NODE) {
-                    const commentText = sibling.textContent.trim();
-
-                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X, renderIndex=Y"
-                    const match = commentText.match(FOREACH_INDEX_REGEX);
-
-                    if (match && match[1].trim() === foreachId) {
-                        return parseInt(match[2], 10);
-                    }
-                }
-
-                sibling = sibling.previousSibling;
-            }
-
-            current = current.parentElement;
-        }
-
-        return null;
-    }
-
-    /**
-     * Extracts parent index from HTML comments by walking up the DOM
-     * @param {Element} startElement - Element to start searching from
-     * @param {string} foreachId - The foreach ID to look for in comments
-     * @returns {number|null} The parent index or null if not found
-     */
-    Context.prototype.extractParentIndexFromComments = function(startElement, foreachId) {
-        // Start from text node's parent if needed
-        let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
-
-        // Walk up the DOM to find the parent foreach item
         while (current && current !== this.container) {
             // Check previous siblings for comment markers
             let sibling = current.previousSibling;
@@ -2838,7 +2802,7 @@
         // Check if the array expression starts with the parent's item variable
         if (arrayExpr.startsWith(parentMapping.itemVar + '.')) {
             // Extract parent index from HTML comments
-            const parentIndex = this.extractParentIndexFromComments(contextElement, parentMapping.foreachId);
+            const parentIndex = this.extractIndexFromComments(contextElement, parentMapping.foreachId);
 
             if (parentIndex !== null) {
                 // Recursively resolve the parent expression first
