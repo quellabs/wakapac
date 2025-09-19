@@ -2549,6 +2549,7 @@
 
         this.originalAbstraction = abstraction;
         this.parent = parent;
+        this.children = new Set();
         this.container = container;
         this.config = config;
         this.abstraction = this.createReactiveAbstraction();
@@ -3671,6 +3672,7 @@
         const self = this;
 
         // Inject system properties
+        this.injectHierarchyProperties(this.originalAbstraction);
         this.injectSystemProperties(this.originalAbstraction);
 
         // Create reactive proxy directly from original abstraction
@@ -3699,7 +3701,56 @@
             });
         });
 
+        /**
+         * Hierarchy communication methods
+         */
+        Object.assign(proxiedReactive, {
+            /**
+             * Sends a notification to the parent component
+             * @param {string} type - Type of notification
+             * @param {*} data - Data to send with the notification
+             */
+            notifyParent: (type, data) => {
+                if (self.parent && typeof self.parent.receiveUpdate === 'function') {
+                    self.parent.receiveUpdate(type, data, self);
+                }
+            },
+
+            /**
+             * Sends a command to all child components
+             * @param {string} cmd - Command to send
+             * @param {*} data - Data to send with the command
+             */
+            notifyChildren: (cmd, data) => {
+                self.children.forEach(child => {
+                    if (typeof child.receiveFromParent === 'function') {
+                        child.receiveFromParent(cmd, data);
+                    }
+                });
+            },
+
+            /**
+             * Sends a command to a specific child component
+             * @param {string|Function} selector - Selector to find the target child
+             * @param {string} cmd - Command to send
+             * @param {*} data - Data to send with the command
+             */
+            notifyChild: (selector, cmd, data) => {
+                const child = Array.from(self.children).find(c => c.container.matches(selector));
+
+                if (child && child.receiveFromParent) {
+                    child.receiveFromParent(cmd, data);
+                }
+            }
+        });
+
+        // Return the proxy
         return proxiedReactive;
+    };
+
+    Context.prototype.injectHierarchyProperties = function(abstraction) {
+        abstraction.childrenCount = 0;
+        abstraction.hasParent = false;
     };
 
     /**
@@ -4241,6 +4292,136 @@
         });
     };
 
+    /**
+     * Establishes parent-child relationships in component hierarchy
+     */
+    Context.prototype.establishHierarchy = function() {
+        const { parent, children } = window.PACRegistry.getHierarchy(this.container);
+
+        this.updateParentRelationship(parent);
+        this.updateChildrenRelationships(children);
+        this.updateReactiveProperties();
+    };
+
+    /**
+     * Updates parent relationship - only sets parent reference
+     * @param {Object|null} newParent - New parent component or null
+     */
+    Context.prototype.updateParentRelationship = function(newParent) {
+        // Do nothing when parent did not change
+        if (this.parent === newParent) {
+            return;
+        }
+
+        // Remove from old parent's children set
+        if (this.parent) {
+            this.parent.children.delete(this);
+        }
+
+        // Set new parent
+        this.parent = newParent;
+
+        // Add to new parent's children set
+        if (newParent) {
+            newParent.children.add(this);
+        }
+    };
+
+    /**
+     * Rebuilds children relationships from current DOM hierarchy
+     * @param {Array} currentChildren - Children found in DOM
+     */
+    Context.prototype.updateChildrenRelationships = function(currentChildren) {
+        this.children.clear();
+
+        currentChildren.forEach(child => {
+            // Remove child from previous parent if different
+            if (child.parent && child.parent !== this) {
+                child.parent.children.delete(child);
+            }
+
+            child.parent = this;
+            this.children.add(child);
+        });
+    };
+
+    /**
+     * Updates reactive hierarchy properties
+     */
+    Context.prototype.updateReactiveProperties = function() {
+        if (this.abstraction) {
+            this.abstraction.childrenCount = this.children.size;
+            this.abstraction.hasParent = !!this.parent;
+        }
+    };
+
+    /**
+     * Notifies the parent component of an event or state change
+     * @param {string} type - The type of event being reported
+     * @param {*} data - The data payload associated with the event
+     */
+    Context.prototype.notifyParent = function(type, data) {
+        // Check if parent exists and has the required receiveUpdate method
+        if (this.parent && typeof this.parent.receiveUpdate === 'function') {
+            // Call parent's receiveUpdate method, passing this component as the child reference
+            this.parent.receiveUpdate(type, data, this);
+        }
+    };
+
+    /**
+     * Receives and processes updates from child components
+     * @param {string} type - The type of event received from child
+     * @param {*} data - The data payload from the child
+     * @param {Object} child - Reference to the child component that sent the update
+     */
+    Context.prototype.receiveUpdate = function(type, data, child) {
+        if (this.abstraction && typeof this.abstraction.receiveFromChild === 'function') {
+            this.abstraction.receiveFromChild(type, data, child);
+        }
+    };
+
+    /**
+     * Receives and processes commands sent down from parent component
+     * @param {string} cmd - The command identifier
+     * @param {*} data - The command data payload
+     */
+    Context.prototype.receiveFromParent = function(cmd, data) {
+        if (this.abstraction && typeof this.abstraction.receiveFromParent === 'function') {
+            this.abstraction.receiveFromParent(cmd, data);
+        }
+    };
+
+    /**
+     * Sends a command to all direct child components
+     * @param {string} cmd - The command identifier
+     * @param {*} data - The command data payload
+     */
+    Context.prototype.notifyChildren = function(cmd, data) {
+        // Iterate through all child components
+        this.children.forEach(child => {
+            // Ensure child has the receiveFromParent method before calling
+            if (typeof child.receiveFromParent === 'function') {
+                child.receiveFromParent(cmd, data);
+            }
+        });
+    };
+
+    /**
+     * Sends a command to a specific child component matching the given selector
+     * @param {string} selector - CSS selector to identify the target child
+     * @param {string} cmd - The command identifier
+     * @param {*} data - The command data payload
+     */
+    Context.prototype.notifyChild = function(selector, cmd, data) {
+        // Find the first child whose container element matches the selector
+        const child = Array.from(this.children).find(c => c.container.matches(selector));
+
+        // If matching child found and has receiveFromParent method, send the command
+        if (child && child.receiveFromParent) {
+            child.receiveFromParent(cmd, data);
+        }
+    };
+
     // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
@@ -4264,34 +4445,125 @@
         // Create context directly
         const context = new Context(container, abstraction, null, config);
 
-        // Register in PACRegistry for cleanup/debugging if needed
-        window.PACRegistry.register(selector, {
-            selector: selector,
-            container: container,
-            config: config,
-            context: context
-        });
+        // Register in global registry and establish hierarchy
+        // Add this component to the global registry using its CSS selector as the key,
+        // making it discoverable by other components and external code
+        window.PACRegistry.register(selector, context);
+
+        // Signal that a new component is ready to set proper hierarchies
+        document.dispatchEvent(new CustomEvent('pac:component-ready', {
+            detail: { component: context, selector: selector }
+        }));
 
         // Return the reactive abstraction
         return context.abstraction;
     }
 
+    // =============================================================================
+    // COMPONENT REGISTRY
+    // =============================================================================
+
+    /**
+     * Global registry for managing PAC components and their hierarchical relationships
+     * @constructor
+     */
+    function ComponentRegistry() {
+        this.components = new Map();
+        this.hierarchyCache = new WeakMap();
+    }
+
+    ComponentRegistry.prototype = {
+        /**
+         * Registers a new PAC component
+         * @param {string} selector - CSS selector for the component
+         * @param {Object} context - The PAC component context object
+         */
+        register(selector, context) {
+            this.components.set(selector, context);
+            this.hierarchyCache = new WeakMap(); // Clear cache
+        },
+
+        /**
+         * Unregisters a PAC component
+         * @param {string} selector - CSS selector for the component
+         * @returns {Object|undefined} The removed component
+         */
+        unregister(selector) {
+            const component = this.components.get(selector);
+
+            if (component) {
+                component.destroy();
+                this.components.delete(selector);
+            }
+
+            return component;
+        },
+
+        /**
+         * Gets the hierarchy (parent and children) for a given container
+         * @param {Element} container - DOM element to find hierarchy for
+         * @returns {Object} Object with parent and children properties
+         */
+        getHierarchy(container) {
+            // Pull from cache if possible
+            if (this.hierarchyCache.has(container)) {
+                return this.hierarchyCache.get(container);
+            }
+
+            // Find parent component
+            let parent = null;
+            let element = container.parentElement;
+
+            while (element && !parent) {
+                this.components.forEach(component => {
+                    if (component.container === element) {
+                        parent = component;
+                    }
+                });
+
+                element = element.parentElement;
+            }
+
+            // Find child components
+            const children = [];
+            this.components.forEach(component => {
+                if (container.contains(component.container) && component.container !== container) {
+                    children.push(component);
+                }
+            });
+
+            const hierarchy = {parent, children};
+            this.hierarchyCache.set(container, hierarchy);
+            return hierarchy;
+        }
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
 
-    function SimplePACRegistry() {
-        this.components = new Map();
+    window.PACRegistry = window.PACRegistry || new ComponentRegistry();
 
-        this.register = function (selector, component) {
-            this.components.set(selector, component);
-        };
+    // Set up event-driven hierarchy resolution (singleton)
+    if (!window._wakaPACHierarchyListener) {
+        window._wakaPACHierarchyListener = true;
 
-        this.unregister = function (selector) {
-            this.components.delete(selector);
-        };
+        // Listen for pac:component-ready events
+        document.addEventListener('pac:component-ready', () => {
+            // Clear any existing timeout to debounce multiple rapid component creations
+            clearTimeout(window._wakaPACHierarchyTimeout);
+            window._wakaPACHierarchyTimeout = setTimeout(() => {
+                // Clear hierarchy cache
+                window.PACRegistry.hierarchyCache = new WeakMap();
+
+                // Re-establish hierarchy for all components
+                window.PACRegistry.components.forEach(component => {
+                    component.establishHierarchy();
+                });
+            }, 20);
+        });
     }
 
-    window.PACRegistry = window.PACRegistry || new SimplePACRegistry();
+    // Export to global scope
     window.wakaPAC = wakaPAC;
 })();
