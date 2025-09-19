@@ -2367,6 +2367,10 @@
                     this.applyVisibleBinding(element, value);
                     break;
 
+                case 'if':  // Add this case
+                    this.applyConditionalBinding(element, value);
+                    break;
+
                 case 'class':
                     this.applyClassBinding(element, value);
                     break;
@@ -2453,6 +2457,45 @@
                 element.style.display = 'none';
                 element.setAttribute('data-pac-hidden', 'true');
             }
+        }
+    };
+
+    /**
+     * Applies conditional binding to show/hide DOM elements based on a boolean value.
+     * This replaces elements with placeholder comments when hidden and restores them when shown.
+     * @param {HTMLElement} element - The DOM element to show/hide
+     * @param {*} value - Truthy values show the element, falsy values hide it
+     */
+    DomUpdater.prototype.applyConditionalBinding = function(element, value) {
+        const shouldShow = !!value;
+
+        // Get or create placeholder comment
+        if (!element._pacPlaceholder) {
+            element._pacPlaceholder = document.createComment('pac-if: hidden');
+            element._pacOriginalParent = element.parentNode;
+            element._pacOriginalNextSibling = element.nextSibling;
+            element._pacIsRendered = true; // Initially rendered
+        }
+
+        // Show the element: replace placeholder with actual element
+        if (shouldShow && !element._pacIsRendered) {
+            if (element._pacPlaceholder.parentNode) {
+                element._pacOriginalParent = element._pacPlaceholder.parentNode;
+                element._pacOriginalNextSibling = element._pacPlaceholder.nextSibling;
+                element._pacPlaceholder.parentNode.replaceChild(element, element._pacPlaceholder);
+            }
+
+            element._pacIsRendered = true;
+            return;
+        }
+
+        // Hide the element: replace element with placeholder
+        if (!shouldShow && element._pacIsRendered) {
+            if (element.parentNode) {
+                element.parentNode.replaceChild(element._pacPlaceholder, element);
+            }
+
+            element._pacIsRendered = false;
         }
     };
 
