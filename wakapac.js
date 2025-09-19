@@ -569,11 +569,25 @@
                 },
 
                 set: function (target, prop, newValue) {
+                    // Do nothing when value did not change
                     const oldValue = target[prop];
                     const propertyPath = currentPath.concat([prop]);
 
                     if (oldValue === newValue) {
                         return true;
+                    }
+
+                    // Special handling for scroll properties
+                    if (propertyPath.length === 1) {
+                        if (prop === 'containerScrollX' && container) {
+                            container.scrollLeft = newValue;
+                        } else if (prop === 'containerScrollY' && container) {
+                            container.scrollTop = newValue;
+                        } else if (prop === 'browserScrollX') {
+                            window.scrollTo(newValue, window.scrollY);
+                        } else if (prop === 'browserScrollY') {
+                            window.scrollTo(window.scrollX, newValue);
+                        }
                     }
 
                     // Wrap objects and arrays in proxies when they're assigned
