@@ -1962,6 +1962,7 @@
             // Use context to resolve scoped paths if available
             if (scopeResolver && scopeResolver.resolveScopedPath) {
                 resolvedPath = scopeResolver.resolveScopedPath(path);
+                console.log(path, resolvedPath);
             }
 
             // Handle simple property access (no dots or brackets)
@@ -2312,9 +2313,8 @@
                 const parsed = ExpressionCache.parseExpression(expression);
 
                 // Resolve the scope - use parentElement for text nodes
-                const contextElement = element.nodeType === Node.TEXT_NODE ? element.parentElement : element;
                 const scopeResolver = {
-                    resolveScopedPath: (path) => self.context.resolveScopedPath(path, contextElement)
+                    resolveScopedPath: (path) => self.context.normalizePath(path, element)
                 };
 
                 // Evaluate the expression using the scope resolver
@@ -2347,7 +2347,7 @@
 
             // Create resolver context for this element
             const scopeResolver = {
-                resolveScopedPath: (path) => this.context.resolveScopedPath(path, element)
+                resolveScopedPath: (path) => this.context.normalizePath(path, element)
             };
 
             // Evaluate the expression
@@ -2845,7 +2845,6 @@
 
         // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
-            console.log(self.getForeachChain(textNode));
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
@@ -3239,7 +3238,7 @@
             // Get the foreach configuration and set up scope resolution
             const foreachData = this.interpolationMap.get(foreachElement);
             const scopeResolver = {
-                resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
+                resolveScopedPath: (path) => this.normalizePath(path, event.detail.target)
             };
 
             // Evaluate the foreach expression to get the source array
@@ -3317,7 +3316,7 @@
             const valueBinding = mappingData.bindings.value;
 
             // Resolve the target path considering any scoped context (e.g., loops, nested objects)
-            const resolvedPath = self.resolveScopedPath(valueBinding.target, targetElement);
+            const resolvedPath = self.normalizePath(valueBinding.target, targetElement);
 
             // Update the data model using nested property setter to handle complex object paths
             // e.g., "user.profile.name" gets properly set in the nested object structure
@@ -3331,7 +3330,7 @@
             const checkedBinding = mappingData.bindings.checked;
 
             // Resolve the target path for the checked property binding
-            const resolvedPath = self.resolveScopedPath(checkedBinding.target, targetElement);
+            const resolvedPath = self.normalizePath(checkedBinding.target, targetElement);
 
             // Checkbox: set boolean value based on checked state
             // Radio button: only update when this radio is selected, use its value
@@ -3386,7 +3385,7 @@
             const valueBinding = mappingData.bindings.value;
 
             // Resolve the target path considering any scoped context (e.g., loops, nested objects)
-            const resolvedPath = self.resolveScopedPath(valueBinding.target, targetElement);
+            const resolvedPath = self.normalizePath(valueBinding.target, targetElement);
 
             // Get update configuration for this element
             const config = this.getUpdateConfiguration(targetElement);
@@ -3973,7 +3972,7 @@
         // Create scope resolver for this foreach element
         // This handles variable resolution in nested contexts (e.g., converting "todo.subs" to "todos[0].subs")
         const scopeResolver = {
-            resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
+            resolveScopedPath: (path) => this.normalizePath(path, foreachElement)
         };
 
         try {
@@ -4101,48 +4100,6 @@
     };
 
     /**
-     * Resolves a scoped path (e.g., 'item.name') to its actual data path by finding
-     * the corresponding foreach element and building the indexed path.
-     * @param {string} scopedPath - The scoped variable path to resolve (e.g., 'item.name')
-     * @param {Element} element - The DOM element context for scope resolution
-     * @returns {string} The resolved path with array indices (e.g., 'users[0].name') or original path if no resolution needed
-     */
-    Context.prototype.resolveScopedPath = function(scopedPath, element) {
-        // Find the foreach element that defines this scoped variable
-        const foreachElement = this.findForeachElementForScopedPath(scopedPath, element);
-
-        if (!foreachElement) {
-            return scopedPath;
-        }
-
-        /**
-         * Get the interpolation mapping data for this foreach element.
-         * This contains bindings, item variable name, and foreach ID needed for resolution.
-         * @type {Object|undefined} mappingData - Contains bindings, itemVar, and foreachId properties
-         */
-        const mappingData = this.interpolationMap.get(foreachElement);
-        if (!mappingData || !mappingData.bindings || !mappingData.bindings.foreach) {
-            return scopedPath;
-        }
-
-        // Extract current index from HTML comments for this foreach
-        const currentIndex = this.extractIndexFromComments(element, mappingData.foreachId);
-
-        if (currentIndex === null) {
-            return scopedPath;
-        }
-
-        // Extract the property path after the item variable
-        const propertyPath = scopedPath.substring(mappingData.itemVar.length + 1);
-
-        // Resolve the array expression using parent relationships and HTML comments
-        const resolvedExpr = this.resolveArrayExpression(mappingData.bindings.foreach.target, foreachElement, element);
-
-        // Build the final resolved path
-        return resolvedExpr + '[' + currentIndex + ']' + (propertyPath ? '.' + propertyPath : '');
-    };
-
-    /**
      * Fetches the entire chain of foreaches for the given element
      * @param element
      * @returns {*[]}
@@ -4159,7 +4116,7 @@
                 const forEachContainer = document.querySelector('[data-pac-foreach-id="' + context.foreachId + '"]');
                 const forEachData = this.interpolationMap.get(forEachContainer);
 
-                result.push({
+                result.unshift({
                     foreachId: context.foreachId,
                     depth: forEachData.depth,
                     index: context.index,
@@ -4178,6 +4135,48 @@
     }
 
     /**
+     * Converts a scoped path (e.g. ["subItem", "id"]) into a fully qualified
+     * global path (e.g. "todos[0].children[0].id") based on the foreach
+     * hierarchy of the given element.
+     * @param {string[]} pathSegments - Segments of the local variable path.
+     * @param {HTMLElement} element - Element within the foreach chain.
+     * @returns {string} - The normalized global path string.
+     */
+    Context.prototype.normalizePath = function normalizePath(pathSegments, element) {
+        if (!Array.isArray(pathSegments) || pathSegments.length === 0) {
+            return "";
+        }
+
+        // Get the entire foreach chain
+        const frames = this.getForeachChain(element);
+
+        /** @type {Map<string,string>} maps var -> resolved expr */
+        const scope = new Map();
+
+        // Build scope: itemVar → "<rootArray>[index]" chained inward.
+        for (const frame of frames) {
+            const baseArrayExpr = scope.get(frame.sourceArray) || frame.sourceArray;
+            const itemExpr = `${baseArrayExpr}[${frame.index}]`;
+
+            scope.set(frame.itemVar, itemExpr);
+
+            if (frame.indexVar) {
+                scope.set(frame.indexVar, String(frame.index));
+            }
+        }
+
+        // If head is a foreach var, substitute; otherwise keep as root variable.
+        const head = pathSegments[0];
+        const resolvedHead = scope.get(head) || head;
+
+        // Append the remaining segments: numeric → [n], non-numeric → .prop
+        return pathSegments.slice(1).reduce((acc, seg) => {
+            const isNumber = /^\d+$/.test(seg);
+            return isNumber ? `${acc}[${seg}]` : `${acc}.${seg}`;
+        }, resolvedHead);
+    };
+
+    /**
      * Determines whether a foreach element needs to be rebuilt based on array changes
      * @param {Element} foreachElement - The DOM element with foreach directive
      * @returns {boolean} True if the foreach should be rebuilt, false otherwise
@@ -4192,7 +4191,7 @@
 
         // Create scope resolver to handle scoped path resolution within foreach context
         const scopeResolver = {
-            resolveScopedPath: (path) => this.resolveScopedPath(path, foreachElement)
+            resolveScopedPath: (path) => this.normalizePath(path, foreachElement)
         };
 
         // Evaluate the foreach expression to get the current array
@@ -4355,55 +4354,6 @@
         }
 
         return null;
-    };
-
-    /**
-     * Resolves an array expression by substituting parent item variables with their actual paths
-     * @param {string} arrayExpr - The array expression to resolve (e.g., "item.subitems")
-     * @param {Element} foreachElement - The foreach element context
-     * @param {Element} contextElement - The DOM element for context (to find parent indices)
-     * @returns {string} The resolved array expression
-     */
-    Context.prototype.resolveArrayExpression = function(arrayExpr, foreachElement, contextElement) {
-        // If the array expression doesn't contain any variables to substitute, return as-is
-        if (!arrayExpr.includes('.')) {
-            return arrayExpr;
-        }
-
-        const parentElement = this.findParentForeachElement(foreachElement);
-
-        if (!parentElement) {
-            return arrayExpr;
-        }
-
-        const parentMapping = this.interpolationMap.get(parentElement);
-
-        if (!parentMapping || !parentMapping.bindings.foreach) {
-            return arrayExpr;
-        }
-
-        // Check if the array expression starts with the parent's item variable
-        if (arrayExpr.startsWith(parentMapping.itemVar + '.')) {
-            // Extract parent index from HTML comments
-            const parentIndex = this.extractIndexFromComments(contextElement, parentMapping.foreachId);
-
-            if (parentIndex !== null) {
-                // Recursively resolve the parent expression first
-                const parentResolvedExpr = this.resolveArrayExpression(
-                    parentMapping.foreachExpr,
-                    parentElement,
-                    contextElement
-                );
-
-                // Replace the item variable with the resolved path + index
-                return arrayExpr.replace(
-                    parentMapping.itemVar + '.',
-                    parentResolvedExpr + '[' + parentIndex + '].'
-                );
-            }
-        }
-
-        return arrayExpr;
     };
 
     /**
