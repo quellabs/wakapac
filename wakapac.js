@@ -3281,6 +3281,21 @@
                 Utils.setNestedProperty(resolvedPath, event.detail.value, this.abstraction);
             }
         }
+
+        // Handle change binding (method execution)
+        if (mappingData.bindings.change) {
+            // Resolve the target method from the abstraction object
+            const method = this.abstraction[mappingData.bindings.change.target];
+
+            if (typeof method === 'function') {
+                try {
+                    // Execute the bound method with the abstraction as context
+                    method.call(this.abstraction, event);
+                } catch (error) {
+                    console.error(`Error executing change binding '${mappingData.bindings.change.target}':`, error);
+                }
+            }
+        }
     };
 
     /**
