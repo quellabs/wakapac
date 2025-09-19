@@ -298,7 +298,7 @@
 
         /**
          * Converts a DOMRect object to a plain JavaScript object
-         * @param {DOMRect} domRect - The DOMRect object to convert
+         * @param {DOMRect|DOMRectReadOnly} domRect - The DOMRect object to convert
          * @returns {Object} Plain object containing all DOMRect properties
          */
         domRectToSimpleObject(domRect) {
@@ -2479,6 +2479,9 @@
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
 
+        // Setup intersection observer for container visibility checking
+        this.setupIntersectionObserver();
+
         // Scan the container for items and store them in interpolationMap and textInterpolationMap
         this.scanAndRegisterNewElements(this.container);
 
@@ -2494,15 +2497,33 @@
     }
 
     Context.prototype.destroy = function() {
-        // Now you can remove them
+        // Remove event listeners
         this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:focus-state', this.boundHandlePacEvent);
 
-        // Clear references
+        // Clear boundHandlePacEvent callback
         this.boundHandlePacEvent = null;
+
+        // Clean up container scroll listener
+        if (this.containerScrollHandler) {
+            this.container.removeEventListener('scroll', this.containerScrollHandler);
+            this.containerScrollHandler = null;
+        }
+
+        // Clean up intersection observer
+        // The IntersectionObserver API is used to track when elements enter/exit the viewport
+        if (this.intersectionObserver) {
+            // Disconnect the observer to stop monitoring all target elements
+            // This prevents the observer from continuing to fire callbacks after cleanup
+            this.intersectionObserver.disconnect();
+
+            // Set reference to null to allow garbage collection
+            // Without this, the observer and its associated DOM references might remain in memory
+            this.intersectionObserver = null;
+        }
     }
 
     // Add debounce utility method
@@ -2576,6 +2597,50 @@
             y: scrollY
         });
     }
+
+    /**
+     * Modern approach using Intersection Observer API.
+     * This is more performant as it runs on the main thread and batches calculations.
+     */
+    Context.prototype.setupIntersectionObserver = function() {
+        // Create observer that tracks when container enters/exits viewport
+        this.intersectionObserver = new IntersectionObserver((entries) => {
+            // Process each observed element (in this case, just our container)
+            entries.forEach(entry => {
+                // Verify we're handling the correct element
+                if (entry.target === this.container) {
+                    // Get the boundingClientRect
+                    const rect = entry.boundingClientRect;
+
+                    // Basic visibility: any part of element is in viewport
+                    const isVisible = entry.isIntersecting;
+
+                    // Full visibility: element is completely within viewport bounds
+                    // intersectionRatio of 1.0 means 100% of element is visible
+                    // Using 0.99 to account for potential floating point precision issues
+                    const isFullyVisible = entry.intersectionRatio >= 0.99;
+
+                    // Update component state with new visibility data
+                    // These are reactive properties that trigger UI updates
+                    this.abstraction.containerVisible = isVisible;
+                    this.abstraction.containerFullyVisible = isFullyVisible;
+                    this.abstraction.containerWidth = rect.width;
+                    this.abstraction.containerHeight = rect.height;
+
+                    // Store current position/size data for potential use by other components
+                    this.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
+                }
+            });
+        }, {
+            // Define thresholds for intersection callbacks
+            // 0 = trigger when element enters/exits viewport
+            // 1.0 = trigger when element becomes fully visible/hidden
+            threshold: [0, 1.0]
+        });
+
+        // Start observing our container element
+        this.intersectionObserver.observe(this.container);
+    };
 
     /**
      * Manual visibility calculation using getBoundingClientRect().
