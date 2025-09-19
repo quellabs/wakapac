@@ -761,7 +761,9 @@
                     event.target.type === 'radio' ||
                     event.target.type === 'checkbox'
                 ) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHANGE, event);
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHANGE, event, {
+                        elementType: (event.target.tagName === 'SELECT') ? 'select' : event.target.type
+                    });
                 }
             });
 
@@ -776,7 +778,9 @@
                     (event.target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(event.target.type)) ||
                     event.target.tagName === 'TEXTAREA'
                 ) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHAR, event);
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHAR, event, {
+                        elementType: (event.target.tagName === 'TEXTAREA') ? 'textarea' : 'input'
+                    });
                 }
             });
 
@@ -803,6 +807,7 @@
                         scrollX: window.scrollX,
                         scrollY: window.scrollY
                     });
+
                     scrollTimeout = null;
                 }, 16); // ~60fps
             });
@@ -914,10 +919,10 @@
             containers.forEach(container => {
                 const customEvent = new CustomEvent('pac:browser-state', {
                     detail: {
+                        target: container,
                         stateType: stateType,
                         stateData: stateData,
-                        timestamp: Date.now(),
-                        target: container
+                        timestamp: Date.now()
                     }
                 });
 
@@ -942,9 +947,9 @@
                         focusType: focusType,
                         target: target,
                         relatedTarget: relatedTarget,
-                        timestamp: Date.now(),
                         containerFocus: Utils.isElementDirectlyFocused(container),
-                        containerFocusWithin: Utils.isElementFocusWithin(container)
+                        containerFocusWithin: Utils.isElementFocusWithin(container),
+                        timestamp: Date.now()
                     }
                 }));
             });
@@ -993,11 +998,17 @@
 
                 // Character and input change events - encode text length
                 case MSG_TYPES.MSG_CHAR:
-                case MSG_TYPES.MSG_CHANGE:
                     return {
                         wParam: (event.target && event.target.value) ? event.target.value.length : 0,  // Text length
                         lParam: 0  // Not used for these message types
                     };
+
+                // Select/radio change event
+                case MSG_TYPES.MSG_CHANGE:
+                    return {
+                        wParam: this.buildChangeWParam(event),
+                        lParam: 0        // Not used for change events
+                    }
 
                 // Form submission events - encode form data
                 case MSG_TYPES.MSG_SUBMIT: {
@@ -1117,6 +1128,35 @@
             }
 
             return lParam;
+        },
+
+        /**
+         * Builds wParam for change events based on element type
+         * @param {Event} event - The change event
+         * @returns {number} wParam value appropriate for the element type
+         */
+        buildChangeWParam(event) {
+            const element = event.target;
+
+            switch (element.type) {
+                case 'checkbox':
+                    return element.checked ? 1 : 0;  // Boolean state as integer
+
+                case 'radio': {
+                    // For radio buttons, get the selected index in the group
+                    const radioGroup = document.querySelectorAll(`input[name="${element.name}"]`);
+                    return Array.from(radioGroup).indexOf(element);
+                }
+
+                default:
+                    // For selects and other elements, use selectedIndex if available
+                    if ('selectedIndex' in element) {
+                        return element.selectedIndex;
+                    }
+                    
+                    // Fallback to 0 for unknown element types
+                    return 0;
+            }
         },
 
         /**
