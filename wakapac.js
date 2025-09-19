@@ -132,6 +132,25 @@
         },
 
         /**
+         * Check if a string represents a valid array index.
+         * More robust than simple regex - handles edge cases like "007", large numbers.
+         * @param {string} token - Token to validate
+         * @returns {boolean} True if valid array index
+         */
+        isValidArrayIndex(token) {
+            // Must be all digits
+            if (!/^\d+$/.test(token)) {
+                return false;
+            }
+
+            // Convert to number and validate bounds
+            const num = parseInt(token, 10);
+
+            // Must be valid 32-bit array index (JavaScript limitation)
+            return num >= 0 && num <= 0xFFFFFFFF && num.toString() === token;
+        },
+
+        /**
          * Sets a nested property value on the reactive abstraction
          * @param {string} path - The property path (e.g., "todos[0].completed")
          * @param {*} value - The value to set
@@ -4128,7 +4147,7 @@
                 const forEachContainer = document.querySelector('[data-pac-foreach-id="' + context.foreachId + '"]');
                 const forEachData = this.interpolationMap.get(forEachContainer);
 
-                result.unshift({
+                result.push({
                     foreachId: context.foreachId,
                     depth: forEachData.depth,
                     index: context.index,
@@ -4148,68 +4167,63 @@
 
     /**
      * Normalize a scoped path to a global path using the element's foreach chain.
-     * Supports climbing up with "parent" tokens (e.g., ["parent","parent","todos","0","xyz"]).
+     * Example: ["parent", "item", "name"] inside a nested foreach becomes "users[0].posts[1].name"
+     * Note: Assumes getForeachChain returns frames in innermost-first order
      * @param {string|string[]} pathSegments - Local path as array or string.
      * @param {HTMLElement} element - DOM element inside the foreach hierarchy.
      * @returns {string} Fully qualified data path.
      */
     Context.prototype.normalizePath = function normalizePath(pathSegments, element) {
-        // Make sure path is an array
-        pathSegments = Utils.pathStringToArray(pathSegments);
+        // Convert to array and handle empty paths
+        const path = Utils.pathStringToArray(pathSegments);
 
-        // Do nothing when segments list is empty
-        if (pathSegments.length === 0) {
+        if (!path.length) {
             return "";
         }
 
-        // Fetch foreach chain
-        const foreachFrames = this.getForeachChain(element);
-
-        /** @type {Map<string, string>} maps var/index -> resolved expression */
-        const scopeMap = new Map();
-
-        // Consume leading "parent" tokens to climb up the foreach stack
-        let climbLevels = 0;
-        while (pathSegments[0] === "parent") {
-            climbLevels += 1;
-            pathSegments.shift();
+        // Count leading "parent" tokens to climb up foreach stack
+        let climbs = 0;
+        while (path[climbs] === "parent") {
+            climbs++;
         }
 
-        // Slice the frames
-        const effectiveFrames = foreachFrames.slice(0, Math.max(0, foreachFrames.length - climbLevels));
+        // Get effective frames after climbing (skip first N frames for parent climbs)
+        const frames = this.getForeachChain(element).slice(climbs);
+        const scope = new Map();
 
-        // Build scope for remaining frames: itemVar -> "<rootArray>[index]"
-        for (const frame of effectiveFrames) {
-            const baseArrayExpr = scopeMap.get(frame.sourceArray) || frame.sourceArray;
-            const itemExpr = `${baseArrayExpr}[${frame.index}]`;
+        // Build variable scope (innermost-first order means first occurrence wins)
+        for (const f of frames) {
+            // Map item variable: "item" → "users[0]" or "users[0].posts[1]"
+            if (!scope.has(f.itemVar)) {
+                const base = scope.get(f.sourceArray) || f.sourceArray; // Resolve nested arrays
+                scope.set(f.itemVar, `${base}[${f.index}]`);
+            }
 
-            scopeMap.set(frame.itemVar, itemExpr);
-
-            if (frame.indexVar) {
-                scopeMap.set(frame.indexVar, String(frame.index));
+            // Map index variable: "i" → "0" or "1"
+            if (f.indexVar && !scope.has(f.indexVar)) {
+                scope.set(f.indexVar, String(f.index));
             }
         }
 
-        if (pathSegments.length === 0) {
+        // Get path after removing "parent" tokens
+        const remaining = path.slice(climbs);
+
+        if (!remaining.length) {
             return "";
         }
 
-        // Resolve head against scope (fallback to root/global variable)
-        const headToken = pathSegments[0];
-        let resolvedPath = scopeMap.get(headToken) || headToken;
+        // Resolve first token against scope, then append remaining path segments
+        let result = scope.get(remaining[0]) || remaining[0]; // "item" → "users[0]" or keep "globalVar"
 
-        // Append remaining tokens: numeric -> [n], non-numeric -> .prop
-        for (let i = 1; i < pathSegments.length; i++) {
-            const token = pathSegments[i];
+        for (let i = 1; i < remaining.length; i++) {
+            // Fetch token
+            const token = remaining[i];
 
-            if (/^\d+$/.test(token)) {
-                resolvedPath += `[${token}]`;
-            } else {
-                resolvedPath += `.${token}`;
-            }
+            // Numeric tokens become array access, others become property access
+            result += /^\d+$/.test(token) ? `[${token}]` : `.${token}`;
         }
 
-        return resolvedPath;
+        return result;
     };
 
     /**
