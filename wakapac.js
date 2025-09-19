@@ -2541,7 +2541,7 @@
     DomUpdater.prototype.applyClassBinding = function (element, value) {
         if (typeof value === 'object' && value !== null) {
             Object.keys(value).forEach(className => {
-                if (value[className]) {
+                if (Boolean(value[className])) {
                     element.classList.add(className);
                 } else {
                     element.classList.remove(className);
