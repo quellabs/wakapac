@@ -1975,7 +1975,6 @@
             // Use context to resolve scoped paths if available
             if (scopeResolver && scopeResolver.resolveScopedPath) {
                 resolvedPath = scopeResolver.resolveScopedPath(path);
-                console.log(path, resolvedPath);
             }
 
             // Handle simple property access (no dots or brackets)
@@ -4148,44 +4147,69 @@
     }
 
     /**
-     * Converts a scoped path (e.g. ["subItem", "id"]) into a fully qualified
-     * global path (e.g. "todos[0].children[0].id") based on the foreach
-     * hierarchy of the given element.
-     * @param {string[]} pathSegments - Segments of the local variable path.
-     * @param {HTMLElement} element - Element within the foreach chain.
-     * @returns {string} - The normalized global path string.
+     * Normalize a scoped path to a global path using the element's foreach chain.
+     * Supports climbing up with "parent" tokens (e.g., ["parent","parent","todos","0","xyz"]).
+     * @param {string|string[]} pathSegments - Local path as array or string.
+     * @param {HTMLElement} element - DOM element inside the foreach hierarchy.
+     * @returns {string} Fully qualified data path.
      */
     Context.prototype.normalizePath = function normalizePath(pathSegments, element) {
         // Make sure path is an array
         pathSegments = Utils.pathStringToArray(pathSegments);
 
-        // Get the entire foreach chain
-        const frames = this.getForeachChain(element);
+        // Do nothing when segments list is empty
+        if (pathSegments.length === 0) {
+            return "";
+        }
 
-        /** @type {Map<string,string>} maps var -> resolved expr */
-        const scope = new Map();
+        // Fetch foreach chain
+        const foreachFrames = this.getForeachChain(element);
 
-        // Build scope: itemVar → "<rootArray>[index]" chained inward.
-        for (const frame of frames) {
-            const baseArrayExpr = scope.get(frame.sourceArray) || frame.sourceArray;
+        /** @type {Map<string, string>} maps var/index -> resolved expression */
+        const scopeMap = new Map();
+
+        // Consume leading "parent" tokens to climb up the foreach stack
+        let climbLevels = 0;
+        while (pathSegments[0] === "parent") {
+            climbLevels += 1;
+            pathSegments.shift();
+        }
+
+        // Slice the frames
+        const effectiveFrames = foreachFrames.slice(0, Math.max(0, foreachFrames.length - climbLevels));
+
+        // Build scope for remaining frames: itemVar -> "<rootArray>[index]"
+        for (const frame of effectiveFrames) {
+            const baseArrayExpr = scopeMap.get(frame.sourceArray) || frame.sourceArray;
             const itemExpr = `${baseArrayExpr}[${frame.index}]`;
 
-            scope.set(frame.itemVar, itemExpr);
+            scopeMap.set(frame.itemVar, itemExpr);
 
             if (frame.indexVar) {
-                scope.set(frame.indexVar, String(frame.index));
+                scopeMap.set(frame.indexVar, String(frame.index));
             }
         }
 
-        // If head is a foreach var, substitute; otherwise keep as root variable.
-        const head = pathSegments[0];
-        const resolvedHead = scope.get(head) || head;
+        if (pathSegments.length === 0) {
+            return "";
+        }
 
-        // Append the remaining segments: numeric → [n], non-numeric → .prop
-        return pathSegments.slice(1).reduce((acc, seg) => {
-            const isNumber = /^\d+$/.test(seg);
-            return isNumber ? `${acc}[${seg}]` : `${acc}.${seg}`;
-        }, resolvedHead);
+        // Resolve head against scope (fallback to root/global variable)
+        const headToken = pathSegments[0];
+        let resolvedPath = scopeMap.get(headToken) || headToken;
+
+        // Append remaining tokens: numeric -> [n], non-numeric -> .prop
+        for (let i = 1; i < pathSegments.length; i++) {
+            const token = pathSegments[i];
+
+            if (/^\d+$/.test(token)) {
+                resolvedPath += `[${token}]`;
+            } else {
+                resolvedPath += `.${token}`;
+            }
+        }
+
+        return resolvedPath;
     };
 
     /**
