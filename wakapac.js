@@ -2845,6 +2845,7 @@
 
         // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
+            console.log(self.getForeachChain(textNode));
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
@@ -4140,6 +4141,41 @@
         // Build the final resolved path
         return resolvedExpr + '[' + currentIndex + ']' + (propertyPath ? '.' + propertyPath : '');
     };
+
+    /**
+     * Fetches the entire chain of foreaches for the given element
+     * @param element
+     * @returns {*[]}
+     */
+    Context.prototype.getForeachChain = function(element) {
+        const result = [];
+
+        let current = element;
+
+        while (current != null) {
+            const context = this.extractClosestForeachContext(current);
+
+            if (context) {
+                const forEachContainer = document.querySelector('[data-pac-foreach-id="' + context.foreachId + '"]');
+                const forEachData = this.interpolationMap.get(forEachContainer);
+
+                result.push({
+                    foreachId: context.foreachId,
+                    depth: forEachData.depth,
+                    index: context.index,
+                    renderIndex: context.renderIndex,
+                    container: forEachContainer,
+                    itemVar: forEachData.itemVar,
+                    indexVar: forEachData.indexVar,
+                    sourceArray: forEachData.sourceArray
+                });
+            }
+
+            current = this.findParentForeachElement(current);
+        }
+
+        return result;
+    }
 
     /**
      * Determines whether a foreach element needs to be rebuilt based on array changes
