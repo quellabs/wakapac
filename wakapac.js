@@ -24,46 +24,26 @@
     // =============================================================================
 
     /**
-     * Various repeated regular expressions
+     * Matches handlebars-style interpolation: {{variable}}
+     * Captures variable name/expression with global flag
      * @type {RegExp}
      */
     const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
+
+    /**
+     * Tests for presence of interpolation syntax without capture groups
+     * More efficient for boolean checks than INTERPOLATION_REGEX
+     * @type {RegExp}
+     */
     const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
+
+    /**
+     * Extracts foreach item metadata from PAC syntax
+     * Format: "pac-foreach-item: name, index=N, renderIndex=M"
+     * Captures: [itemName, index, renderIndex] (indices as strings)
+     * @type {RegExp}
+     */
     const FOREACH_INDEX_REGEX = /pac-foreach-item:\s*([^,]+),\s*index=(\d+),\s*renderIndex=(\d+)/;
-
-    // Add to your constants section
-    const MSG_TYPES = {
-        // Unknown message (should never occur)
-        MSG_UNKNOWN: 0x0000,
-
-        // Mouse messages
-        MSG_LBUTTONDOWN: 0x0201,
-        MSG_LBUTTONUP: 0x0202,
-        MSG_RBUTTONDOWN: 0x0204,
-        MSG_RBUTTONUP: 0x0205,
-        MSG_MBUTTONDOWN: 0x0207,
-        MSG_MBUTTONUP: 0x0208,
-
-        // Input messages
-        MSG_CHAR: 0x0300,
-        MSG_CHANGE: 0x0301,
-        MSG_SUBMIT: 0x0302,
-
-        // Focus messages
-        MSG_FOCUS: 0x0007,
-        MSG_BLUR: 0x0008,
-
-        // Keyboard messages
-        MSG_KEYDOWN: 0x0100,
-        MSG_KEYUP: 0x0101
-    };
-
-    const MK_LBUTTON = 0x0001;
-    const MK_RBUTTON = 0x0002;
-    const MK_MBUTTON = 0x004;
-    const MK_SHIFT = 0x0008;
-    const MK_CONTROL = 0x0010;
-    const MK_ALT = 0x0020;
 
     /**
      * HTML attributes that are boolean (present = true, absent = false)
@@ -79,6 +59,47 @@
         "value", "checked", "visible", "if", "foreach", "class", "style",
         "click", "change", "input", "submit", "focus", "blur", "keyup", "keydown"
     ];
+
+    /**
+     * Windows-style message type constants for event handling
+     * Hex values match Win32 API message identifiers
+     */
+    const MSG_TYPES = {
+        // Unknown message (should never occur)
+        MSG_UNKNOWN: 0x0000,
+
+        // Mouse button press/release events
+        MSG_LBUTTONDOWN: 0x0201,    // Left mouse button pressed
+        MSG_LBUTTONUP: 0x0202,      // Left mouse button released
+        MSG_RBUTTONDOWN: 0x0204,    // Right mouse button pressed
+        MSG_RBUTTONUP: 0x0205,      // Right mouse button released
+        MSG_MBUTTONDOWN: 0x0207,    // Middle mouse button pressed
+        MSG_MBUTTONUP: 0x0208,      // Middle mouse button released
+
+        // Text input and form events
+        MSG_CHAR: 0x0300,           // Character input received
+        MSG_CHANGE: 0x0301,         // Input value changed
+        MSG_SUBMIT: 0x0302,         // Form submission triggered
+
+        // Element focus state changes
+        MSG_FOCUS: 0x0007,          // Element gained focus
+        MSG_BLUR: 0x0008,           // Element lost focus
+
+        // Keyboard key press/release events
+        MSG_KEYDOWN: 0x0100,        // Key pressed down
+        MSG_KEYUP: 0x0101           // Key released
+    };
+
+    /**
+     * Mouse and keyboard modifier key state flags
+     * Used as bitmask - multiple flags can be OR'd together
+     */
+    const MK_LBUTTON = 0x0001;      // Left mouse button held down
+    const MK_RBUTTON = 0x0002;      // Right mouse button held down
+    const MK_MBUTTON = 0x0004;      // Middle mouse button held down
+    const MK_SHIFT = 0x0008;        // Shift key held down
+    const MK_CONTROL = 0x0010;      // Ctrl key held down
+    const MK_ALT = 0x0020;          // Alt key held down
 
     // =============================================================================
     // UTILITY FUNCTIONS
@@ -135,6 +156,25 @@
             // Set the final property
             const finalPart = parts[parts.length - 1];
             current[finalPart] = value;
+        },
+
+        /**
+         * Gets a unique identifier for an element to use in queue tracking
+         * @param {HTMLElement} element - The element to identify
+         * @returns {string} A unique identifier for the element
+         */
+        getElementIdentifier(element) {
+            // If element has an ID, use it
+            if (element.id) {
+                return element.id;
+            }
+
+            // Otherwise, generate and assign a unique ID
+            if (!element.hasAttribute('data-pac-element-id')) {
+                element.setAttribute('data-pac-element-id', Utils.uniqid('pac-el-'));
+            }
+
+            return element.getAttribute('data-pac-element-id');
         },
 
         /**
@@ -946,6 +986,9 @@
 
         /**
          * Dispatches focus state changes to relevant PAC containers
+         * Also dispatches PAC events for form elements that can have data bindings
+         * @param focusType
+         * @param originalEvent
          */
         dispatchFocusEvent(focusType, originalEvent) {
             const containers = document.querySelectorAll('[data-pac-container]');
@@ -956,6 +999,7 @@
                     return;
                 }
 
+                // Dispatch focus state event
                 container.dispatchEvent(new CustomEvent('pac:focus-state', {
                     detail: {
                         focusType: focusType,
@@ -966,16 +1010,38 @@
                         timestamp: Date.now()
                     }
                 }));
+
+                // Also dispatch PAC events for form elements within this container
+                if (Utils.belongsToPacContainer(container, target) && this.isFormElement(target)) {
+                    if (focusType === 'focusin') {
+                        this.dispatchTrackedEvent(MSG_TYPES.MSG_FOCUS, originalEvent);
+                    } else if (focusType === 'focusout') {
+                        this.dispatchTrackedEvent(MSG_TYPES.MSG_BLUR, originalEvent);
+                    }
+                }
             });
         },
 
         /**
          * Checks if focus change affects the container
+         * @param container
+         * @param target
+         * @param relatedTarget
+         * @returns {*|boolean}
          */
         isContainerAffected(container, target, relatedTarget) {
             const containsTarget = container.contains(target) || container === target;
             const containsRelated = relatedTarget && (container.contains(relatedTarget) || container === relatedTarget);
             return containsTarget || containsRelated;
+        },
+
+        /**
+         * Checks if an element is a form element that can have data bindings
+         * @param {Element} element - The element to check
+         * @returns {boolean} True if element is a bindable form element
+         */
+        isFormElement(element) {
+            return element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT';
         },
 
         /**
@@ -2473,7 +2539,7 @@
     // CONTEXT
     // ========================================================================
 
-    function Context(container, abstraction, parent = null) {
+    function Context(container, abstraction, parent = null, config) {
         const self = this;
 
         // Ensure container has the required attribute
@@ -2484,6 +2550,7 @@
         this.originalAbstraction = abstraction;
         this.parent = parent;
         this.container = container;
+        this.config = config;
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
         this.dependencies = this.getDependencies();
@@ -2498,6 +2565,11 @@
 
         // Scan the container for items and store them in interpolationMap and textInterpolationMap
         this.scanAndRegisterNewElements(this.container);
+
+        // Add interval for checking updateQueue
+        this.updateQueue = new Map();
+        this.updateQueueCallback = function() { self.updateQueueHandler(); };
+        this.updateQueueInterval = setInterval(this.updateQueueCallback, 10);
 
         // Handle click events
         this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
@@ -2868,6 +2940,91 @@
         });
     };
 
+    Context.prototype.updateQueueHandler = function() {
+        // Early exit if queue is empty for performance
+        if (this.updateQueue.size === 0) {
+            return;
+        }
+
+        const now = Date.now();
+        const expiredUpdates = [];
+
+        // Find all expired updates
+        this.updateQueue.forEach((queueEntry, resolvedPath) => {
+            if (queueEntry.trigger === 'delay' && now >= queueEntry.executeAt) {
+                expiredUpdates.push({
+                    path: resolvedPath,
+                    value: queueEntry.value
+                });
+            }
+        });
+
+        // Apply expired updates and remove from queue
+        expiredUpdates.forEach(update => {
+            try {
+                Utils.setNestedProperty(update.path, update.value, this.abstraction);
+                this.updateQueue.delete(update.path);
+            } catch (error) {
+                console.warn('Error applying queued update for path:', update.path, error);
+
+                // Remove failed update to prevent infinite retries
+                this.updateQueue.delete(update.path);
+            }
+        });
+    };
+
+    /**
+     * Processes queued updates that should trigger on blur for a specific element
+     * @param {HTMLElement} targetElement - The element that just lost focus
+     * @returns {void}
+     */
+    Context.prototype.processBlurQueueUpdates = function(targetElement) {
+        const elementId = Utils.getElementIdentifier(targetElement);
+        const updatesToProcess = [];
+
+        // Find all queued updates for this element that should trigger on blur
+        this.updateQueue.forEach((queueEntry, resolvedPath) => {
+            if (queueEntry.trigger === 'blur' && queueEntry.elementId === elementId) {
+                updatesToProcess.push({
+                    path: resolvedPath,
+                    value: queueEntry.value
+                });
+            }
+        });
+
+        // Apply all blur-triggered updates for this element
+        updatesToProcess.forEach(update => {
+            try {
+                Utils.setNestedProperty(update.path, update.value, this.abstraction);
+                this.updateQueue.delete(update.path);
+            } catch (error) {
+                console.warn('Error applying blur-triggered update for path:', update.path, error);
+                // Remove failed update to prevent infinite retries
+                this.updateQueue.delete(update.path);
+            }
+        });
+    };
+
+    /**
+     * Retrieves the update configuration for a specific element, combining element-specific
+     * attributes with context-wide configuration defaults.
+     * @param {HTMLElement} element - The DOM element to get update configuration for
+     * @returns {{updateMode: (string|string|*), delay: number}} The update configuration object
+     * @returns {string} returns.updateMode - The update mode ('immediate' or other configured modes)
+     * @returns {number} returns.delay - The delay in milliseconds, capped at maximum 3000ms
+     */
+    Context.prototype.getUpdateConfiguration = function(element) {
+        // Check element attributes first
+        const updateMode = element.getAttribute('data-pac-update-mode') || this.config.updateMode || 'immediate';
+        const delay = parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay || 300;
+
+        // Cap maximum delay at 3000ms for safety
+        const cappedDelay = Math.min(delay, 3000);
+
+        // Return the delay information
+        return { updateMode, delay: cappedDelay };
+    };
+
     /**
      * Handles incoming events by dispatching them to appropriate handler methods based on event type.
      * This is the central event routing mechanism for the Context system.
@@ -2943,9 +3100,23 @@
                 break;
 
             case MSG_TYPES.MSG_CHANGE:
-            case MSG_TYPES.MSG_CHAR:
-                // Input change and character events
+                // DOM change event
                 this.handleDomChange(event);
+                break;
+
+            case MSG_TYPES.MSG_CHAR:
+                // Character input
+                this.handleDomInput(event);
+                break;
+
+            case MSG_TYPES.MSG_FOCUS:
+                // Focus events - handle any focus-related logic
+                this.handleDomFocus(event);
+                break;
+
+            case MSG_TYPES.MSG_BLUR:
+                // Blur events - handle change mode updates and other blur logic
+                this.handleDomBlur(event);
                 break;
                 
             default :
@@ -3099,6 +3270,135 @@
                 Utils.setNestedProperty(resolvedPath, event.detail.value, this.abstraction);
             }
         }
+    };
+
+    /**
+     * Handles DOM change events for data-bound elements, updating the underlying data model
+     * when form controls change their values. This enables two-way data binding by listening
+     * for custom DOM change events and propagating changes back to the data context.
+     * @param {CustomEvent} event - The DOM change event containing target element and new value
+     * @param {Element} event.detail.target - The DOM element that changed
+     * @param {*} event.detail.value - The new value from the changed element
+     */
+    Context.prototype.handleDomInput = function(event) {
+        const self = this;
+        const targetElement = event.detail.target;
+
+        // Get the mapping data for this specific element from the interpolation map
+        // This contains all the binding information (value, checked, etc.) for the element
+        const mappingData = this.interpolationMap.get(targetElement);
+
+        // If no mapping data found, this element isn't data-bound so nothing to do
+        if (!mappingData) {
+            return;
+        }
+
+        // Handle value binding (for inputs, selects, textareas)
+        // This covers most form controls that have a "value" property
+        if (mappingData.bindings.value) {
+            // Fetch value binding
+            const valueBinding = mappingData.bindings.value;
+
+            // Resolve the target path considering any scoped context (e.g., loops, nested objects)
+            const resolvedPath = self.resolveScopedPath(valueBinding.target, targetElement);
+
+            // Get update configuration for this element
+            const config = this.getUpdateConfiguration(targetElement);
+
+            // Update the data model using nested property setter to handle complex object paths
+            // e.g., "user.profile.name" gets properly set in the nested object structure
+            switch (config.updateMode) {
+                case 'immediate':
+                    // Immediate update - bypass queue entirely
+                    Utils.setNestedProperty(resolvedPath, event.detail.value, this.abstraction);
+                    break;
+
+                case 'delayed':
+                    // Delayed update - add to queue with time trigger
+                    this.updateQueue.set(resolvedPath, {
+                        trigger: 'delay',
+                        value: event.detail.value,
+                        executeAt: Date.now() + config.delay
+                    });
+
+                    break;
+
+                case 'change':
+                    // Change mode - add to queue with blur trigger
+                    this.updateQueue.set(resolvedPath, {
+                        trigger: 'blur',
+                        value: event.detail.value,
+                        elementId: Utils.getElementIdentifier(targetElement)
+                    });
+
+                    break;
+            }
+        }
+    };
+
+    /**
+     * Handles DOM focus events for data-bound elements
+     * @param {CustomEvent} event - The focus event containing target element details
+     * @param {Object} event.detail - Event detail object
+     * @param {HTMLElement} event.detail.target - The DOM element that gained focus
+     * @returns {void}
+     */
+    Context.prototype.handleDomFocus = function(event) {
+        const targetElement = event.detail.target;
+
+        // Get the mapping data for this element
+        const mappingData = this.interpolationMap.get(targetElement);
+
+        // If no mapping data, this element isn't data-bound
+        if (!mappingData) {
+            return;
+        }
+
+        // For now, focus events don't trigger immediate actions
+        // but this is where you could add focus-related behaviors like:
+        // - Clearing validation messages
+        // - Highlighting related fields
+        // - Loading autocomplete data
+        // - Analytics tracking
+
+        // Future: Could execute focus binding if implemented
+        // if (mappingData.bindings.focus) {
+        //     const method = this.abstraction[mappingData.bindings.focus.target];
+        //     if (typeof method === 'function') {
+        //         method.call(this.abstraction, event);
+        //     }
+        // }
+    };
+
+    /**
+     * Handles DOM blur events for data-bound elements
+     * Processes any pending "change" mode updates that should trigger on blur
+     * @param {CustomEvent} event - The blur event containing target element details
+     * @param {Object} event.detail - Event detail object
+     * @param {HTMLElement} event.detail.target - The DOM element that lost focus
+     * @returns {void}
+     */
+    Context.prototype.handleDomBlur = function (event) {
+        const targetElement = event.detail.target;
+
+        // Get the mapping data for this element
+        const mappingData = this.interpolationMap.get(targetElement);
+
+        // If no mapping data, this element isn't data-bound
+        if (!mappingData) {
+            return;
+        }
+
+        // Process any queued "change" mode updates for this element
+        this.processBlurQueueUpdates(targetElement);
+
+        // Future: Could execute blur binding if implemented
+        // if (mappingData.bindings.blur) {
+        //     const method = this.abstraction[mappingData.bindings.blur.target];
+        //     if (typeof method === 'function') {
+        //         method.call(this.abstraction, event);
+        //     }
+        // }
     };
 
     /**
@@ -3966,7 +4266,7 @@
             selector: selector,
             container: container,
             config: config,
-            context: new Context(container, abstraction),
+            context: new Context(container, abstraction, null, config),
 
             /**
              * Constructor

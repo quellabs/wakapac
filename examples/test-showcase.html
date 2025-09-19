@@ -223,7 +223,7 @@
 
                 <div style="margin: 10px 0; padding: 10px; border: 2px solid #ffc107; border-radius: 4px;">
                     <label><strong>⏱️ Delayed Mode (500ms):</strong></label><br>
-                    <input type="text" data-pac-bind="value:delayedText" data-pac-update="delayed" data-pac-delay="500"
+                    <input type="text" data-pac-bind="value:delayedText" data-pac-update-mode="delayed" data-pac-update-delay="500"
                            placeholder="Updates 500ms after you stop typing" style="width: 250px;" />
                     <div style="margin-top: 5px; font-size: 12px; color: #666;">
                         Live value: <strong style="color: #ffc107;">{{delayedText}}</strong>
@@ -233,7 +233,7 @@
 
                 <div style="margin: 10px 0; padding: 10px; border: 2px solid #28a745; border-radius: 4px;">
                     <label><strong>🎯 Change Mode (on blur):</strong></label><br>
-                    <input type="text" data-pac-bind="value:changeText" data-pac-update="change"
+                    <input type="text" data-pac-bind="value:changeText" data-pac-update-mode="change"
                            placeholder="Updates only when you click away (blur)" style="width: 250px;" />
                     <div style="margin-top: 5px; font-size: 12px; color: #666;">
                         Live value: <strong style="color: #28a745;">{{changeText}}</strong>
@@ -260,7 +260,7 @@
                 <h4>🎯 Advanced Features Demo</h4>
                 <div>
                     <label>Search with 1000ms delay (simulates API calls):</label><br>
-                    <input type="text" data-pac-bind="value:searchQuery" data-pac-update="delayed" data-pac-delay="1000"
+                    <input type="text" data-pac-bind="value:searchQuery" data-pac-update-mode="delayed" data-pac-update-delay="1000"
                            placeholder="Search simulates API call..." style="width: 300px;" />
                     <div style="margin-top: 5px;">
                         <strong>Search Results for:</strong> "{{searchQuery}}"
@@ -270,7 +270,7 @@
 
                 <div style="margin-top: 15px;">
                     <label>Form validation (change mode):</label><br>
-                    <input type="email" data-pac-bind="value:email" data-pac-update="change"
+                    <input type="email" data-pac-bind="value:email" data-pac-update-mode="change"
                            placeholder="Enter email (validates on blur)" style="width: 300px;" />
                     <div style="margin-top: 5px;">
                         <span data-pac-bind="visible:email">
