@@ -2538,11 +2538,11 @@
     // CONTEXT
     // ========================================================================
 
-    function Context(container, abstraction, parent = null, config) {
+    function Context(container, abstraction, config) {
         const self = this;
 
         this.originalAbstraction = abstraction;
-        this.parent = parent;
+        this.parent = null;
         this.children = new Set();
         this.container = container;
         this.config = config;
@@ -4308,9 +4308,13 @@
     Context.prototype.establishHierarchy = function() {
         const { parent, children } = window.PACRegistry.getHierarchy(this.container);
 
+        // Updates relationships
         this.updateParentRelationship(parent);
         this.updateChildrenRelationships(children);
-        this.updateReactiveProperties();
+
+        // Updates reactive hierarchy properties
+        this.abstraction.childrenCount = this.children.size;
+        this.abstraction.hasParent = !!this.parent;
 
         // Perform scanning when all containers are properly marked
         this.scanAndRegisterNewElements(this.container);
@@ -4359,16 +4363,6 @@
     };
 
     /**
-     * Updates reactive hierarchy properties
-     */
-    Context.prototype.updateReactiveProperties = function() {
-        if (this.abstraction) {
-            this.abstraction.childrenCount = this.children.size;
-            this.abstraction.hasParent = !!this.parent;
-        }
-    };
-
-    /**
      * Notifies the parent component of an event or state change
      * @param {string} type - The type of event being reported
      * @param {*} data - The data payload associated with the event
@@ -4388,7 +4382,7 @@
      * @param {Object} child - Reference to the child component that sent the update
      */
     Context.prototype.receiveUpdate = function(type, data, child) {
-        if (this.abstraction && typeof this.abstraction.receiveFromChild === 'function') {
+        if (this.abstraction.receiveFromChild && typeof this.abstraction.receiveFromChild === 'function') {
             this.abstraction.receiveFromChild(type, data, child);
         }
     };
@@ -4399,7 +4393,7 @@
      * @param {*} data - The command data payload
      */
     Context.prototype.receiveFromParent = function(cmd, data) {
-        if (this.abstraction && typeof this.abstraction.receiveFromParent === 'function') {
+        if (this.abstraction.receiveFromParent && typeof this.abstraction.receiveFromParent === 'function') {
             this.abstraction.receiveFromParent(cmd, data);
         }
     };
@@ -4541,7 +4535,7 @@
         }, options);
 
         // Create context directly
-        const context = new Context(container, abstraction, null, config);
+        const context = new Context(container, abstraction, config);
 
         // Register in global registry and establish hierarchy
         // Add this component to the global registry using its CSS selector as the key,
