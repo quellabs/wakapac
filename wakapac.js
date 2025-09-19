@@ -1996,6 +1996,12 @@
                 resolvedPath = scopeResolver.resolveScopedPath(path);
             }
 
+            // Handle special index value markers
+            const indexMatch = resolvedPath.match(/^__INDEX_VAL_(\d+)__$/);
+            if (indexMatch) {
+                return parseInt(indexMatch[1], 10);
+            }
+
             // Handle simple property access (no dots or brackets)
             if (resolvedPath.indexOf('.') === -1 && resolvedPath.indexOf('[') === -1) {
                 return (resolvedPath in obj) ? obj[resolvedPath] : undefined;
@@ -4173,6 +4179,10 @@
      * @param {HTMLElement} element - DOM element inside the foreach hierarchy.
      * @returns {string} Fully qualified data path.
      */
+    /**
+     * Fixed version of normalizePath that properly handles index variables
+     * Replace this method in wakapac.js around line 2866
+     */
     Context.prototype.normalizePath = function normalizePath(pathSegments, element) {
         // Convert to array and handle empty paths
         const path = Utils.pathStringToArray(pathSegments);
@@ -4195,13 +4205,13 @@
         for (const f of frames) {
             // Map item variable: "item" → "users[0]" or "users[0].posts[1]"
             if (!scope.has(f.itemVar)) {
-                const base = scope.get(f.sourceArray) || f.sourceArray; // Resolve nested arrays
+                const base = scope.get(f.sourceArray) || f.sourceArray;
                 scope.set(f.itemVar, `${base}[${f.index}]`);
             }
 
-            // Map index variable: "i" → "0" or "1"
+            // CRITICAL FIX: Map index variable to actual numeric value
             if (f.indexVar && !scope.has(f.indexVar)) {
-                scope.set(f.indexVar, String(f.index));
+                scope.set(f.indexVar, f.index); // Store numeric value, not string
             }
         }
 
@@ -4212,14 +4222,19 @@
             return "";
         }
 
-        // Resolve first token against scope, then append remaining path segments
-        let result = scope.get(remaining[0]) || remaining[0]; // "item" → "users[0]" or keep "globalVar"
+        // CRITICAL FIX: Handle index variables specially - return the numeric value directly
+        const firstToken = remaining[0];
+        if (scope.has(firstToken) && typeof scope.get(firstToken) === 'number') {
+            // This is an index variable - return the numeric value directly as a special marker
+            // We'll handle this in the expression evaluator
+            return `__INDEX_VAL_${scope.get(firstToken)}__`;
+        }
+
+        // Handle other scoped variables normally
+        let result = scope.get(firstToken) || firstToken;
 
         for (let i = 1; i < remaining.length; i++) {
-            // Fetch token
             const token = remaining[i];
-
-            // Numeric tokens become array access, others become property access
             result += /^\d+$/.test(token) ? `[${token}]` : `.${token}`;
         }
 
