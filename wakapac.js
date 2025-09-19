@@ -2804,12 +2804,29 @@
             });
     };
 
+    /**
+     * Analyzes computed properties to build a dependency graph showing which computed
+     * properties depend on which data properties.
+     * @returns {Map<string, string[]>} A Map where keys are property names that are accessed
+     */
     Context.prototype.getDependencies = function() {
+        /** @type {Map<string, string[]>} Dependency map from property names to computed property names */
         const dependencies = new Map();
+
+        /** @type {Object<string, Function>} Computed properties from the original abstraction */
         const computed = this.originalAbstraction.computed || {};
+
+        /** @type {Set<string>} Tracks which properties are accessed during each computed property execution */
         const accessed = new Set();
 
+        /** @type {Proxy} Proxy that intercepts property access to track dependencies */
         const proxy = new Proxy(this.originalAbstraction, {
+            /**
+             * Trap for property access - records accessed property names
+             * @param {Object} target - The original abstraction object
+             * @param {string|symbol} prop - The property being accessed
+             * @returns {*} The property value
+             */
             get(target, prop) {
                 if (typeof prop === 'string') {
                     accessed.add(prop);
@@ -2819,6 +2836,7 @@
             }
         });
 
+        // Execute each computed property to discover its dependencies
         Object.keys(computed).forEach(name => {
             accessed.clear();
             computed[name].call(proxy);
