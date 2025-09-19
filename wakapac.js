@@ -1996,10 +1996,9 @@
                 resolvedPath = scopeResolver.resolveScopedPath(path);
             }
 
-            // Handle special index value markers
-            const indexMatch = resolvedPath.match(/^__INDEX_VAL_(\d+)__$/);
-            if (indexMatch) {
-                return parseInt(indexMatch[1], 10);
+            // If resolved path is a number, return it directly
+            if (typeof resolvedPath === 'number') {
+                return resolvedPath;
             }
 
             // Handle simple property access (no dots or brackets)
@@ -4179,14 +4178,11 @@
      * @param {HTMLElement} element - DOM element inside the foreach hierarchy.
      * @returns {string} Fully qualified data path.
      */
-    /**
-     * Fixed version of normalizePath that properly handles index variables
-     * Replace this method in wakapac.js around line 2866
-     */
     Context.prototype.normalizePath = function normalizePath(pathSegments, element) {
-        // Convert to array and handle empty paths
+        // Convert to array
         const path = Utils.pathStringToArray(pathSegments);
 
+        // Check if path is empty
         if (!path.length) {
             return "";
         }
@@ -4209,9 +4205,9 @@
                 scope.set(f.itemVar, `${base}[${f.index}]`);
             }
 
-            // CRITICAL FIX: Map index variable to actual numeric value
+            // Map index variable to its numeric value
             if (f.indexVar && !scope.has(f.indexVar)) {
-                scope.set(f.indexVar, f.index); // Store numeric value, not string
+                scope.set(f.indexVar, f.index);
             }
         }
 
@@ -4222,15 +4218,14 @@
             return "";
         }
 
-        // CRITICAL FIX: Handle index variables specially - return the numeric value directly
+        // Check if this is an index variable that should return a number
         const firstToken = remaining[0];
         if (scope.has(firstToken) && typeof scope.get(firstToken) === 'number') {
-            // This is an index variable - return the numeric value directly as a special marker
-            // We'll handle this in the expression evaluator
-            return `__INDEX_VAL_${scope.get(firstToken)}__`;
+            // This is an index variable - return the numeric value directly
+            return scope.get(firstToken);
         }
 
-        // Handle other scoped variables normally
+        // Handle normal property resolution
         let result = scope.get(firstToken) || firstToken;
 
         for (let i = 1; i < remaining.length; i++) {
