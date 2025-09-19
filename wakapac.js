@@ -211,9 +211,10 @@
 
         /**
          * Determines if an element belongs to the specified PAC container.
+         * An element belongs to a container if that container is its immediate PAC parent.
          * @param {Element} container - The PAC container element with data-pac-container attribute
          * @param {Node} element - The element to check (can be Element or Text node)
-         * @returns {boolean} True if element belongs to this container, false otherwise
+         * @returns {boolean} True if element belongs directly to this container, false otherwise
          */
         belongsToPacContainer(container, element) {
             // Early validation: ensure container is an Element with required attribute
@@ -236,13 +237,11 @@
                 return false;
             }
 
-            // Find the closest ancestor (or self) that has the PAC container attribute
-            // This ensures we're checking against the actual owning container
-            const owningContainer = targetElement.closest('[data-pac-container]');
+            // Find the closest PAC container ancestor (or self)
+            const immediateContainer = targetElement.closest('[data-pac-container]');
 
-            // Return true only if the owning container is exactly our target container
-            // This prevents false positives when nested PAC containers exist
-            return owningContainer === container;
+            // Element belongs to this container only if this container is its immediate PAC parent
+            return immediateContainer === container;
         },
 
         /**
@@ -2915,11 +2914,12 @@
 
         self.textInterpolationMap.forEach((mappingData, textNode) => {
             // Check if any of the paths that changed affect this node
-            // Need to check both exact matches and root property matches
             let shouldUpdate = mappingData.dependencies.some(dep => {
-                return pathsToCheck.includes(dep) ||
-                    event.detail.path.join('.').startsWith(dep + '.') ||
+                const exactMatch = pathsToCheck.includes(dep);
+                const pathMatch = event.detail.path.join('.').startsWith(dep + '.') ||
                     event.detail.path.join('.').startsWith(dep + '[');
+
+                return exactMatch || pathMatch;
             });
 
             // Also check if element is in a foreach container affected by the change
@@ -3597,6 +3597,9 @@
      * @returns {Map<WeakKey, any>}
      */
     Context.prototype.scanTextBindings = function(parentElement) {
+        console.log('scanTextBindings called for:', parentElement.getAttribute('data-pac-container'));
+        console.log('Child container has attribute:', document.getElementById('child-component')?.hasAttribute('data-pac-container'));
+
         const interpolationMap = new Map();
 
         // Create tree walker to find text nodes with interpolation expressions
@@ -4400,7 +4403,7 @@
         // Iterate through all child components
         this.children.forEach(child => {
             // Ensure child has the receiveFromParent method before calling
-            if (typeof child.receiveFromParent === 'function') {
+            if (child && typeof child.receiveFromParent === 'function') {
                 child.receiveFromParent(cmd, data);
             }
         });
@@ -4417,7 +4420,7 @@
         const child = Array.from(this.children).find(c => c.container.matches(selector));
 
         // If matching child found and has receiveFromParent method, send the command
-        if (child && child.receiveFromParent) {
+        if (child && typeof child.receiveFromParent === 'function') {
             child.receiveFromParent(cmd, data);
         }
     };
