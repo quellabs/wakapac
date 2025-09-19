@@ -132,25 +132,6 @@
         },
 
         /**
-         * Check if a string represents a valid array index.
-         * More robust than simple regex - handles edge cases like "007", large numbers.
-         * @param {string} token - Token to validate
-         * @returns {boolean} True if valid array index
-         */
-        isValidArrayIndex(token) {
-            // Must be all digits
-            if (!/^\d+$/.test(token)) {
-                return false;
-            }
-
-            // Convert to number and validate bounds
-            const num = parseInt(token, 10);
-
-            // Must be valid 32-bit array index (JavaScript limitation)
-            return num >= 0 && num <= 0xFFFFFFFF && num.toString() === token;
-        },
-
-        /**
          * Sets a nested property value on the reactive abstraction
          * @param {string} path - The property path (e.g., "todos[0].completed")
          * @param {*} value - The value to set
@@ -2546,7 +2527,7 @@
     DomUpdater.prototype.applyClassBinding = function (element, value) {
         if (typeof value === 'object' && value !== null) {
             Object.keys(value).forEach(className => {
-                if (Boolean(value[className])) {
+                if (value[className]) {
                     element.classList.add(className);
                 } else {
                     element.classList.remove(className);
@@ -4036,7 +4017,7 @@
                 return;
             }
 
-            // CRITICAL FIX: Get the source array to find original indices
+            // Get the source array to find original indices
             const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array);
 
             // Store array to be able to compare later
@@ -4290,34 +4271,6 @@
         return false;
     };
 
-    /**
-     * Finds the foreach element that defines the given scoped variable
-     * @param {string} scopedPath - The scoped path (e.g., "sub_item.text")
-     * @param {Element} startElement - The DOM element to search from
-     * @returns {Element|null} The foreach element or null if not found
-     */
-    Context.prototype.findForeachElementForScopedPath = function(scopedPath, startElement) {
-        const rootVariable = scopedPath.split('.')[0];
-
-        // Start from text node's parent if needed
-        let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
-
-        // Walk up from current element to find foreach that defines this variable
-        while (current && current !== this.container) {
-            const mappingData = this.interpolationMap.get(current);
-
-            if (mappingData && mappingData.bindings && mappingData.bindings.foreach) {
-                if (mappingData.itemVar === rootVariable) {
-                    return current;
-                }
-            }
-
-            current = current.parentElement;
-        }
-
-        return null;
-    };
-
     Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
         const elementsToUpdate = [];
 
@@ -4377,42 +4330,6 @@
         }
 
         // No foreach context found in the entire tree up to container
-        return null;
-    };
-
-    /**
-     * Extracts the index from HTML comments by walking up the DOM tree
-     * @param {Element} startElement - Element to start searching from
-     * @param {string} foreachId - The foreach ID to look for in comments
-     * @returns {number|null} The index or null if not found
-     */
-    Context.prototype.extractIndexFromComments = function(startElement, foreachId) {
-        // Start from text node's parent if needed
-        let current = startElement.nodeType === Node.TEXT_NODE ? startElement.parentElement : startElement;
-
-        // Walk up the DOM to find this foreach's comment marker
-        while (current && current !== this.container) {
-            // Check previous siblings for comment markers
-            let sibling = current.previousSibling;
-
-            while (sibling) {
-                if (sibling.nodeType === Node.COMMENT_NODE) {
-                    const commentText = sibling.textContent.trim();
-
-                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X, renderIndex=Y"
-                    const match = commentText.match(FOREACH_INDEX_REGEX);
-
-                    if (match && match[1].trim() === foreachId) {
-                        return parseInt(match[2], 10);
-                    }
-                }
-
-                sibling = sibling.previousSibling;
-            }
-
-            current = current.parentElement;
-        }
-
         return null;
     };
 
