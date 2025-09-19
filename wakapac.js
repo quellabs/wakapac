@@ -2507,8 +2507,9 @@
         // Clear boundHandlePacEvent callback
         this.boundHandlePacEvent = null;
 
-        // Clean up container scroll listener
+        // Clean up container scroll listener and the timeout for it
         if (this.containerScrollHandler) {
+            clearTimeout(this.scrollTimeout);
             this.container.removeEventListener('scroll', this.containerScrollHandler);
             this.containerScrollHandler = null;
         }
@@ -2526,21 +2527,6 @@
         }
     }
 
-    // Add debounce utility method
-    Context.prototype.debounce = function(func, wait) {
-        let timeout;
-
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    }
-
     /**
      * Sets up scroll event tracking for the container element with debounced handling.
      * Creates an optimized scroll listener that updates container scroll state at ~60fps
@@ -2553,16 +2539,19 @@
         // First time setup
         requestAnimationFrame(() => this.updateContainerScrollState());
 
-        // Create debounced scroll handler for this container
-        const debouncedScrollHandler = this.debounce(() => {
-            this.updateContainerScrollState();
-        }, 16); // ~60fps
+        // Inline debounce implementation
+        const scrollHandler = () => {
+            clearTimeout(this.scrollTimeout); // Use instance property
+            this.scrollTimeout = setTimeout(() => {
+                this.updateContainerScrollState();
+            }, 16);
+        };
 
         // Add scroll listener to this container
-        this.container.addEventListener('scroll', debouncedScrollHandler, { passive: true });
+        this.container.addEventListener('scroll', scrollHandler, { passive: true });
 
         // Store reference for cleanup
-        this.containerScrollHandler = debouncedScrollHandler;
+        this.containerScrollHandler = scrollHandler;
     }
 
     // Add new method to update container scroll state
