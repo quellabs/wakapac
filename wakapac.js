@@ -4107,11 +4107,6 @@
      * @returns {string} The resolved path with array indices (e.g., 'users[0].name') or original path if no resolution needed
      */
     Context.prototype.resolveScopedPath = function(scopedPath, element) {
-        // If no dot in path, it's just a variable name - no resolution needed
-        if (!scopedPath.includes('.')) {
-            return scopedPath;
-        }
-
         // Find the foreach element that defines this scoped variable
         const foreachElement = this.findForeachElementForScopedPath(scopedPath, element);
 
