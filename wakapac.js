@@ -178,6 +178,19 @@
         },
 
         /**
+         * Converts a path string into an array of segments.
+         * @param {string|string[]} pathString - Path expression as string or array.
+         * @returns {string[]} Array of path segments.
+         */
+        pathStringToArray(pathString) {
+            if (Array.isArray(pathString)) {
+                return pathString;
+            }
+
+            return String(pathString).split(/[.\[\]]+/).filter(Boolean);
+        },
+
+        /**
          * Converts an array of path segments into a JavaScript property access string.
          * Handles both dot notation for properties and bracket notation for numeric indices.
          * @param {string[]} pathArray - Array of path segments representing object property access
@@ -4143,9 +4156,8 @@
      * @returns {string} - The normalized global path string.
      */
     Context.prototype.normalizePath = function normalizePath(pathSegments, element) {
-        if (!Array.isArray(pathSegments) || pathSegments.length === 0) {
-            return "";
-        }
+        // Make sure path is an array
+        pathSegments = Utils.pathStringToArray(pathSegments);
 
         // Get the entire foreach chain
         const frames = this.getForeachChain(element);
