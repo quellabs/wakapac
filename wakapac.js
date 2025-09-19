@@ -197,24 +197,20 @@
          * @returns {string} Formatted property access string (e.g., "user.settings[0].name")
          */
         pathArrayToString(pathArray) {
-            // Handle empty array case
             if (pathArray.length === 0) {
                 return '';
             }
 
-            // Start with the root property (no dot prefix needed)
-            let result = pathArray[0];
+            let result = String(pathArray[0]); // Convert first token to string
 
-            // Process remaining path segments
             for (let i = 1; i < pathArray.length; i++) {
                 const part = pathArray[i];
 
-                // Check if current segment is a numeric index using regex
-                if (/^\d+$/.test(part)) {
-                    // Numeric index - use bracket notation for array access
+                // Handle numeric indices
+                if (typeof part === 'number' || /^\d+$/.test(String(part))) {
                     result += `[${part}]`;
                 } else {
-                    // Property name - use dot notation for object property access
+                    // Handle property names
                     result += `.${part}`;
                 }
             }
@@ -1982,13 +1978,15 @@
                 return resolvedPath;
             }
 
+            // Ensure resolvedPath is a string for string operations
+            resolvedPath = String(resolvedPath);
+
             // Handle simple property access (no dots or brackets)
             if (resolvedPath.indexOf('.') === -1 && resolvedPath.indexOf('[') === -1) {
                 return (resolvedPath in obj) ? obj[resolvedPath] : undefined;
             }
 
             // Split path by both dots and brackets, handling bracket notation correctly
-            // "todos[0].text" becomes ["todos", "0", "text"]
             const parts = resolvedPath.split(/[.\[\]]+/).filter(Boolean);
             let current = obj;
 
@@ -4160,10 +4158,9 @@
      * @returns {string} Fully qualified data path.
      */
     Context.prototype.normalizePath = function normalizePath(pathSegments, element) {
-        // Convert to array
+        // Convert to array and handle empty paths
         const path = Utils.pathStringToArray(pathSegments);
 
-        // Check if path is empty
         if (!path.length) {
             return "";
         }
@@ -4174,19 +4171,19 @@
             climbs++;
         }
 
-        // Get effective frames after climbing (skip first N frames for parent climbs)
+        // Get effective frames after climbing
         const frames = this.getForeachChain(element).slice(climbs);
         const scope = new Map();
 
-        // Build variable scope (innermost-first order means first occurrence wins)
+        // Build variable scope
         for (const f of frames) {
-            // Map item variable: "item" → "users[0]" or "users[0].posts[1]"
+            // Map item variable: "item" → "users[0]"
             if (!scope.has(f.itemVar)) {
                 const base = scope.get(f.sourceArray) || f.sourceArray;
                 scope.set(f.itemVar, `${base}[${f.index}]`);
             }
 
-            // Map index variable to its numeric value
+            // Map index variable to numeric value
             if (f.indexVar && !scope.has(f.indexVar)) {
                 scope.set(f.indexVar, f.index);
             }
@@ -4199,22 +4196,37 @@
             return "";
         }
 
-        // Check if this is an index variable that should return a number
-        const firstToken = remaining[0];
-        if (scope.has(firstToken) && typeof scope.get(firstToken) === 'number') {
-            // This is an index variable - return the numeric value directly
-            return scope.get(firstToken);
-        }
+        // Process each token as a slot that might need replacement
+        const resolvedTokens = [];
 
-        // Handle normal property resolution
-        let result = scope.get(firstToken) || firstToken;
-
-        for (let i = 1; i < remaining.length; i++) {
+        for (let i = 0; i < remaining.length; i++) {
             const token = remaining[i];
-            result += /^\d+$/.test(token) ? `[${token}]` : `.${token}`;
+
+            if (scope.has(token)) {
+                const scopeValue = scope.get(token);
+
+                if (typeof scopeValue === 'number') {
+                    // Index variable - add as numeric index
+                    resolvedTokens.push(scopeValue);
+                } else {
+                    // Item variable - it's already a resolved path like "users[0]"
+                    // Split it and add each part
+                    const itemParts = scopeValue.split(/[.\[\]]+/).filter(Boolean);
+                    resolvedTokens.push(...itemParts);
+                }
+            } else {
+                // Regular token - add as-is
+                resolvedTokens.push(token);
+            }
         }
 
-        return result;
+        // Special case: if the entire path resolves to just a number, return it directly
+        if (resolvedTokens.length === 1 && typeof resolvedTokens[0] === 'number') {
+            return resolvedTokens[0];
+        }
+
+        // Convert resolved tokens back to path string
+        return Utils.pathArrayToString(resolvedTokens);
     };
 
     /**
