@@ -2541,11 +2541,6 @@
     function Context(container, abstraction, parent = null, config) {
         const self = this;
 
-        // Ensure container has the required attribute
-        if (!container.hasAttribute('data-pac-container')) {
-            container.setAttribute('data-pac-container', Utils.uniqid());
-        }
-
         this.originalAbstraction = abstraction;
         this.parent = parent;
         this.children = new Set();
@@ -2562,9 +2557,6 @@
 
         // Setup intersection observer for container visibility checking
         this.setupIntersectionObserver();
-
-        // Scan the container for items and store them in interpolationMap and textInterpolationMap
-        this.scanAndRegisterNewElements(this.container);
 
         // Add interval for checking updateQueue
         this.updateQueue = new Map();
@@ -3597,9 +3589,6 @@
      * @returns {Map<WeakKey, any>}
      */
     Context.prototype.scanTextBindings = function(parentElement) {
-        console.log('scanTextBindings called for:', parentElement.getAttribute('data-pac-container'));
-        console.log('Child container has attribute:', document.getElementById('child-component')?.hasAttribute('data-pac-container'));
-
         const interpolationMap = new Map();
 
         // Create tree walker to find text nodes with interpolation expressions
@@ -4304,6 +4293,9 @@
         this.updateParentRelationship(parent);
         this.updateChildrenRelationships(children);
         this.updateReactiveProperties();
+
+        // Perform scanning when all containers are properly marked
+        this.scanAndRegisterNewElements(this.container);
     };
 
     /**
@@ -4425,43 +4417,6 @@
         }
     };
 
-    // ========================================================================
-    // MAIN FRAMEWORK
-    // ========================================================================
-
-    function wakaPAC(selector, abstraction, options) {
-        // Initialize global event tracking first
-        DomUpdateTracker.initialize();
-
-        // Fetch selector
-        const container = document.querySelector(selector);
-        if (!container) {
-            throw new Error(`Container not found: ${selector}`);
-        }
-
-        // Merge configuration
-        const config = Object.assign({
-            updateMode: 'immediate',
-            delay: 300
-        }, options);
-
-        // Create context directly
-        const context = new Context(container, abstraction, null, config);
-
-        // Register in global registry and establish hierarchy
-        // Add this component to the global registry using its CSS selector as the key,
-        // making it discoverable by other components and external code
-        window.PACRegistry.register(selector, context);
-
-        // Signal that a new component is ready to set proper hierarchies
-        document.dispatchEvent(new CustomEvent('pac:component-ready', {
-            detail: { component: context, selector: selector }
-        }));
-
-        // Return the reactive abstraction
-        return context.abstraction;
-    }
-
     // =============================================================================
     // COMPONENT REGISTRY
     // =============================================================================
@@ -4540,6 +4495,49 @@
             return hierarchy;
         }
     };
+
+    // ========================================================================
+    // MAIN FRAMEWORK
+    // ========================================================================
+
+    function wakaPAC(selector, abstraction, options) {
+        // Initialize global event tracking first
+        DomUpdateTracker.initialize();
+
+        // Fetch selector
+        const container = document.querySelector(selector);
+        if (!container) {
+            throw new Error(`Container not found: ${selector}`);
+        }
+
+        // Mark this container BEFORE creating the Context
+        // This ensures other components can see it during their scanning
+        if (!container.hasAttribute('data-pac-container')) {
+            container.setAttribute('data-pac-container', Utils.uniqid());
+        }
+
+        // Merge configuration
+        const config = Object.assign({
+            updateMode: 'immediate',
+            delay: 300
+        }, options);
+
+        // Create context directly
+        const context = new Context(container, abstraction, null, config);
+
+        // Register in global registry and establish hierarchy
+        // Add this component to the global registry using its CSS selector as the key,
+        // making it discoverable by other components and external code
+        window.PACRegistry.register(selector, context);
+
+        // Signal that a new component is ready to set proper hierarchies
+        document.dispatchEvent(new CustomEvent('pac:component-ready', {
+            detail: { component: context, selector: selector }
+        }));
+
+        // Return the reactive abstraction
+        return context.abstraction;
+    }
 
     // ========================================================================
     // EXPORTS
