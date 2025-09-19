@@ -2615,9 +2615,25 @@
         this.container.addEventListener('pac:array-change', this.boundHandlePacEvent);
         this.container.addEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.addEventListener('pac:focus-state', this.boundHandlePacEvent);
+
+        // Call init() method if it exists after all setup is complete
+        if (
+            this.abstraction.init &&
+            typeof this.abstraction.init === 'function'
+        ) {
+            try {
+                this.abstraction.init.call(this.abstraction);
+            } catch (error) {
+                console.error('Error in init() method:', error);
+            }
+        }
     }
 
     Context.prototype.destroy = function() {
+        // Clear updateQueueCallback interval
+        clearInterval(this.updateQueueInterval);
+        this.updateQueueCallback = null;
+
         // Remove event listeners
         this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
@@ -3485,6 +3501,11 @@
         const pathString = Utils.pathArrayToString(event.detail.path);
         const pathsToCheck = [pathString];
 
+        // Trigger watchers for root property changes (not nested changes)
+        if (event.detail.path.length === 1) {
+            this.triggerWatcher(pathString, event.detail.newValue, event.detail.oldValue);
+        }
+
         // Check if the changed path has any registered dependencies and include them
         if (this.dependencies.has(pathString)) {
             pathsToCheck.push(...this.dependencies.get(pathString));
@@ -3529,6 +3550,31 @@
                 });
             }
         });
+    };
+
+    /**
+     * Triggers watchers for property changes - simple property name matching only
+     * @param {string} property - The property that changed
+     * @param {*} newValue - The new value
+     * @param {*} oldValue - The old value
+     */
+    Context.prototype.triggerWatcher = function(property, newValue, oldValue) {
+        // Guard missing watch object
+        if (!this.originalAbstraction.watch) {
+            return;
+        }
+
+        // Only handle direct property watchers - no pattern matching
+        if (
+            this.originalAbstraction.watch[property] &&
+            typeof this.originalAbstraction.watch[property] === 'function'
+        ) {
+            try {
+                this.originalAbstraction.watch[property].call(this.abstraction, newValue, oldValue);
+            } catch (error) {
+                console.error('Error in watcher for \'' + property + '\':', error);
+            }
+        }
     };
 
     /**
