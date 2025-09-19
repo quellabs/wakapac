@@ -4251,7 +4251,6 @@
 
         // Fetch selector
         const container = document.querySelector(selector);
-
         if (!container) {
             throw new Error(`Container not found: ${selector}`);
         }
@@ -4262,27 +4261,19 @@
             delay: 300
         }, options);
 
-        const control = {
+        // Create context directly
+        const context = new Context(container, abstraction, null, config);
+
+        // Register in PACRegistry for cleanup/debugging if needed
+        window.PACRegistry.register(selector, {
             selector: selector,
             container: container,
             config: config,
-            context: new Context(container, abstraction, null, config),
+            context: context
+        });
 
-            /**
-             * Constructor
-             * @returns {control}
-             */
-            initialize: function () {
-                return this;
-            }
-        };
-
-        // Initialize control
-        const controlUnit = control.initialize();
-
-        // Return the reactive abstraction directly, not a copy
-        window.PACRegistry.register(selector, control);
-        return controlUnit.context.abstraction;
+        // Return the reactive abstraction
+        return context.abstraction;
     }
 
     // ========================================================================
