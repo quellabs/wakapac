@@ -2653,7 +2653,14 @@
         }
 
         if (typeof value === 'string') {
-            element.className = value;
+            // Remove previous dynamic class if it exists
+            if (element._pacDynamicClass) {
+                element.classList.remove(element._pacDynamicClass);
+            }
+
+            // Add new dynamic class
+            element.classList.add(value);
+            element._pacDynamicClass = value;
         }
     };
 
