@@ -4120,6 +4120,12 @@
      * @returns {number} The original index in the source array
      */
     Context.prototype.findOriginalIndex = function(item, sourceArray, fallbackIndex) {
+        // For primitive arrays (like flatGrid with numbers), the renderIndex IS the correct index
+        // because the array items are primitives that appear in order
+        if (typeof item === 'number' || typeof item === 'string' || typeof item === 'boolean') {
+            return fallbackIndex;
+        }
+
         // Strategy 1: Direct reference comparison (works for object references)
         for (let i = 0; i < sourceArray.length; i++) {
             if (sourceArray[i] === item) {
