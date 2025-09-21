@@ -803,7 +803,10 @@
              * Tracks when user releases any key
              */
             document.addEventListener('keyup', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_KEYUP, event);
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_KEYUP, event, {
+                    key: event.key,
+                    code: event.code
+                });
             });
 
             /**
@@ -3156,10 +3159,37 @@
      * Handles PAC events based on message type
      * @param {CustomEvent} event - The PAC event containing message details
      * @param {Object} event.detail - Event detail object
-     * @param {string} event.detail.message - Message type from MSG_TYPES constants
+     * @param {Number} event.detail.message - Message type from MSG_TYPES constants
      * @returns {void}
      */
     Context.prototype.handlePacEvent = function(event) {
+        // Call msgProc if it exists
+        let allowDefault = true;
+
+        if (this.originalAbstraction.msgProc && typeof this.originalAbstraction.msgProc === 'function') {
+            const msgProcResult = this.originalAbstraction.msgProc.call(this.abstraction, event);
+
+            // Only certain message types can be cancelled by msgProc
+            const cancellableEvents = [
+                MSG_TYPES.MSG_LBUTTONUP,
+                MSG_TYPES.MSG_MBUTTONUP,
+                MSG_TYPES.MSG_RBUTTONUP,
+                MSG_TYPES.MSG_SUBMIT,
+                MSG_TYPES.MSG_CHANGE
+            ];
+
+            if (cancellableEvents.includes(event.detail.message) && msgProcResult === false) {
+                allowDefault = false;
+            }
+        }
+
+        // Prevent default if msgProc returned false for cancellable events
+        if (!allowDefault) {
+            event.preventDefault();
+            return;
+        }
+
+        // Call built in event handlers
         switch(event.detail.message) {
             case MSG_TYPES.MSG_LBUTTONDOWN:
             case MSG_TYPES.MSG_MBUTTONDOWN:
@@ -4653,4 +4683,5 @@
 
     // Export to global scope
     window.wakaPAC = wakaPAC;
+    window.MSG_TYPES = MSG_TYPES;
 })();

@@ -21,14 +21,16 @@
             }
         },
 
-        eventProc(message) {
-            if (message.type === 'EVENT_KEYUP') {
-                if (message.key === 'ArrowUp') {
+        msgProc(message) {
+            if (message.detail.message === MSG_TYPES.MSG_KEYUP) {
+                console.log(message.detail);
+
+                if (message.detail.extended.key === 'ArrowUp') {
                     this.increment();
                     return true;
                 }
 
-                if (message.key === 'ArrowDown') {
+                if (message.detail.extended.key === 'ArrowDown') {
                     this.decrement();
                     return true;
                 }
