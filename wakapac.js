@@ -2840,6 +2840,10 @@
                 const sourceArray = this.inferArrayRoot(foreachExpr);
                 element.setAttribute('data-pac-array', sourceArray);
 
+                // Get itemVar and indexVar from attributes
+                const itemVar = element.getAttribute('data-pac-item') || 'item';
+                const indexVar = element.getAttribute('data-pac-index') || 'index';
+
                 // Extend the existing mappingData with foreach-specific information
                 Object.assign(mappingData, {
                     foreachExpr: bindings.foreach.target,
@@ -2847,8 +2851,8 @@
                     foreachId: foreachId,
                     depth: self.calculateForEachDepth(element),
                     template: element.innerHTML,
-                    itemVar: element.getAttribute('data-pac-item') || 'item',
-                    indexVar: element.getAttribute('data-pac-index') || 'index'
+                    itemVar: itemVar,
+                    indexVar: indexVar
                 });
             }
         });
@@ -4158,19 +4162,22 @@
             const context = this.extractClosestForeachContext(current);
 
             if (context) {
-                const forEachContainer = document.querySelector('[data-pac-foreach-id="' + context.foreachId + '"]');
+                const forEachContainer = this.container.querySelector('[data-pac-foreach-id="' + context.foreachId + '"]');
                 const forEachData = this.interpolationMap.get(forEachContainer);
 
-                result.push({
-                    foreachId: context.foreachId,
-                    depth: forEachData.depth,
-                    index: context.index,
-                    renderIndex: context.renderIndex,
-                    container: forEachContainer,
-                    itemVar: forEachData.itemVar,
-                    indexVar: forEachData.indexVar,
-                    sourceArray: forEachData.sourceArray
-                });
+                // Ensure forEachData exists before accessing properties
+                if (forEachData) {
+                    result.push({
+                        foreachId: context.foreachId,
+                        depth: forEachData.depth,
+                        index: context.index,
+                        renderIndex: context.renderIndex,
+                        container: forEachContainer,
+                        itemVar: forEachData.itemVar,
+                        indexVar: forEachData.indexVar,
+                        sourceArray: forEachData.sourceArray
+                    });
+                }
             }
 
             current = this.findParentForeachElement(current);
