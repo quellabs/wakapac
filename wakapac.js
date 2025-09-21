@@ -2375,6 +2375,9 @@
         /** @type {Map<string, *>} Internal cache storage mapping expression strings to parsed results */
         cache: new Map(),
 
+        /** @type {Map<string, *>} Internal cache for binding strings */
+        bindingCache: new Map(),
+
         /** @type {number} Maximum number of cached entries before LRU eviction begins */
         maxSize: 1000, // Prevent unbounded growth
 
@@ -2412,12 +2415,46 @@
         },
 
         /**
+         * Parses a binding string with caching support.
+         * Uses string representation of the binding string as cache key for consistent lookups.
+         * Implements simple LRU eviction when cache exceeds maxSize.
+         * @param {string} bindingString - The binding string to parse (e.g., "value: name, class: { active: isActive }")
+         * @returns {Array} The parsed binding pairs from ExpressionParser or cache
+         */
+        parseBindingString(bindingString) {
+            // Convert to string and use as cache key
+            // Trimming ensures consistent keys regardless of whitespace variations
+            const key = String(bindingString).trim();
+
+            // Check binding cache first - O(1) lookup
+            if (this.bindingCache.has(key)) {
+                return this.bindingCache.get(key);
+            }
+
+            // Parse using existing parser
+            const result = ExpressionParser.parseBindingString(bindingString);
+
+            // Cache management - implement simple LRU eviction for binding cache
+            if (this.bindingCache.size >= this.maxSize) {
+                // Simple LRU: delete oldest entry (first inserted)
+                // Note: Map maintains insertion order, so first key is oldest
+                const firstKey = this.bindingCache.keys().next().value;
+                this.bindingCache.delete(firstKey);
+            }
+
+            // Store result in binding cache for future lookups
+            this.bindingCache.set(key, result);
+            return result;
+        },
+
+        /**
          * Clears all cached expressions.
          * Useful for memory management or when expression parsing logic changes.
          * @returns {void}
          */
         clear() {
             this.cache.clear();
+            this.bindingCache.clear();
         }
     };
 
@@ -3854,7 +3891,7 @@
             }
 
             const bindingString = element.getAttribute('data-pac-bind');
-            const parsedBindings = ExpressionParser.parseBindingString(bindingString);
+            const parsedBindings = ExpressionCache.parseBindingString(bindingString);
 
             // Transform bindings array into object keyed by binding type
             const bindingsObject = {};
