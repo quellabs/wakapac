@@ -1628,37 +1628,46 @@
          * Parses primary expressions (parentheses, properties, literals)
          * @returns {Object|null} Primary expression AST node
          */
+        /**
+         * Parses primary expressions (parentheses, properties, literals)
+         * @returns {Object|null} Primary expression AST node
+         */
         parsePrimary() {
             // Parentheses
             if (this.match('LPAREN')) {
                 const expr = this.parseTernary();
                 this.consume('RPAREN', 'Expected closing parenthesis');
 
-                return {
+                return this.parsePostfixOperators({
                     type: 'parentheses',
                     inner: expr
-                };
+                });
+            }
+
+            // Array literals
+            if (this.match('LBRACKET')) {
+                return this.parsePostfixOperators(this.parseArrayLiteral());
             }
 
             // Object literals
             if (this.match('LBRACE')) {
-                return this.parseObjectLiteral();
+                return this.parsePostfixOperators(this.parseObjectLiteral());
             }
 
             // String literals
             if (this.check('STRING')) {
-                return {
+                return this.parsePostfixOperators({
                     type: 'literal',
                     value: this.advance().value
-                };
+                });
             }
 
             // Number literals
             if (this.check('NUMBER')) {
-                return {
+                return this.parsePostfixOperators({
                     type: 'literal',
                     value: this.advance().value
-                };
+                });
             }
 
             // Keywords (true, false, null, undefined)
@@ -1684,18 +1693,67 @@
                         break;
                 }
 
-                return {
+                return this.parsePostfixOperators({
                     type: 'literal',
                     value: value
-                };
+                });
             }
 
             // Property access
             if (this.check('IDENTIFIER')) {
-                return this.parsePropertyAccess();
+                return this.parsePostfixOperators(this.parsePropertyAccess());
             }
 
             return null;
+        },
+
+        parsePostfixOperators(expr) {
+            while (true) {
+                if (this.match('LBRACKET')) {
+                    // Array/object indexing: expr[index]
+                    const index = this.parseTernary();
+                    this.consume('RBRACKET', 'Expected closing bracket');
+
+                    expr = {
+                        type: 'index',
+                        object: expr,
+                        index
+                    };
+                } else if (this.match('DOT')) {
+                    // Property access: expr.prop
+                    if (this.check('IDENTIFIER')) {
+                        const property = this.advance().value;
+                        expr = {
+                            type: 'member',
+                            object: expr,
+                            property
+                        };
+                    } else {
+                        throw new Error('Expected property name after "."');
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            return expr;
+        },
+
+        parseArrayLiteral() {
+            const elements = [];
+
+            if (!this.check('RBRACKET')) {
+                do {
+                    elements.push(this.parseTernary());
+                } while (this.match('COMMA') && !this.check('RBRACKET'));
+            }
+
+            this.consume('RBRACKET', 'Expected closing bracket');
+
+            return {
+                type: 'array',
+                elements
+            };
         },
 
         /**
@@ -1914,8 +1972,22 @@
                 case 'parentheses':
                     return this.evaluate(parsedExpr.inner, context, scopeResolver);
 
+                case 'array':
+                    return this.evaluateArrayLiteral(parsedExpr, context, scopeResolver);
+
                 case 'object':
                     return this.evaluateObjectLiteral(parsedExpr, context, scopeResolver);
+
+                case 'index': {
+                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
+                    const index = this.evaluate(parsedExpr.index, context, scopeResolver);
+                    return object && object[index];
+                }
+
+                case 'member': {
+                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
+                    return object && object[parsedExpr.property];
+                }
 
                 case 'ternary': {
                     const condition = this.evaluate(parsedExpr.condition, context, scopeResolver);
@@ -2005,6 +2077,16 @@
             return current;
         },
 
+        evaluateArrayLiteral(arrayExpr, context, resolverContext = null) {
+            if (!arrayExpr.elements) {
+                return [];
+            }
+
+            return arrayExpr.elements.map(element =>
+                this.evaluate(element, context, resolverContext)
+            );
+        },
+
         evaluateObjectLiteral(objectExpr, context, resolverContext = null) {
             const result = {};
 
@@ -2091,6 +2173,21 @@
                         break;
                     }
 
+                    case 'array':
+                        if (n.elements) {
+                            n.elements.forEach(element => traverse(element));
+                        }
+                        break;
+
+                    case 'index':
+                        traverse(n.object);
+                        traverse(n.index);
+                        break;
+
+                    case 'member':
+                        traverse(n.object);
+                        break;
+
                     case 'ternary':
                         traverse(n.condition);
                         traverse(n.trueValue);
@@ -2137,6 +2234,7 @@
             let quoteChar = '';
             let parenDepth = 0;
             let braceDepth = 0;
+            let bracketDepth = 0;  // ADD: Track bracket depth
 
             for (let i = 0; i < bindingString.length; i++) {
                 const char = bindingString[i];
@@ -2161,10 +2259,15 @@
                         braceDepth++;
                     } else if (char === '}') {
                         braceDepth--;
+                    } else if (char === '[') {          // ADD: Track opening brackets
+                        bracketDepth++;
+                    } else if (char === ']') {          // ADD: Track closing brackets
+                        bracketDepth--;
                     }
                 }
 
-                if (char === ',' && !inQuotes && parenDepth === 0 && braceDepth === 0) {
+                // CHANGE: Only split on commas at top level (not inside nested structures)
+                if (char === ',' && !inQuotes && parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
                     this.addBindingPairIfValid(current, pairs);
                     current = '';
                 } else {
@@ -2209,6 +2312,7 @@
          * @returns {number} Index of colon or -1
          */
         findBindingColon(str) {
+            // Check for known binding types first
             for (const type of KNOWN_BINDING_TYPES) {
                 if (str.startsWith(type + ':')) {
                     return type.length;
@@ -2218,6 +2322,8 @@
             let inQuotes = false;
             let quoteChar = '';
             let parenDepth = 0;
+            let bracketDepth = 0;  // Track bracket depth for arrays
+            let braceDepth = 0;    // Track brace depth for objects
 
             for (let i = 0; i < str.length; i++) {
                 const char = str[i];
@@ -2238,7 +2344,15 @@
                         parenDepth++;
                     } else if (char === ')') {
                         parenDepth--;
-                    } else if (char === ':' && parenDepth === 0) {
+                    } else if (char === '[') {
+                        bracketDepth++;
+                    } else if (char === ']') {
+                        bracketDepth--;
+                    } else if (char === '{') {
+                        braceDepth++;
+                    } else if (char === '}') {
+                        braceDepth--;
+                    } else if (char === ':' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
                         return i;
                     }
                 }

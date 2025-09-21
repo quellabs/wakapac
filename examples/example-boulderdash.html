@@ -130,8 +130,8 @@
     </div>
 
     <div class="game-board" data-pac-bind="foreach: flatGrid" data-pac-item="cellType" data-pac-index="i">
-        <div class="cell" data-pac-bind="class: cellType === 0 ? 'empty' : cellType === 1 ? 'wall' : cellType === 2 ? 'dirt' : cellType === 3 ? 'player' : cellType === 4 ? 'boulder' : cellType === 5 ? 'diamond' : 'exit'">
-            {{cellType === 0 ? '' : cellType === 1 ? '█' : cellType === 2 ? '▒' : cellType === 3 ? '☺' : cellType === 4 ? '●' : cellType === 5 ? '♦' : '⚑'}}
+        <div class="cell" data-pac-bind="class:['empty', 'wall', 'dirt', 'player', 'boulder', 'diamond', 'exit'][cellType]">
+            {{['', '█', '▒', '☺', '●', '♦', '⚑'][cellType]}}
         </div>
     </div>
 
