@@ -1,425 +1,254 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Boulderdash Game - WakaPAC</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Boulderdash — single rAF loop</title>
     <style>
-        body {
-            font-family: 'Courier New', monospace;
-            background: #1a1a2e;
-            color: #eee;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-
-        .game-container {
-            text-align: center;
-            background: #16213e;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
-        }
-
-        .game-header {
-            margin-bottom: 20px;
-        }
-
-        .stats {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 15px;
-            font-size: 18px;
-            font-weight: bold;
-        }
-
-        .game-board {
-            display: grid;
-            grid-template-columns: repeat(20, 25px);
-            gap: 1px;
-            background: #0f3460;
-            padding: 10px;
-            border: 3px solid #00d4aa;
-            border-radius: 5px;
-            margin: 0 auto;
-            width: fit-content;
-        }
-
-        .row {
-            display: contents;
-        }
-
-        .cell {
-            width: 25px;
-            height: 25px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            font-weight: bold;
-            border-radius: 2px;
-            transition: all 0.1s ease;
-        }
-
-        .wall { background: #666; color: #333; }
-        .dirt { background: #8B4513; color: #654321; }
-        .empty { background: #000; }
-        .player { background: #FFD700; color: #000; }
-        .boulder { background: #708090; color: #2F4F4F; }
-        .diamond { background: #00FFFF; color: #006666; }
-        .exit { background: #FF6B6B; color: #8B0000; }
-
-        .controls {
-            margin-top: 20px;
-            font-size: 14px;
-            color: #aaa;
-        }
-
-        .game-over, .level-complete {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9);
-            color: white;
-            padding: 30px;
-            border-radius: 10px;
-            text-align: center;
-            z-index: 1000;
-            border: 3px solid;
-        }
-
-        .game-over {
-            border-color: #FF6B6B;
-        }
-
-        .level-complete {
-            border-color: #00d4aa;
-        }
-
-        .restart-btn {
-            background: #00d4aa;
-            color: #1a1a2e;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            margin-top: 15px;
-        }
-
-        .restart-btn:hover {
-            background: #00b894;
-        }
+        :root { --cell: 26px; }
+        body { margin:0; background:#0b1020; color:#e6e6e6; font:14px/1.4 system-ui,Segoe UI,Roboto,Arial; display:grid; place-items:center; min-height:100vh; }
+        .wrap { width: min(95vw, 980px); }
+        header { display:flex; gap:12px; align-items:center; justify-content:space-between; margin:20px 0; }
+        header h1 { font:600 16px/1 system-ui; margin:0; letter-spacing:.3px; }
+        .stats { display:flex; gap:12px; }
+        .badge { background:#141a33; padding:6px 10px; border-radius:10px; }
+        .grid { display:grid; grid-template-columns: repeat(var(--cols), var(--cell)); grid-auto-rows: var(--cell); gap:2px; background:#0b0f1f; padding:6px; border-radius:12px; box-shadow: 0 4px 24px rgba(0,0,0,.35) inset; }
+        .cell { display:grid; place-items:center; font-weight:700; border-radius:4px; user-select:none; width:var(--cell); height:var(--cell); }
+        .empty { background:#000; }
+        .wall { background:#5e6b77; color:#1e2327; }
+        .dirt { background:#7b4a20; color:#4c2b13; }
+        .player { background:#ffd400; color:#000; }
+        .boulder { background:#6a7680; color:#2a343b; }
+        .diamond { background:#1be9ff; color:#004b52; }
+        .exit { background:#11644d; color:#0a2e22; }
+        .controls { margin-top:12px; display:flex; gap:8px; }
+        button { background:#243056; color:#e6e6e6; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; }
+        button:active { transform: translateY(1px); }
     </style>
 </head>
 <body>
-<div class="game-container" id="gameContainer">
-    <div class="game-header">
-        <h1>🗿 Boulderdash</h1>
+<div class="wrap">
+    <header>
+        <h1>Boulderdash</h1>
         <div class="stats">
-            <div>Level: <span data-pac-bind="text">{{level}}</span></div>
-            <div>Diamonds: <span data-pac-bind="text">{{diamonds}}</span>/{{diamondsNeeded}}</div>
-            <div>Score: <span data-pac-bind="text">{{score}}</span></div>
+            <div class="badge">Level: <span id="level">1</span></div>
+            <div class="badge">Score: <span id="score">0</span></div>
+            <div class="badge">Diamonds: <span id="diam">0</span>/<span id="need">0</span></div>
         </div>
-    </div>
-
-    <div class="game-board" data-pac-bind="foreach: flatGrid" data-pac-item="cellType" data-pac-index="i">
-        <div class="cell" data-pac-bind="class:['empty', 'wall', 'dirt', 'player', 'boulder', 'diamond', 'exit'][cellType]">
-            {{['', '█', '▒', '☺', '●', '♦', '⚑'][cellType]}}
-        </div>
-    </div>
-
+    </header>
+    <div id="grid" class="grid"></div>
     <div class="controls">
-        Use WASD or Arrow Keys to move • Collect diamonds • Avoid falling boulders • Find the exit!
-    </div>
-
-    <div data-pac-bind="visible:gameOver" class="game-over">
-        <h2>💀 Game Over!</h2>
-        <p>You were crushed by a boulder!</p>
-        <p>Final Score: <span data-pac-bind="text">{{score}}</span></p>
-        <button class="restart-btn" data-pac-bind="click:restart">Try Again</button>
-    </div>
-
-    <div data-pac-bind="visible:levelComplete" class="level-complete">
-        <h2>🎉 Level Complete!</h2>
-        <p>Great job collecting all the diamonds!</p>
-        <p>Score: <span data-pac-bind="text">{{score}}</span></p>
-        <button class="restart-btn" data-pac-bind="click:nextLevel">Next Level</button>
+        <button id="restart">Restart</button>
+        <button id="next">Next level</button>
     </div>
 </div>
 
-<script src="../wakapac.js"></script>
-
 <script>
-    const EMPTY = 0;
-    const WALL = 1;
-    const DIRT = 2;
-    const PLAYER = 3;
-    const BOULDER = 4;
-    const DIAMOND = 5;
-    const EXIT = 6;
-    const BOARD_WIDTH = 20;
-    const BOARD_HEIGHT = 15;
+    // ==== config =====
+    const BOARD_WIDTH = 28;
+    const BOARD_HEIGHT = 18;
+    const EMPTY=0, WALL=1, DIRT=2, PLAYER=3, BOULDER=4, DIAMOND=5, EXIT=6;
+    const CLASSES = ['empty','wall','dirt','player','boulder','diamond','exit'];
+    const GLYPHS = ['', '█','▒','☺','●','♦','⚑'];
 
-    const game = wakaPAC('#gameContainer', {
-        level: 1,
-        score: 0,
-        diamonds: 0,
-        diamondsNeeded: 5,
-        gameOver: false,
-        levelComplete: false,
+    // ==== state =====
+    const game = {
+        grid: [],
+        flat: [],
         playerX: 1,
         playerY: 1,
-        grid: [],
-        flatGrid: [],
+        diamonds: 0,
+        need: 0,
+        level: 1,
+        score: 0,
+        over: false,
+        won: false,
+        loopId: null,
+        lastTick: 0,
+        controlsReady: false
+    };
 
-        init() {
-            console.log('Game initializing...');
-            this.generateLevel();
+    // ==== setup DOM =====
+    const elGrid = document.getElementById('grid');
+    const elLevel = document.getElementById('level');
+    const elScore = document.getElementById('score');
+    const elDiam = document.getElementById('diam');
+    const elNeed = document.getElementById('need');
 
-            console.log('Grid after generation:', this.grid);
-            console.log('First row:', this.grid[0]);
-            console.log('Grid dimensions:', this.grid.length, 'x', this.grid[0]?.length);
-            this.startGameLoop();
-            this.setupControls();
-        },
-
-        generateLevel() {
-            this.grid = [];
-            this.playerX = 1;
-            this.playerY = 1;
-            this.diamonds = 0;
-            this.gameOver = false;
-            this.levelComplete = false;
-            this.diamondsNeeded = Math.min(5 + this.level * 2, 15);
-
-            for (let y = 0; y < BOARD_HEIGHT; y++) {
-                const row = [];
-
-                for (let x = 0; x < BOARD_WIDTH; x++) {
-                    if (x === 0 || x === BOARD_WIDTH - 1 || y === 0 || y === BOARD_HEIGHT - 1) {
-                        row.push(WALL);
-                    } else {
-                        row.push(DIRT);
-                    }
-                }
-
-                this.grid.push(row);
-            }
-
-            this.grid[this.playerY][this.playerX] = PLAYER;
-            this.createCaves();
-            this.placeBoulders();
-            this.placeDiamonds();
-            this.placeExit();
-            this.updateFlatGrid();
-        },
-
-        updateFlatGrid() {
-            this.flatGrid = [];
-
-            for (let y = 0; y < BOARD_HEIGHT; y++) {
-                for (let x = 0; x < BOARD_WIDTH; x++) {
-                    this.flatGrid.push(this.grid[y][x]);
-                }
-            }
-
-            console.log('Flat grid created with', this.flatGrid.length, 'cells');
-        },
-
-        createCaves() {
-            const numCaves = 3 + Math.floor(this.level / 2);
-
-            for (let i = 0; i < numCaves; i++) {
-                const x = 2 + Math.floor(Math.random() * (BOARD_WIDTH - 4));
-                const y = 2 + Math.floor(Math.random() * (BOARD_HEIGHT - 4));
-                const size = 2 + Math.floor(Math.random() * 3);
-
-                for (let dy = 0; dy < size; dy++) {
-                    for (let dx = 0; dx < size; dx++) {
-                        const newX = x + dx;
-                        const newY = y + dy;
-
-                        if (newX < BOARD_WIDTH - 1 && newY < BOARD_HEIGHT - 1 &&
-                            this.grid[newY][newX] !== PLAYER) {
-                            this.grid[newY][newX] = EMPTY;
-                        }
-                    }
-                }
-            }
-        },
-
-        placeBoulders() {
-            const numBoulders = 8 + this.level * 2;
-            let placed = 0;
-
-            while (placed < numBoulders) {
-                const x = 1 + Math.floor(Math.random() * (BOARD_WIDTH - 2));
-                const y = 1 + Math.floor(Math.random() * (BOARD_HEIGHT - 2));
-
-                if (this.grid[y][x] === DIRT &&
-                    Math.abs(x - this.playerX) + Math.abs(y - this.playerY) > 3) {
-                    this.grid[y][x] = BOULDER;
-                    placed++;
-                }
-            }
-        },
-
-        placeDiamonds() {
-            let placed = 0;
-
-            while (placed < this.diamondsNeeded) {
-                const x = 1 + Math.floor(Math.random() * (BOARD_WIDTH - 2));
-                const y = 1 + Math.floor(Math.random() * (BOARD_HEIGHT - 2));
-
-                if (this.grid[y][x] === DIRT || this.grid[y][x] === EMPTY) {
-                    this.grid[y][x] = DIAMOND;
-                    placed++;
-                }
-            }
-        },
-
-        placeExit() {
-            let placed = false;
-
-            while (!placed) {
-                const x = 1 + Math.floor(Math.random() * (BOARD_WIDTH - 2));
-                const y = 1 + Math.floor(Math.random() * (BOARD_HEIGHT - 2));
-
-                if (this.grid[y][x] === DIRT &&
-                    Math.abs(x - this.playerX) + Math.abs(y - this.playerY) > 5) {
-                    this.grid[y][x] = EXIT;
-                    placed = true;
-                }
-            }
-        },
-
-        setupControls() {
-            document.addEventListener('keydown', (e) => {
-                if (this.gameOver || this.levelComplete) {
-                    return;
-                }
-
-                let newX = this.playerX;
-                let newY = this.playerY;
-
-                switch(e.key.toLowerCase()) {
-                    case 'w': case 'arrowup': newY--; break;
-                    case 's': case 'arrowdown': newY++; break;
-                    case 'a': case 'arrowleft': newX--; break;
-                    case 'd': case 'arrowright': newX++; break;
-                    default: return;
-                }
-
-                e.preventDefault();
-                this.movePlayer(newX, newY);
-            });
-        },
-
-        movePlayer(newX, newY) {
-            if (newX < 0 || newX >= BOARD_WIDTH || newY < 0 || newY >= BOARD_HEIGHT) {
-                return;
-            }
-
-            const targetCell = this.grid[newY][newX];
-
-            switch(targetCell) {
-                case WALL:
-                    return;
-
-                case BOULDER:
-                    const pushX = newX + (newX - this.playerX);
-                    const pushY = newY + (newY - this.playerY);
-
-                    if (pushX >= 0 && pushX < BOARD_WIDTH && pushY >= 0 && pushY < BOARD_HEIGHT &&
-                        this.grid[pushY][pushX] === EMPTY) {
-                        this.grid[pushY][pushX] = BOULDER;
-                        this.grid[newY][newX] = PLAYER;
-                        this.grid[this.playerY][this.playerX] = EMPTY;
-                        this.playerX = newX;
-                        this.playerY = newY;
-                        this.updateFlatGrid();
-                    }
-
-                    break;
-
-                case DIAMOND:
-                    this.diamonds++;
-                    this.score += 10;
-
-                case DIRT:
-                case EMPTY:
-                    this.grid[this.playerY][this.playerX] = EMPTY;
-                    this.grid[newY][newX] = PLAYER;
-                    this.playerX = newX;
-                    this.playerY = newY;
-                    this.updateFlatGrid();
-                    break;
-
-                case EXIT:
-                    if (this.diamonds >= this.diamondsNeeded) {
-                        this.levelComplete = true;
-                        this.score += 100;
-                    }
-                    break;
-            }
-        },
-
-        startGameLoop() {
-            this.gameInterval = setInterval(() => {
-                if (!this.gameOver && !this.levelComplete) {
-                    this.updatePhysics();
-                }
-            }, 500);
-        },
-
-        updatePhysics() {
-            let gridChanged = false;
-            const newGrid = this.grid.map(row => [...row]);
-
-            for (let y = BOARD_HEIGHT - 2; y >= 0; y--) {
-                for (let x = 0; x < BOARD_WIDTH; x++) {
-                    if (this.grid[y][x] === BOULDER) {
-                        if (y + 1 < BOARD_HEIGHT && this.grid[y + 1][x] === EMPTY) {
-                            newGrid[y][x] = EMPTY;
-                            newGrid[y + 1][x] = BOULDER;
-                            gridChanged = true;
-
-                            if (y + 1 === this.playerY && x === this.playerX) {
-                                this.gameOver = true;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (gridChanged) {
-                this.grid = newGrid;
-                this.updateFlatGrid();
-            }
-        },
-
-        restart() {
-            clearInterval(this.gameInterval);
-            this.level = 1;
-            this.score = 0;
-            this.generateLevel();
-            this.startGameLoop();
-        },
-
-        nextLevel() {
-            clearInterval(this.gameInterval);
-            this.level++;
-            this.generateLevel();
-            this.startGameLoop();
+    function initGrid() {
+        elGrid.style.setProperty('--cols', BOARD_WIDTH);
+        const total = BOARD_WIDTH * BOARD_HEIGHT;
+        if (game.flat.length !== total) game.flat = new Array(total).fill(EMPTY);
+        elGrid.innerHTML = '';
+        for (let i = 0; i < total; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell empty';
+            cell.textContent = '';
+            elGrid.appendChild(cell);
         }
-    });
+    }
+
+    // ==== level generation =====
+    function generateLevel(seed = game.level) {
+        game.over = false; game.won = false; game.diamonds = 0; game.need = 0;
+        game.grid = Array.from({ length: BOARD_HEIGHT }, () => Array(BOARD_WIDTH).fill(EMPTY));
+        // walls
+        for (let x = 0; x < BOARD_WIDTH; x++) { game.grid[0][x] = WALL; game.grid[BOARD_HEIGHT-1][x] = WALL; }
+        for (let y = 0; y < BOARD_HEIGHT; y++) { game.grid[y][0] = WALL; game.grid[y][BOARD_WIDTH-1] = WALL; }
+        // sprinkle dirt and rocks and diamonds predictably
+        let r = mulberry32(seed);
+        for (let y = 1; y < BOARD_HEIGHT-1; y++) {
+            for (let x = 1; x < BOARD_WIDTH-1; x++) {
+                const v = r();
+                if (v < 0.50) game.grid[y][x] = DIRT;
+                else if (v < 0.66) game.grid[y][x] = BOULDER;
+                else if (v < 0.74) { game.grid[y][x] = DIAMOND; game.need++; }
+            }
+        }
+        // player and exit
+        game.playerX = 2; game.playerY = 2; game.grid[game.playerY][game.playerX] = PLAYER;
+        game.grid[BOARD_HEIGHT-2][BOARD_WIDTH-2] = EXIT;
+        updateFlatFromGrid();
+        updateHud();
+    }
+
+    function mulberry32(a){
+        return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    }
+
+    // ==== transforms =====
+    function updateFlatFromGrid() {
+        const w = BOARD_WIDTH; const h = BOARD_HEIGHT; const total = w*h;
+        if (game.flat.length !== total) game.flat = new Array(total);
+        let i = 0;
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) { game.flat[i++] = game.grid[y][x]; }
+        }
+    }
+
+    // ==== rendering =====
+    function render() {
+        const cells = elGrid.children; // HTMLCollection
+        for (let i = 0; i < game.flat.length; i++) {
+            const type = game.flat[i];
+            const el = cells[i];
+            const cls = CLASSES[type];
+            if (!el.classList.contains(cls)) {
+                el.className = `cell ${cls}`;
+                el.textContent = GLYPHS[type];
+            }
+        }
+    }
+
+    function updateHud() {
+        elLevel.textContent = String(game.level);
+        elScore.textContent = String(game.score);
+        elDiam.textContent = String(game.diamonds);
+        elNeed.textContent = String(game.need);
+    }
+
+    // ==== movement =====
+    function tryMove(dx, dy) {
+        if (game.over || game.won) return;
+        const nx = game.playerX + dx;
+        const ny = game.playerY + dy;
+        const target = game.grid[ny]?.[nx];
+        if (target === undefined) return;
+        if (target === WALL) return;
+
+        if (target === BOULDER) {
+            const bx = nx + dx; const by = ny + dy;
+            if (dx !== 0 && dy === 0 && game.grid[by][bx] === EMPTY) {
+                game.grid[by][bx] = BOULDER; // push
+                game.grid[ny][nx] = EMPTY;
+            } else { return; }
+        }
+
+        if (target === DIAMOND) { game.diamonds++; game.score += 10; }
+        if (target === EXIT && game.diamonds >= game.need) { game.won = true; }
+
+        game.grid[game.playerY][game.playerX] = EMPTY;
+        game.playerX = nx; game.playerY = ny;
+        game.grid[ny][nx] = PLAYER;
+        updateFlatFromGrid();
+    }
+
+    // ==== physics =====
+    function tickPhysics() {
+        let changed = false;
+        const w = BOARD_WIDTH; const h = BOARD_HEIGHT;
+        const g2 = game.grid.map(row => row.slice());
+        for (let y = h-2; y >= 1; y--) {
+            for (let x = 1; x < w-1; x++) {
+                if (game.grid[y][x] === BOULDER && game.grid[y+1][x] === EMPTY) {
+                    g2[y][x] = EMPTY; g2[y+1][x] = BOULDER; changed = true;
+                    if (y+1 === game.playerY && x === game.playerX) game.over = true;
+                }
+            }
+        }
+        if (changed) { game.grid = g2; updateFlatFromGrid(); }
+    }
+
+    // ==== loop =====
+    function startLoop() {
+        stopLoop();
+        game.lastTick = performance.now();
+        const step = (t) => {
+            const elapsed = t - game.lastTick;
+            if (elapsed >= 100) { // 10 Hz physics
+                tickPhysics();
+                game.lastTick = t;
+            }
+            render();
+            game.loopId = requestAnimationFrame(step);
+        };
+        game.loopId = requestAnimationFrame(step);
+    }
+
+    function stopLoop() {
+        if (game.loopId) { cancelAnimationFrame(game.loopId); game.loopId = null; }
+    }
+
+    // ==== controls =====
+    function setupControls() {
+        if (game.controlsReady) return; game.controlsReady = true;
+        const map = new Map([
+            ['arrowup', [0,-1]], ['w', [0,-1]],
+            ['arrowdown', [0,1]], ['s', [0,1]],
+            ['arrowleft', [-1,0]], ['a', [-1,0]],
+            ['arrowright', [1,0]], ['d', [1,0]],
+        ]);
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            const move = map.get(key);
+            if (!move) return;
+            e.preventDefault();
+            tryMove(move[0], move[1]);
+        });
+        document.getElementById('restart').addEventListener('click', restartGame);
+        document.getElementById('next').addEventListener('click', nextLevel);
+    }
+
+    function restartGame() {
+        stopLoop();
+        game.level = 1; game.score = 0;
+        generateLevel();
+        startLoop();
+    }
+
+    function nextLevel() {
+        stopLoop();
+        game.level += 1;
+        game.score += 100;
+        generateLevel();
+        startLoop();
+    }
+
+    // ==== boot =====
+    initGrid();
+    setupControls();
+    generateLevel();
+    startLoop();
 </script>
 </body>
 </html>
