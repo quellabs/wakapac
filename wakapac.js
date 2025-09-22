@@ -532,6 +532,33 @@
             return keysA.length === keysB.length &&
                 keysA.every(k => Object.hasOwn(b, k) && this.isEqual(a[k], b[k]));
         },
+
+        /**
+         * Creates a stable hash from content data, handling various data types
+         * @param {*} data - The data to hash
+         * @returns {string} A string representation suitable for hashing
+         */
+        createContentHash(data) {
+            // Handle null and undefined
+            if (data == null) {
+                return String(data);
+            }
+
+            // Handle primitives directly
+            if (typeof data !== 'object') {
+                return String(data);
+            }
+
+            // Handle arrays by recursively hashing elements
+            if (Array.isArray(data)) {
+                return '[' + data.map(this.createContentHash).join(',') + ']';
+            }
+
+            // Handle objects by sorting keys and recursively hashing values
+            const keys = Object.keys(data).sort(); // Sort for consistent ordering
+            const pairs = keys.map(key => `${key}:${this.createContentHash(data[key])}`);
+            return '{' + pairs.join(',') + '}';
+        }
     }
 
     // ========================================================================
