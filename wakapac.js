@@ -4264,7 +4264,7 @@
                 const originalIndex = this.findOriginalIndex(item, sourceArray, renderIndex);
 
                 // Hash data
-                const contentHash = this.createForeachEntryHash(item, mappingData.foreachId, originalIndex);
+                const contentHash = this.createForeachEntryHash(item, originalIndex);
 
                 // Store in mapping data for later diffing
                 mappingData.contentHashes.set(contentHash, originalIndex);
@@ -4787,16 +4787,10 @@
      * Creates a stable hash for a foreach entry based on content data, foreach ID, and logical index.
      * This hash can be used for change detection, caching, or reconciliation in foreach loops.
      * @param {*} contentData - The data item being rendered (object, primitive, etc.)
-     * @param {string} foreachId - The unique identifier for the foreach loop
      * @param {number} index - The logical index in the source array (not renderIndex)
      * @returns {string} A hash string representing this foreach entry
      */
-    Context.prototype.createForeachEntryHash = function(contentData, foreachId, index) {
-        // Input validation
-        if (typeof foreachId !== 'string') {
-            throw new Error('foreachId must be a string');
-        }
-
+    Context.prototype.createForeachEntryHash = function(contentData, index) {
         if (typeof index !== 'number' || index < 0 || !Number.isInteger(index)) {
             throw new Error('index must be a non-negative integer');
         }
@@ -4806,7 +4800,7 @@
 
         // Combine all components with delimiters to avoid collisions
         // Format: "foreachId|index|contentHash"
-        const combined = `${foreachId}|${index}|${contentHash}`;
+        const combined = `${index}|${contentHash}`;
 
         // Create a simple but effective hash using djb2 algorithm
         return Utils.djb2Hash(combined);
@@ -4819,21 +4813,21 @@
      * Uses the existing createForeachEntryHash method for consistent hashing.
      * @param {Map<string, number>} oldHashMap - Map of hash -> index from previous render
      * @param {Array} newArray - New array data to be rendered
-     * @param {string} foreachId - The foreach ID for hash generation
-     * @param {Context} context - The context instance to access createForeachEntryHash
      * @returns {Object} Classification object with arrays for each change type
      * @returns {number[]} returns.removed - Indices of items to remove from DOM (sorted high to low)
      * @returns {Object[]} returns.moved - Items that moved positions [{from: oldIndex, to: newIndex, hash}]
      * @returns {number[]} returns.added - Indices where new items should be inserted
      * @returns {number[]} returns.unchanged - Indices of items that stayed in same position
      */
-    Context.prototype.classifyArrayChanges = function(oldHashMap, newArray, foreachId, context) {
+    Context.prototype.classifyArrayChanges = function(oldHashMap, newArray) {
+        const self = this;
+
         // Step 1: Generate hash map for the new array state
         const newHashMap = new Map();
 
         // Create hashes for new array
         newArray.forEach((item, index) => {
-            const hash = context.createForeachEntryHash(item, foreachId, index);
+            const hash = self.createForeachEntryHash(item, index);
             newHashMap.set(hash, index); // hash -> newIndex mapping
         });
 
