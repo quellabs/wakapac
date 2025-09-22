@@ -4287,7 +4287,6 @@
             });
 
             // Add to hash map
-            console.log(arrayPath, hashMap);
             this.arrayHashMaps.set(arrayPath, hashMap);
 
             // Recursively scan the newly generated content for bindings and nested foreach elements
@@ -4900,11 +4899,13 @@
     /**
      * Determines if changes can be handled with simple operations
      */
-    Context.prototype.canHandleSimply = function(changes) {
+    Context.prototype.canHandleSimply = function (changes) {
         const totalChanges = changes.added.length + changes.removed.length + changes.moved.length;
 
         // Skip simple handling if changes are too complex
-        if (totalChanges > 10) return false;
+        if (totalChanges > 10) {
+            return false;
+        }
 
         // Handle these patterns efficiently:
         return (
@@ -4933,7 +4934,11 @@
 
         // Apply changes in safe order: removes first, then moves, then adds
         if (changes.removed.length > 0) {
+            // Remove the items
             this.removeItems(element, changes.removed);
+
+            // Clean up maps after removing DOM elements - element IS the foreach container
+            this.cleanupForeachMaps(element);
         }
 
         if (changes.moved.length > 0) {
