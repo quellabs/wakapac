@@ -2799,6 +2799,7 @@
         this.dependencies = this.getDependencies();
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
+        this.arrayHashMaps = new Map();
 
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
@@ -3938,11 +3939,6 @@
                 bindings: bindingsObject
             };
 
-            // Add contentHashes Map only for foreach elements
-            if (parsedBindings.some(binding => binding.type === 'foreach')) {
-                mappingData.contentHashes = new Map();
-            }
-
             // Put the data in the map
             interpolationMap.set(element, mappingData);
         });
@@ -4203,6 +4199,7 @@
      * @returns {void}
      */
     Context.prototype.renderForeach = function(foreachElement) {
+        const self = this;
         const mappingData = this.interpolationMap.get(foreachElement);
 
         if (!mappingData || !mappingData.foreachId) {
@@ -4210,6 +4207,9 @@
             return;
         }
 
+        // Keep array path for later use
+        const arrayPath = mappingData.sourceArray;
+        
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
         this.cleanupForeachMaps(foreachElement);
@@ -4245,9 +4245,6 @@
                 return;
             }
 
-            // Clear content hashes
-            mappingData.contentHashes.clear();
-
             // Get the source array to find original indices
             const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array);
 
@@ -4263,11 +4260,10 @@
                 // Find the original index in the source array
                 const originalIndex = this.findOriginalIndex(item, sourceArray, renderIndex);
 
-                // Hash data
-                const contentHash = this.createForeachEntryHash(item, originalIndex);
-
                 // Store in mapping data for later diffing
-                mappingData.contentHashes.set(contentHash, originalIndex);
+                const hashMap = self.arrayHashMaps.get(arrayPath) || new Map();
+                const contentHash = this.createForeachEntryHash(item, originalIndex);
+                hashMap.set(contentHash, originalIndex);
 
                 // Build the HTML
                 foreachElement.innerHTML +=
@@ -4386,8 +4382,7 @@
                         container: forEachContainer,
                         itemVar: forEachData.itemVar,
                         indexVar: forEachData.indexVar,
-                        sourceArray: forEachData.sourceArray,
-                        contentHashes: forEachData.contentHashes
+                        sourceArray: forEachData.sourceArray
                     });
                 }
             }
