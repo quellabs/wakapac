@@ -3890,6 +3890,9 @@
         // This method searches the DOM for elements whose foreach binding matches the changed array
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
+        // Fetch the changes list
+        const changes = this.classifyArrayChanges(this.arrayHashMaps.get(pathString), event.detail.newValue);
+
         // Re-render each affected foreach element to reflect the array changes
         // The index parameter is provided by forEach but not used in this implementation
         foreachElements.forEach((element) => {
@@ -4209,7 +4212,7 @@
 
         // Keep array path for later use
         const arrayPath = mappingData.sourceArray;
-        
+
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
         this.cleanupForeachMaps(foreachElement);
@@ -4248,6 +4251,10 @@
             // Get the source array to find original indices
             const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array);
 
+            // Get hash map and clear it
+            const hashMap = self.arrayHashMaps.get(arrayPath) || new Map();
+            hashMap.clear();
+
             // Store array to be able to compare later
             foreachElement._pacPreviousArray = array;
 
@@ -4258,11 +4265,12 @@
             // HTML comments mark the boundaries and context for each iteration
             array.forEach((item, renderIndex) => {
                 // Find the original index in the source array
-                const originalIndex = this.findOriginalIndex(item, sourceArray, renderIndex);
+                const originalIndex = self.findOriginalIndex(item, sourceArray, renderIndex);
 
                 // Store in mapping data for later diffing
-                const hashMap = self.arrayHashMaps.get(arrayPath) || new Map();
-                const contentHash = this.createForeachEntryHash(item, originalIndex);
+                const contentHash = self.createForeachEntryHash(item, originalIndex);
+                
+                // Put hash in map
                 hashMap.set(contentHash, originalIndex);
 
                 // Build the HTML
@@ -4271,6 +4279,10 @@
                     mappingData.template + // Original template with bindings like {{subItem.id}}
                     `<!-- /pac-foreach-item -->`;
             });
+
+            // Add to hash map
+            console.log(arrayPath, hashMap);
+            this.arrayHashMaps.set(arrayPath, hashMap);
 
             // Recursively scan the newly generated content for bindings and nested foreach elements
             // This is where the "natural retry" happens - nested foreach elements found here
