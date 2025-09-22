@@ -4934,11 +4934,7 @@
 
         // Apply changes in safe order: removes first, then moves, then adds
         if (changes.removed.length > 0) {
-            // Remove the items
             this.removeItems(element, changes.removed);
-
-            // Clean up maps after removing DOM elements - element IS the foreach container
-            this.cleanupForeachMaps(element);
         }
 
         if (changes.moved.length > 0) {
@@ -4956,11 +4952,20 @@
      * Removes items by their original indices
      */
     Context.prototype.removeItems = function(element, removedIndices) {
-        // Process from highest to lowest index to avoid shifting issues
         removedIndices.forEach(index => {
             const itemNodes = this.findItemNodes(element, index);
+
             itemNodes.forEach(node => {
-                this.interpolationMap.delete(node);
+                // Remove from interpolation maps if it's an element with bindings
+                if (node.nodeType === Node.ELEMENT_NODE && this.interpolationMap.has(node)) {
+                    this.interpolationMap.delete(node);
+                }
+
+                // Remove from text interpolation maps if it's a text node
+                if (node.nodeType === Node.TEXT_NODE && this.textInterpolationMap.has(node)) {
+                    this.textInterpolationMap.delete(node);
+                }
+
                 node.remove();
             });
         });
