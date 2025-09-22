@@ -3891,7 +3891,8 @@
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
         // Fetch the changes list
-        const changes = this.classifyArrayChanges(this.arrayHashMaps.get(pathString), event.detail.newValue);
+        const oldHashMap = this.arrayHashMaps.get(pathString) || new Map();
+        const changes = this.classifyArrayChanges(oldHashMap, event.detail.newValue);
 
         // Re-render each affected foreach element to reflect the array changes
         // The index parameter is provided by forEach but not used in this implementation
