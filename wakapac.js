@@ -534,30 +534,23 @@
         },
 
         /**
-         * Creates a stable hash from content data, handling various data types
-         * @param {*} data - The data to hash
-         * @returns {string} A string representation suitable for hashing
+         * Simple djb2 hash algorithm implementation
+         * Provides good distribution for typical string inputs
+         * @param {string} str - String to hash
+         * @returns {string} Hexadecimal hash string
          */
-        createContentHash(data) {
-            // Handle null and undefined
-            if (data == null) {
-                return String(data);
+        djb2Hash(str) {
+            let hash = 5381;
+
+            for (let i = 0; i < str.length; i++) {
+                // hash * 33 + char_code
+                hash = ((hash << 5) + hash) + str.charCodeAt(i);
+                // Keep within 32-bit integer range
+                hash = hash & 0xffffffff;
             }
 
-            // Handle primitives directly
-            if (typeof data !== 'object') {
-                return String(data);
-            }
-
-            // Handle arrays by recursively hashing elements
-            if (Array.isArray(data)) {
-                return '[' + data.map(this.createContentHash).join(',') + ']';
-            }
-
-            // Handle objects by sorting keys and recursively hashing values
-            const keys = Object.keys(data).sort(); // Sort for consistent ordering
-            const pairs = keys.map(key => `${key}:${this.createContentHash(data[key])}`);
-            return '{' + pairs.join(',') + '}';
+            // Convert to positive hex string
+            return (hash >>> 0).toString(16);
         }
     }
 
@@ -3930,10 +3923,19 @@
                 };
             });
 
-            interpolationMap.set(element, {
+            // Create mapping object
+            const mappingData = {
                 bindingString: bindingString,
                 bindings: bindingsObject
-            });
+            };
+
+            // Add contentHashes Map only for foreach elements
+            if (parsedBindings.some(binding => binding.type === 'foreach')) {
+                mappingData.contentHashes = new Map();
+            }
+
+            // Put the data in the map
+            interpolationMap.set(element, mappingData);
         });
 
         return interpolationMap;
@@ -4234,6 +4236,9 @@
                 return;
             }
 
+            // Clear content hashes
+            mappingData.contentHashes.clear();
+
             // Get the source array to find original indices
             const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array);
 
@@ -4248,6 +4253,12 @@
             array.forEach((item, renderIndex) => {
                 // Find the original index in the source array
                 const originalIndex = this.findOriginalIndex(item, sourceArray, renderIndex);
+
+                // Hash data
+                const contentHash = this.createForeachEntryHash(item, mappingData.foreachId, originalIndex);
+
+                // Store in mapping data for later diffing
+                mappingData.contentHashes.set(originalIndex, contentHash);
 
                 // Build the HTML
                 foreachElement.innerHTML +=
@@ -4366,7 +4377,8 @@
                         container: forEachContainer,
                         itemVar: forEachData.itemVar,
                         indexVar: forEachData.indexVar,
-                        sourceArray: forEachData.sourceArray
+                        sourceArray: forEachData.sourceArray,
+                        contentHashes: forEachData.contentHashes
                     });
                 }
             }
@@ -4732,6 +4744,65 @@
             child.receiveFromParent(cmd, data);
         }
     };
+
+    /**
+     * Creates a stable hash from content data, handling various data types
+     * @param {*} data - The data to hash
+     * @returns {string} A string representation suitable for hashing
+     */
+    Context.prototype.createContentHash = function(data) {
+        const self = this;
+
+        // Handle null and undefined
+        if (data == null) {
+            return String(data);
+        }
+
+        // Handle primitives directly
+        if (typeof data !== 'object') {
+            return String(data);
+        }
+
+        // Handle arrays by recursively hashing elements
+        if (Array.isArray(data)) {
+            return '[' + data.map(this.createContentHash).join(',') + ']';
+        }
+
+        // Handle objects by sorting keys and recursively hashing values
+        const keys = Object.keys(data).sort(); // Sort for consistent ordering
+        const pairs = keys.map(key => `${key}:${self.createContentHash(data[key])}`);
+        return '{' + pairs.join(',') + '}';
+    };
+
+    /**
+     * Creates a stable hash for a foreach entry based on content data, foreach ID, and logical index.
+     * This hash can be used for change detection, caching, or reconciliation in foreach loops.
+     *
+     * @param {*} contentData - The data item being rendered (object, primitive, etc.)
+     * @param {string} foreachId - The unique identifier for the foreach loop
+     * @param {number} index - The logical index in the source array (not renderIndex)
+     * @returns {string} A hash string representing this foreach entry
+     */
+    Context.prototype.createForeachEntryHash = function(contentData, foreachId, index) {
+        // Input validation
+        if (typeof foreachId !== 'string') {
+            throw new Error('foreachId must be a string');
+        }
+
+        if (typeof index !== 'number' || index < 0 || !Number.isInteger(index)) {
+            throw new Error('index must be a non-negative integer');
+        }
+
+        // Serialize the content data to a stable string representation
+        const contentHash = this.createContentHash(contentData);
+
+        // Combine all components with delimiters to avoid collisions
+        // Format: "foreachId|index|contentHash"
+        const combined = `${foreachId}|${index}|${contentHash}`;
+
+        // Create a simple but effective hash using djb2 algorithm
+        return Utils.djb2Hash(combined);
+    }
 
     // =============================================================================
     // COMPONENT REGISTRY
