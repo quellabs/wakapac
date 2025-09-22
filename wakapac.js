@@ -4267,7 +4267,7 @@
                 const contentHash = this.createForeachEntryHash(item, mappingData.foreachId, originalIndex);
 
                 // Store in mapping data for later diffing
-                mappingData.contentHashes.set(originalIndex, contentHash);
+                mappingData.contentHashes.set(contentHash, originalIndex);
 
                 // Build the HTML
                 foreachElement.innerHTML +=
@@ -4786,7 +4786,6 @@
     /**
      * Creates a stable hash for a foreach entry based on content data, foreach ID, and logical index.
      * This hash can be used for change detection, caching, or reconciliation in foreach loops.
-     *
      * @param {*} contentData - The data item being rendered (object, primitive, etc.)
      * @param {string} foreachId - The unique identifier for the foreach loop
      * @param {number} index - The logical index in the source array (not renderIndex)
@@ -4811,6 +4810,84 @@
 
         // Create a simple but effective hash using djb2 algorithm
         return Utils.djb2Hash(combined);
+    }
+
+    /**
+     * Classifies changes between old and new arrays based on content hashes.
+     * This function enables efficient DOM diffing by identifying what items were
+     * added, removed, moved, or remained unchanged between array renders.
+     * Uses the existing createForeachEntryHash method for consistent hashing.
+     * @param {Map<string, number>} oldHashMap - Map of hash -> index from previous render
+     * @param {Array} newArray - New array data to be rendered
+     * @param {string} foreachId - The foreach ID for hash generation
+     * @param {Context} context - The context instance to access createForeachEntryHash
+     * @returns {Object} Classification object with arrays for each change type
+     * @returns {number[]} returns.removed - Indices of items to remove from DOM (sorted high to low)
+     * @returns {Object[]} returns.moved - Items that moved positions [{from: oldIndex, to: newIndex, hash}]
+     * @returns {number[]} returns.added - Indices where new items should be inserted
+     * @returns {number[]} returns.unchanged - Indices of items that stayed in same position
+     */
+    Context.prototype.classifyArrayChanges = function(oldHashMap, newArray, foreachId, context) {
+        // Step 1: Generate hash map for the new array state
+        const newHashMap = new Map();
+
+        // Create hashes for new array
+        newArray.forEach((item, index) => {
+            const hash = context.createForeachEntryHash(item, foreachId, index);
+            newHashMap.set(hash, index); // hash -> newIndex mapping
+        });
+
+        // Initialize result object to collect our classifications
+        const result = {
+            removed: [],    // Items present in old array but missing in new array
+            moved: [],      // Items present in both arrays but at different positions
+            added: [],      // Items present in new array but missing in old array
+            unchanged: []   // Items present in both arrays at the same position
+        };
+
+        // Step 2: Find removed items by checking old hashes against new array
+        // If an old hash is not found in the new array, the item was deleted
+        oldHashMap.forEach((oldIndex, hash) => {
+            if (!newHashMap.has(hash)) {
+                result.removed.push(oldIndex);
+            }
+        });
+
+        // Step 3: Process each item in the new array to find moves, adds, and unchanged
+        newHashMap.forEach((newIndex, hash) => {
+            if (oldHashMap.has(hash)) {
+                // This hash existed in the previous render
+                const oldIndex = oldHashMap.get(hash);
+
+                if (oldIndex === newIndex) {
+                    // Same position in both arrays - no DOM operation needed
+                    result.unchanged.push(newIndex);
+                } else {
+                    // Different position - DOM element needs to be moved
+                    result.moved.push({
+                        from: oldIndex,    // Where the DOM element currently is
+                        to: newIndex,      // Where it needs to move to
+                        hash: hash         // Hash for debugging/verification
+                    });
+                }
+            } else {
+                // This hash is new - DOM element needs to be created
+                result.added.push(newIndex);
+            }
+        });
+
+        // Step 4: Sort arrays to ensure safe DOM manipulation order
+        // CRITICAL: Process removals from highest index to lowest to avoid index shifting
+        result.removed.sort((a, b) => b - a);
+
+        // Process moves by target position to maintain proper order during DOM manipulation
+        result.moved.sort((a, b) => a.to - b.to);
+
+        // Process additions in ascending order to maintain natural insertion order
+        result.added.sort((a, b) => a - b);
+
+        // Return the result
+        return result;
     }
 
     // =============================================================================
