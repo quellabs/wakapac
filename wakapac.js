@@ -606,7 +606,11 @@
 
                             // Also trigger computed property updates
                             container.dispatchEvent(new CustomEvent("pac:change", {
-                                detail: { path: currentPath, oldValue: oldArray, newValue: newArray }
+                                detail: {
+                                    path: currentPath,
+                                    oldValue: oldArray,
+                                    newValue: newArray
+                                }
                             }));
 
                             return result;
