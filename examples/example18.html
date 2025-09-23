@@ -301,18 +301,23 @@
                 case 'scroll-to-top':
                     this.containerScrollY = 0;
                     break;
+
                 case 'scroll-to-percent':
                     this.containerScrollY = this.maxScrollY * (data.percent / 100);
                     break;
+
                 case 'scroll-to-bottom':
                     this.containerScrollY = this.maxScrollY;
                     break;
+
                 case 'add-items':
                     this.addItems();
                     break;
+
                 case 'remove-items':
                     this.removeItems();
                     break;
+                    
                 case 'log-metrics':
                     this.logMetrics();
                     break;
