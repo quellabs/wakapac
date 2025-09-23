@@ -4323,7 +4323,8 @@
             }
 
             // Get the source array to find original indices
-            const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array);
+            const rootName = mappingData.sourceArray;
+            const sourceArray = Array.isArray(this.abstraction[rootName]) ? this.abstraction[rootName] : array;
 
             // Get hash map and clear it
             const hashMap = self.arrayHashMaps.get(arrayPath) || new Map();
@@ -4380,26 +4381,9 @@
      * @returns {Array} The source array or current array if no source found
      */
     Context.prototype.getSourceArrayForFiltered = function(foreachExpr, currentArray) {
-        // If it's a computed property, try to find the source array it's based on
-        if (this.originalAbstraction.computed && this.originalAbstraction.computed[foreachExpr]) {
-            // Look through dependencies to find array properties
-            const dependencies = this.dependencies.get(foreachExpr) || [];
-
-            for (const dep of dependencies) {
-                const sourceValue = this.abstraction[dep];
-                if (Array.isArray(sourceValue)) {
-                    return sourceValue;
-                }
-            }
-        }
-
-        // If foreachExpr is a direct array property, return it
-        if (Array.isArray(this.abstraction[foreachExpr])) {
-            return this.abstraction[foreachExpr];
-        }
-
-        // Fallback: return the current array
-        return currentArray;
+        const root = this.inferArrayRoot(foreachExpr);
+        const v = this.abstraction[root];
+        return Array.isArray(v) ? v : currentArray;
     };
 
     /**

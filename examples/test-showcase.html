@@ -557,8 +557,9 @@
                     return allTodos.filter(todo => !todo.completed);
                 } else if (currentFilter === 'completed') {
                     return allTodos.filter(todo => todo.completed);
+                } else {
+                    return allTodos;
                 }
-                return allTodos;
             },
 
             allCompleted() {
