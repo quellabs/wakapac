@@ -2580,6 +2580,10 @@
                     this.applyStyleBinding(element, value);
                     break;
 
+                case 'foreach':
+                    // foreach bindings are handled during renderForeach, not as attributes
+                    break;
+                    
                 default:
                     this.applyAttributeBinding(element, bindingType, value);
                     break;
@@ -3026,7 +3030,7 @@
         // Process nested foreach elements
         newBindings.forEach((mappingData, element) => {
             const { bindings } = mappingData;
-
+            
             if (bindings.foreach && element !== parentElement) {
                 // Set the ID as an attribute for debugging/identification
                 const foreachId = Utils.uniqid('foreach');
