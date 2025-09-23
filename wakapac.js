@@ -4851,31 +4851,46 @@
 
     /**
      * Creates a stable hash from content data, handling various data types
-     * @param {*} data - The data to hash
      * @returns {string} A string representation suitable for hashing
+     * @param inputData
      */
-    Context.prototype.createContentHash = function(data) {
-        const self = this;
+    Context.prototype.createContentHash = function(inputData) {
+        /**
+         * Convert any data structure into a deterministic string representation.
+         * This ensures that logically equivalent objects produce the same hash string,
+         * regardless of key order or formatting differences.
+         */
+        function createStableRepresentation(value) {
+            // Handle null or undefined explicitly
+            if (value === null || value === undefined) {
+                return String(value);
+            }
 
-        // Handle null and undefined
-        if (data == null) {
-            return String(data);
+            // Handle primitive types (string, number, boolean, etc.)
+            if (typeof value !== "object") {
+                return String(value);
+            }
+
+            // Handle arrays: recursively hash each item in order
+            if (Array.isArray(value)) {
+                const arrayRepresentation = value.map(function (element) {
+                    return createStableRepresentation(element);
+                });
+
+                return "[" + arrayRepresentation.join(",") + "]";
+            }
+
+            // Handle objects: sort keys to ensure consistent ordering
+            const sortedKeys = Object.keys(value).sort();
+            const objectRepresentation = sortedKeys.map(function(key) {
+                return key + ":" + createStableRepresentation(value[key]);
+            });
+
+            return "{" + objectRepresentation.join(",") + "}";
         }
 
-        // Handle primitives directly
-        if (typeof data !== 'object') {
-            return String(data);
-        }
-
-        // Handle arrays by recursively hashing elements
-        if (Array.isArray(data)) {
-            return '[' + data.map(this.createContentHash).join(',') + ']';
-        }
-
-        // Handle objects by sorting keys and recursively hashing values
-        const keys = Object.keys(data).sort(); // Sort for consistent ordering
-        const pairs = keys.map(key => `${key}:${self.createContentHash(data[key])}`);
-        return '{' + pairs.join(',') + '}';
+        // Entry point: return stable representation for the given input
+        return createStableRepresentation(inputData);
     };
 
     /**
