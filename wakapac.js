@@ -4288,8 +4288,9 @@
             // Store array to be able to compare later
             foreachElement._pacPreviousArray = array;
 
-            // Clear existing content and rebuild from scratch
-            foreachElement.innerHTML = '';
+            // CRITICAL FIX: Build complete HTML string first, then set innerHTML once
+            // This prevents DOM corruption caused by repeated innerHTML += operations
+            let completeHTML = '';
 
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
@@ -4299,16 +4300,19 @@
 
                 // Store in mapping data for later diffing
                 const contentHash = self.createForeachEntryHash(item, originalIndex);
-                
+
                 // Put hash in map
                 hashMap.set(contentHash, originalIndex);
 
-                // Build the HTML
-                foreachElement.innerHTML +=
+                // Build the HTML for this item
+                completeHTML +=
                     `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
-                    mappingData.template + // Original template with bindings like {{subItem.id}}
+                    mappingData.template + // Original template with bindings like {{item}}
                     `<!-- /pac-foreach-item -->`;
             });
+
+            // Set the complete HTML at once - this preserves comment structure
+            foreachElement.innerHTML = completeHTML;
 
             // Add to hash map
             this.arrayHashMaps.set(arrayPath, hashMap);
