@@ -258,11 +258,11 @@
             },
 
             isAtTop() {
-                return this.containerScrollY <= 5;
+                return this.scrollPercent <= 2;
             },
 
             isAtBottom() {
-                return this.containerScrollY >= this.maxScrollY - 5;
+                return this.scrollPercent >= 98;
             },
 
             isNearTop() {
