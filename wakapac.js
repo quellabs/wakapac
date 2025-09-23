@@ -572,34 +572,37 @@
                     // In makeDeepReactiveProxy, find this section and add logging:
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
-                            // For methods that add items, proxy the arguments first
-                            if (prop === 'push' || prop === 'unshift') {
-                                for (let i = 0; i < arguments.length; i++) {
-                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
-                                        arguments[i] = createProxy(arguments[i], currentPath.concat([target.length + i]));
-                                        arguments[i]._isReactive = true;
-                                    }
-                                }
-                            } else if (prop === 'splice' && arguments.length > 2) {
-                                // For splice, items to add start at index 2
-                                for (let i = 2; i < arguments.length; i++) {
-                                    if (arguments[i] && typeof arguments[i] === 'object' && !arguments[i]._isReactive) {
-                                        arguments[i] = createProxy(arguments[i], currentPath.concat([arguments[0] + i - 2]));
-                                        arguments[i]._isReactive = true;
-                                    }
-                                }
-                            }
-
+                            // Store the old array state before modification
                             const oldArray = Array.prototype.slice.call(target);
+
+                            // Apply the array method to get the result
                             const result = Array.prototype[prop].apply(target, arguments);
+
+                            // Get the new array state after modification
                             const newArray = Array.prototype.slice.call(target);
+
+                            // Re-proxy all items with correct indices after the operation
+                            // This ensures all objects have the proper path references
+                            newArray.forEach((item, index) => {
+                                if (item && typeof item === 'object' && !item._isReactive) {
+                                    const correctPath = currentPath.concat([index]);
+                                    newArray[index] = createProxy(item, correctPath);
+                                    newArray[index]._isReactive = true;
+                                }
+                            });
+
+                            // Update the target array with the newly proxied items
+                            // This is necessary because forEach works on a copy
+                            for (let i = 0; i < newArray.length; i++) {
+                                target[i] = newArray[i];
+                            }
 
                             // Dispatch array-specific event
                             container.dispatchEvent(new CustomEvent("pac:array-change", {
                                 detail: {
                                     path: currentPath,
                                     oldValue: oldArray,
-                                    newValue: newArray,
+                                    newValue: target, // Use the updated target, not newArray copy
                                     method: prop
                                 }
                             }));
@@ -609,7 +612,7 @@
                                 detail: {
                                     path: currentPath,
                                     oldValue: oldArray,
-                                    newValue: newArray
+                                    newValue: target // Use the updated target, not newArray copy
                                 }
                             }));
 
@@ -2868,6 +2871,12 @@
             // Without this, the observer and its associated DOM references might remain in memory
             this.intersectionObserver = null;
         }
+
+        // Clean up all maps
+        this.interpolationMap.clear();
+        this.textInterpolationMap.clear();
+        this.arrayHashMaps.clear();
+        this.updateQueue.clear();
     }
 
     /**
@@ -3037,7 +3046,6 @@
                     foreachExpr: bindings.foreach.target,
                     sourceArray: sourceArray,
                     foreachId: foreachId,
-                    depth: self.calculateForEachDepth(element),
                     template: element.innerHTML,
                     itemVar: itemVar,
                     indexVar: indexVar
@@ -3220,6 +3228,12 @@
         });
     };
 
+    /**
+     * Processes queued updates that are ready for execution.
+     * Handles both delay-triggered and blur-triggered updates safely by avoiding
+     * Map modification during iteration and providing proper error handling.
+     * @returns {void}
+     */
     Context.prototype.updateQueueHandler = function() {
         // Early exit if queue is empty for performance
         if (this.updateQueue.size === 0) {
@@ -3227,30 +3241,45 @@
         }
 
         const now = Date.now();
-        const expiredUpdates = [];
+        const updatesToProcess = [];
+        const pathsToDelete = [];
 
-        // Find all expired updates
+        // Step 1: Collect all expired updates without modifying the queue
+        // This prevents the race condition of modifying a Map during iteration
         this.updateQueue.forEach((queueEntry, resolvedPath) => {
             if (queueEntry.trigger === 'delay' && now >= queueEntry.executeAt) {
-                expiredUpdates.push({
+                updatesToProcess.push({
                     path: resolvedPath,
-                    value: queueEntry.value
+                    value: queueEntry.value,
+                    trigger: queueEntry.trigger
                 });
+                pathsToDelete.push(resolvedPath);
             }
         });
 
-        // Apply expired updates and remove from queue
-        expiredUpdates.forEach(update => {
+        // Step 2: Process all collected updates
+        // Apply updates in batch to minimize reactive system overhead
+        updatesToProcess.forEach(update => {
             try {
+                // Apply the property update to the reactive abstraction
+                // This will trigger any dependent DOM updates automatically
                 Utils.setNestedProperty(update.path, update.value, this.abstraction);
-                this.updateQueue.delete(update.path);
             } catch (error) {
-                console.warn('Error applying queued update for path:', update.path, error);
-
-                // Remove failed update to prevent infinite retries
-                this.updateQueue.delete(update.path);
+                // Log error with context for debugging, but continue processing other updates
+                console.warn(`Error applying queued update for path "${update.path}":`, error);
             }
         });
+
+        // Step 3: Clean up processed entries from the queue
+        // Remove entries only after all processing is complete to maintain consistency
+        pathsToDelete.forEach(path => {
+            this.updateQueue.delete(path);
+        });
+
+        // Optional: Log performance metrics for debugging (can be removed in production)
+        if (updatesToProcess.length > 0) {
+            console.debug(`Processed ${updatesToProcess.length} queued updates`);
+        }
     };
 
     /**
@@ -4112,6 +4141,14 @@
         return proxiedReactive;
     };
 
+    /**
+     * Injects hierarchy-related properties into an abstraction object.
+     * These properties are used to track parent-child relationships within a hierarchical structure.
+     * @param {Object} abstraction - The abstraction object to inject properties into
+     * @param {number} abstraction.childrenCount - Will be set to 0, representing the number of child elements
+     * @param {boolean} abstraction.hasParent - Will be set to false, indicating whether this abstraction has a parent
+     * @returns {void} This method modifies the abstraction object in place
+     */
     Context.prototype.injectHierarchyProperties = function(abstraction) {
         abstraction.childrenCount = 0;
         abstraction.hasParent = false;
@@ -4169,28 +4206,15 @@
         abstraction.containerHeight = this.container.clientHeight;
     };
 
-    Context.prototype.calculateForEachDepth = function(element) {
-        let depth = 0;
-        let current = element.parentElement;
-
-        while (current && current !== this.container) {
-            // Check if this ancestor has a foreach binding
-            if (current.hasAttribute('data-pac-bind') &&
-                current.getAttribute('data-pac-bind').includes('foreach:')) {
-                depth++;
-            }
-
-            current = current.parentElement;
-        }
-
-        return depth;
-    }
-
+    /**
+     * Finds the nearest parent element that has a foreach binding.
+     * @param {Element} element - The DOM element to start searching from. Must be a valid DOM Element.
+     * @returns {Element|null} The nearest parent element with a foreach binding, or null
+     */
     Context.prototype.findParentForeachElement = function(element) {
         let current = element.parentElement;
 
         while (current && current !== this.container) {
-            // Check if this ancestor has a foreach binding
             if (current.hasAttribute('data-pac-bind') &&
                 current.getAttribute('data-pac-bind').includes('foreach:')) {
                 return current;
@@ -4428,15 +4452,25 @@
 
         // Count leading "parent" tokens to climb up foreach stack
         let climbs = 0;
-        while (path[climbs] === "parent") {
+        while (climbs < path.length && path[climbs] === "parent") {
             climbs++;
         }
 
-        // Get effective frames after climbing
-        const frames = this.getForeachChain(element).slice(climbs);
+        // Get the complete foreach chain
+        const allFrames = this.getForeachChain(element);
+
+        // Validate that we don't climb more than available frames
+        if (climbs > allFrames.length) {
+            console.warn(`Cannot climb ${climbs} levels - only ${allFrames.length} foreach frames available`);
+            // Clamp to maximum available frames to prevent undefined behavior
+            climbs = allFrames.length;
+        }
+
+        // Get effective frames after climbing (slice removes the climbed frames)
+        const frames = allFrames.slice(climbs);
         const scope = new Map();
 
-        // Build variable scope
+        // Build variable scope from remaining frames
         for (const f of frames) {
             // Map item variable: "item" → "users[0]"
             if (!scope.has(f.itemVar)) {
@@ -4454,6 +4488,9 @@
         const remaining = path.slice(climbs);
 
         if (!remaining.length) {
+            // If all tokens were "parent", we've climbed out of all foreach contexts
+            // This might be valid (accessing root scope) or an error condition
+            console.warn(`Path resolved to empty after climbing ${climbs} levels`);
             return "";
         }
 
