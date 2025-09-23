@@ -5370,4 +5370,5 @@
     // Export to global scope
     window.wakaPAC = wakaPAC;
     window.MSG_TYPES = MSG_TYPES;
+
 })();

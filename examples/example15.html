@@ -39,19 +39,12 @@
 
         watch: {
             triggerValue: function(newVal, oldVal) {
-                console.log('Watcher triggered, adding to watchLog');
-                console.log('watchLog before:', [...this.watchLog]);
-
                 this.watchLog.unshift(`Changed: ${oldVal} → ${newVal}`);
-
-                console.log('watchLog after:', [...this.watchLog]);
             }
         },
 
         addItem() {
-            console.log('Adding item directly');
             this.items.push('New item ' + Date.now());
-            console.log('items now:', [...this.items]);
         },
 
         removeItem() {
@@ -60,9 +53,6 @@
             }
         }
     });
-
-    console.log('Initial items:', app.items);
-    console.log('Initial watchLog:', app.watchLog);
 </script>
 </body>
 </html>
