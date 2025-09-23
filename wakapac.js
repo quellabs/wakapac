@@ -4825,7 +4825,7 @@
      * Uses the existing createForeachEntryHash method for consistent hashing.
      * @param {Map<string, number>} oldHashMap - Map of hash -> index from previous render
      * @param {Array} newArray - New array data to be rendered
-     * @returns {Object} Classification object with arrays for each change type
+     * @returns {{removed: *[], moved: *[], added: *[], unchanged: *[]}} Classification object with arrays for each change type
      * @returns {number[]} returns.removed - Indices of items to remove from DOM (sorted high to low)
      * @returns {Object[]} returns.moved - Items that moved positions [{from: oldIndex, to: newIndex, hash}]
      * @returns {number[]} returns.added - Indices where new items should be inserted
@@ -4898,6 +4898,11 @@
 
     /**
      * Determines if changes can be handled with simple operations
+     * @param {Object} changes - The changes object containing arrays of added, removed, and moved items
+     * @param {Array} changes.added - Items that were added to the array
+     * @param {Array} changes.removed - Items that were removed from the array
+     * @param {Array} changes.moved - Items that were moved/reordered within the array
+     * @returns {boolean} True if changes can be handled with simple DOM operations, false if full rebuild needed
      */
     Context.prototype.canHandleSimply = function (changes) {
         const totalChanges = changes.added.length + changes.removed.length + changes.moved.length;
@@ -4928,6 +4933,14 @@
 
     /**
      * Handles simple array changes with targeted DOM operations
+     * @param {HTMLElement} element - The DOM element containing the array representation
+     * @param {Object} changes - The changes object with added, removed, and moved arrays
+     * @param {Array} changes.added - Items added to the array with their target indices
+     * @param {Array} changes.removed - Items removed from the array with their previous indices
+     * @param {Array} changes.moved - Items moved within the array with old and new indices
+     * @param {Array} newArray - The complete updated array after changes
+     * @param {string} arrayPath - The property path to the array being updated
+     * @returns {void}
      */
     Context.prototype.handleSimpleArrayChange = function(element, changes, newArray, arrayPath) {
         const mappingData = this.interpolationMap.get(element);
@@ -4938,7 +4951,7 @@
         }
 
         if (changes.moved.length > 0) {
-            this.moveItems(element, changes.moved, mappingData);
+            this.moveItems(element, changes.moved);
         }
 
         if (changes.added.length > 0) {
@@ -4949,9 +4962,23 @@
     };
 
     /**
-     * Removes items by their original indices
+     * This method handles the complete removal of items including cleanup of interpolation maps
+     * to prevent memory leaks and stale references.
+     * @param {Element} element - The container element containing the items to remove
+     * @param {number[]} removedIndices - Array of original indices of items to remove
+     * @throws {TypeError} If element is not a valid DOM Element
+     * @throws {TypeError} If removedIndices is not an array
      */
     Context.prototype.removeItems = function(element, removedIndices) {
+        // Input validation
+        if (!(element instanceof Element)) {
+            throw new TypeError('element must be a DOM Element');
+        }
+
+        if (!Array.isArray(removedIndices)) {
+            throw new TypeError('removedIndices must be an array');
+        }
+
         removedIndices.forEach(index => {
             const itemNodes = this.findItemNodes(element, index);
 
@@ -4972,10 +4999,37 @@
     };
 
     /**
-     * Moves items to new positions
+     * Handles DOM node repositioning while maintaining proper insertion order.
+     * Each move operation relocates nodes from their current position to a new target position.
+     * @param {Element} element - The container element containing the items to move
+     * @param {Object[]} moves - Array of move operations
+     * @param {number} moves[].from - Original index of the item to move
+     * @param {number} moves[].to - Target index where the item should be moved
      */
-    Context.prototype.moveItems = function(element, moves, mappingData) {
+    Context.prototype.moveItems = function(element, moves) {
+        // Input validation
+        if (!(element instanceof Element)) {
+            throw new TypeError('element must be a DOM Element');
+        }
+
+        if (!Array.isArray(moves)) {
+            throw new TypeError('moves must be an array');
+        }
+
         moves.forEach(move => {
+            // Validate move object structure
+            if (typeof move !== 'object' || move === null) {
+                throw new TypeError('each move must be an object');
+            }
+
+            if (typeof move.from !== 'number' || typeof move.to !== 'number') {
+                throw new TypeError('move objects must have numeric "from" and "to" properties');
+            }
+
+            if (move.from < 0 || move.to < 0) {
+                throw new RangeError('move indices cannot be negative');
+            }
+
             const itemNodes = this.findItemNodes(element, move.from);
             const insertPoint = this.findInsertionPoint(element, move.to);
 
@@ -4983,6 +5037,7 @@
                 if (insertPoint) {
                     element.insertBefore(node, insertPoint);
                 } else {
+                    // Insert at end when no insertion point found (target index beyond current items)
                     element.appendChild(node);
                 }
             });
@@ -4990,64 +5045,113 @@
     };
 
     /**
-     * Adds new items at specified indices
+     * Adds new items to a foreach-rendered element at specified indices
+     * @param {HTMLElement} element - The DOM element containing the foreach-rendered items
+     * @param {number[]} addedIndices - Array of indices where new items should be inserted
+     * @param {Array} newArray - The updated array containing all items including new ones
+     * @param {Object} mappingData - Configuration object for the foreach mapping
+     * @param {string} mappingData.foreachId - Unique identifier for this foreach instance
+     * @param {string} mappingData.template - HTML template string for rendering items
+     * @param {string} mappingData.foreachExpr - The foreach expression used for filtering/mapping
+     * @param {string} arrayPath - Dot-notation path to the array in the data context
      */
     Context.prototype.addItems = function(element, addedIndices, newArray, mappingData, arrayPath) {
+        // Get or create hash map for tracking original array indices
         const hashMap = this.arrayHashMaps.get(arrayPath) || new Map();
+
+        // Get the source array to determine original indices for filtered/mapped data
         const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, newArray);
 
+        // Process each index where a new item should be added
         addedIndices.forEach(index => {
             const item = newArray[index];
+
+            // Find the original index in the source array for this item
             const originalIndex = this.findOriginalIndex(item, sourceArray, index);
+
+            // Create a unique hash for this item to track it across updates
             const hash = this.createForeachEntryHash(item, originalIndex);
 
+            // Store the mapping between hash and original index
             hashMap.set(hash, originalIndex);
 
+            // Create HTML with boundary comments for item identification
+            // These comments help with debugging and proper item removal/updates
             const itemHTML =
                 `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${index} -->` +
                 mappingData.template +
                 `<!-- /pac-foreach-item -->`;
 
+            // Use temporary div to parse HTML and convert to DOM nodes
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = itemHTML;
 
+            // Find where this item should be inserted in the DOM
             const insertPoint = this.findInsertionPoint(element, index);
 
+            // Move all parsed nodes from temp div to their final location
             while (tempDiv.firstChild) {
                 if (insertPoint) {
+                    // Insert before the found insertion point
                     element.insertBefore(tempDiv.firstChild, insertPoint);
                 } else {
+                    // Append to end if no insertion point found
                     element.appendChild(tempDiv.firstChild);
                 }
             }
         });
 
+        // Update the stored hash map with new mappings
         this.arrayHashMaps.set(arrayPath, hashMap);
+
+        // Scan newly added elements for data bindings and register them
         this.scanAndRegisterNewElements(element);
     };
 
     /**
-     * Finds all DOM nodes for a foreach item by its index
+     * Finds all DOM nodes for a foreach item by its index, handling nested foreach loops
+     * @param {Element} element - The DOM element to search within
+     * @param {number} index - The index of the foreach item to find
+     * @returns {Node[]} Array of DOM nodes that belong to the foreach item at the specified index
      */
     Context.prototype.findItemNodes = function(element, index) {
         const nodes = [];
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
 
-        let collecting = false;
+        let collecting = false;  // Whether we're currently collecting nodes for our target item
+        let depth = 0;           // Nesting depth counter for handling nested foreach loops
         let node;
 
         while ((node = walker.nextNode())) {
             if (node.nodeType === Node.COMMENT_NODE) {
-                const match = node.textContent.match(FOREACH_INDEX_REGEX);
+                const text = node.textContent.trim();
+                const match = text.match(FOREACH_INDEX_REGEX);
 
-                if (match && parseInt(match[2], 10) === index) {
+                // Check if this is the start comment for our target index
+                if (match && parseInt(match[2], 10) === index && !collecting) {
                     collecting = true;
+                    depth = 0;
                     nodes.push(node);
-                } else if (collecting && node.textContent.trim() === '/pac-foreach-item') {
+                } else if (collecting) {
+                    // We're collecting - add this comment node
                     nodes.push(node);
-                    break;
+
+                    if (match) {
+                        // Found a nested foreach start - increment depth
+                        depth++;
+                    } else if (text === '/pac-foreach-item') {
+                        // Found a foreach end comment
+                        if (depth === 0) {
+                            // This closes our target item - stop collecting
+                            break;
+                        }
+
+                        // This closes a nested foreach item - decrement depth
+                        depth--;
+                    }
                 }
             } else if (collecting) {
+                // Collect all non-comment nodes while we're in collection mode
                 nodes.push(node);
             }
         }
@@ -5056,14 +5160,18 @@
     };
 
     /**
-     * Finds insertion point for an item at the given index
+     * Finds the insertion point for an item at the given index within a foreach loop
+     * @param {Element} element - The DOM element to search within
+     * @param {number} targetIndex - The index where the new item should be inserted
+     * @returns {Comment|null} The comment node marking where to insert, or null to append at end
      */
     Context.prototype.findInsertionPoint = function(element, targetIndex) {
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_COMMENT);
-        let node;
 
+        let node;
         while ((node = walker.nextNode())) {
             const match = node.textContent.match(FOREACH_INDEX_REGEX);
+
             if (match && parseInt(match[3], 10) >= targetIndex) {
                 return node;
             }
@@ -5216,7 +5324,7 @@
                 window.PACRegistry.components.forEach(component => {
                     component.establishHierarchy();
                 });
-            }, 20);
+            }, 10);
         });
     }
 
