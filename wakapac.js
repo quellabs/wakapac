@@ -372,15 +372,34 @@
          * @returns {*|string}
          */
         getNetworkEffectiveType() {
-            if (!navigator.onLine) {
-                return 'offline';
-            } else if ('connection' in navigator && navigator.connection?.effectiveType) {
+            if ('connection' in navigator && navigator.connection?.effectiveType) {
                 return navigator.connection.effectiveType;
             } else {
                 return '4g';
             }
         },
 
+        /**
+         * Detects current network quality by measuring response time
+         * to a small test resource.
+         */
+        detectNetworkQuality() {
+            if (!navigator.onLine) {
+                return 'offline';
+            }
+
+            // Use Network Information API when available (Chrome, Edge, mobile browsers)
+            switch (this.getNetworkEffectiveType()) {
+                case 'slow-2g':
+                case '2g':
+                case '3g':
+                    return 'slow';
+
+                default:
+                    return 'fast';
+            }
+        },
+        
         /**
          * Reads the current value from a DOM element (input, select, textarea, etc.)
          * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
@@ -746,7 +765,8 @@
             window.addEventListener('online', function(event) {
                 self.dispatchBrowserStateEvent('online', {
                     online: true,
-                    networkType: Utils.getNetworkEffectiveType()
+                    networkType: Utils.getNetworkEffectiveType(),
+                    networkQuality: Utils.detectNetworkQuality(),
                 });
             });
 
@@ -757,7 +777,8 @@
             window.addEventListener('offline', function(event) {
                 self.dispatchBrowserStateEvent('online', {
                     online: false,
-                    networkType: 'offline'
+                    networkType: Utils.getNetworkEffectiveType(),
+                    networkQuality: Utils.detectNetworkQuality(),
                 });
             });
 
@@ -769,7 +790,8 @@
                 navigator.connection.addEventListener('change', function(event) {
                     self.dispatchBrowserStateEvent('online', {
                         online: navigator.onLine,
-                        networkType: Utils.getNetworkEffectiveType()
+                        networkType: Utils.getNetworkEffectiveType(),
+                        networkQuality: Utils.detectNetworkQuality(),
                     });
                 });
             }
@@ -3869,6 +3891,7 @@
                 // Update network connectivity and connection type
                 this.abstraction.browserOnline = stateData.online;
                 this.abstraction.browserNetworkEffectiveType = stateData.networkType;
+                this.abstraction.browserNetworkQuality = stateData.networkQuality;
                 break;
 
             case 'scroll':
@@ -4166,6 +4189,7 @@
         // Initialize online/offline state and network quality
         abstraction.browserOnline = navigator.onLine;
         abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
+        abstraction.browserNetworkQuality = Utils.detectNetworkQuality();
 
         // Initialize page visibility state - tracks if the browser tab/window is currently visible
         // Useful for pausing animations or reducing CPU usage when user switches tabs
