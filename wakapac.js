@@ -4610,10 +4610,8 @@
      * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
      */
     Context.prototype.extractClosestForeachContext = function(startElement) {
-        const isTextNode = (startElement && startElement.nodeType === Node.TEXT_NODE);
-
         // Start from the element and walk up the DOM tree
-        let current = isTextNode ? startElement.parentElement: startElement;
+        let current = startElement;
 
         while (current && current !== this.container) {
             // Check previous siblings for comment markers
