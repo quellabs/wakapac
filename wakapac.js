@@ -46,6 +46,12 @@
     const FOREACH_INDEX_REGEX = /pac-foreach-item:\s*([^,]+),\s*index=(\d+),\s*renderIndex=(\d+)/;
 
     /**
+     * This regexp finds runs of dots and square brackets.
+     * @type {RegExp}
+     */
+    const DOTS_AND_BRACKETS_PATTERN = /[.\[\]]+/;
+
+    /**
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
@@ -138,7 +144,7 @@
          * @param {object} current
          */
         setNestedProperty(path, value, current) {
-            const parts = path.split(/[.\[\]]+/).filter(Boolean);
+            const parts = path.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
 
             for (let i = 0; i < parts.length - 1; i++) {
                 const part = parts[i];
@@ -187,7 +193,7 @@
                 return pathString;
             }
 
-            return String(pathString).split(/[.\[\]]+/).filter(Boolean);
+            return String(pathString).split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
         },
 
         /**
@@ -2116,7 +2122,7 @@
             }
 
             // Split path by both dots and brackets, handling bracket notation correctly
-            const parts = resolvedPath.split(/[.\[\]]+/).filter(Boolean);
+            const parts = resolvedPath.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
             let current = obj;
 
             for (let i = 0; i < parts.length; i++) {
@@ -4546,7 +4552,7 @@
                 } else {
                     // Item variable - it's already a resolved path like "users[0]"
                     // Split it and add each part
-                    const itemParts = scopeValue.split(/[.\[\]]+/).filter(Boolean);
+                    const itemParts = scopeValue.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
                     resolvedTokens.push(...itemParts);
                 }
             } else {
