@@ -2608,6 +2608,7 @@
                     this.applyStyleBinding(element, value);
                     break;
 
+                case 'click':
                 case 'foreach':
                     // foreach bindings are handled during renderForeach, not as attributes
                     break;
@@ -2719,6 +2720,9 @@
             }
 
             element._pacIsRendered = true;
+
+            // rescan so nested bindings (e.g., foreach) initialize
+            this.context.scanAndRegisterNewElements(element);
             return;
         }
 
