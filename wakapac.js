@@ -4323,8 +4323,7 @@
             }
 
             // Get the source array to find original indices
-            const rootName = mappingData.sourceArray;
-            const sourceArray = Array.isArray(this.abstraction[rootName]) ? this.abstraction[rootName] : array;
+            const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array, mappingData);
 
             // Get hash map and clear it
             const hashMap = self.arrayHashMaps.get(arrayPath) || new Map();
@@ -4333,7 +4332,7 @@
             // Store array to be able to compare later
             foreachElement._pacPreviousArray = array;
 
-            // CRITICAL FIX: Build complete HTML string first, then set innerHTML once
+            // Build complete HTML string first, then set innerHTML once
             // This prevents DOM corruption caused by repeated innerHTML += operations
             let completeHTML = '';
 
@@ -4378,12 +4377,18 @@
      * Gets the source array for a potentially filtered expression
      * @param {string} foreachExpr - The foreach expression (e.g., "filteredTodos")
      * @param {Array} currentArray - The current evaluated array
+     * @param mappingData
      * @returns {Array} The source array or current array if no source found
      */
-    Context.prototype.getSourceArrayForFiltered = function(foreachExpr, currentArray) {
-        const root = this.inferArrayRoot(foreachExpr);
-        const v = this.abstraction[root];
-        return Array.isArray(v) ? v : currentArray;
+    Context.prototype.getSourceArrayForFiltered = function (foreachExpr, currentArray, mappingData) {
+        const rootName = (mappingData && mappingData.sourceArray) || this.inferArrayRoot(foreachExpr);
+        
+        if (!rootName) {
+            return currentArray;
+        }
+
+        const rootArray = this.abstraction[rootName];
+        return Array.isArray(rootArray) ? rootArray : currentArray;
     };
 
     /**
@@ -5161,7 +5166,7 @@
      */
     Context.prototype.addItems = function(element, addedIndices, newArray, mappingData) {
         // Get the source array to determine original indices
-        const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, newArray);
+        const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, newArray, mappingData);
 
         addedIndices.forEach(index => {
             const item = newArray[index];
