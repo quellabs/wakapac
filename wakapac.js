@@ -3788,59 +3788,75 @@
      * @param {*} event.detail.oldValue - The previous value before the change
      * @param {*} event.detail.newValue - The new value after the change
      */
-    Context.prototype.handleReactiveChange = function(event) {
-        // Convert the change path array to a string for dependency lookups
-        const pathString = Utils.pathArrayToString(event.detail.path);
-        const pathsToCheck = [pathString];
+    Context.prototype.handleReactiveChange = function (event) {
+        // 1) Normalize path and seed the worklist
+        const changedPath = Utils.pathArrayToString(event.detail.path);
+        const changedRoot = event.detail.path[0];
 
-        // Trigger watchers for root property changes (not nested changes)
+        /** Build initial seed set: the changed path + direct dependents on path and root */
+        const initialSeeds = new Set([changedPath]);
+        if (this.dependencies.has(changedPath)) {
+            for (const d of this.dependencies.get(changedPath)) {
+                initialSeeds.add(d);
+            }
+        }
+        if (this.dependencies.has(changedRoot)) {
+            for (const d of this.dependencies.get(changedRoot)) {
+                initialSeeds.add(d);
+            }
+        }
+
+        /** Expand to transitive dependents with BFS so chains like A→B→C are included */
+        const expandAllDependents = (seedSet) => {
+            const seen = new Set(seedSet);
+            const queue = [...seedSet];
+
+            while (queue.length) {
+                const current = queue.shift();
+                const nexts = this.dependencies.get(current) || [];
+
+                for (const dep of nexts) {
+                    if (!seen.has(dep)) {
+                        seen.add(dep);
+                        queue.push(dep);
+                    }
+                }
+            }
+
+            return Array.from(seen);
+        };
+
+        // 2) Fire watchers on simple root-level property writes
         if (event.detail.path.length === 1) {
-            this.triggerWatcher(pathString, event.detail.newValue, event.detail.oldValue);
+            this.triggerWatcher(changedPath, event.detail.newValue, event.detail.oldValue);
         }
 
-        // Check if the changed path has any registered dependencies and include them
-        if (this.dependencies.has(pathString)) {
-            pathsToCheck.push(...this.dependencies.get(pathString));
-        }
+        // 3) Update text nodes and attributes bound to any affected paths
+        const pathsToProcess = expandAllDependents(initialSeeds);
+        this.handleTextInterpolation(event, pathsToProcess);
+        this.handleAttributeChanges(event, pathsToProcess);
 
-        // Also check dependencies for the root property (first segment of the path)
-        // This handles cases where nested changes should trigger root-level dependencies
-        const rootProperty = event.detail.path[0];
-        if (this.dependencies.has(rootProperty)) {
-            pathsToCheck.push(...this.dependencies.get(rootProperty));
-        }
-
-        // Update text interpolations ({{variable}} expressions) that depend on changed paths
-        this.handleTextInterpolation(event, pathsToCheck);
-
-        // Update HTML attributes that are bound to changed paths
-        this.handleAttributeChanges(event, pathsToCheck);
-
-        // Handle foreach loop rebuilds when array data changes
-        pathsToCheck.forEach(path => {
-            // Skip nested property changes unless it's a direct array assignment
-            // This prevents unnecessary rebuilds when individual array items change
-            if (path === pathString && event.detail.path.length > 1) {
+        // 4) Rebuild foreach blocks when the underlying array or a computed array changes
+        pathsToProcess.forEach((path) => {
+            // Skip nested writes for the direct changed path to avoid noisy rebuilds
+            if (path === changedPath && event.detail.path.length > 1) {
                 return;
             }
 
-            // Determine if this path could represent an array that needs foreach rebuilding
-            // Check both computed functions (that might return arrays) and direct array properties
-            const isComputedFunction = typeof this.abstraction.computed?.[path] === 'function';
+            const isComputedSource = typeof this.abstraction.computed?.[path] === 'function';
             const isDirectArray = event.detail.path.length === 1 && Array.isArray(this.abstraction[path]);
 
-            // Only proceed if this path could contain array data for foreach loops
-            if (isComputedFunction || isDirectArray) {
-                // Find all DOM elements with foreach directives that use this array path
-                const foreachElements = this.findForeachElementsByArrayPath(path);
-
-                // Rebuild each foreach element if conditions are met
-                foreachElements.forEach(element => {
-                    if (this.shouldRebuildForeach(element)) {
-                        this.renderForeach(element);
-                    }
-                });
+            if (!isComputedSource && !isDirectArray) {
+                return;
             }
+
+            const foreachElements = this.findForeachElementsByArrayPath(path);
+
+            foreachElements.forEach((el) => {
+                if (this.shouldRebuildForeach(el)) {
+                    this.renderForeach(el);
+                }
+            });
         });
     };
 
