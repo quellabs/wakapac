@@ -4903,6 +4903,9 @@
             this.addItems(element, changes.added, newArray, mappingData);
         }
 
+        // Scan newly added elements for bindings
+        this.scanAndRegisterNewElements(element);
+
         // Rebuild hash map from scratch after all operations
         this.rebuildHashMap(element, newArray, arrayPath);
 
@@ -4962,7 +4965,6 @@
 
         removedIndices.forEach(index => {
             this.findItemNodes(element, index).forEach(node => {
-                // Remove the actual DOM node
                 node.remove();
             });
         });
@@ -5056,9 +5058,6 @@
                 }
             }
         });
-
-        // Scan newly added elements for bindings
-        this.scanAndRegisterNewElements(element);
     };
 
     /**
