@@ -2450,9 +2450,7 @@
                 // Resolve the scope - use parentElement for text nodes
                 const scopeResolver = {
                     resolveScopedPath: (path) => {
-                        const normalizedPath = self.context.normalizePath(path, element);
-                        //console.log(path, normalizedPath);
-                        return normalizedPath;
+                        return self.context.normalizePath(path, element);
                     }
                 };
 
@@ -3609,8 +3607,6 @@
      * @param {*} event.detail.oldValue - The previous value before the change
      * @param {*} event.detail.newValue - The new value after the change
      */
-// Replace the entire handleReactiveChange method (around line 2750) with this debug version:
-
     Context.prototype.handleReactiveChange = function (event) {
         // Simple approach: check every element binding to see if it needs updating
         this.interpolationMap.forEach((mappingData, element) => {
@@ -3639,6 +3635,7 @@
                         element._pacPreviousValues = {};
                     }
 
+                    // Grab previous value
                     const previousValue = element._pacPreviousValues[bindingType];
 
                     // Update if value changed
@@ -3664,16 +3661,8 @@
                 const newText = mappingData.template.replace(INTERPOLATION_REGEX, (match, expression) => {
                     try {
                         const parsed = ExpressionCache.parseExpression(expression);
-
-                        // Find the parent element for context resolution
-                        // Text nodes need their parent element to resolve foreach contexts
-                        let contextElement = textNode.parentElement;
-                        while (contextElement && !contextElement.closest) {
-                            contextElement = contextElement.parentElement;
-                        }
-
                         const scopeResolver = {
-                            resolveScopedPath: (path) => this.normalizePath(path, contextElement)
+                            resolveScopedPath: (path) => this.normalizePath(path, textNode)
                         };
                         const result = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
                         return result != null ? String(result) : '';
@@ -3877,7 +3866,6 @@
 
     Context.prototype.findElementByForEachId = function(forEachId) {
         for (const [element, mappingData] of this.interpolationMap) {
-            //console.log(element, mappingData);
             if (mappingData.foreachId === forEachId) {
                 return element;
             }
