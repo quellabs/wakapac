@@ -2098,7 +2098,7 @@
 
             // Ensure resolvedPath is a string for string operations
             resolvedPath = String(resolvedPath);
-
+            
             // Handle simple property access (no dots or brackets)
             if (resolvedPath.indexOf('.') === -1 && resolvedPath.indexOf('[') === -1) {
                 return (resolvedPath in obj) ? obj[resolvedPath] : undefined;
@@ -2106,8 +2106,8 @@
 
             // Split path by both dots and brackets, handling bracket notation correctly
             const parts = resolvedPath.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
-            let current = obj;
 
+            let current = obj;
             for (let i = 0; i < parts.length; i++) {
                 if (current == null) {
                     return undefined;
@@ -2449,7 +2449,11 @@
 
                 // Resolve the scope - use parentElement for text nodes
                 const scopeResolver = {
-                    resolveScopedPath: (path) => self.context.normalizePath(path, element)
+                    resolveScopedPath: (path) => {
+                        const normalizedPath = self.context.normalizePath(path, element);
+                        //console.log(path, normalizedPath);
+                        return normalizedPath;
+                    }
                 };
 
                 // Evaluate the expression using the scope resolver
@@ -2982,24 +2986,7 @@
 
         // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
-            // Check if text node is inside a conditionally rendered element that's currently hidden
-            let currentElement = textNode.parentNode;
-            let isInHiddenConditional = false;
-
-            while (currentElement && currentElement !== this.container) {
-                // Check if this element has conditional binding and is not currently rendered
-                if (currentElement._pacIsRendered === false) {
-                    isInHiddenConditional = true;
-                    break;
-                }
-
-                currentElement = currentElement.parentNode;
-            }
-
-            // Only process text interpolations that are not in hidden conditional elements
-            if (!isInHiddenConditional) {
-                self.domUpdater.updateTextNode(textNode, mappingData.template);
-            }
+            self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
         // Handle nested foreach rendering (sort by depth, deepest first)
@@ -4237,7 +4224,7 @@
 
                 // Put hash in map
                 hashMap.set(contentHash, originalIndex);
-
+                
                 // Build the HTML for this item
                 completeHTML +=
                     `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
