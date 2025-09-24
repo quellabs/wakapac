@@ -3613,10 +3613,12 @@
             const { bindings } = mappingData;
 
             Object.keys(bindings).forEach(bindingType => {
+                // Skip foreach and click binds. They are handled elsewhere
                 if (['foreach', 'click'].includes(bindingType)) {
                     return;
                 }
 
+                // Fetch the binding type
                 const bindingData = bindings[bindingType];
 
                 // For each binding, evaluate it now and see if the result changed
@@ -3643,7 +3645,6 @@
                         element._pacPreviousValues[bindingType] = currentValue;
                         this.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
                     }
-
                 } catch (error) {
                     console.warn('Error evaluating binding:', bindingType, error);
                 }
