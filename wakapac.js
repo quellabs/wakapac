@@ -985,6 +985,11 @@
                 return;
             }
 
+            // Process event modifiers - return early if event should be filtered
+            if (!this.processEventModifiers(originalEvent.target, originalEvent)) {
+                return;
+            }
+
             // Build Win32-style parameters based on the message type and original event
             const params = this.buildParams(messageType, originalEvent);
 
@@ -1346,6 +1351,122 @@
             ];
 
             return extendedKeys.includes(code);
+        },
+
+        /**
+         * Processes event modifiers from the data-pac-event attribute to control event behavior.
+         * Handles both behavioral modifiers (prevent, stop) and key filtering for keyboard events.
+         * Returns false if the event should be filtered out (not dispatched), true otherwise.
+         * @param {HTMLElement} element - The DOM element that has the data-pac-event attribute
+         * @param {Event} originalEvent - The original DOM event being processed
+         * @returns {boolean} True if the event should be dispatched, false if it should be filtered out
+         */
+        processEventModifiers(element, originalEvent) {
+            const modifiers = element.getAttribute('data-pac-event');
+
+                    // No modifiers, process normally
+            if (!modifiers) {
+                return true;
+            }
+
+            const modifierList = modifiers.split(/\s+/);
+
+            for (const modifier of modifierList) {
+                switch (modifier.toLowerCase()) {
+                    case 'prevent':
+                        originalEvent.preventDefault();
+                        break;
+
+                    case 'stop':
+                        originalEvent.stopPropagation();
+                        break;
+
+                    case 'enter':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== 'Enter') {
+                                return false; // Don't dispatch event
+                            }
+                        }
+
+                        break;
+
+                    case 'escape':
+                    case 'esc':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== 'Escape') {
+                                return false;
+                            }
+                        }
+
+                        break;
+
+                    case 'space':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== ' ') {
+                                return false;
+                            }
+                        }
+
+                        break;
+
+                    case 'tab':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== 'Tab') {
+                                return false;
+                            }
+                        }
+
+                        break;
+
+                    case 'delete':
+                    case 'del':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== 'Delete') {
+                                return false;
+                            }
+                        }
+
+                        break;
+
+                    case 'up':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== 'ArrowUp') {
+                                return false;
+                            }
+                        }
+
+                        break;
+
+                    case 'down':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== 'ArrowDown') {
+                                return false;
+                            }
+                        }
+
+                        break;
+
+                    case 'left':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== 'ArrowLeft') {
+                                return false;
+                            }
+                        }
+
+                        break;
+
+                    case 'right':
+                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
+                            if (originalEvent.key !== 'ArrowRight') {
+                                return false;
+                            }
+                        }
+
+                        break;
+                }
+            }
+
+            return true; // Process the event
         }
     }
 
