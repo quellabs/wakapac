@@ -49,7 +49,7 @@
      * This regexp finds runs of dots and square brackets.
      * @type {RegExp}
      */
-    const DOTS_AND_BRACKETS_PATTERN = /[.\[\]]+/;
+    const DOTS_AND_BRACKETS_PATTERN = /[.[\]]+/;
 
     /**
      * HTML attributes that are boolean (present = true, absent = false)
@@ -758,7 +758,7 @@
              * Handle document visibility changes (tab switches, window minimize, etc.)
              * Updates browserVisible property for all PAC containers
              */
-            document.addEventListener('visibilitychange', function(event) {
+            document.addEventListener('visibilitychange', function() {
                 self.dispatchBrowserStateEvent('visibility', {
                     visible: !document.hidden
                 });
@@ -768,7 +768,7 @@
              * Handle browser coming online
              * Updates network state for all PAC containers
              */
-            window.addEventListener('online', function(event) {
+            window.addEventListener('online', function() {
                 self.dispatchBrowserStateEvent('online', {
                     online: true,
                     networkType: Utils.getNetworkEffectiveType(),
@@ -780,7 +780,7 @@
              * Handle browser going offline
              * Updates network state for all PAC containers
              */
-            window.addEventListener('offline', function(event) {
+            window.addEventListener('offline', function() {
                 self.dispatchBrowserStateEvent('online', {
                     online: false,
                     networkType: Utils.getNetworkEffectiveType(),
@@ -793,7 +793,7 @@
              * Updates network quality when connection type changes
              */
             if ('connection' in navigator && navigator.connection) {
-                navigator.connection.addEventListener('change', function(event) {
+                navigator.connection.addEventListener('change', function() {
                     self.dispatchBrowserStateEvent('online', {
                         online: navigator.onLine,
                         networkType: Utils.getNetworkEffectiveType(),
@@ -922,7 +922,7 @@
              * Updates current scroll position for all PAC containers
              */
             let scrollTimeout;
-            window.addEventListener('scroll', function(event) {
+            window.addEventListener('scroll', function() {
                 if (scrollTimeout) {
                     return;
                 }
@@ -942,7 +942,7 @@
              * Updates viewport/document dimensions and scroll position
              */
             let resizeTimeout;
-            window.addEventListener('resize', function(event) {
+            window.addEventListener('resize', function() {
                 if (resizeTimeout) {
                     return;
                 }
