@@ -2628,12 +2628,6 @@
             element._pacPlaceholder.parentNode.replaceChild(element, element._pacPlaceholder);
             element._pacIsRendered = true;
 
-            // Clear any foreach elements so they render fresh
-            element.querySelectorAll('[data-pac-foreach-id]').forEach(el => {
-                this.context.cleanupForeachMaps(el);
-                delete el._pacPreviousArray;
-            });
-
             this.context.scanAndRegisterNewElements(element);
         }
 
