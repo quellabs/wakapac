@@ -1379,16 +1379,6 @@
          * @returns {Object|null} Parsed AST node or null if unparseable
          */
         parseExpression(expression) {
-            // Handle already parsed objects
-            if (typeof expression === 'object' && expression !== null) {
-                if (expression.dependencies) {
-                    return expression;
-                }
-
-                const dependencies = this.extractDependencies(expression);
-                return Object.assign({}, expression, {dependencies});
-            }
-
             // Remove whitespace around expression
             expression = String(expression).trim();
 
@@ -1401,14 +1391,7 @@
             }
 
             // Add dependencies to the result
-            const result = this.parseTernary();
-
-            if (result) {
-                result.dependencies = this.extractDependencies(result);
-            }
-
-            // Cache the result
-            return result;
+            return this.parseTernary();
         },
 
         /**
@@ -2206,83 +2189,6 @@
         },
 
         /**
-         * Extracts dependencies from parsed AST
-         * @param {Object} node - AST node
-         * @returns {string[]} Array of property dependencies
-         */
-        extractDependencies(node) {
-            if (!node) {
-                return [];
-            }
-
-            const dependencies = new Set();
-
-            const traverse = (n) => {
-                if (!n) {
-                    return;
-                }
-
-                switch (n.type) {
-                    case 'property': {
-                        const rootProp = n.path.split(/[.[]/, 1)[0];
-
-                        if (rootProp && !['true', 'false', 'null', 'undefined'].includes(rootProp)) {
-                            dependencies.add(rootProp);
-                        }
-
-                        break;
-                    }
-
-                    case 'array':
-                        if (n.elements) {
-                            n.elements.forEach(element => traverse(element));
-                        }
-                        break;
-
-                    case 'index':
-                        traverse(n.object);
-                        traverse(n.index);
-                        break;
-
-                    case 'member':
-                        traverse(n.object);
-                        break;
-
-                    case 'ternary':
-                        traverse(n.condition);
-                        traverse(n.trueValue);
-                        traverse(n.falseValue);
-                        break;
-
-                    case 'logical':
-                    case 'comparison':
-                    case 'arithmetic':
-                        traverse(n.left);
-                        traverse(n.right);
-                        break;
-
-                    case 'unary':
-                        traverse(n.operand);
-                        break;
-
-                    case 'parentheses':
-                        traverse(n.inner);
-                        break;
-
-                    case 'object':
-                        if (n.pairs) {
-                            n.pairs.forEach(pair => traverse(pair.value));
-                        }
-
-                        break;
-                }
-            };
-
-            traverse(node);
-            return Array.from(dependencies);
-        },
-
-        /**
          * Parses a binding string into key-value pairs
          * @param {string} bindingString - Binding string to parse
          * @returns {Array} Array of binding pairs
@@ -3057,43 +2963,13 @@
 
         // Add new bindings to main maps
         newBindings.forEach((mappingData, element) => {
-            if (element !== parentElement) { // Don't re-add the foreach element itself
+            if (element !== parentElement) {
                 this.interpolationMap.set(element, mappingData);
             }
         });
 
         newTextBindings.forEach((mappingData, textNode) => {
             this.textInterpolationMap.set(textNode, mappingData);
-        });
-
-        // Process nested foreach elements
-        newBindings.forEach((mappingData, element) => {
-            const { bindings } = mappingData;
-            
-            if (bindings.foreach && element !== parentElement) {
-                // Set the ID as an attribute for debugging/identification
-                const foreachId = Utils.uniqid('foreach');
-                element.setAttribute('data-pac-foreach-id', foreachId);
-
-                // Auto-detect and set the source array
-                const foreachExpr = bindings.foreach.target;
-                const sourceArray = this.inferArrayRoot(foreachExpr);
-                element.setAttribute('data-pac-array', sourceArray);
-
-                // Get itemVar and indexVar from attributes
-                const itemVar = element.getAttribute('data-pac-item') || 'item';
-                const indexVar = element.getAttribute('data-pac-index') || 'index';
-
-                // Extend the existing mappingData with foreach-specific information
-                Object.assign(mappingData, {
-                    foreachExpr: bindings.foreach.target,
-                    sourceArray: sourceArray,
-                    foreachId: foreachId,
-                    template: element.innerHTML,
-                    itemVar: itemVar,
-                    indexVar: indexVar
-                });
-            }
         });
 
         // Apply initial bindings to new elements
@@ -3156,7 +3032,7 @@
         /** @type {Set<string>} Tracks which properties are accessed during each computed property execution */
         const accessed = new Set();
 
-        /** @type {Proxy} Proxy that intercepts property access to track dependencies */
+        /** @type {Object} Proxy that intercepts property access to track dependencies */
         const proxy = new Proxy(this.originalAbstraction, {
             /**
              * Trap for property access - records accessed property names
@@ -3210,82 +3086,6 @@
 
         // Nothing matched
         return computedName;
-    };
-
-    Context.prototype.handleAttributeChanges = function(event, pathsToCheck) {
-        const self = this;
-        const changedRoot = event.detail.path[0]; // e.g., "todos"
-
-        this.interpolationMap.forEach((mappingData, element) => {
-            const { bindings } = mappingData;
-
-            // Check each binding type individually
-            Object.keys(bindings).forEach(bindingType => {
-                // Skip foreach and click bindings (handled separately)
-                if (['foreach', 'click'].includes(bindingType)) {
-                    return;
-                }
-
-                const bindingData = bindings[bindingType];
-
-                // Check if any of the paths that changed affect this binding
-                // Need to check both exact matches and root property matches
-                let shouldUpdate = bindingData.dependencies.some(dependency => {
-                    return pathsToCheck.includes(dependency) ||
-                        event.detail.path.join('.').startsWith(dependency + '.') ||
-                        event.detail.path.join('.').startsWith(dependency + '[');
-                });
-
-                // Also check if element is in a foreach container affected by the change
-                if (!shouldUpdate) {
-                    const foreachContainer = element.closest('[data-pac-foreach-id]');
-
-                    if (foreachContainer) {
-                        const containerData = self.interpolationMap.get(foreachContainer);
-                        if (containerData && containerData.sourceArray === changedRoot) {
-                            shouldUpdate = true;
-                        }
-                    }
-                }
-
-                if (shouldUpdate) {
-                    self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
-                }
-            });
-        });
-    };
-
-    Context.prototype.handleTextInterpolation = function(event, pathsToCheck) {
-        const self = this;
-        const changedRoot = event.detail.path[0];
-
-        self.textInterpolationMap.forEach((mappingData, textNode) => {
-            // Check if any of the paths that changed affect this node
-            let shouldUpdate = mappingData.dependencies.some(dep => {
-                const exactMatch = pathsToCheck.includes(dep);
-                const pathMatch = event.detail.path.join('.').startsWith(dep + '.') ||
-                    event.detail.path.join('.').startsWith(dep + '[');
-
-                return exactMatch || pathMatch;
-            });
-
-            // Also check if element is in a foreach container affected by the change
-            if (!shouldUpdate) {
-                const foreachContainer = textNode.parentElement?.closest('[data-pac-foreach-id]');
-
-                if (foreachContainer) {
-                    const containerData = self.interpolationMap.get(foreachContainer);
-
-                    if (containerData && containerData.sourceArray === changedRoot) {
-                        shouldUpdate = true;
-                    }
-                }
-            }
-
-            if (shouldUpdate) {
-                self.domUpdater.updateTextNode(textNode, mappingData.template);
-            }
-        });
     };
 
     /**
@@ -3822,76 +3622,104 @@
      * @param {*} event.detail.oldValue - The previous value before the change
      * @param {*} event.detail.newValue - The new value after the change
      */
+// Replace the entire handleReactiveChange method (around line 2750) with this debug version:
+
     Context.prototype.handleReactiveChange = function (event) {
-        // 1) Normalize path and seed the worklist
-        const changedPath = Utils.pathArrayToString(event.detail.path);
-        const changedRoot = event.detail.path[0];
+        // Simple approach: check every element binding to see if it needs updating
+        this.interpolationMap.forEach((mappingData, element) => {
+            const { bindings } = mappingData;
 
-        /** Build initial seed set: the changed path + direct dependents on path and root */
-        const initialSeeds = new Set([changedPath]);
-        if (this.dependencies.has(changedPath)) {
-            for (const d of this.dependencies.get(changedPath)) {
-                initialSeeds.add(d);
-            }
-        }
-        if (this.dependencies.has(changedRoot)) {
-            for (const d of this.dependencies.get(changedRoot)) {
-                initialSeeds.add(d);
-            }
-        }
-
-        /** Expand to transitive dependents with BFS so chains like A→B→C are included */
-        const expandAllDependents = (seedSet) => {
-            const seen = new Set(seedSet);
-            const queue = [...seedSet];
-
-            while (queue.length) {
-                const current = queue.shift();
-                const nexts = this.dependencies.get(current) || [];
-
-                for (const dep of nexts) {
-                    if (!seen.has(dep)) {
-                        seen.add(dep);
-                        queue.push(dep);
-                    }
+            Object.keys(bindings).forEach(bindingType => {
+                if (['foreach', 'click'].includes(bindingType)) {
+                    return;
                 }
+
+                const bindingData = bindings[bindingType];
+
+                // For each binding, evaluate it now and see if the result changed
+                try {
+                    // Create scope resolver for this element
+                    const scopeResolver = {
+                        resolveScopedPath: (path) => this.normalizePath(path, element)
+                    };
+
+                    // Parse and evaluate the binding expression
+                    const parsed = ExpressionCache.parseExpression(bindingData.target);
+                    const currentValue = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
+
+                    // Store previous values to detect changes
+                    if (!element._pacPreviousValues) {
+                        element._pacPreviousValues = {};
+                    }
+
+                    const previousValue = element._pacPreviousValues[bindingType];
+
+                    // Update if value changed
+                    if (!Utils.isEqual(previousValue, currentValue)) {
+                        element._pacPreviousValues[bindingType] = currentValue;
+                        this.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
+                    }
+
+                } catch (error) {
+                    console.warn('Error evaluating binding:', bindingType, error);
+                }
+            });
+        });
+
+        // Handle text interpolations with proper foreach context resolution
+        this.textInterpolationMap.forEach((mappingData, textNode) => {
+            try {
+                // Store previous text content to detect changes
+                if (!textNode._pacPreviousText) {
+                    textNode._pacPreviousText = textNode.textContent;
+                }
+
+                const newText = mappingData.template.replace(INTERPOLATION_REGEX, (match, expression) => {
+                    try {
+                        const parsed = ExpressionCache.parseExpression(expression);
+
+                        // Find the parent element for context resolution
+                        // Text nodes need their parent element to resolve foreach contexts
+                        let contextElement = textNode.parentElement;
+                        while (contextElement && !contextElement.closest) {
+                            contextElement = contextElement.parentElement;
+                        }
+
+                        const scopeResolver = {
+                            resolveScopedPath: (path) => this.normalizePath(path, contextElement)
+                        };
+                        const result = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
+                        return result != null ? String(result) : '';
+                    } catch (error) {
+                        console.warn('Error evaluating text interpolation:', expression, error);
+                        return match;
+                    }
+                });
+
+                // Only update if text actually changed
+                if (textNode._pacPreviousText !== newText) {
+                    textNode.textContent = newText;
+                    textNode._pacPreviousText = newText;
+                }
+            } catch (error) {
+                console.warn('Error updating text node:', error);
             }
+        });
 
-            return Array.from(seen);
-        };
-
-        // 2) Fire watchers on simple root-level property writes
+        // Handle watchers for root-level changes
         if (event.detail.path.length === 1) {
-            this.triggerWatcher(changedPath, event.detail.newValue, event.detail.oldValue);
+            this.triggerWatcher(event.detail.path[0], event.detail.newValue, event.detail.oldValue);
         }
 
-        // 3) Update text nodes and attributes bound to any affected paths
-        const pathsToProcess = expandAllDependents(initialSeeds);
-        this.handleTextInterpolation(event, pathsToProcess);
-        this.handleAttributeChanges(event, pathsToProcess);
-
-        // 4) Rebuild foreach blocks when the underlying array or a computed array changes
-        pathsToProcess.forEach((path) => {
-            // Skip nested writes for the direct changed path to avoid noisy rebuilds
-            if (path === changedPath && event.detail.path.length > 1) {
-                return;
-            }
-
-            const isComputedSource = typeof this.abstraction.computed?.[path] === 'function';
-            const isDirectArray = event.detail.path.length === 1 && Array.isArray(this.abstraction[path]);
-
-            if (!isComputedSource && !isDirectArray) {
-                return;
-            }
-
-            const foreachElements = this.findForeachElementsByArrayPath(path);
-
+        // Handle foreach rebuilds only for array changes
+        if (event.detail.path.length === 1 && Array.isArray(this.abstraction[event.detail.path[0]])) {
+            const foreachElements = this.findForeachElementsByArrayPath(event.detail.path[0]);
             foreachElements.forEach((el) => {
                 if (this.shouldRebuildForeach(el)) {
                     this.renderForeach(el);
                 }
             });
-        });
+        }
     };
 
     /**
@@ -4040,54 +3868,89 @@
 
             // Transform bindings array into object keyed by binding type
             const bindingsObject = {};
-
             parsedBindings.forEach(binding => {
                 bindingsObject[binding.type] = {
-                    target: binding.target,
-                    dependencies: this.extractDependencies(binding.target)
+                    target: binding.target
                 };
             });
 
-            // Create mapping object
-            const mappingData = {
+            // Put the data in the map
+            interpolationMap.set(element, {
                 bindingString: bindingString,
                 bindings: bindingsObject
-            };
-
-            // Special handling for foreach bindings
-            if (bindingsObject.foreach) {
-                const foreachId = Utils.uniqid('foreach');
-                element.setAttribute('data-pac-foreach-id', foreachId);
-
-                // Reset element to clean state if it has rendered content from previous renders
-                if (element.innerHTML.includes('<!-- pac-foreach-item:')) {
-                    // Find existing mapping data to get clean template
-                    const existingMapping = this.interpolationMap.get(element);
-                    if (existingMapping && existingMapping.template) {
-                        element.innerHTML = existingMapping.template;
-                    }
-                }
-
-                const foreachExpr = bindingsObject.foreach.target;
-                const itemVar = element.getAttribute('data-pac-item') || 'item';
-                const indexVar = element.getAttribute('data-pac-index') || 'index';
-
-                Object.assign(mappingData, {
-                    foreachExpr: foreachExpr,
-                    sourceArray: this.inferArrayRoot(foreachExpr),
-                    foreachId: foreachId,
-                    template: element.innerHTML, // Capture clean template
-                    itemVar: itemVar,
-                    indexVar: indexVar
-                });
-            }
-
-            // Put the data in the map
-            interpolationMap.set(element, mappingData);
+            });
         });
 
+        // Extend data of foreach bindings
+        this.extendBindingsWithForEachData(interpolationMap);
+        
+        // Return the map
         return interpolationMap;
     };
+
+    Context.prototype.findElementByForEachId = function(forEachId) {
+        for (const [element, mappingData] of this.interpolationMap) {
+            //console.log(element, mappingData);
+            if (mappingData.foreachId === forEachId) {
+                return element;
+            }
+        }
+
+        return null;
+    };
+
+    /**
+     * Extend data of foreach binds
+     * @param interpolationMap {Map<WeakKey, any>}
+     */
+    Context.prototype.extendBindingsWithForEachData = function(interpolationMap) {
+        const self = this;
+
+        interpolationMap.forEach((mappingData, element) => {
+            // Do nothing when this is not a foreach binding
+            if (!mappingData.bindings.foreach) {
+                return;
+            }
+
+            // Do nothing when the binding already has a foreachId
+            if (mappingData.foreachId) {
+                return;
+            }
+
+            // If the element has an foreach-id attribute, but no internal foreachId, this is probably
+            // a foreach that becomes out of hiding through the if binding. Lookup the previous element
+            // and put its elementData inside the new element. Then remove the old binding
+            if (element.hasAttribute('data-pac-foreach-id')) {
+                const foreachId = element.getAttribute('data-pac-foreach-id');
+                const elementByForEach = self.findElementByForEachId(foreachId);
+                const elementData = self.interpolationMap.get(elementByForEach);
+
+                interpolationMap.set(element, elementData);
+                self.interpolationMap.delete(elementByForEach);
+                return;
+            }
+
+            // Set a new foreachId
+            const foreachId = Utils.uniqid('foreach');
+            element.setAttribute('data-pac-foreach-id', foreachId);
+
+            // Store the updated mapping data into the map
+            const foreachExpr = mappingData.bindings.foreach.target;
+            const itemVar = element.getAttribute('data-pac-item') || 'item';
+            const indexVar = element.getAttribute('data-pac-index') || 'index';
+
+            Object.assign(mappingData, {
+                foreachId: foreachId,
+                foreachExpr: foreachExpr,
+                sourceArray: this.inferArrayRoot(foreachExpr),
+                template: element.innerHTML, // Capture clean template
+                itemVar: itemVar,
+                indexVar: indexVar
+            });
+
+            interpolationMap.set(element, mappingData);
+        })
+    }
 
     /**
      * Scans the container for text nodes containing interpolation expressions and builds
@@ -4120,46 +3983,11 @@
             }
 
             interpolationMap.set(element, {
-                template: element.textContent,
-                dependencies: this.extractInterpolationDependencies(element.textContent)
+                template: element.textContent
             });
         }
 
         return interpolationMap;
-    };
-
-    /**
-     * Extracts all unique dependencies from interpolation expressions in a text template.
-     * @param {string} template - The text template containing interpolation expressions
-     * @returns {Array<string>} Array of unique dependency identifiers
-     * @private
-     */
-    Context.prototype.extractInterpolationDependencies = function(template) {
-        const dependencies = new Set();
-
-        template.replace(INTERPOLATION_REGEX, (match, expression) => {
-            const expressionDependencies = this.extractDependencies(expression.trim());
-            expressionDependencies.forEach(dep => dependencies.add(dep));
-            return match; // Return match to satisfy replace callback
-        });
-
-        return Array.from(dependencies);
-    };
-
-    /**
-     * Extracts dependencies from a binding expression, with error handling.
-     * @param {string} expression - The binding expression to parse
-     * @returns {Array<string>} Array of dependency identifiers
-     * @private
-     */
-    Context.prototype.extractDependencies = function(expression) {
-        try {
-            const parsed = ExpressionCache.parseExpression(expression);
-            return parsed?.dependencies || [];
-        } catch (error) {
-            console.warn('Failed to parse binding dependencies:', expression, error);
-            return [];
-        }
     };
 
     /**
