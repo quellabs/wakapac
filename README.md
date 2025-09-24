@@ -26,11 +26,12 @@ This results in more predictable data flow and easier debugging than traditional
 
 - **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes
 - **Two-way reactivity** for objects and nested arrays
+- **Advanced expression system** supporting arrays, objects, and complex operations
+- **Integrated HTTP client** (WakaSync) with request grouping, cancellation, and retry logic
 - **Drop-in script file** - no bundler required
-- **Win32-style** `eventProc` for low-level event handling when you want total control
-- **Hierarchical components** with parent–child notification
-- **Everything included** - reactivity, HTTP utilities, component communication, and browser state tracking in one library
-- **No ecosystem complexity** - one script file provides what typically requires multiple React/Vue packages
+- **Win32-style** `msgProc` for low-level event handling when you want total control
+- **Hierarchical components** with parent—child notification
+- **Integrated HTTP client** - seamless integration with WakaSync for advanced HTTP handling with request grouping and cancellation
 
 ### Who WakaPAC is For
 
@@ -50,8 +51,12 @@ This results in more predictable data flow and easier debugging than traditional
 <!-- CDN -->
 <script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.min.js"></script>
 
-<!-- Or download -->
+<!-- Optional: Add WakaSync for HTTP functionality -->
+<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakasync.min.js"></script>
+
+<!-- Or download files -->
 <script src="wakapac.min.js"></script>
+<script src="wakasync.min.js"></script>
 ```
 
 ## Quick Example
@@ -107,6 +112,43 @@ Text interpolation allows you to dynamically insert data into your HTML template
 
 <!-- String Operations -->
 <p>Full Name: {{firstName + ' ' + lastName}}</p>
+```
+
+### Advanced Expression System
+
+WakaPAC supports JavaScript-like expressions in templates and bindings, enabling complex data operations directly in your HTML:
+
+#### Array Literals and Operations
+```html
+<!-- Array literals -->
+<div data-pac-bind="visible: [1, 2, 3][selectedIndex]">
+
+<!-- Array indexing -->
+<span>{{items[currentIndex].title}}</span>
+
+<!-- Array length -->
+<p>Total items: {{items.length}}</p>
+```
+
+#### Object Literals
+```html
+<!-- Object creation -->
+<div data-pac-bind="style: {color: textColor, fontSize: size + 'px'}">
+
+<!-- Conditional object properties -->
+<div data-pac-bind="class: {active: isSelected, disabled: !isEnabled}">
+```
+
+#### Complex Conditionals
+```html
+<!-- Multiple conditions -->
+<div data-pac-bind="visible: user.role === 'admin' && user.active">
+
+<!-- Nested ternary -->
+<span>{{status === 'loading' ? 'Please wait...' : status === 'error' ? 'Try again' : 'Ready'}}</span>
+
+<!-- Array operations -->
+<div data-pac-bind="if: allowedRoles.includes(user.role)">
 ```
 
 ### Complete Binding Reference
@@ -352,6 +394,119 @@ Control when form inputs update your data:
 - **Change**: Server validation, auto-save functionality
 - **Delayed**: Search autocomplete, API queries
 
+## HTTP Client Usage (WakaSync)
+
+WakaPAC works well with WakaSync for HTTP requests. Simply instantiate WakaSync in your components where needed.
+
+### Basic Usage
+
+```javascript
+wakaPAC('#app', {
+    user: null,
+    loading: false,
+    error: null,
+
+    init() {
+        // Create HTTP client instance
+        this.http = new WakaSync({
+            timeout: 10000,
+            retries: 1
+        });
+    },
+
+    async loadUser() {
+        this.loading = true;
+        this.error = null;
+
+        try {
+            this.user = await this.http.get('/api/user');
+        } catch (error) {
+            this.error = error.message;
+        } finally {
+            this.loading = false;
+        }
+    }
+});
+```
+
+### HTTP Methods
+
+```javascript
+wakaPAC('#app', {
+    init() {
+        this.http = new WakaSync();
+    },
+
+    async saveData() {
+        // GET request
+        const users = await this.http.get('/api/users');
+        
+        // POST with data
+        const newUser = await this.http.post('/api/users', {
+            name: 'John Doe',
+            email: 'john@example.com'
+        });
+        
+        // PUT update
+        await this.http.put(`/api/users/${newUser.id}`, {
+            name: 'Jane Doe'
+        });
+        
+        // DELETE
+        await this.http.delete(`/api/users/${newUser.id}`);
+        
+        // PATCH partial update
+        await this.http.patch(`/api/users/${newUser.id}`, {
+            lastLogin: new Date().toISOString()
+        });
+    }
+});
+```
+
+### Advanced HTTP Features
+
+#### Request with Options
+```javascript
+const userData = await this.http.request('/api/user', {
+    method: 'GET',
+    headers: {
+        'Authorization': `Bearer ${this.token}`
+    },
+    timeout: 5000,
+    onSuccess: (data) => {
+        console.log('User loaded:', data);
+    },
+    onError: (error) => {
+        console.error('Load failed:', error);
+    }
+});
+```
+
+#### File Upload
+```javascript
+// FormData upload
+const formData = new FormData();
+formData.append('file', file);
+await this.http.post('/api/upload', formData);
+```
+
+#### Request Cancellation
+```javascript
+wakaPAC('#app', {
+    init() {
+        this.http = new WakaSync();
+    },
+
+    cancelAllRequests() {
+        this.http.cancelAll();
+    },
+
+    cancelSearches() {
+        this.http.cancelGroup('search');
+    }
+});
+```
+
 ## Browser Reactive Properties
 
 WakaPAC automatically provides reactive browser state properties that update when the browser environment changes. These are available in all components without any setup:
@@ -521,7 +676,7 @@ wakaPAC('#app', {
 });
 ```
 
-### EventProc - Win32-Style Message Processing
+### MsgProc - Win32-Style Message Processing
 
 WakaPAC provides a powerful message processing system inspired by Win32 window procedures:
 
@@ -529,11 +684,13 @@ WakaPAC provides a powerful message processing system inspired by Win32 window p
 wakaPAC('#file-manager', {
     activePane: 'left',
 
-    eventProc(message) {
+    msgProc(message) {
+        const { message, wParam, lParam, target, originalEvent } = event.detail;
+        
         switch(message.type) {
-            case 'EVENT_KEYDOWN':
-                if (message.ctrlKey) {
-                    switch(message.key) {
+            case MSG_TYPES.MSG_KEYDOWN:
+                if (originalEvent.ctrlKey) {
+                    switch(originalEvent.key) {
                         case 's':
                             this.saveDocument();
                             return true;
@@ -545,12 +702,36 @@ wakaPAC('#file-manager', {
                 }
                 break;
 
-            case 'EVENT_LBUTTONDOWN':
-                console.log('Left click at', message.clientX, message.clientY);
+            case MSG_TYPES.MSG_LBUTTONDOWN:
+                // Extract coordinates from packed lParam
+                const x = lParam & 0xFFFF;
+                const y = (lParam >> 16) & 0xFFFF;
+                console.log(`Left click at ${x}, ${y}`);
+
+                // Check modifier keys from wParam
+                if (wParam & MK_CONTROL) {
+                    console.log('Ctrl+Click detected');
+                }
+                
                 break;
 
-            case 'EVENT_RBUTTONDOWN':
-                this.showContextMenu(message.clientX, message.clientY);
+            case MSG_TYPES.MSG_RBUTTONDOWN:
+                this.showContextMenu(originalEvent.clientX, originalEvent.clientY);
+                break;
+
+            case MSG_TYPES.MSG_CHAR:
+                // Text input event
+                console.log(`Text length: ${wParam}`);
+                break;
+
+            case MSG_TYPES.MSG_CHANGE:
+                // Form control changed
+                console.log(`Control changed: ${target.tagName}`);
+                break;
+
+            case MSG_TYPES.MSG_SUBMIT:
+                // Form submitted
+                console.log('Form data:', lParam);
                 break;
         }
 
@@ -559,48 +740,70 @@ wakaPAC('#file-manager', {
 });
 ```
 
-**Message Object Structure:**
+#### Message Types (MSG_TYPES Constants)
 
-For keyboard events:
+WakaPAC provides these predefined message constants:
+
+**Mouse Events:**
+- `MSG_TYPES.MSG_LBUTTONDOWN` (0x0201) - Left mouse button pressed
+- `MSG_TYPES.MSG_LBUTTONUP` (0x0202) - Left mouse button released
+- `MSG_TYPES.MSG_RBUTTONDOWN` (0x0204) - Right mouse button pressed
+- `MSG_TYPES.MSG_RBUTTONUP` (0x0205) - Right mouse button released
+- `MSG_TYPES.MSG_MBUTTONDOWN` (0x0207) - Middle mouse button pressed
+- `MSG_TYPES.MSG_MBUTTONUP` (0x0208) - Middle mouse button released
+
+**Keyboard Events:**
+- `MSG_TYPES.MSG_KEYDOWN` (0x0100) - Key pressed down
+- `MSG_TYPES.MSG_KEYUP` (0x0101) - Key released
+
+**Form Events:**
+- `MSG_TYPES.MSG_CHAR` (0x0300) - Character input (typing)
+- `MSG_TYPES.MSG_CHANGE` (0x0301) - Form control value changed
+- `MSG_TYPES.MSG_SUBMIT` (0x0302) - Form submitted
+
+**Focus Events:**
+- `MSG_TYPES.MSG_FOCUS` (0x0007) - Element gained focus
+- `MSG_TYPES.MSG_BLUR` (0x0008) - Element lost focus
+
+#### Message Structure
+
+Each message event contains a standardized structure:
+
 ```javascript
 {
-    type:'EVENT_KEYDOWN',          // or EVENT_KEYUP
-    wParam: 65,                    // Key code
-    lParam: 0,                     // Reserved
-    key: 'a',                      // Modern key name
-    ctrlKey: false,                // Modifier states
-    altKey: false,
-    shiftKey: false,
-    target: HTMLElement,           // Target element
-    originalEvent: Event           // Original DOM event
+    message: MSG_TYPES.MSG_LBUTTONDOWN,  // Message type constant
+    wParam: 0x0001,                      // Primary parameter (flags/data)
+    lParam: 0x00640032,                  // Secondary parameter (coordinates/data)
+    target: HTMLElement,                 // Target DOM element
+    originalEvent: Event,                // Original DOM event
+    timestamp: 1640995200000            // Event timestamp
 }
 ```
 
-For mouse events:
-```javascript
-{
-    type: 'EVENT_LBUTTONDOWN',     // LBUTTON, MBUTTON, RBUTTON + DOWN/UP
-    wParam: 0,                     // Button: 0=left, 1=middle, 2=right
-    lParam: 3435533,               // Packed coordinates
-    clientX: 205,                  // X position
-    clientY: 150,                  // Y position
-    ctrlKey: false,                // Modifier states
-    altKey: false,
-    shiftKey: false,
-    target: HTMLElement,           // Target element
-    originalEvent: Event           // Original DOM event
-}
-```
+#### wParam and lParam Values
 
-**Focus State Requirements:**
-Messages are only sent to components whose containers have keyboard focus. Make elements focusable:
+**For Mouse Events:**
+- **wParam**: Modifier key flags (can be combined with bitwise OR)
+    - `MK_LBUTTON` (0x0001) - Left button held
+    - `MK_RBUTTON` (0x0002) - Right button held
+    - `MK_MBUTTON` (0x0004) - Middle button held
+    - `MK_SHIFT` (0x0008) - Shift key held
+    - `MK_CONTROL` (0x0010) - Ctrl key held
+    - `MK_ALT` (0x0020) - Alt key held
 
-```html
-<!-- Add tabindex to make divs focusable -->
-<div id="file-manager" tabindex="0" style="outline: none;">
-    <!-- Component content -->
-</div>
-```
+- **lParam**: Packed coordinates (LOWORD=x, HIWORD=y)
+  ```javascript
+  const x = lParam & 0xFFFF;
+  const y = (lParam >> 16) & 0xFFFF;
+  ```
+
+**For Keyboard Events:**
+- **wParam**: Virtual key code
+- **lParam**: Keyboard state flags and repeat count
+
+**For Form Events:**
+- **wParam**: Element-specific data (text length, selected index, etc.)
+- **lParam**: Form data object (for submit events) or 0
 
 ### Component Hierarchy
 
@@ -696,193 +899,6 @@ wakaPAC('#map-app', {
 });
 ```
 
-### Server Communication
-
-The `control` method provides enhanced HTTP request handling with comprehensive options for modern web applications:
-
-#### Basic Usage
-
-```javascript
-wakaPAC('#app', {
-    user: null,
-    loading: false,
-    error: null,
-
-    async loadUser() {
-        this.loading = true;
-        this.error = null;
-
-        try {
-            const userData = await this.control('/api/user', {
-                method: 'GET',
-                onSuccess: (data) => {
-                    this.user = data;
-                },
-                onError: (error) => {
-                    this.error = error.message;
-                }
-            });
-        } finally {
-            this.loading = false;
-        }
-    }
-});
-```
-
-#### Complete Options Reference
-
-##### Core Request Options
-
-- **`method`** (`string`, default: `'GET'`): HTTP method (GET, POST, PUT, DELETE, PATCH, etc.)
-- **`data`** (`any`): Request body data - automatically JSON-stringified for objects, supports FormData, Blob, ArrayBuffer, and strings
-- **`headers`** (`Object`): Additional HTTP headers to include with the request
-- **`timeout`** (`number`, default: `30000`): Request timeout in milliseconds (0 = no timeout)
-
-##### Response Handling Options
-
-- **`responseType`** (`string`, default: `'auto'`): How to parse the response
-    - `'json'` - Parse as JSON
-    - `'text'` - Return as plain text
-    - `'blob'` - Return as Blob object
-    - `'response'` - Return raw Response object
-    - `'auto'` - Auto-detect based on Content-Type header
-
-- **`validateStatus`** (`function`): Custom response validation function
-  ```javascript
-  validateStatus: (response) => response.status < 400
-  ```
-
-##### Callback Options
-
-- **`onSuccess`** (`function`): Called when request succeeds
-  ```javascript
-  onSuccess: (data, response) => {
-      console.log('Success:', data);
-  }
-  ```
-
-- **`onError`** (`function`): Called when request fails
-  ```javascript
-  onError: (error) => {
-      console.error('Request failed:', error.message);
-  }
-  ```
-
-- **`onProgress`** (`function`): Progress callback for uploads (note: limited support with fetch API)
-
-##### Request Grouping and Cancellation
-
-- **`groupKey`** (`string`): Groups related requests - new requests cancel previous ones in the same group
-- **`latestOnly`** (`boolean`): Automatically uses URL as groupKey for race condition prevention
-- **`ignoreAbort`** (`boolean`): Suppress AbortError exceptions when requests are cancelled
-- **`abortController`** (`AbortController`): External abort controller for manual cancellation
-
-##### Advanced Fetch Options
-
-You can include any standard fetch API option directly in your request object:
-
-```javascript
-await this.control('/api/data', {
-    method: 'GET',
-    credentials: 'include',  // Standard fetch option
-    mode: 'cors',            // Standard fetch option
-    cache: 'no-cache'        // Standard fetch option
-});
-```
-
-Available options:
-
-- **`credentials`** (`string`): Request credentials mode
-    - `'omit'` - Never send credentials
-    - `'same-origin'` - Send credentials for same-origin requests
-    - `'include'` - Always send credentials
-
-- **`mode`** (`string`): Request mode
-    - `'cors'` - Allow cross-origin requests
-    - `'no-cors'` - Restrict to simple cross-origin requests
-    - `'same-origin'` - Only allow same-origin requests
-
-- **`cache`** (`string`): Cache mode
-    - `'default'` - Use browser's default cache behavior
-    - `'no-store'` - Never cache
-    - `'reload'` - Always fetch from network
-    - `'no-cache'` - Validate cache before use
-    - `'force-cache'` - Use cache if available
-    - `'only-if-cached'` - Only use cache, fail if not cached
-
-- **`redirect`** (`string`): Redirect handling
-    - `'follow'` - Follow redirects automatically
-    - `'error'` - Treat redirects as errors
-    - `'manual'` - Handle redirects manually
-
-- **`referrer`** (`string`): Referrer URL or `'no-referrer'`
-- **`referrerPolicy`** (`string`): Referrer policy
-- **`integrity`** (`string`): Subresource integrity value
-- **`keepalive`** (`boolean`): Keep connection alive after page unload
-- **`priority`** (`string`): Request priority (`'high'`, `'low'`, `'auto'`)
-
-#### Common Use Cases
-
-##### File Upload
-```javascript
-// FormData upload
-const formData = new FormData();
-formData.append('file', file);
-await this.control('/api/upload', {
-    method: 'POST',
-    data: formData
-});
-```
-
-##### Search with Race Condition Prevention
-```javascript
-// Prevents stale search results
-this.control('/api/search', {
-    data: { query: this.searchQuery },
-    latestOnly: true,
-    onSuccess: (results) => {
-        this.searchResults = results;
-    }
-});
-```
-
-##### Custom Response Validation
-```javascript
-// Accept 304 as success
-await this.control('/api/data', {
-    validateStatus: (response) => response.ok || response.status === 304
-});
-```
-
-##### Request with Timeout and Headers
-```javascript
-await this.control('/api/save', {
-    method: 'PUT',
-    data: this.formData,
-    timeout: 10000,
-    headers: {
-        'Authorization': `Bearer ${this.token}`
-    }
-});
-```
-
-##### Binary Data Download
-```javascript
-const blob = await this.control('/api/file.pdf', {
-    responseType: 'blob'
-});
-```
-
-#### Best Practices
-
-1. **Use `latestOnly: true`** for search-as-you-type and dynamic content loading
-2. **Set appropriate timeouts** based on expected response times
-3. **Use `groupKey`** for related requests that should cancel each other
-4. **Handle `ignoreAbort: true`** for background requests that shouldn't show errors when cancelled
-5. **Validate responses** with custom `validateStatus` functions for APIs with non-standard error codes
-6. **Use FormData** for file uploads to preserve proper content types
-7. **Set proper CORS options** for cross-origin requests
-
 ## API Reference
 
 ### Internal Methods (Available as `this.methodName()` within component)
@@ -890,14 +906,11 @@ const blob = await this.control('/api/file.pdf', {
 These methods are only accessible within component methods and provide core functionality for data binding, utilities, and component communication:
 
 ```javascript
-// DOM interaction
-this.readDOMValue(selector)           // Reads current value from DOM element
-this.writeDOMValue(selector, value)   // Sets value to DOM element
-
 // Data utilities  
 this.formatValue(value)               // Formats any value for display
 this.escapeHTML(str)                  // Escapes HTML entities to prevent XSS
 this.sanitizeUserInput(html)          // Strips HTML tags and returns plain text
+this.getElementPosition(element)      // Returns the global position of an element within the document
 
 // Component communication
 this.notifyParent(type, data)         // Send message to parent component
@@ -913,44 +926,6 @@ These methods are available when you have a reference to the component instance:
 // Lifecycle management (external only)
 component.destroy()                   // Destroys component and cleans up resources
 ```
-
-### Dual-Access Methods (Available both internally and externally)
-
-These methods are available as `this.methodName()` inside the component and `component.methodName()` outside:
-
-```javascript
-// HTTP requests
-control(url, options)                 // Makes HTTP requests with enhanced features
-
-// Serialize to JSON
-toJSON()
-
-// DOM utilities
-getElementPosition(elementOrId)       // Gets global position of element in document
-```
-
-### Method Availability Reference
-
-| Method                 | Internal (`this.`) | External (`component.`) | Purpose                                   |
-|------------------------|:------------------:|:-----------------------:|-------------------------------------------|
-| `readDOMValue()`       |         ✅          |            ❌            | Read values from form elements and DOM    |
-| `writeDOMValue()`      |         ✅          |            ❌            | Set values to form elements and DOM       |
-| `formatValue()`        |         ✅          |            ❌            | Format values for display in templates    |
-| `escapeHTML()`         |         ✅          |            ❌            | Escape HTML to prevent XSS attacks        |
-| `sanitizeUserInput()`  |         ✅          |            ❌            | Strip HTML tags from user input           |
-| `notifyParent()`       |         ✅          |            ❌            | Send messages up the component hierarchy  |
-| `notifyChildren()`     |         ✅          |            ❌            | Broadcast to all child components         |
-| `notifyChild()`        |         ✅          |            ❌            | Send message to specific child            |
-| `control()`            |         ✅          |            ✅            | Make HTTP requests with advanced features |
-| `getElementPosition()` |         ✅          |            ✅            | Get element's global document position    |
-| `toJSON()`             |         ✅          |            ✅            | Convert container contents to JSON        |
-| `destroy()`            |         ❌          |            ✅            | Clean up component and free resources     |
-
-### Access Patterns Summary
-
-- **Internal-only methods**: Core component functionality that should only be used within the component's own methods
-- **External-only methods**: Lifecycle management that external code needs to control
-- **Dual-access methods**: Utilities that are useful both within components and in external application logic
 
 ### Configuration Options
 
