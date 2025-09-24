@@ -527,6 +527,49 @@
         },
 
         /**
+         * Formats a value for display in text content
+         * @param {*} value - Value to format
+         * @returns {string} Formatted string
+         */
+        formatValue(value) {
+            return value !== null ? String(value) : '';
+        },
+
+        /**
+         * Sanitizes user input by stripping HTML tags and returning escaped HTML
+         * Uses the browser's built-in text content handling to safely process untrusted input
+         * @param {string} html - The potentially unsafe HTML string to sanitize
+         * @returns {string} The sanitized string with HTML tags stripped and special characters escaped
+         */
+        sanitizeUserInput(html) {
+            // Create a temporary div element to leverage browser's text content handling
+            const div = document.createElement('div');
+
+            // Set textContent (not innerHTML) to automatically strip all HTML tags
+            // The browser treats the input as plain text, removing any markup
+            div.textContent = html;
+
+            // Return the innerHTML, which gives us the text with HTML entities properly escaped
+            // This converts characters like < > & " ' into their HTML entity equivalents
+            return div.innerHTML;
+        },
+
+        /**
+         * Manually escapes HTML special characters to prevent XSS attacks
+         * Converts potentially dangerous characters into their HTML entity equivalents
+         * @param {string} str - The string containing characters that need to be escaped
+         * @returns {string} The escaped string safe for insertion into HTML
+         */
+        escapeHTML(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')    // Replace & first (must be done before other entities)
+                .replace(/</g, '&lt;')     // Replace < with less-than entity
+                .replace(/>/g, '&gt;')     // Replace > with greater-than entity
+                .replace(/"/g, '&quot;')   // Replace double quotes with quote entity
+                .replace(/'/g, '&#39;');   // Replace single quotes with apostrophe entity
+        },
+
+        /**
          * Deep equality comparison optimized for performance
          * @param {*} a - First value
          * @param {*} b - Second value
@@ -4112,6 +4155,57 @@
 
                 // Return the clean, serializable object
                 return result;
+            },
+        });
+
+        // Add utility methods as non-enumerable properties
+        Object.defineProperties(proxiedReactive, {
+
+            /**
+             * Formats a value for display in text content or UI elements
+             * Handles null/undefined, objects, arrays, and primitives appropriately
+             * @param {*} value - Value to format for display
+             * @returns {string} Human-readable formatted string
+             */
+            formatValue: {
+                value: (value) => Utils.formatValue(value),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Escapes HTML entities to prevent XSS when displaying user input
+             * Converts <, >, &, quotes to their HTML entity equivalents
+             * @param {string} str - String to escape HTML entities in
+             * @returns {string} HTML-safe escaped string
+             */
+            escapeHTML: {
+                value: (str) => Utils.escapeHTML(str),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Strips all HTML tags from user input to get plain text
+             * Use this for user-generated content that should not contain HTML
+             * @param {string} html - HTML string to sanitize
+             * @returns {string} Plain text with all HTML tags removed
+             */
+            sanitizeUserInput: {
+                value: (html) => Utils.sanitizeUserInput(html),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Gets the global position of an element within the document
+             * @param {string|Element} elementOrId - Element ID or DOM element
+             * @returns {Object|null} Position object with x, y properties or null if not found
+             */
+            getElementPosition: {
+                value: (elementOrId) => Utils.getElementPosition(elementOrId),
+                writable: false,
+                enumerable: false
             }
         });
 
