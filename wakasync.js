@@ -908,31 +908,6 @@
                 // Add control method to the abstraction
                 context.abstraction.control = createControlMethod(context);
 
-                // Add HTTP convenience methods
-                context.abstraction.get = function(url, options) {
-                    return context.abstraction.control(url, { ...options, method: 'GET' });
-                };
-
-                context.abstraction.post = function(url, data, options) {
-                    return context.abstraction.control(url, { ...options, method: 'POST', data });
-                };
-
-                context.abstraction.put = function(url, data, options) {
-                    return context.abstraction.control(url, { ...options, method: 'PUT', data });
-                };
-
-                context.abstraction.delete = function(url, options) {
-                    return context.abstraction.control(url, { ...options, method: 'DELETE' });
-                };
-
-                context.abstraction.patch = function(url, data, options) {
-                    return context.abstraction.control(url, { ...options, method: 'PATCH', data });
-                };
-
-                context.abstraction.head = function(url, options) {
-                    return context.abstraction.control(url, { ...options, method: 'HEAD' });
-                };
-
                 // Add cancel method
                 context.abstraction.cancelRequests = function() {
                     const groupKey = context.container.getAttribute('data-pac-container');
