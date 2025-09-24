@@ -4561,13 +4561,21 @@
             }
         });
 
-        // Remove them from the maps
+        // Remove them from the maps AND clean up cached state
         elementsToRemove.forEach(element => {
             this.interpolationMap.delete(element);
+
+            // Clean up cached state to prevent memory leaks
+            delete element._pacPreviousValues;
+            delete element._pacPreviousArray;
+            delete element._pacDynamicClass;
         });
 
         textNodesToRemove.forEach(textNode => {
             this.textInterpolationMap.delete(textNode);
+
+            // Clean up cached text state
+            delete textNode._pacPreviousText;
         });
     };
 
@@ -5143,6 +5151,8 @@
     function ComponentRegistry() {
         this.components = new Map();
         this.hierarchyCache = new WeakMap();
+        this.pendingHierarchy = new Set();
+        this.hierarchyTimer = null;
     }
 
     ComponentRegistry.prototype = {
@@ -5153,23 +5163,37 @@
          */
         register(selector, context) {
             this.components.set(selector, context);
-            this.hierarchyCache = new WeakMap(); // Clear cache
+            this.pendingHierarchy.add(context);
+
+            // Clear existing timer and start new one
+            clearTimeout(this.hierarchyTimer);
+
+            this.hierarchyTimer = setTimeout(() => {
+                this.establishAllHierarchies();
+            }, 10); // Keep your current delay
         },
 
-        /**
-         * Unregisters a PAC component
-         * @param {string} selector - CSS selector for the component
-         * @returns {Object|undefined} The removed component
-         */
-        unregister(selector) {
-            const component = this.components.get(selector);
+        establishAllHierarchies() {
+            if (this.pendingHierarchy.size === 0) return;
 
-            if (component) {
-                component.destroy();
-                this.components.delete(selector);
+            // Clear hierarchy cache once for all components
+            this.hierarchyCache = new WeakMap();
+
+            // Process all pending components
+            const componentsToProcess = Array.from(this.pendingHierarchy);
+            this.pendingHierarchy.clear();
+
+            componentsToProcess.forEach(component => {
+                component.establishHierarchy();
+            });
+
+            // If more components were added during processing, schedule another round
+            if (this.pendingHierarchy.size > 0) {
+                clearTimeout(this.hierarchyTimer);
+                this.hierarchyTimer = setTimeout(() => {
+                    this.establishAllHierarchies();
+                }, 10);
             }
-
-            return component;
         },
 
         /**
@@ -5245,7 +5269,7 @@
         // making it discoverable by other components and external code
         window.PACRegistry.register(selector, context);
 
-        // Signal that a new component is ready to set proper hierarchies
+        // Signal that a new component is ready
         document.dispatchEvent(new CustomEvent('pac:component-ready', {
             detail: { component: context, selector: selector }
         }));
@@ -5259,26 +5283,6 @@
     // ========================================================================
 
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
-
-    // Set up event-driven hierarchy resolution (singleton)
-    if (!window._wakaPACHierarchyListener) {
-        window._wakaPACHierarchyListener = true;
-
-        // Listen for pac:component-ready events
-        document.addEventListener('pac:component-ready', () => {
-            // Clear any existing timeout to debounce multiple rapid component creations
-            clearTimeout(window._wakaPACHierarchyTimeout);
-            window._wakaPACHierarchyTimeout = setTimeout(() => {
-                // Clear hierarchy cache
-                window.PACRegistry.hierarchyCache = new WeakMap();
-
-                // Re-establish hierarchy for all components
-                window.PACRegistry.components.forEach(component => {
-                    component.establishHierarchy();
-                });
-            }, 10);
-        });
-    }
 
     // Export to global scope
     window.wakaPAC = wakaPAC;
