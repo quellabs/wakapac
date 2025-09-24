@@ -584,8 +584,33 @@
     // ========================================================================
 
     function makeDeepReactiveProxy(value, container) {
+
+        /**
+         * List of all methods allowed on an array
+         * @type {string[]}
+         */
         const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
 
+        /**
+         * Determines whether a property should be wrapped in a reactive proxy.
+         * Properties starting with underscore (_) or dollar sign ($) are treated as non-reactive
+         * to avoid performance overhead when storing complex objects, DOM references, or internal state.
+         * @param {string|symbol|number} prop - The property name being accessed or set
+         * @returns {boolean} True if the property should trigger reactivity and DOM updates, false otherwise
+         */
+        function shouldMakeReactive(prop) {
+            return typeof prop === 'string' && !prop.startsWith('_') && !prop.startsWith('$');
+        }
+
+        /**
+         * Creates a recursive proxy that intercepts property access and mutations to enable reactivity.
+         * This is the core function that transforms plain objects into reactive proxies that can trigger
+         * DOM updates when their properties change. It handles nested objects, arrays, and maintains
+         * proper path tracking for deep property changes.
+         * @param {Object|Array} obj - The object or array to make reactive
+         * @param {string[]} [currentPath=[]] - Array representing the property path from root (e.g., ['users', '0', 'name'])
+         * @returns {Object|Array} A proxy object that intercepts get/set operations for reactivity
+         */
         function createProxy(obj, currentPath) {
             currentPath = currentPath || [];
 
@@ -659,7 +684,7 @@
 
                     // CRITICAL FIX: Lazy wrapping of nested objects and arrays
                     // If the value is an object/array and not already reactive, wrap it in a proxy
-                    if (val && typeof val === 'object' && !val._isReactive) {
+                    if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
                         const propertyPath = currentPath.concat([prop]);
                         const proxiedVal = createProxy(val, propertyPath);
                         proxiedVal._isReactive = true;
@@ -693,6 +718,12 @@
                         } else if (prop === 'browserScrollY') {
                             window.scrollTo(window.scrollX, newValue);
                         }
+                    }
+
+                    // Only make reactive and dispatch events for non-underscore properties
+                    if (!shouldMakeReactive(prop)) {
+                        target[prop] = newValue;
+                        return true;
                     }
 
                     // Wrap objects and arrays in proxies when they're assigned
