@@ -1796,10 +1796,6 @@
          * Parses primary expressions (parentheses, properties, literals)
          * @returns {Object|null} Primary expression AST node
          */
-        /**
-         * Parses primary expressions (parentheses, properties, literals)
-         * @returns {Object|null} Primary expression AST node
-         */
         parsePrimary() {
             // Parentheses
             if (this.match('LPAREN')) {
@@ -1875,27 +1871,48 @@
             return null;
         },
 
+        /**
+         * Parses postfix operators including array/object indexing, property access, and method calls.
+         * Handles chaining of multiple postfix operations (e.g., obj.prop[0].method()).
+         * @param {Object} expr - The base expression to apply postfix operators to
+         * @returns {Object} The final expression tree with all postfix operations applied
+         * @throws {Error} When expected tokens are missing (closing bracket, property name, closing parenthesis)
+         */
         parsePostfixOperators(expr) {
             while (true) {
                 if (this.match('LBRACKET')) {
                     // Array/object indexing: expr[index]
                     const index = this.parseTernary();
                     this.consume('RBRACKET', 'Expected closing bracket');
-
                     expr = {
                         type: 'index',
                         object: expr,
                         index
                     };
                 } else if (this.match('DOT')) {
-                    // Property access: expr.prop
+                    // Property access or method call
                     if (this.check('IDENTIFIER')) {
                         const property = this.advance().value;
-                        expr = {
-                            type: 'member',
-                            object: expr,
-                            property
-                        };
+
+                        // Check for method call syntax
+                        if (this.match('LPAREN')) {
+                            const args = this.parseArgumentList();
+                            this.consume('RPAREN', 'Expected closing parenthesis');
+
+                            expr = {
+                                type: 'methodCall',
+                                object: expr,
+                                method: property,
+                                arguments: args
+                            };
+                        } else {
+                            // Regular property access
+                            expr = {
+                                type: 'member',
+                                object: expr,
+                                property
+                            };
+                        }
                     } else {
                         throw new Error('Expected property name after "."');
                     }
@@ -1903,10 +1920,35 @@
                     break;
                 }
             }
-
             return expr;
         },
 
+        /**
+         * Parses a comma-separated list of function arguments.
+         * Continues parsing until reaching a closing parenthesis or end of input.
+         * @returns {Array} Array of parsed argument expressions
+         */
+        parseArgumentList() {
+            const args = [];
+
+            if (!this.check('RPAREN')) {
+                do {
+                    args.push(this.parseTernary());
+                } while (this.match('COMMA') && !this.check('RPAREN'));
+            }
+
+            return args;
+        },
+
+        /**
+         * Parses an array literal expression, handling comma-separated elements.
+         * Expects the opening bracket to already be consumed.
+         * @returns {{type: string, elements: *[]}} AST node representing the array literal
+         * @returns {string} returns.type - Always 'array'
+         * @returns {Array} returns.elements - Array of parsed element expressions
+         * @throws {Error} When closing bracket is missing
+         * @example
+         */
         parseArrayLiteral() {
             const elements = [];
 
@@ -2152,11 +2194,6 @@
                     return object && object[index];
                 }
 
-                case 'member': {
-                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
-                    return object && object[parsedExpr.property];
-                }
-
                 case 'ternary': {
                     const condition = this.evaluate(parsedExpr.condition, context, scopeResolver);
                     return condition ?
@@ -2184,6 +2221,7 @@
 
                 case 'unary': {
                     const operandValue = this.evaluate(parsedExpr.operand, context, scopeResolver);
+
                     switch (parsedExpr.operator) {
                         case '!':
                             return !operandValue;
@@ -2199,7 +2237,50 @@
                     }
                 }
 
+                case 'member': {
+                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
+                    return object && object[parsedExpr.property];
+                }
+
+                case 'methodCall': {
+                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
+
+                    // Only allow method calls on arrays for security
+                    if (!Array.isArray(object)) {
+                        console.warn('Method calls only supported on arrays');
+                        return undefined;
+                    }
+
+                    return this.evaluateArrayMethod(object, parsedExpr.method,
+                        parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver))
+                    );
+                }
+
                 default:
+                    return undefined;
+            }
+        },
+
+        evaluateArrayMethod(array, methodName, args) {
+            switch (methodName) {
+                case 'includes':
+                    // Check if array contains the value
+                    return array.includes(args[0]);
+
+                case 'indexOf':
+                    // Find first index of value, -1 if not found
+                    return array.indexOf(args[0]);
+
+                case 'length':
+                    // Array length (handled as method for consistency)
+                    return array.length;
+
+                case 'join':
+                    // Join array elements with separator
+                    return array.join(args[0] || ',');
+
+                default:
+                    console.warn(`Array method '${methodName}' not supported`);
                     return undefined;
             }
         },
