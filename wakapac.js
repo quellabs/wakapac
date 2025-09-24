@@ -3099,7 +3099,24 @@
 
         // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
-            self.domUpdater.updateTextNode(textNode, mappingData.template);
+            // Check if text node is inside a conditionally rendered element that's currently hidden
+            let currentElement = textNode.parentNode;
+            let isInHiddenConditional = false;
+
+            while (currentElement && currentElement !== this.container) {
+                // Check if this element has conditional binding and is not currently rendered
+                if (currentElement._pacIsRendered === false) {
+                    isInHiddenConditional = true;
+                    break;
+                }
+                
+                currentElement = currentElement.parentNode;
+            }
+
+            // Only process text interpolations that are not in hidden conditional elements
+            if (!isInHiddenConditional) {
+                self.domUpdater.updateTextNode(textNode, mappingData.template);
+            }
         });
 
         // Handle nested foreach rendering (sort by depth, deepest first)
