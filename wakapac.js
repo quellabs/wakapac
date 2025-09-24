@@ -3934,8 +3934,22 @@
         const walker = document.createTreeWalker(
             parentElement,
             NodeFilter.SHOW_TEXT,
-            { acceptNode: node => INTERPOLATION_TEST_REGEX.test(node.textContent) ?
-                    NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }
+            {
+                acceptNode: node => {
+                    // Skip if no interpolation
+                    if (!INTERPOLATION_TEST_REGEX.test(node.textContent)) {
+                        return NodeFilter.FILTER_SKIP;
+                    }
+
+                    // Skip if belongs to a nested PAC container
+                    if (!Utils.belongsToPacContainer(this.container, node)) {
+                        return NodeFilter.FILTER_SKIP;
+                    }
+
+                    // Process this node
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+            }
         );
 
         // Walk through matching text nodes that belong to this container
