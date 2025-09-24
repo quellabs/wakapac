@@ -27,7 +27,6 @@ This results in more predictable data flow and easier debugging than traditional
 - **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes
 - **Two-way reactivity** for objects and nested arrays
 - **Advanced expression system** supporting arrays, objects, and complex operations
-- **Integrated HTTP client** (WakaSync) with request grouping, cancellation, and retry logic
 - **Drop-in script file** - no bundler required
 - **Win32-style** `msgProc` for low-level event handling when you want total control
 - **Hierarchical components** with parent—child notification
@@ -75,7 +74,7 @@ This results in more predictable data flow and easier debugging than traditional
 </div>
 
 <script>
-    WakaPAC('#my-app', {
+    wakaPAC('#my-app', {
         name: 'World',
         count: 0,
 
@@ -316,7 +315,7 @@ Event modifiers allow you to control how events behave by using the `data-pac-ev
 WakaPAC automatically tracks changes in nested objects and arrays:
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     user: {
         name: 'John',
         preferences: { theme: 'dark' }
@@ -353,7 +352,7 @@ WakaPAC('#app', {
 ```
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     todos: [
         {id: 1, text: 'Learn WakaPAC', completed: false},
         {id: 2, text: 'Build an app', completed: true}
@@ -401,7 +400,7 @@ WakaPAC works well with WakaSync for HTTP requests. Simply instantiate WakaSync 
 ### Basic Usage
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     user: null,
     loading: false,
     error: null,
@@ -432,7 +431,7 @@ WakaPAC('#app', {
 ### HTTP Methods
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     init() {
         this.http = new WakaSync();
     },
@@ -492,7 +491,7 @@ await this.http.post('/api/upload', formData);
 
 #### Request Cancellation
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     init() {
         this.http = new WakaSync();
     },
@@ -563,7 +562,7 @@ WakaPAC automatically provides reactive browser state properties that update whe
 ```
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     init() {
         // Set initial document title based on visibility
         document.title = this.browserVisible ? 'App Active' : 'App Paused';
@@ -592,7 +591,7 @@ WakaPAC('#app', {
 Computed properties automatically recalculate when their dependencies change:
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     firstName: 'John',
     lastName: 'Doe',
     items: [{price: 10}, {price: 20}],
@@ -621,7 +620,7 @@ WakaPAC('#app', {
 Watchers execute code when reactive properties change:
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     searchQuery: '',
    
     watch: {
@@ -638,7 +637,7 @@ WakaPAC('#app', {
 ### Component Lifecycle
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     message: 'Hello',
     user: null,
 
@@ -660,7 +659,7 @@ WakaPAC('#app', {
 WakaPAC provides a powerful message processing system inspired by Win32 window procedures:
 
 ```javascript
-WakaPAC('#file-manager', {
+wakaPAC('#file-manager', {
     activePane: 'left',
 
     msgProc(message) {
@@ -790,7 +789,7 @@ Parent-child communication system:
 
 ```javascript
 // Child to Parent (Notifications)
-const child = WakaPAC('#child-app', {
+const child = wakaPAC('#child-app', {
     sendAlert() {
         this.notifyParent('alert', {
             message: 'Something important happened'
@@ -799,7 +798,7 @@ const child = WakaPAC('#child-app', {
 });
 
 // Parent receives notifications
-const parent = WakaPAC('#parent-app', {
+const parent = wakaPAC('#parent-app', {
     receiveFromChild(eventType, data, childPAC) {
         if (eventType === 'alert') {
             console.log('Alert:', data.message);
@@ -808,7 +807,7 @@ const parent = WakaPAC('#parent-app', {
 });
 
 // Parent to Child (Commands)
-const parent = WakaPAC('#parent-app', {
+const parent = wakaPAC('#parent-app', {
     broadcastMessage() {
         // Notify all children
         this.notifyChildren('update', {theme: 'dark'});
@@ -819,7 +818,7 @@ const parent = WakaPAC('#parent-app', {
 });
 
 // Child receives commands
-const child = WakaPAC('#child-app', {
+const child = wakaPAC('#child-app', {
     receiveFromParent(command, data) {
         if (command === 'update') {
             this.applyTheme(data.theme);
@@ -833,7 +832,7 @@ const child = WakaPAC('#child-app', {
 Built-in utility functions for safe data handling:
 
 ```javascript
-WakaPAC('#app', {
+wakaPAC('#app', {
     userInput: '<script>alert("hack")</script>',
 
     saveComment() {
@@ -862,7 +861,7 @@ WakaPAC('#app', {
 Use underscore prefix for properties that shouldn't trigger DOM updates:
 
 ```javascript
-WakaPAC('#map-app', {
+wakaPAC('#map-app', {
     // Reactive properties (trigger DOM updates)
     tracking: false,
     currentLocation: null,
@@ -909,7 +908,7 @@ component.destroy()                   // Destroys component and cleans up resour
 ### Configuration Options
 
 ```javascript
-WakaPAC('#app', data, {
+wakaPAC('#app', data, {
     updateMode: 'immediate',  // 'immediate', 'delayed', 'change'
     delay: 300,              // Default delay for 'delayed' mode (ms)
 });
@@ -939,7 +938,7 @@ const [count, setCount] = useState(0);
 const increment = () => setCount(count + 1);
 
 // WakaPAC
-WakaPAC('#app', {
+wakaPAC('#app', {
     count: 0,
     increment() {
         this.count++; // Direct assignment
@@ -956,7 +955,7 @@ const viewModel = {
 };
 
 // WakaPAC
-WakaPAC('#app', {
+wakaPAC('#app', {
     firstName: 'John',
     computed: {
         fullName() {
