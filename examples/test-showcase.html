@@ -223,7 +223,7 @@
 
                 <div style="margin: 10px 0; padding: 10px; border: 2px solid #ffc107; border-radius: 4px;">
                     <label><strong>⏱️ Delayed Mode (500ms):</strong></label><br>
-                    <input type="text" data-pac-bind="value:delayedText" data-pac-update="delayed" data-pac-delay="500"
+                    <input type="text" data-pac-bind="value:delayedText" data-pac-update-mode="delayed" data-pac-update-delay="500"
                            placeholder="Updates 500ms after you stop typing" style="width: 250px;" />
                     <div style="margin-top: 5px; font-size: 12px; color: #666;">
                         Live value: <strong style="color: #ffc107;">{{delayedText}}</strong>
@@ -233,7 +233,7 @@
 
                 <div style="margin: 10px 0; padding: 10px; border: 2px solid #28a745; border-radius: 4px;">
                     <label><strong>🎯 Change Mode (on blur):</strong></label><br>
-                    <input type="text" data-pac-bind="value:changeText" data-pac-update="change"
+                    <input type="text" data-pac-bind="value:changeText" data-pac-update-mode="change"
                            placeholder="Updates only when you click away (blur)" style="width: 250px;" />
                     <div style="margin-top: 5px; font-size: 12px; color: #666;">
                         Live value: <strong style="color: #28a745;">{{changeText}}</strong>
@@ -260,7 +260,7 @@
                 <h4>🎯 Advanced Features Demo</h4>
                 <div>
                     <label>Search with 1000ms delay (simulates API calls):</label><br>
-                    <input type="text" data-pac-bind="value:searchQuery" data-pac-update="delayed" data-pac-delay="1000"
+                    <input type="text" data-pac-bind="value:searchQuery" data-pac-update-mode="delayed" data-pac-update-delay="1000"
                            placeholder="Search simulates API call..." style="width: 300px;" />
                     <div style="margin-top: 5px;">
                         <strong>Search Results for:</strong> "{{searchQuery}}"
@@ -270,7 +270,7 @@
 
                 <div style="margin-top: 15px;">
                     <label>Form validation (change mode):</label><br>
-                    <input type="email" data-pac-bind="value:email" data-pac-update="change"
+                    <input type="email" data-pac-bind="value:email" data-pac-update-mode="change"
                            placeholder="Enter email (validates on blur)" style="width: 300px;" />
                     <div style="margin-top: 5px;">
                         <span data-pac-bind="visible:email">
@@ -287,7 +287,7 @@
             <h3>📋 Todo List (Deep Reactivity)</h3>
             <p><strong>Total:</strong> {{todoCount}} | <strong>Active:</strong> {{activeCount}} | <strong>Completed:</strong> {{completedCount}}</p>
 
-            <form data-pac-bind="submit:addTodo">
+            <form data-pac-bind="submit: addTodo">
                 <input type="text" data-pac-bind="value:newTodo" placeholder="Add new todo..." style="width: 200px;" />
                 <button type="submit" class="btn-success">➕ Add</button>
             </form>
@@ -557,8 +557,9 @@
                     return allTodos.filter(todo => !todo.completed);
                 } else if (currentFilter === 'completed') {
                     return allTodos.filter(todo => todo.completed);
+                } else {
+                    return allTodos;
                 }
-                return allTodos;
             },
 
             allCompleted() {
@@ -573,19 +574,14 @@
 
         addTodo(event) {
             event.preventDefault();
-            if (this.newTodo.trim()) {
-                console.log('Adding todo:', this.newTodo);
-                console.log('Current todos before:', this.todos.length);
 
-                // Demonstrate deep reactivity - this push will trigger updates
+            if (this.newTodo.trim()) {
+                // This should trigger the array method interception
                 this.todos.push({
                     id: Date.now(),
                     text: this.newTodo.trim(),
                     completed: false
                 });
-
-                console.log('Current todos after:', this.todos.length);
-                console.log('Filtered todos:', this.filteredTodos);
 
                 this.newTodo = '';
             }
@@ -616,13 +612,8 @@
         },
 
         toggleAllTodos() {
-            console.log(JSON.stringify(this.toJSON()));
-
-            console.log('toggleAllTodos called');
             const allCompleted = this.allCompleted;
-            console.log('allCompleted:', allCompleted);
             this.todos.forEach((todo, index) => {
-                console.log(`Setting todo ${index} completed from ${todo.completed} to ${!allCompleted}`);
                 todo.completed = !allCompleted;
             });
         }
@@ -1104,6 +1095,7 @@
     logMessage('parent', 'Parent PAC Unit initialized');
     logMessage('child', 'Child PAC Unit initialized');
     logMessage('grandchild', 'Grandchild PAC Unit initialized');
+
 </script>
 
 </body>

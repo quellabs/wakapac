@@ -99,6 +99,10 @@
             background-color: #e0e0e0;
         }
 
+        .star-button > span {
+            pointer-events: none;
+        }
+
         .form-section {
             margin-top: 20px;
         }
@@ -152,8 +156,8 @@
             </div>
 
             <div data-pac-bind="if: activeTab.type === 'list'">
-                <ul class="task-list">
-                    <li data-pac-bind="foreach: activeTab.items" data-pac-item="item" class="task-item">
+                <ul class="task-list" data-pac-bind="foreach: activeTab.items" data-pac-item="item">
+                    <li class="task-item">
                         <span class="task-text" data-pac-bind="class: { 'important': item.important }">{{item.text}}</span>
                         <button class="star-button" data-pac-bind="click: toggleImportant">
                             <span data-pac-bind="visible: item.important">★</span>
@@ -204,6 +208,7 @@
             },
 
             toggleImportant(item) {
+                console.log('toggleImportant:', { item });
                 item.important = !item.important;
             }
         });

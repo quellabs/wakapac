@@ -143,7 +143,7 @@
             </div>
             <div>
                 <span class="network-badge" data-pac-bind="class: browserNetworkQuality">
-                    {{browserNetworkQuality}}
+                    {{browserNetworkQuality}} ({{browserNetworkEffectiveType}})
                 </span>
             </div>
         </div>
@@ -181,7 +181,7 @@
 
     <div class="demo-section">
         <h3>Adaptive Features</h3>
-        <p>Network Quality: <strong>{{browserNetworkQuality}}</strong></p>
+        <p>Network Quality: <strong>{{browserNetworkQuality}} ({{browserNetworkEffectiveType}})</strong></p>
 
         <div data-pac-bind="if: browserNetworkQuality === 'fast'">
             ✅ High-quality images and videos enabled
