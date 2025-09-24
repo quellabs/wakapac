@@ -2703,31 +2703,38 @@
     DomUpdater.prototype.applyConditionalBinding = function(element, value) {
         const shouldShow = !!value;
 
-        // Get or create placeholder comment
+        // Initialize tracking properties if not already set
         if (!element._pacPlaceholder) {
             element._pacPlaceholder = document.createComment('pac-if: hidden');
             element._pacOriginalParent = element.parentNode;
             element._pacOriginalNextSibling = element.nextSibling;
             element._pacIsRendered = true; // Initially rendered
+
+            // Store original HTML to restore if needed
+            element._pacOriginalHTML = element.innerHTML;
         }
 
         // Show the element: replace placeholder with actual element
         if (shouldShow && !element._pacIsRendered) {
-            if (element._pacPlaceholder.parentNode) {
-                element._pacOriginalParent = element._pacPlaceholder.parentNode;
-                element._pacOriginalNextSibling = element._pacPlaceholder.nextSibling;
-                element._pacPlaceholder.parentNode.replaceChild(element, element._pacPlaceholder);
-            }
-
+            // Restore element
+            element._pacPlaceholder.parentNode.replaceChild(element, element._pacPlaceholder);
             element._pacIsRendered = true;
 
-            // rescan so nested bindings (e.g., foreach) initialize
+            // Clear any foreach elements so they render fresh
+            element.querySelectorAll('[data-pac-foreach-id]').forEach(el => {
+                this.context.cleanupForeachMaps(el);
+                delete el._pacPreviousArray;
+            });
+
             this.context.scanAndRegisterNewElements(element);
-            return;
         }
 
         // Hide the element: replace element with placeholder
         if (!shouldShow && element._pacIsRendered) {
+            // Update stored HTML before hiding in case content changed
+            element._pacOriginalHTML = element.innerHTML;
+
+            // Replace element with placeholder comment
             if (element.parentNode) {
                 element.parentNode.replaceChild(element._pacPlaceholder, element);
             }
@@ -3109,7 +3116,7 @@
                     isInHiddenConditional = true;
                     break;
                 }
-                
+
                 currentElement = currentElement.parentNode;
             }
 
@@ -4046,6 +4053,34 @@
                 bindingString: bindingString,
                 bindings: bindingsObject
             };
+
+            // Special handling for foreach bindings
+            if (bindingsObject.foreach) {
+                const foreachId = Utils.uniqid('foreach');
+                element.setAttribute('data-pac-foreach-id', foreachId);
+
+                // Reset element to clean state if it has rendered content from previous renders
+                if (element.innerHTML.includes('<!-- pac-foreach-item:')) {
+                    // Find existing mapping data to get clean template
+                    const existingMapping = this.interpolationMap.get(element);
+                    if (existingMapping && existingMapping.template) {
+                        element.innerHTML = existingMapping.template;
+                    }
+                }
+
+                const foreachExpr = bindingsObject.foreach.target;
+                const itemVar = element.getAttribute('data-pac-item') || 'item';
+                const indexVar = element.getAttribute('data-pac-index') || 'index';
+
+                Object.assign(mappingData, {
+                    foreachExpr: foreachExpr,
+                    sourceArray: this.inferArrayRoot(foreachExpr),
+                    foreachId: foreachId,
+                    template: element.innerHTML, // Capture clean template
+                    itemVar: itemVar,
+                    indexVar: indexVar
+                });
+            }
 
             // Put the data in the map
             interpolationMap.set(element, mappingData);
