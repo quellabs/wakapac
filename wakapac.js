@@ -82,6 +82,11 @@
         MSG_MBUTTONDOWN: 0x0207,    // Middle mouse button pressed
         MSG_MBUTTONUP: 0x0208,      // Middle mouse button released
 
+        // Click event (semantic user activation)
+        MSG_LCLICK: 0x0210,          // Web-style click event
+        MSG_MCLICK: 0x0211,          // Web-style click event
+        MSG_RCLICK: 0x0212,          // Web-style click event
+
         // Text input and form events
         MSG_CHAR: 0x0300,           // Character input received
         MSG_CHANGE: 0x0301,         // Input value changed
@@ -862,6 +867,26 @@
                 self.dispatchTrackedEvent(messageType, event);
             });
 
+            // Add click for semantic activation (form submission, etc.)
+            document.addEventListener('click', function (event) {
+                let messageType;
+
+                if (event.button === 0) {
+                    messageType = MSG_TYPES.MSG_LCLICK;  // Left click
+                } else if (event.button === 1) {
+                    messageType = MSG_TYPES.MSG_MCLICK;  // Middle click
+                } else {
+                    return;  // Should never happen for click events
+                }
+
+                self.dispatchTrackedEvent(messageType, event);
+            });
+
+            // Handle right click
+            document.addEventListener('contextmenu', function (event) {
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_RCLICK, event);
+            });
+
             /**
              * Handle keyboard key release events
              * Tracks when user releases any key
@@ -1143,6 +1168,9 @@
                 case MSG_TYPES.MSG_LBUTTONUP:
                 case MSG_TYPES.MSG_RBUTTONUP:
                 case MSG_TYPES.MSG_MBUTTONUP:
+                case MSG_TYPES.MSG_LCLICK:
+                case MSG_TYPES.MSG_MCLICK:
+                case MSG_TYPES.MSG_RCLICK:
                     return {
                         wParam: this.buildMouseWParam(event),  // Mouse button and modifier key flags
                         lParam: this.buildMouseLParam(event)   // Packed x,y coordinates
@@ -1358,13 +1386,14 @@
          * Handles both behavioral modifiers (prevent, stop) and key filtering for keyboard events.
          * Returns false if the event should be filtered out (not dispatched), true otherwise.
          * @param {HTMLElement} element - The DOM element that has the data-pac-event attribute
-         * @param {Event} originalEvent - The original DOM event being processed
+         * @param {Event} event - The original DOM event being processed
          * @returns {boolean} True if the event should be dispatched, false if it should be filtered out
          */
-        processEventModifiers(element, originalEvent) {
+        processEventModifiers(element, event) {
+            const originalEvent = event.detail?.originalEvent || event;
             const modifiers = element.getAttribute('data-pac-event');
 
-                    // No modifiers, process normally
+            // No modifiers, process normally
             if (!modifiers) {
                 return true;
             }
@@ -3440,6 +3469,9 @@
                 MSG_TYPES.MSG_LBUTTONUP,
                 MSG_TYPES.MSG_MBUTTONUP,
                 MSG_TYPES.MSG_RBUTTONUP,
+                MSG_TYPES.MSG_LCLICK,
+                MSG_TYPES.MSG_MCLICK,
+                MSG_TYPES.MSG_RCLICK,
                 MSG_TYPES.MSG_SUBMIT,
                 MSG_TYPES.MSG_CHANGE
             ];
@@ -3460,7 +3492,12 @@
             case MSG_TYPES.MSG_LBUTTONDOWN:
             case MSG_TYPES.MSG_MBUTTONDOWN:
             case MSG_TYPES.MSG_RBUTTONDOWN:
-                // Mouse button down events - no action taken
+            case MSG_TYPES.MSG_LBUTTONUP:
+            case MSG_TYPES.MSG_MBUTTONUP:
+            case MSG_TYPES.MSG_RBUTTONUP:
+            case MSG_TYPES.MSG_MCLICK:
+            case MSG_TYPES.MSG_RCLICK:
+                // Mouse and click events - no default action, handled by msgProc if needed
                 break;
 
             case MSG_TYPES.MSG_KEYUP:
@@ -3468,9 +3505,7 @@
                 // Raw key events - no action taken
                 break;
 
-            case MSG_TYPES.MSG_LBUTTONUP:
-            case MSG_TYPES.MSG_MBUTTONUP:
-            case MSG_TYPES.MSG_RBUTTONUP:
+            case MSG_TYPES.MSG_LCLICK:
                 // Mouse button up events - handle DOM clicks
                 this.handleDomClicks(event);
                 break;

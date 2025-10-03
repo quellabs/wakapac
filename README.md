@@ -656,61 +656,390 @@ wakaPAC('#app', {
 
 ### MsgProc - Win32-Style Message Processing
 
-WakaPAC provides a powerful message processing system inspired by Win32 window procedures:
+WakaPAC provides a powerful low-level event processing system inspired by Win32 window procedures. The `msgProc` method gives you complete control over event handling before standard bindings execute.
+
+#### Message Flow
+
+```
+DOM Event Occurs
+    ↓
+msgProc processes message (if defined)
+    ↓
+    Returns false? → Event handled, stop processing (preventDefault called)
+    Returns true (or undefined)? → Continue to standard bindings
+    ↓
+Standard data-pac-bind handlers execute (if msgProc returned true/undefined)
+```
+
+#### Basic Usage
 
 ```javascript
-wakaPAC('#file-manager', {
-    activePane: 'left',
-
-    msgProc(message) {
+wakaPAC('#app', {
+    msgProc(event) {
         const { message, wParam, lParam, target, originalEvent } = event.detail;
         
-        switch(message.type) {
+        // Handle specific message types
+        switch(message) {
             case MSG_TYPES.MSG_KEYDOWN:
-                if (originalEvent.ctrlKey) {
-                    switch(originalEvent.key) {
-                        case 's':
-                            this.saveDocument();
-                            return true;
-
-                        case 'o':
-                            this.openDocument();
-                            return true;
-                    }
-                }
+                // Handle keyboard input
                 break;
-
-            case MSG_TYPES.MSG_LBUTTONDOWN:
-                // Extract coordinates from packed lParam
-                const x = lParam & 0xFFFF;
-                const y = (lParam >> 16) & 0xFFFF;
-                console.log(`Left click at ${x}, ${y}`);
-
-                // Check modifier keys from wParam
-                if (wParam & MK_CONTROL) {
-                    console.log('Ctrl+Click detected');
-                }
                 
+            case MSG_TYPES.MSG_LCLICK:
+                // Handle mouse clicks
                 break;
+        }
+        
+        // Return false to prevent standard bindings from executing
+        // Return true (or undefined) to allow standard bindings to process
+        return true;
+    }
+});
+```
 
-            case MSG_TYPES.MSG_RBUTTONDOWN:
-                this.showContextMenu(originalEvent.clientX, originalEvent.clientY);
-                break;
+#### Event Object Structure
 
-            case MSG_TYPES.MSG_CHAR:
-                // Text input event
-                console.log(`Text length: ${wParam}`);
-                break;
+The `msgProc` method receives a CustomEvent with the following structure:
 
-            case MSG_TYPES.MSG_CHANGE:
-                // Form control changed
-                console.log(`Control changed: ${target.tagName}`);
-                break;
+```javascript
+{
+    type: 'pac:event',             // Always 'pac:event' for msgProc
+    detail: {
+        message: 0x0201,           // Message type from MSG_TYPES constants
+        wParam: 0x0001,            // Primary parameter (varies by message type)
+        lParam: 0x00640032,        // Secondary parameter (varies by message type)
+        target: HTMLElement,       // The DOM element that triggered the event
+        originalEvent: Event,      // Original browser DOM event object
+        timestamp: 1640995200000,  // Timestamp when event was dispatched
+        id: 'element-id',          // Element ID if available, null otherwise
+        value: 'current-value',    // Current value from the element (via readDOMValue)
+        extended: {}               // Additional data specific to certain event types
+    }
+}
+```
 
-            case MSG_TYPES.MSG_SUBMIT:
-                // Form submitted
-                console.log('Form data:', lParam);
-                break;
+**Key Properties:**
+- **`message`**: Message type constant indicating what kind of event occurred
+- **`wParam`**: Primary parameter containing flags, button states, or primary data
+- **`lParam`**: Secondary parameter containing coordinates, form data, or other contextual info
+- **`target`**: The actual DOM element where the event originated
+- **`originalEvent`**: Access to all native browser event properties and methods
+- **`timestamp`**: Milliseconds since epoch when the event was created
+- **`id`**: Convenience access to target.id (or null if not set)
+- **`value`**: Current value read from the target element (for form controls)
+- **`extended`**: Additional metadata that varies by event type
+
+#### Message Types Reference
+
+**Mouse Button Events (Raw Button Tracking):**
+```javascript
+MSG_TYPES.MSG_LBUTTONDOWN  // 0x0201 - Left button pressed
+MSG_TYPES.MSG_LBUTTONUP    // 0x0202 - Left button released
+MSG_TYPES.MSG_RBUTTONDOWN  // 0x0204 - Right button pressed
+MSG_TYPES.MSG_RBUTTONUP    // 0x0205 - Right button released
+MSG_TYPES.MSG_MBUTTONDOWN  // 0x0207 - Middle button pressed
+MSG_TYPES.MSG_MBUTTONUP    // 0x0208 - Middle button released
+```
+
+**Click Events (Semantic User Actions):**
+```javascript
+MSG_TYPES.MSG_LCLICK       // 0x0210 - Left click (triggers click: bindings)
+MSG_TYPES.MSG_MCLICK       // 0x0211 - Middle click
+MSG_TYPES.MSG_RCLICK       // 0x0212 - Right click (contextmenu)
+```
+
+**Keyboard Events:**
+```javascript
+MSG_TYPES.MSG_KEYDOWN      // 0x0100 - Key pressed down
+MSG_TYPES.MSG_KEYUP        // 0x0101 - Key released
+```
+
+**Form Events:**
+```javascript
+MSG_TYPES.MSG_CHAR         // 0x0300 - Text input (typing in fields)
+MSG_TYPES.MSG_CHANGE       // 0x0301 - Form control changed (triggers change: bindings)
+MSG_TYPES.MSG_SUBMIT       // 0x0302 - Form submitted (triggers submit: bindings)
+```
+
+**Focus Events:**
+```javascript
+MSG_TYPES.MSG_FOCUS        // 0x0007 - Element gained focus
+MSG_TYPES.MSG_BLUR         // 0x0008 - Element lost focus
+```
+
+#### wParam and lParam by Message Type
+
+##### Mouse Events (LBUTTONDOWN, RBUTTONDOWN, MBUTTONDOWN, LBUTTONUP, RBUTTONUP, MBUTTONUP, LCLICK, MCLICK, RCLICK)
+
+**wParam** - Modifier key and button state flags (bitwise OR of flags):
+```javascript
+// Extract modifier keys and button states
+if (wParam & MK_CONTROL) { /* Ctrl key held */ }     // 0x0010
+if (wParam & MK_SHIFT)   { /* Shift key held */ }    // 0x0008
+if (wParam & MK_ALT)     { /* Alt key held */ }      // 0x0020
+if (wParam & MK_LBUTTON) { /* Left button held */ }  // 0x0001
+if (wParam & MK_RBUTTON) { /* Right button held */ } // 0x0002
+if (wParam & MK_MBUTTON) { /* Middle button held */ }// 0x0004
+```
+
+**lParam** - Mouse coordinates packed into 32 bits:
+```javascript
+// Extract x and y coordinates from lParam
+const x = lParam & 0xFFFF;           // Low 16 bits = x coordinate
+const y = (lParam >> 16) & 0xFFFF;   // High 16 bits = y coordinate
+
+// These are viewport-relative coordinates (clientX, clientY)
+```
+
+**Example:**
+```javascript
+case MSG_TYPES.MSG_LBUTTONDOWN:
+    const x = lParam & 0xFFFF;
+    const y = (lParam >> 16) & 0xFFFF;
+    
+    if (wParam & MK_CONTROL) {
+        console.log(`Ctrl+Click at (${x}, ${y})`);
+    }
+    break;
+```
+
+##### Keyboard Events (KEYDOWN, KEYUP)
+
+**wParam** - Virtual key code:
+```javascript
+// The keyCode from the original event
+const keyCode = wParam;  // e.g., 13 for Enter, 27 for Escape
+```
+
+**lParam** - Keyboard state flags (32-bit value):
+```javascript
+// Bits 0-15: Repeat count
+const repeatCount = lParam & 0xFFFF;
+
+// Bit 24: Extended key flag (arrow keys, function keys, etc.)
+const isExtended = (lParam & (1 << 24)) !== 0;
+
+// Bit 31: Key release flag (0 = keydown, 1 = keyup)
+const isRelease = (lParam & (1 << 31)) !== 0;
+```
+
+**Extended Keys:**
+- Arrow keys (Up, Down, Left, Right)
+- Function keys (F1-F12)
+- Navigation keys (Home, End, PageUp, PageDown, Insert, Delete)
+- Numpad Enter and Divide
+- Windows/Meta keys
+- Context Menu key
+
+**Example:**
+```javascript
+case MSG_TYPES.MSG_KEYDOWN:
+    const keyCode = wParam;
+    const isExtended = (lParam & (1 << 24)) !== 0;
+    
+    if (keyCode === 13) {  // Enter key
+        console.log('Enter pressed');
+    }
+    
+    if (isExtended) {
+        console.log('Extended key (arrow, function key, etc.)');
+    }
+    break;
+```
+
+##### Text Input Events (CHAR)
+
+**wParam** - Text length:
+```javascript
+const textLength = wParam;  // Length of text in the input field
+```
+
+**lParam** - Not used (always 0)
+
+**Extended data:**
+```javascript
+event.detail.extended = {
+    elementType: 'input' | 'textarea'  // Type of input element
+};
+```
+
+**Example:**
+```javascript
+case MSG_TYPES.MSG_CHAR:
+    console.log(`Text field has ${wParam} characters`);
+    console.log(`Value: ${event.detail.value}`);
+    break;
+```
+
+##### Form Change Events (CHANGE)
+
+**wParam** - Element-specific value:
+```javascript
+// For checkboxes: 1 = checked, 0 = unchecked
+// For radio buttons: index in radio group
+// For select elements: selectedIndex
+```
+
+**lParam** - Not used (always 0)
+
+**Extended data:**
+```javascript
+event.detail.extended = {
+    elementType: 'select' | 'radio' | 'checkbox'
+};
+```
+
+**Example:**
+```javascript
+case MSG_TYPES.MSG_CHANGE:
+    const target = event.detail.target;
+    
+    if (target.type === 'checkbox') {
+        const isChecked = wParam === 1;
+        console.log(`Checkbox is now ${isChecked ? 'checked' : 'unchecked'}`);
+    }
+    
+    if (target.tagName === 'SELECT') {
+        console.log(`Selected index: ${wParam}`);
+    }
+    break;
+```
+
+##### Form Submit Events (SUBMIT)
+
+**wParam** - Form ID:
+```javascript
+const formId = wParam;  // The id attribute of the form, or null
+```
+
+**lParam** - Form data object:
+```javascript
+// Object containing all form fields
+const formData = lParam;  // e.g., { name: 'John', email: 'john@example.com' }
+```
+
+**Example:**
+```javascript
+case MSG_TYPES.MSG_SUBMIT:
+    console.log('Form submitted:', lParam);
+    console.log('Form ID:', wParam);
+    
+    // Validate form data
+    if (!lParam.email || !lParam.email.includes('@')) {
+        originalEvent.preventDefault();
+        return true;  // Stop processing
+    }
+    break;
+```
+
+##### Focus Events (FOCUS, BLUR)
+
+**wParam** - Not used (always 0)
+
+**lParam** - Not used (always 0)
+
+**Example:**
+```javascript
+case MSG_TYPES.MSG_FOCUS:
+    console.log('Element gained focus:', event.detail.target);
+    break;
+
+case MSG_TYPES.MSG_BLUR:
+    console.log('Element lost focus:', event.detail.target);
+    break;
+```
+
+#### Modifier Key Constants
+
+Use these constants to check button and key states in wParam:
+
+```javascript
+const MK_LBUTTON = 0x0001;  // Left mouse button
+const MK_RBUTTON = 0x0002;  // Right mouse button
+const MK_MBUTTON = 0x0004;  // Middle mouse button
+const MK_SHIFT   = 0x0008;  // Shift key
+const MK_CONTROL = 0x0010;  // Control key
+const MK_ALT     = 0x0020;  // Alt key
+```
+
+#### Cancellable Message Types
+
+Only these message types can be cancelled by returning `false` from msgProc:
+
+- `MSG_LBUTTONUP`, `MSG_MBUTTONUP`, `MSG_RBUTTONUP` (button release)
+- `MSG_LCLICK`, `MSG_MCLICK`, `MSG_RCLICK` (click events)
+- `MSG_SUBMIT` (form submission)
+- `MSG_CHANGE` (form control changes)
+
+Returning `false` prevents:
+1. The original DOM event's default behavior (preventDefault is called)
+2. Execution of standard `data-pac-bind` handlers
+
+For all other message types, the return value is ignored and standard processing continues.
+
+#### Complete Examples
+
+##### Example 1: Global Keyboard Shortcuts
+
+```javascript
+wakaPAC('#app', {
+    msgProc(event) {
+        const { message, wParam, originalEvent } = event.detail;
+
+        if (message === MSG_TYPES.MSG_KEYDOWN) {
+            // Check for Ctrl key combinations
+            if (originalEvent.ctrlKey) {
+                switch (originalEvent.key) {
+                    case 's':
+                        this.saveDocument();
+                        originalEvent.preventDefault();
+                        return false;  // Stop processing
+
+                    case 'o':
+                        this.openDocument();
+                        originalEvent.preventDefault();
+                        return false;
+
+                    case 'f':
+                        this.showFindDialog();
+                        originalEvent.preventDefault();
+                        return false;
+                }
+            }
+
+            // Escape key closes modals
+            if (originalEvent.key === 'Escape') {
+                this.closeAllModals();
+                return true;
+            }
+        }
+
+        return false;  // Allow other handlers to process
+    }
+});
+```
+
+##### Example 2: Keyboard State Tracking
+
+```javascript
+wakaPAC('#text-editor', {
+    msgProc(event) {
+        const { message, wParam, lParam, originalEvent } = event.detail;
+
+        if (message === MSG_TYPES.MSG_KEYDOWN) {
+            const repeatCount = lParam & 0xFFFF;
+            const isExtended = (lParam & (1 << 24)) !== 0;
+
+            // Track key repeats for auto-scroll
+            if (repeatCount > 1 && isExtended) {
+                // This is a repeated arrow key press
+                this.accelerateScroll();
+            }
+
+            // Special handling for function keys
+            if (isExtended && originalEvent.key.startsWith('F')) {
+                this.handleFunctionKey(originalEvent.key);
+                return true;
+            }
         }
 
         return false;
@@ -718,70 +1047,67 @@ wakaPAC('#file-manager', {
 });
 ```
 
-#### Message Types (MSG_TYPES Constants)
+#### When to Use MsgProc vs Standard Bindings
 
-WakaPAC provides these predefined message constants:
+**Use msgProc for:**
+- Global keyboard shortcuts (Ctrl+S, Ctrl+C, etc.)
+- Low-level mouse tracking (drag operations, drawing)
+- Complex event coordination across multiple elements
+- Event interception and validation before standard processing
+- Performance-critical event handling
+- Custom context menus and right-click behavior
 
-**Mouse Events:**
-- `MSG_TYPES.MSG_LBUTTONDOWN` (0x0201) - Left mouse button pressed
-- `MSG_TYPES.MSG_LBUTTONUP` (0x0202) - Left mouse button released
-- `MSG_TYPES.MSG_RBUTTONDOWN` (0x0204) - Right mouse button pressed
-- `MSG_TYPES.MSG_RBUTTONUP` (0x0205) - Right mouse button released
-- `MSG_TYPES.MSG_MBUTTONDOWN` (0x0207) - Middle mouse button pressed
-- `MSG_TYPES.MSG_MBUTTONUP` (0x0208) - Middle mouse button released
+**Use standard `data-pac-bind` for:**
+- Simple button clicks
+- Form input handling
+- Most user interactions
+- Declarative, readable event handling
+- When you don't need to prevent default behavior
 
-**Keyboard Events:**
-- `MSG_TYPES.MSG_KEYDOWN` (0x0100) - Key pressed down
-- `MSG_TYPES.MSG_KEYUP` (0x0101) - Key released
+#### Performance Considerations
 
-**Form Events:**
-- `MSG_TYPES.MSG_CHAR` (0x0300) - Character input (typing)
-- `MSG_TYPES.MSG_CHANGE` (0x0301) - Form control value changed
-- `MSG_TYPES.MSG_SUBMIT` (0x0302) - Form submitted
+1. **msgProc runs for every event** - keep logic fast and focused
+2. **Return early** - use `return true` as soon as you know processing is complete
+3. **Avoid heavy computations** - defer expensive operations to separate methods
+4. **Cache calculations** - don't recalculate coordinates repeatedly
 
-**Focus Events:**
-- `MSG_TYPES.MSG_FOCUS` (0x0007) - Element gained focus
-- `MSG_TYPES.MSG_BLUR` (0x0008) - Element lost focus
+#### Common Patterns
 
-#### Message Structure
-
-Each message event contains a standardized structure:
-
+**Pattern 1: Modifier Key Combos**
 ```javascript
-{
-    message: MSG_TYPES.MSG_LBUTTONDOWN,  // Message type constant
-    wParam: 0x0001,                      // Primary parameter (flags/data)
-    lParam: 0x00640032,                  // Secondary parameter (coordinates/data)
-    target: HTMLElement,                 // Target DOM element
-    originalEvent: Event,                // Original DOM event
-    timestamp: 1640995200000            // Event timestamp
+if (message === MSG_TYPES.MSG_LCLICK) {
+    if ((wParam & MK_CONTROL) && (wParam & MK_SHIFT)) {
+        // Ctrl+Shift+Click
+    } else if (wParam & MK_CONTROL) {
+        // Ctrl+Click
+    } else if (wParam & MK_SHIFT) {
+        // Shift+Click
+    }
 }
 ```
 
-#### wParam and lParam Values
+**Pattern 2: Coordinate Extraction Helper**
+```javascript
+function getCoords(lParam) {
+    return {
+        x: lParam & 0xFFFF,
+        y: (lParam >> 16) & 0xFFFF
+    };
+}
 
-**For Mouse Events:**
-- **wParam**: Modifier key flags (can be combined with bitwise OR)
-    - `MK_LBUTTON` (0x0001) - Left button held
-    - `MK_RBUTTON` (0x0002) - Right button held
-    - `MK_MBUTTON` (0x0004) - Middle button held
-    - `MK_SHIFT` (0x0008) - Shift key held
-    - `MK_CONTROL` (0x0010) - Ctrl key held
-    - `MK_ALT` (0x0020) - Alt key held
+// Usage
+const { x, y } = getCoords(lParam);
+```
 
-- **lParam**: Packed coordinates (LOWORD=x, HIWORD=y)
-  ```javascript
-  const x = lParam & 0xFFFF;
-  const y = (lParam >> 16) & 0xFFFF;
-  ```
+**Pattern 3: Event Filtering**
+```javascript
+// Only process events from specific elements
+if (!target.matches('.draggable')) {
+    return false;  // Let other handlers deal with it
+}
 
-**For Keyboard Events:**
-- **wParam**: Virtual key code
-- **lParam**: Keyboard state flags and repeat count
-
-**For Form Events:**
-- **wParam**: Element-specific data (text length, selected index, etc.)
-- **lParam**: Form data object (for submit events) or 0
+// Your handling logic here
+```
 
 ### Component Hierarchy
 
