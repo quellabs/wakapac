@@ -986,7 +986,7 @@
             }
 
             // Process event modifiers - return early if event should be filtered
-            if (!this.processEventModifiers(originalEvent.target, originalEvent)) {
+            if (!this.processEventModifiers(originalEvent.target, customEvent)) {
                 return;
             }
 
@@ -1358,13 +1358,14 @@
          * Handles both behavioral modifiers (prevent, stop) and key filtering for keyboard events.
          * Returns false if the event should be filtered out (not dispatched), true otherwise.
          * @param {HTMLElement} element - The DOM element that has the data-pac-event attribute
-         * @param {Event} originalEvent - The original DOM event being processed
+         * @param {Event} event - The original DOM event being processed
          * @returns {boolean} True if the event should be dispatched, false if it should be filtered out
          */
-        processEventModifiers(element, originalEvent) {
+        processEventModifiers(element, event) {
+            const originalEvent = event.detail?.originalEvent || event;
             const modifiers = element.getAttribute('data-pac-event');
 
-                    // No modifiers, process normally
+            // No modifiers, process normally
             if (!modifiers) {
                 return true;
             }
