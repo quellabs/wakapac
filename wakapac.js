@@ -986,7 +986,7 @@
             }
 
             // Process event modifiers - return early if event should be filtered
-            if (!this.processEventModifiers(originalEvent.target, customEvent)) {
+            if (!this.processEventModifiers(originalEvent.target, originalEvent)) {
                 return;
             }
 
