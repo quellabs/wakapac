@@ -1261,15 +1261,15 @@ These methods are only accessible within component methods and provide core func
 
 ```javascript
 // Data utilities  
-this.formatValue(value)               // Formats any value for display
-this.escapeHTML(str)                  // Escapes HTML entities to prevent XSS
-this.sanitizeUserInput(html)          // Strips HTML tags and returns plain text
-this.getElementPosition(element)      // Returns the global position of an element within the document
+this.formatValue(value)                 // Formats any value for display
+this.escapeHTML(str)                    // Escapes HTML entities to prevent XSS
+this.sanitizeUserInput(html)            // Strips HTML tags and returns plain text
+this.getElementPosition(element)        // Returns the global position of an element within the document
 
 // Component communication
-this.notifyParent(type, data, bubble)     // Send message to parent component (bubble defaults to false)
-this.notifyChildren(command, data)    // Broadcast message to all child components
-this.notifyChild(selector, cmd, data) // Send message to specific child component
+this.notifyParent(type, data, bubble)   // Send message to parent component (bubble defaults to false)
+this.notifyChildren(command, data)      // Broadcast message to all child components
+this.notifyChild(selector, cmd, data)   // Send message to specific child component
 ```
 
 ### External Methods (Available on component instance)
@@ -1278,7 +1278,7 @@ These methods are available when you have a reference to the component instance:
 
 ```javascript
 // Lifecycle management (external only)
-component.destroy()                   // Destroys component and cleans up resources
+component.destroy()   // Destroys component and cleans up resources
 ```
 
 ### Configuration Options
