@@ -4261,24 +4261,14 @@
              * @param {string} type - Type of notification
              * @param {*} data - Data to send with the notification
              */
-            notifyParent: (type, data) => {
-                if (self.parent && typeof self.parent.receiveUpdate === 'function') {
-                    self.parent.receiveUpdate(type, data, self);
-                }
-            },
+            notifyParent: (type, data) => self.notifyParent(type, data),
 
             /**
              * Sends a command to all child components
              * @param {string} cmd - Command to send
              * @param {*} data - Data to send with the command
              */
-            notifyChildren: (cmd, data) => {
-                self.children.forEach(child => {
-                    if (typeof child.receiveFromParent === 'function') {
-                        child.receiveFromParent(cmd, data);
-                    }
-                });
-            },
+            notifyChildren: (cmd, data) => self.notifyChildren(cmd, data),
 
             /**
              * Sends a command to a specific child component
@@ -4286,13 +4276,7 @@
              * @param {string} cmd - Command to send
              * @param {*} data - Data to send with the command
              */
-            notifyChild: (selector, cmd, data) => {
-                const child = Array.from(self.children).find(c => c.container.matches(selector));
-
-                if (child && child.receiveFromParent) {
-                    child.receiveFromParent(cmd, data);
-                }
-            },
+            notifyChild: (selector, cmd, data) => self.notifyChild(selector, cmd, data),
 
             /**
              * Serializing the reactive object to JSON (excluding non-serializable properties)
@@ -4976,28 +4960,46 @@
     };
 
     /**
-     * Notifies the parent component of an event or state change
-     * @param {string} type - The type of event being reported
-     * @param {*} data - The data payload associated with the event
+     * Notifies parent component with optional bubbling
+     * @param {string} type - Event type
+     * @param {*} data - Event payload
+     * @param {boolean} bubble - Whether to continue bubbling up the chain (default: false)
      */
-    Context.prototype.notifyParent = function(type, data) {
-        // Check if parent exists and has the required receiveUpdate method
-        if (this.parent && typeof this.parent.receiveUpdate === 'function') {
-            // Call parent's receiveUpdate method, passing this component as the child reference
-            this.parent.receiveUpdate(type, data, this);
+    Context.prototype.notifyParent = function(type, data, bubble = false) {
+        if (!this.parent) {
+            return;
+        }
+
+        // Call parent's handler if it exists
+        if (typeof this.parent.receiveUpdate === 'function') {
+            const result = this.parent.receiveUpdate(type, data, this);
+
+            // If bubbling is enabled, only stop if handler explicitly returns false
+            if (bubble && result === false) {
+                return;
+            }
+        }
+
+        // Continue bubbling if requested
+        if (bubble) {
+            this.parent.notifyParent(type, data, bubble);
         }
     };
 
     /**
-     * Receives and processes updates from child components
-     * @param {string} type - The type of event received from child
-     * @param {*} data - The data payload from the child
-     * @param {Object} child - Reference to the child component that sent the update
+     * Receives updates from children
+     * @param {string} type - Event type
+     * @param {*} data - Event payload
+     * @param {Object} child - Source child component
+     * @returns {boolean} Return false to stop bubbling, anything else continues
      */
     Context.prototype.receiveUpdate = function(type, data, child) {
         if (this.abstraction.receiveFromChild && typeof this.abstraction.receiveFromChild === 'function') {
-            this.abstraction.receiveFromChild(type, data, child);
+            return this.abstraction.receiveFromChild(type, data, child);
         }
+
+        // Default: continue bubbling
+        return true;
     };
 
     /**
