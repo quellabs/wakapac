@@ -439,21 +439,21 @@ wakaPAC('#app', {
     async saveData() {
         // GET request
         const users = await this.http.get('/api/users');
-        
+
         // POST with data
         const newUser = await this.http.post('/api/users', {
             name: 'John Doe',
             email: 'john@example.com'
         });
-        
+
         // PUT update
         await this.http.put(`/api/users/${newUser.id}`, {
             name: 'Jane Doe'
         });
-        
+
         // DELETE
         await this.http.delete(`/api/users/${newUser.id}`);
-        
+
         // PATCH partial update
         await this.http.patch(`/api/users/${newUser.id}`, {
             lastLogin: new Date().toISOString()
@@ -622,7 +622,7 @@ Watchers execute code when reactive properties change:
 ```javascript
 wakaPAC('#app', {
     searchQuery: '',
-   
+
     watch: {
         // Called when searchQuery changes 
         searchQuery(newValue, oldValue) {
@@ -677,18 +677,18 @@ Standard data-pac-bind handlers execute (if msgProc returned true/undefined)
 wakaPAC('#app', {
     msgProc(event) {
         const { message, wParam, lParam, target, originalEvent } = event.detail;
-        
+
         // Handle specific message types
         switch(message) {
             case MSG_TYPES.MSG_KEYDOWN:
                 // Handle keyboard input
                 break;
-                
+
             case MSG_TYPES.MSG_LCLICK:
                 // Handle mouse clicks
                 break;
         }
-        
+
         // Return false to prevent standard bindings from executing
         // Return true (or undefined) to allow standard bindings to process
         return true;
@@ -1153,6 +1153,56 @@ const child = wakaPAC('#child-app', {
 });
 ```
 
+#### Event Bubbling
+
+By default, `notifyParent` only sends the event to the immediate parent. You can enable automatic bubbling up the entire component hierarchy by setting the third parameter to `true`:
+
+```javascript
+// Grandchild component
+const grandchild = wakaPAC('#grandchild-app', {
+    triggerValidation() {
+        // Bubble event up through parent to grandparent
+        this.notifyParent('validation-failed', {
+            field: 'email',
+            error: 'Invalid format'
+        }, true);  // Enable bubbling
+    }
+});
+
+// Parent component - event passes through
+const parent = wakaPAC('#parent-app', {
+    receiveFromChild(eventType, data, childPAC) {
+        if (eventType === 'validation-failed') {
+            console.log('Child validation failed:', data.field);
+            // Return value controls bubbling:
+            // - Don't return anything: event continues bubbling up
+            // - Return true: event continues bubbling up
+            // - Return false: stop bubbling here
+            return false; // Stop propagation
+        }
+    }
+});
+
+// Grandparent component - receives event if not stopped
+const grandparent = wakaPAC('#grandparent-app', {
+    receiveFromChild(eventType, data, childPAC) {
+        if (eventType === 'validation-failed') {
+            this.showGlobalError(data);
+        }
+    }
+});
+```
+
+**When to use bubbling:**
+- Global error handling at root level
+- Application-wide events (logout, theme change)
+- Events that multiple ancestor levels need to observe
+
+**When to use direct parent notification (default):**
+- Direct parent-child communication
+- Events specific to immediate parent
+- Better performance (fewer handler calls)
+
 ### Data Safety and Display Utilities
 
 Built-in utility functions for safe data handling:
@@ -1217,7 +1267,7 @@ this.sanitizeUserInput(html)          // Strips HTML tags and returns plain text
 this.getElementPosition(element)      // Returns the global position of an element within the document
 
 // Component communication
-this.notifyParent(type, data)         // Send message to parent component
+this.notifyParent(type, data, bubble)     // Send message to parent component (bubble defaults to false)
 this.notifyChildren(command, data)    // Broadcast message to all child components
 this.notifyChild(selector, cmd, data) // Send message to specific child component
 ```
