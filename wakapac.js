@@ -5608,12 +5608,13 @@
     // MAIN FRAMEWORK
     // ========================================================================
 
-    function wakaPAC(selector, abstraction, options) {
+    function wakaPAC(selector, abstraction = {}, options = {}) {
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
 
         // Fetch selector
         const container = document.querySelector(selector);
+
         if (!container) {
             throw new Error(`Container not found: ${selector}`);
         }
