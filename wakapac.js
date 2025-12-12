@@ -4915,6 +4915,22 @@
 
         // Perform scanning when all containers are properly marked
         this.scanAndRegisterNewElements(this.container);
+
+        // Call ready() method if it exists after all bindings have been applied
+        // Only call once per component instance
+        if (
+            !this._readyCalled &&
+            this.abstraction.ready &&
+            typeof this.abstraction.ready === 'function'
+        ) {
+            this._readyCalled = true;
+
+            try {
+                this.abstraction.ready.call(this.abstraction);
+            } catch (error) {
+                console.error('Error in ready() method:', error);
+            }
+        }
     };
 
     /**
@@ -5537,28 +5553,56 @@
             // Clear existing timer and start new one
             clearTimeout(this.hierarchyTimer);
 
+            // Establish hierarchies
             this.hierarchyTimer = setTimeout(() => {
                 this.establishAllHierarchies();
             }, 10); // Keep your current delay
         },
 
+        /**
+         * Processes all pending components to establish their parent-child relationships.
+         *
+         * This method handles cascading component registrations by:
+         * 1. Processing all currently pending components in a batch
+         * 2. Detecting if new components were registered during processing
+         * 3. Scheduling another round if needed to handle the new components
+         *
+         * The recursive processing continues until no new components are added,
+         * ensuring all components eventually get their hierarchy established even
+         * when parent components dynamically create child components.
+         *
+         * @returns {void}
+         */
         establishAllHierarchies() {
-            if (this.pendingHierarchy.size === 0) return;
+            // Nothing to do if no components are waiting
+            if (this.pendingHierarchy.size === 0) {
+                return;
+            }
 
-            // Clear hierarchy cache once for all components
+            // Clear hierarchy cache once for all components in this batch
+            // This ensures fresh parent/child lookups for the current DOM state
             this.hierarchyCache = new WeakMap();
 
-            // Process all pending components
+            // Snapshot the current pending components before clearing
+            // This prevents infinite loops from components added during processing
             const componentsToProcess = Array.from(this.pendingHierarchy);
             this.pendingHierarchy.clear();
 
+            // Establish hierarchy for each component in the batch
+            // Note: This may trigger registration of new child components
             componentsToProcess.forEach(component => {
                 component.establishHierarchy();
             });
 
-            // If more components were added during processing, schedule another round
+            // Check if any new components were registered during processing
+            // This happens when parent components dynamically create children
             if (this.pendingHierarchy.size > 0) {
+                // Cancel any pending hierarchy processing to avoid duplicate runs
                 clearTimeout(this.hierarchyTimer);
+
+                // Schedule another round after a brief delay
+                // The 10ms delay allows multiple rapid registrations to batch together
+                // rather than processing them one at a time
                 this.hierarchyTimer = setTimeout(() => {
                     this.establishAllHierarchies();
                 }, 10);
@@ -5592,6 +5636,7 @@
 
             // Find child components
             const children = [];
+
             this.components.forEach(component => {
                 if (container.contains(component.container) && component.container !== container) {
                     children.push(component);
