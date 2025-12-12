@@ -597,7 +597,6 @@
                     const val = target[prop];
 
                     // Handle array methods first
-                    // In makeDeepReactiveProxy, find this section and add logging:
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
                             // Store the old array state before modification
@@ -677,6 +676,44 @@
                 },
 
                 set: function (target, prop, newValue) {
+                    // Handle array length truncation
+                    if (Array.isArray(target) && prop === 'length') {
+                        const oldLength = target.length;
+                        const newLength = newValue;
+
+                        // Only trigger events if length actually changes
+                        if (oldLength === newLength) {
+                            return true;
+                        }
+
+                        // Store old array state before truncation
+                        const oldArray = Array.prototype.slice.call(target);
+
+                        // Perform the truncation
+                        target.length = newLength;
+
+                        // Dispatch array-specific event
+                        container.dispatchEvent(new CustomEvent("pac:array-change", {
+                            detail: {
+                                path: currentPath,
+                                oldValue: oldArray,
+                                newValue: Array.prototype.slice.call(target),
+                                method: 'length'
+                            }
+                        }));
+
+                        // Also trigger computed property updates
+                        container.dispatchEvent(new CustomEvent("pac:change", {
+                            detail: {
+                                path: currentPath,
+                                oldValue: oldArray,
+                                newValue: Array.prototype.slice.call(target)
+                            }
+                        }));
+
+                        return true;
+                    }
+
                     // Do nothing when value did not change
                     const oldValue = target[prop];
                     const propertyPath = currentPath.concat([prop]);
@@ -2983,6 +3020,7 @@
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
         this.arrayHashMaps = new Map();
+        this._readyCalled = false;
 
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
@@ -3349,11 +3387,6 @@
         pathsToDelete.forEach(path => {
             this.updateQueue.delete(path);
         });
-
-        // Optional: Log performance metrics for debugging (can be removed in production)
-        if (updatesToProcess.length > 0) {
-            console.debug(`Processed ${updatesToProcess.length} queued updates`);
-        }
     };
 
     /**
