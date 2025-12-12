@@ -597,7 +597,6 @@
                     const val = target[prop];
 
                     // Handle array methods first
-                    // In makeDeepReactiveProxy, find this section and add logging:
                     if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
                         return function () {
                             // Store the old array state before modification
@@ -677,6 +676,44 @@
                 },
 
                 set: function (target, prop, newValue) {
+                    // Handle array length truncation
+                    if (Array.isArray(target) && prop === 'length') {
+                        const oldLength = target.length;
+                        const newLength = newValue;
+
+                        // Only trigger events if length actually changes
+                        if (oldLength === newLength) {
+                            return true;
+                        }
+
+                        // Store old array state before truncation
+                        const oldArray = Array.prototype.slice.call(target);
+
+                        // Perform the truncation
+                        target.length = newLength;
+
+                        // Dispatch array-specific event
+                        container.dispatchEvent(new CustomEvent("pac:array-change", {
+                            detail: {
+                                path: currentPath,
+                                oldValue: oldArray,
+                                newValue: Array.prototype.slice.call(target),
+                                method: 'length'
+                            }
+                        }));
+
+                        // Also trigger computed property updates
+                        container.dispatchEvent(new CustomEvent("pac:change", {
+                            detail: {
+                                path: currentPath,
+                                oldValue: oldArray,
+                                newValue: Array.prototype.slice.call(target)
+                            }
+                        }));
+
+                        return true;
+                    }
+
                     // Do nothing when value did not change
                     const oldValue = target[prop];
                     const propertyPath = currentPath.concat([prop]);
@@ -2983,6 +3020,7 @@
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
         this.arrayHashMaps = new Map();
+        this._readyCalled = false;
 
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
@@ -3349,11 +3387,6 @@
         pathsToDelete.forEach(path => {
             this.updateQueue.delete(path);
         });
-
-        // Optional: Log performance metrics for debugging (can be removed in production)
-        if (updatesToProcess.length > 0) {
-            console.debug(`Processed ${updatesToProcess.length} queued updates`);
-        }
     };
 
     /**
@@ -4915,6 +4948,22 @@
 
         // Perform scanning when all containers are properly marked
         this.scanAndRegisterNewElements(this.container);
+
+        // Call ready() method if it exists after all bindings have been applied
+        // Only call once per component instance
+        if (
+            !this._readyCalled &&
+            this.abstraction.ready &&
+            typeof this.abstraction.ready === 'function'
+        ) {
+            this._readyCalled = true;
+
+            try {
+                this.abstraction.ready.call(this.abstraction);
+            } catch (error) {
+                console.error('Error in ready() method:', error);
+            }
+        }
     };
 
     /**
@@ -5537,28 +5586,56 @@
             // Clear existing timer and start new one
             clearTimeout(this.hierarchyTimer);
 
+            // Establish hierarchies
             this.hierarchyTimer = setTimeout(() => {
                 this.establishAllHierarchies();
             }, 10); // Keep your current delay
         },
 
+        /**
+         * Processes all pending components to establish their parent-child relationships.
+         *
+         * This method handles cascading component registrations by:
+         * 1. Processing all currently pending components in a batch
+         * 2. Detecting if new components were registered during processing
+         * 3. Scheduling another round if needed to handle the new components
+         *
+         * The recursive processing continues until no new components are added,
+         * ensuring all components eventually get their hierarchy established even
+         * when parent components dynamically create child components.
+         *
+         * @returns {void}
+         */
         establishAllHierarchies() {
-            if (this.pendingHierarchy.size === 0) return;
+            // Nothing to do if no components are waiting
+            if (this.pendingHierarchy.size === 0) {
+                return;
+            }
 
-            // Clear hierarchy cache once for all components
+            // Clear hierarchy cache once for all components in this batch
+            // This ensures fresh parent/child lookups for the current DOM state
             this.hierarchyCache = new WeakMap();
 
-            // Process all pending components
+            // Snapshot the current pending components before clearing
+            // This prevents infinite loops from components added during processing
             const componentsToProcess = Array.from(this.pendingHierarchy);
             this.pendingHierarchy.clear();
 
+            // Establish hierarchy for each component in the batch
+            // Note: This may trigger registration of new child components
             componentsToProcess.forEach(component => {
                 component.establishHierarchy();
             });
 
-            // If more components were added during processing, schedule another round
+            // Check if any new components were registered during processing
+            // This happens when parent components dynamically create children
             if (this.pendingHierarchy.size > 0) {
+                // Cancel any pending hierarchy processing to avoid duplicate runs
                 clearTimeout(this.hierarchyTimer);
+
+                // Schedule another round after a brief delay
+                // The 10ms delay allows multiple rapid registrations to batch together
+                // rather than processing them one at a time
                 this.hierarchyTimer = setTimeout(() => {
                     this.establishAllHierarchies();
                 }, 10);
@@ -5592,6 +5669,7 @@
 
             // Find child components
             const children = [];
+
             this.components.forEach(component => {
                 if (container.contains(component.container) && component.container !== container) {
                     children.push(component);

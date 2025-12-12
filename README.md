@@ -24,7 +24,7 @@ This results in more predictable data flow and easier debugging than traditional
 
 ### Why WakaPAC?
 
-- **Declarative HTML bindings** with `{{mustache}}` templates and `data-pac-bind` attributes
+- **Declarative HTML bindings** with `{{ mustache }}` templates and `data-pac-bind` attributes
 - **Two-way reactivity** for objects and nested arrays
 - **Advanced expression system** supporting arrays, objects, and complex operations
 - **Drop-in script file** - no bundler required
@@ -68,8 +68,8 @@ This results in more predictable data flow and easier debugging than traditional
 </head>
 <body>
 <div id="my-app">
-    <h1>Hello {{name}}!</h1>
-    <p>Count: {{count}}</p>
+    <h1>Hello {{ name }}!</h1>
+    <p>Count: {{ count }}</p>
     <button data-pac-bind="click: increment">Click me!</button>
 </div>
 
@@ -95,22 +95,22 @@ Text interpolation allows you to dynamically insert data into your HTML template
 
 ```html
 <!-- Simple properties -->
-<p>Hello, {{name}}!</p>
+<p>Hello, {{ name }}!</p>
 
 <!-- Nested properties -->
-<p>User: {{user.name}} ({{user.age}})</p>
+<p>User: {{ user.name }} ({{ user.age }})</p>
 
 <!-- Ternary expressions -->
-<p>Status: {{user.age >= 18 ? 'Adult' : 'Minor'}}</p>
+<p>Status: {{ user.age >= 18 ? 'Adult' : 'Minor'}}</p>
 
 <!-- Computed properties -->
-<p>Total: {{totalPrice}}</p>
+<p>Total: {{ totalPrice }}</p>
 
 <!-- Arithmetic Operations -->
-<p>Total: ${{price * quantity}}</p>
+<p>Total: ${{ price * quantity }}</p>
 
 <!-- String Operations -->
-<p>Full Name: {{firstName + ' ' + lastName}}</p>
+<p>Full Name: {{ firstName + ' ' + lastName }}</p>
 ```
 
 ### Advanced Expression System
@@ -122,11 +122,11 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Array literals -->
 <div data-pac-bind="visible: [1, 2, 3][selectedIndex]">
 
-<!-- Array indexing -->
-<span>{{items[currentIndex].title}}</span>
+    <!-- Array indexing -->
+    <span>{{ items[currentIndex].title }}</span>
 
-<!-- Array length -->
-<p>Total items: {{items.length}}</p>
+    <!-- Array length -->
+    <p>Total items: {{ items.length }}</p>
 ```
 
 #### Object Literals
@@ -134,8 +134,8 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Object creation -->
 <div data-pac-bind="style: {color: textColor, fontSize: size + 'px'}">
 
-<!-- Conditional object properties -->
-<div data-pac-bind="class: {active: isSelected, disabled: !isEnabled}">
+    <!-- Conditional object properties -->
+    <div data-pac-bind="class: {active: isSelected, disabled: !isEnabled}">
 ```
 
 #### Complex Conditionals
@@ -143,11 +143,11 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Multiple conditions -->
 <div data-pac-bind="visible: user.role === 'admin' && user.active">
 
-<!-- Nested ternary -->
-<span>{{status === 'loading' ? 'Please wait...' : status === 'error' ? 'Try again' : 'Ready'}}</span>
+    <!-- Nested ternary -->
+    <span>{{ status === 'loading' ? 'Please wait...' : status === 'error' ? 'Try again' : 'Ready' }}</span>
 
-<!-- Array operations -->
-<div data-pac-bind="if: allowedRoles.includes(user.role)">
+    <!-- Array operations -->
+    <div data-pac-bind="if: allowedRoles.includes(user.role)">
 ```
 
 ### Complete Binding Reference
@@ -208,14 +208,14 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <img data-pac-bind="src: imageUrl, alt: altText">
 <div data-pac-bind="id: dynamicId, role: userRole">
 
-<!-- Data attributes -->
-<div data-pac-bind="data-id: userId, data-category: itemCategory">
+    <!-- Data attributes -->
+    <div data-pac-bind="data-id: userId, data-category: itemCategory">
 
-<!-- ARIA attributes -->
-<button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
+        <!-- ARIA attributes -->
+        <button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
 
-<!-- Multiple custom attributes -->
-<div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
+            <!-- Multiple custom attributes -->
+            <div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
 ```
 
 #### Style and Appearance Bindings
@@ -225,8 +225,8 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <!-- Simple class binding -->
 <div data-pac-bind="class: statusClass">
 
-<!-- Object syntax: conditional classes -->
-<div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
+    <!-- Object syntax: conditional classes -->
+    <div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
 ```
 
 **`style`** - CSS style manipulation (supports object syntax)
@@ -234,11 +234,11 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <!-- Simple style binding -->
 <div data-pac-bind="style: dynamicStyleString">
 
-<!-- Object syntax: multiple CSS properties -->
-<div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
+    <!-- Object syntax: multiple CSS properties -->
+    <div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
 
-<!-- CSS custom properties -->
-<div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
+        <!-- CSS custom properties -->
+        <div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
 ```
 
 #### List Rendering Binding
@@ -247,7 +247,7 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 ```html
 <div data-pac-bind="foreach: items" data-pac-item="item" data-pac-index="index">
     <div class="item">
-        <span>{{index}}. {{item.name}}</span>
+        <span>{{ index }}. {{ item.name }}</span>
         <button data-pac-bind="click: removeItem">Remove</button>
     </div>
 </div>
@@ -296,14 +296,14 @@ Event modifiers allow you to control how events behave by using the `data-pac-ev
 <!-- Prevent form submission redirect -->
 <form data-pac-bind="submit: handleSubmit" data-pac-event="prevent">
 
-<!-- Search on Enter key -->
-<input data-pac-bind="keyup: search" data-pac-event="enter">
+    <!-- Search on Enter key -->
+    <input data-pac-bind="keyup: search" data-pac-event="enter">
 
-<!-- Close modal on Escape -->
-<div data-pac-bind="keyup: closeModal" data-pac-event="escape">
+    <!-- Close modal on Escape -->
+    <div data-pac-bind="keyup: closeModal" data-pac-event="escape">
 
-<!-- Multiple modifiers -->
-<form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
+        <!-- Multiple modifiers -->
+        <form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
 ```
 
 **Available modifiers:**
@@ -344,7 +344,7 @@ wakaPAC('#app', {
 ```html
 <div data-pac-bind="foreach: todos" data-pac-item="todo" data-pac-index="index">
     <div class="todo-item">
-        <span>{{index}}. {{todo.text}}</span>
+        <span>{{ index }}. {{ todo.text }}</span>
         <input type="checkbox" data-pac-bind="checked: todo.completed">
         <button data-pac-bind="click: removeTodo">Remove</button>
     </div>
@@ -556,9 +556,9 @@ WakaPAC automatically provides reactive browser state properties that update whe
 
 ```html
 <!-- Browser properties in templates -->
-<p>Viewport: {{browserViewportWidth}} x {{browserViewportHeight}}</p>
+<p>Viewport: {{ browserViewportWidth }} x {{ browserViewportHeight }}</p>
 <p data-pac-bind="visible: !browserVisible">Tab is hidden - updates paused</p>
-<p>Container is {{containerVisible ? 'visible' : 'hidden'}} in viewport</p>
+<p>Container is {{ containerVisible ? 'visible' : 'hidden' }} in viewport</p>
 ```
 
 ```javascript
@@ -703,16 +703,16 @@ The `msgProc` method receives a CustomEvent with the following structure:
 ```javascript
 {
     type: 'pac:event',             // Always 'pac:event' for msgProc
-    detail: {
+        detail: {
         message: 0x0201,           // Message type from MSG_TYPES constants
-        wParam: 0x0001,            // Primary parameter (varies by message type)
-        lParam: 0x00640032,        // Secondary parameter (varies by message type)
-        target: HTMLElement,       // The DOM element that triggered the event
-        originalEvent: Event,      // Original browser DOM event object
-        timestamp: 1640995200000,  // Timestamp when event was dispatched
-        id: 'element-id',          // Element ID if available, null otherwise
-        value: 'current-value',    // Current value from the element (via readDOMValue)
-        extended: {}               // Additional data specific to certain event types
+            wParam: 0x0001,            // Primary parameter (varies by message type)
+            lParam: 0x00640032,        // Secondary parameter (varies by message type)
+            target: HTMLElement,       // The DOM element that triggered the event
+            originalEvent: Event,      // Original browser DOM event object
+            timestamp: 1640995200000,  // Timestamp when event was dispatched
+            id: 'element-id',          // Element ID if available, null otherwise
+            value: 'current-value',    // Current value from the element (via readDOMValue)
+            extended: {}               // Additional data specific to certain event types
     }
 }
 ```
@@ -793,13 +793,13 @@ const y = (lParam >> 16) & 0xFFFF;   // High 16 bits = y coordinate
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_LBUTTONDOWN:
-    const x = lParam & 0xFFFF;
-    const y = (lParam >> 16) & 0xFFFF;
-    
-    if (wParam & MK_CONTROL) {
-        console.log(`Ctrl+Click at (${x}, ${y})`);
-    }
-    break;
+const x = lParam & 0xFFFF;
+const y = (lParam >> 16) & 0xFFFF;
+
+if (wParam & MK_CONTROL) {
+    console.log(`Ctrl+Click at (${x}, ${y})`);
+}
+break;
 ```
 
 ##### Keyboard Events (KEYDOWN, KEYUP)
@@ -833,17 +833,17 @@ const isRelease = (lParam & (1 << 31)) !== 0;
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_KEYDOWN:
-    const keyCode = wParam;
-    const isExtended = (lParam & (1 << 24)) !== 0;
-    
-    if (keyCode === 13) {  // Enter key
-        console.log('Enter pressed');
-    }
-    
-    if (isExtended) {
-        console.log('Extended key (arrow, function key, etc.)');
-    }
-    break;
+const keyCode = wParam;
+const isExtended = (lParam & (1 << 24)) !== 0;
+
+if (keyCode === 13) {  // Enter key
+    console.log('Enter pressed');
+}
+
+if (isExtended) {
+    console.log('Extended key (arrow, function key, etc.)');
+}
+break;
 ```
 
 ##### Text Input Events (CHAR)
@@ -865,9 +865,9 @@ event.detail.extended = {
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_CHAR:
-    console.log(`Text field has ${wParam} characters`);
-    console.log(`Value: ${event.detail.value}`);
-    break;
+console.log(`Text field has ${wParam} characters`);
+console.log(`Value: ${event.detail.value}`);
+break;
 ```
 
 ##### Form Change Events (CHANGE)
@@ -891,17 +891,17 @@ event.detail.extended = {
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_CHANGE:
-    const target = event.detail.target;
-    
-    if (target.type === 'checkbox') {
-        const isChecked = wParam === 1;
-        console.log(`Checkbox is now ${isChecked ? 'checked' : 'unchecked'}`);
-    }
-    
-    if (target.tagName === 'SELECT') {
-        console.log(`Selected index: ${wParam}`);
-    }
-    break;
+const target = event.detail.target;
+
+if (target.type === 'checkbox') {
+    const isChecked = wParam === 1;
+    console.log(`Checkbox is now ${isChecked ? 'checked' : 'unchecked'}`);
+}
+
+if (target.tagName === 'SELECT') {
+    console.log(`Selected index: ${wParam}`);
+}
+break;
 ```
 
 ##### Form Submit Events (SUBMIT)
@@ -920,15 +920,15 @@ const formData = lParam;  // e.g., { name: 'John', email: 'john@example.com' }
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_SUBMIT:
-    console.log('Form submitted:', lParam);
-    console.log('Form ID:', wParam);
-    
-    // Validate form data
-    if (!lParam.email || !lParam.email.includes('@')) {
-        originalEvent.preventDefault();
-        return true;  // Stop processing
-    }
-    break;
+console.log('Form submitted:', lParam);
+console.log('Form ID:', wParam);
+
+// Validate form data
+if (!lParam.email || !lParam.email.includes('@')) {
+    originalEvent.preventDefault();
+    return true;  // Stop processing
+}
+break;
 ```
 
 ##### Focus Events (FOCUS, BLUR)
@@ -940,12 +940,12 @@ case MSG_TYPES.MSG_SUBMIT:
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_FOCUS:
-    console.log('Element gained focus:', event.detail.target);
-    break;
+console.log('Element gained focus:', event.detail.target);
+break;
 
 case MSG_TYPES.MSG_BLUR:
-    console.log('Element lost focus:', event.detail.target);
-    break;
+console.log('Element lost focus:', event.detail.target);
+break;
 ```
 
 #### Modifier Key Constants
@@ -1253,6 +1253,94 @@ wakaPAC('#map-app', {
 });
 ```
 
+### Lifecycle Methods
+
+WakaPAC provides two lifecycle hooks to control component initialization:
+
+#### `init()` - Early Initialization
+
+Called immediately when the component is created, before DOM bindings are applied:
+
+```javascript
+wakaPAC('#app', {
+    items: [],
+
+    init() {
+        // Set up initial state
+        this.items = this.loadFromStorage();
+
+        // Register external event listeners
+        window.addEventListener('storage', this.handleStorageChange);
+
+        // Initialize third-party libraries (that don't need DOM)
+        this._analytics = new AnalyticsService();
+    }
+});
+```
+
+**Use `init()` for:**
+- Setting up initial data state
+- Registering global event listeners
+- Initializing third-party services that don't require DOM access
+- Setting up non-reactive properties
+
+**Caution:** DOM bindings like `visible`, `if`, and `foreach` have not been applied yet. Avoid DOM manipulation in `init()`.
+
+#### `ready()` - Post-Initialization
+
+Called after all DOM bindings have been applied and child components are initialized:
+
+```javascript
+wakaPAC('#app', {
+    ready() {
+        // DOM is fully bound and ready
+        document.getElementById('logo').style.display = 'block';
+
+        // Initialize libraries that need the DOM
+        this._chart = new Chart(this.$el.querySelector('canvas'));
+
+        // Trigger initial data fetch
+        this.loadData();
+    }
+});
+```
+
+**Use `ready()` for:**
+- Safe DOM manipulation after bindings are applied
+- Initializing third-party libraries that require DOM elements
+- Triggering initial API calls or data loading
+- Setting up observers or DOM-dependent functionality
+
+**Execution Order:**
+1. Component constructor runs
+2. `init()` is called
+3. Reactive abstraction is created
+4. Component hierarchy is established
+5. DOM bindings are scanned and applied (`visible`, `foreach`, etc.)
+6. `ready()` is called ← Safe for DOM manipulation
+7. Component is fully operational
+
+**Common Pattern - Showing Hidden Elements:**
+```javascript
+// HTML: Start with element hidden to prevent flash
+<div id="app" style="display: none">
+    <span data-pac-bind="visible: isLoggedIn">Welcome back!</span>
+</div>
+
+// JavaScript: Show after bindings are applied
+wakaPAC('#app', {
+    isLoggedIn: false,
+
+    ready() {
+        // Bindings are applied, no flash of wrong content
+        document.getElementById('app').style.display = 'block';
+
+        // Now safe to check auth status
+        this.checkAuthStatus();
+    }
+});
+```
+
 ## API Reference
 
 ### Internal Methods (Available as `this.methodName()` within component)
@@ -1301,7 +1389,7 @@ wakaPAC('#app', data, {
 <div v-if="isVisible">Content</div>
 
 <!-- WakaPAC -->
-<div>{{message}}</div>
+<div>{{ message }}</div>
 <input data-pac-bind="value: name">
 <button data-pac-bind="click: handleClick">Click</button>
 <div data-pac-bind="if: isVisible">Content</div>
