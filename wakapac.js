@@ -3865,6 +3865,7 @@
         // }
     };
 
+
     /**
      * Extracts all property dependencies from a parsed expression
      * @param {Object} parsedExpr - The parsed expression AST
@@ -3897,15 +3898,12 @@
 
             case 'methodCall': {
                 this.extractExpressionDependencies(parsedExpr.object, dependencies);
-
                 const args = parsedExpr.arguments;
-
                 if (args) {
                     args.forEach(arg => {
                         this.extractExpressionDependencies(arg, dependencies);
                     });
                 }
-
                 break;
             }
 
@@ -4004,7 +4002,6 @@
             return true;
         }
     };
-
     /**
      * Handles reactive data changes by determining which DOM elements need updates.
      * This is the central event handler that responds to property changes in the reactive
@@ -4085,7 +4082,6 @@
                 const expressionsInTemplate = [];
                 let tempMatch;
                 const regex = new RegExp(INTERPOLATION_REGEX.source, 'g');
-
                 while ((tempMatch = regex.exec(mappingData.template)) !== null) {
                     expressionsInTemplate.push(tempMatch[1].trim());
                 }
@@ -5912,5 +5908,13 @@
     // Export to global scope
     window.wakaPAC = wakaPAC;
     window.MSG_TYPES = MSG_TYPES;
+    
+    // Export modifier key constants
+    window.MK_LBUTTON = MK_LBUTTON;
+    window.MK_RBUTTON = MK_RBUTTON;
+    window.MK_MBUTTON = MK_MBUTTON;
+    window.MK_SHIFT = MK_SHIFT;
+    window.MK_CONTROL = MK_CONTROL;
+    window.MK_ALT = MK_ALT;
 
 })();
