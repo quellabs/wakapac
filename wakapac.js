@@ -3865,143 +3865,6 @@
         // }
     };
 
-
-    /**
-     * Extracts all property dependencies from a parsed expression
-     * @param {Object} parsedExpr - The parsed expression AST
-     * @param {Set<string>} [dependencies=new Set()] - Accumulator for found dependencies
-     * @returns {Set<string>} Set of property names the expression depends on
-     */
-    Context.prototype.extractExpressionDependencies = function(parsedExpr, dependencies = new Set()) {
-        if (!parsedExpr) {
-            return dependencies;
-        }
-
-        switch (parsedExpr.type) {
-            case 'property': {
-                // Extract the root property name from paths like "user.name" or "items[0]"
-                const rootProp = parsedExpr.path.split(/[.[\]]+/)[0];
-                if (rootProp) {
-                    dependencies.add(rootProp);
-                }
-                break;
-            }
-
-            case 'member':
-                this.extractExpressionDependencies(parsedExpr.object, dependencies);
-                break;
-
-            case 'index':
-                this.extractExpressionDependencies(parsedExpr.object, dependencies);
-                this.extractExpressionDependencies(parsedExpr.index, dependencies);
-                break;
-
-            case 'methodCall': {
-                this.extractExpressionDependencies(parsedExpr.object, dependencies);
-                const args = parsedExpr.arguments;
-                if (args) {
-                    args.forEach(arg => {
-                        this.extractExpressionDependencies(arg, dependencies);
-                    });
-                }
-                break;
-            }
-
-            case 'ternary':
-                this.extractExpressionDependencies(parsedExpr.condition, dependencies);
-                this.extractExpressionDependencies(parsedExpr.trueValue, dependencies);
-                this.extractExpressionDependencies(parsedExpr.falseValue, dependencies);
-                break;
-
-            case 'logical':
-            case 'comparison':
-            case 'arithmetic':
-                this.extractExpressionDependencies(parsedExpr.left, dependencies);
-                this.extractExpressionDependencies(parsedExpr.right, dependencies);
-                break;
-
-            case 'unary':
-                this.extractExpressionDependencies(parsedExpr.operand, dependencies);
-                break;
-
-            case 'array':
-                if (parsedExpr.elements) {
-                    parsedExpr.elements.forEach(element => {
-                        this.extractExpressionDependencies(element, dependencies);
-                    });
-                }
-                break;
-
-            case 'object':
-                if (parsedExpr.pairs) {
-                    parsedExpr.pairs.forEach(pair => {
-                        this.extractExpressionDependencies(pair.value, dependencies);
-                    });
-                }
-                break;
-
-            case 'parentheses':
-                this.extractExpressionDependencies(parsedExpr.inner, dependencies);
-                break;
-
-            case 'literal':
-                // Literals have no dependencies
-                break;
-        }
-
-        return dependencies;
-    };
-
-    /**
-     * Checks if an expression depends on the changed property or any computed properties
-     * that depend on the changed property
-     * @param {string} expressionString - The expression to check
-     * @param {string} changedProperty - The property that changed
-     * @returns {boolean} True if the expression should be re-evaluated
-     */
-    Context.prototype.shouldUpdateExpression = function(expressionString, changedProperty) {
-        try {
-            // Parse the expression
-            const parsed = ExpressionCache.parseExpression(expressionString);
-            
-            // Extract all properties this expression depends on
-            const exprDependencies = this.extractExpressionDependencies(parsed);
-            
-            // Check if expression directly depends on the changed property
-            if (exprDependencies.has(changedProperty)) {
-                return true;
-            }
-            
-            // Build set of all transitively affected computed properties
-            const affectedProps = new Set();
-            const toCheck = [changedProperty];
-            
-            while (toCheck.length > 0) {
-                const prop = toCheck.shift();
-                const dependents = this.dependencies.get(prop) || [];
-                
-                for (const dependent of dependents) {
-                    if (!affectedProps.has(dependent)) {
-                        affectedProps.add(dependent);
-                        toCheck.push(dependent); // Check dependents of this computed property
-                    }
-                }
-            }
-            
-            // Check if expression depends on any transitively affected computed properties
-            for (const computedProp of affectedProps) {
-                if (exprDependencies.has(computedProp)) {
-                    return true;
-                }
-            }
-            
-            return false;
-        } catch (error) {
-            // If we can't parse the expression, be safe and update it
-            console.warn('Error checking expression dependencies:', expressionString, error);
-            return true;
-        }
-    };
     /**
      * Handles reactive data changes by determining which DOM elements need updates.
      * This is the central event handler that responds to property changes in the reactive
@@ -4013,13 +3876,7 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Context.prototype.handleReactiveChange = function (event) {
-        // Get the root property that changed (first element of path)
-        const changedProperty = event.detail.path[0];
-        
-        // Check if this is a deep change within an array (e.g., items[0].important)
-        const isDeepArrayChange = event.detail.path.length > 1 && Array.isArray(this.abstraction[changedProperty]);
-        
-        // Optimized approach: only update bindings that depend on the changed property
+        // Simple approach: check every element binding to see if it needs updating
         this.interpolationMap.forEach((mappingData, element) => {
             const { bindings } = mappingData;
 
@@ -4031,14 +3888,6 @@
 
                 // Fetch the binding type
                 const bindingData = bindings[bindingType];
-
-                // Check if this binding depends on the changed property
-                // For deep array changes (e.g., items[0].important), we need to check if the binding
-                // is inside a foreach loop for this array, which we can't easily determine here.
-                // So for deep array changes, we update all bindings to be safe.
-                if (!isDeepArrayChange && !this.shouldUpdateExpression(bindingData.target, changedProperty)) {
-                    return; // Skip this binding - it doesn't depend on what changed
-                }
 
                 // For each binding, evaluate it now and see if the result changed
                 try {
@@ -4076,28 +3925,6 @@
                 // Store previous text content to detect changes
                 if (!textNode._pacPreviousText) {
                     textNode._pacPreviousText = textNode.textContent;
-                }
-
-                // Check if any interpolations in this template depend on the changed property
-                const expressionsInTemplate = [];
-                let tempMatch;
-                const regex = new RegExp(INTERPOLATION_REGEX.source, 'g');
-                while ((tempMatch = regex.exec(mappingData.template)) !== null) {
-                    expressionsInTemplate.push(tempMatch[1].trim());
-                }
-                
-                let hasRelevantDependency = false;
-                for (const expression of expressionsInTemplate) {
-                    if (this.shouldUpdateExpression(expression, changedProperty)) {
-                        hasRelevantDependency = true;
-                        break;
-                    }
-                }
-                
-                // Skip if no dependencies match
-                // For deep array changes, always update to catch foreach-scoped variables
-                if (!isDeepArrayChange && !hasRelevantDependency) {
-                    return;
                 }
 
                 const newText = mappingData.template.replace(INTERPOLATION_REGEX, (match, expression) => {
