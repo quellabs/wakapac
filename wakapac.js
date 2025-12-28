@@ -5688,6 +5688,20 @@
     // MAIN FRAMEWORK
     // ========================================================================
 
+    /**
+     * Creates reactive PAC (Presentation-Abstraction-Control) components
+     *
+     * @param {string} selector - CSS selector ('#id' returns single, '.class' returns array)
+     * @param {Object} [abstraction={}] - Reactive data model with properties and methods
+     * @param {Object} [options={}] - Configuration options
+     * @param {string} [options.updateMode='immediate'] - Update strategy ('immediate' or 'debounced')
+     * @param {number} [options.delay=300] - Debounce delay in milliseconds
+     * @returns {Object|Object[]|undefined} Single abstraction for ID, array for class/tag selectors
+     *
+     * @example
+     * const app = wakaPAC('#app', { count: 0 });
+     * const todos = wakaPAC('.todo-item', { text: '', done: false });
+     */
     function wakaPAC(selector, abstraction = {}, options = {}) {
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
@@ -5695,8 +5709,12 @@
         // Fetch all matching elements (supports both ID and class selectors)
         const containers = document.querySelectorAll(selector);
 
+        // Determine if selector is for multiple elements (class, attribute, tag)
+        const isMultiSelector = !selector.startsWith('#');
+
         if (containers.length === 0) {
-            throw new Error(`Container not found: ${selector}`);
+            console.warn(`wakaPAC: No elements found for selector "${selector}"`);
+            return isMultiSelector ? [] : undefined;
         }
 
         // Process each container and collect abstractions
@@ -5705,6 +5723,7 @@
         containers.forEach(container => {
             // Get or generate pac-id
             let pacId = container.getAttribute('data-pac-id');
+            
             if (!pacId) {
                 pacId = Utils.uniqid('pac-');
                 container.setAttribute('data-pac-id', pacId);
@@ -5731,8 +5750,8 @@
             abstractions.push(context.abstraction);
         });
 
-        // Return single abstraction or array depending on count
-        return abstractions.length === 1 ? abstractions[0] : abstractions;
+        // Return array for multi-selectors, single abstraction for ID selectors
+        return isMultiSelector ? abstractions : abstractions[0];
     }
 
     // ========================================================================
