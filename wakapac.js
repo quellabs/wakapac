@@ -232,13 +232,13 @@
         /**
          * Determines if an element belongs to the specified PAC container.
          * An element belongs to a container if that container is its immediate PAC parent.
-         * @param {Element} container - The PAC container element with data-pac-container attribute
+         * @param {Element} container - The PAC container element with data-pac-id attribute
          * @param {Node} element - The element to check (can be Element or Text node)
          * @returns {boolean} True if element belongs directly to this container, false otherwise
          */
         belongsToPacContainer(container, element) {
             // Early validation: ensure container is an Element with required attribute
-            if (!(container instanceof Element) || !container.hasAttribute('data-pac-container')) {
+            if (!(container instanceof Element) || !container.hasAttribute('data-pac-id')) {
                 return false;
             }
 
@@ -258,7 +258,7 @@
             }
 
             // Find the closest PAC container ancestor (or self)
-            const immediateContainer = targetElement.closest('[data-pac-container]');
+            const immediateContainer = targetElement.closest('[data-pac-id]');
 
             // Element belongs to this container only if this container is its immediate PAC parent
             return immediateContainer === container;
@@ -1032,7 +1032,7 @@
          * Creates a custom event that wraps the original DOM event with additional
          * tracking data including Win32-style wParam/lParam values, timestamps,
          * and extended metadata. The event is dispatched to the nearest container
-         * element with a [data-pac-container] attribute.
+         * element with a [data-pac-id] attribute.
          * @param {string} messageType - The Win32 message type (e.g., MSG_LBUTTONDOWN, MSG_KEYUP)
          * @param {Event} originalEvent - The original DOM event to wrap
          * @param {Object} [extended={}] - Additional extended data to include in the event detail
@@ -1040,7 +1040,7 @@
          */
         dispatchTrackedEvent(messageType, originalEvent, extended = {}) {
             // Find the nearest container element that should receive the event
-            const container = originalEvent.target.closest('[data-pac-container]');
+            const container = originalEvent.target.closest('[data-pac-id]');
 
             // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
@@ -1110,7 +1110,7 @@
          * @param {Object} stateData - State data to include in event
          */
         dispatchBrowserStateEvent(stateType, stateData) {
-            const containers = document.querySelectorAll('[data-pac-container]');
+            const containers = document.querySelectorAll('[data-pac-id]');
 
             containers.forEach(container => {
                 const customEvent = new CustomEvent('pac:browser-state', {
@@ -1133,7 +1133,7 @@
          * @param originalEvent
          */
         dispatchFocusEvent(focusType, originalEvent) {
-            const containers = document.querySelectorAll('[data-pac-container]');
+            const containers = document.querySelectorAll('[data-pac-id]');
             const { target, relatedTarget } = originalEvent;
 
             containers.forEach(container => {
@@ -5084,8 +5084,10 @@
      * @param {*} data - The command data payload
      */
     Context.prototype.notifyChild = function(selector, cmd, data) {
-        // Find the first child whose container element matches the selector
-        const child = Array.from(this.children).find(c => c.container.matches(selector));
+        // Find the child by its pac-id attribute
+        const child = Array.from(this.children).find(c =>
+            c.container.getAttribute('data-pac-id') === selector
+        );
 
         // If matching child found and has receiveFromParent method, send the command
         if (child && typeof child.receiveFromParent === 'function') {
@@ -5576,7 +5578,7 @@
     ComponentRegistry.prototype = {
         /**
          * Registers a new PAC component
-         * @param {string} selector - CSS selector for the component
+         * @param {string} selector - Unique identifier for the component (from data-pac-id)
          * @param {Object} context - The PAC component context object
          */
         register(selector, context) {
@@ -5690,40 +5692,47 @@
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
 
-        // Fetch selector
-        const container = document.querySelector(selector);
+        // Fetch all matching elements (supports both ID and class selectors)
+        const containers = document.querySelectorAll(selector);
 
-        if (!container) {
+        if (containers.length === 0) {
             throw new Error(`Container not found: ${selector}`);
         }
 
-        // Mark this container BEFORE creating the Context
-        // This ensures other components can see it during their scanning
-        if (!container.hasAttribute('data-pac-container')) {
-            container.setAttribute('data-pac-container', Utils.uniqid());
-        }
+        // Process each container and collect abstractions
+        const abstractions = [];
 
-        // Merge configuration
-        const config = Object.assign({
-            updateMode: 'immediate',
-            delay: 300
-        }, options);
+        containers.forEach(container => {
+            // Get or generate pac-id
+            let pacId = container.getAttribute('data-pac-id');
+            if (!pacId) {
+                pacId = Utils.uniqid('pac-');
+                container.setAttribute('data-pac-id', pacId);
+            }
 
-        // Create context directly
-        const context = new Context(container, abstraction, config);
+            // Merge configuration
+            const config = Object.assign({
+                updateMode: 'immediate',
+                delay: 300
+            }, options);
 
-        // Register in global registry and establish hierarchy
-        // Add this component to the global registry using its CSS selector as the key,
-        // making it discoverable by other components and external code
-        window.PACRegistry.register(selector, context);
+            // Create context for this container
+            const context = new Context(container, abstraction, config);
 
-        // Signal that a new component is ready
-        document.dispatchEvent(new CustomEvent('pac:component-ready', {
-            detail: { component: context, selector: selector }
-        }));
+            // Register using pac-id as key (not selector)
+            window.PACRegistry.register(pacId, context);
 
-        // Return the reactive abstraction
-        return context.abstraction;
+            // Signal that a new component is ready
+            document.dispatchEvent(new CustomEvent('pac:component-ready', {
+                detail: { component: context, selector: selector, pacId: pacId }
+            }));
+
+            // Collect the abstraction
+            abstractions.push(context.abstraction);
+        });
+
+        // Return single abstraction or array depending on count
+        return abstractions.length === 1 ? abstractions[0] : abstractions;
     }
 
     // ========================================================================
