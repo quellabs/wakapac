@@ -80,6 +80,7 @@
         // Mouse button press/release events
         MSG_LBUTTONDOWN: 0x0201,    // Left mouse button pressed
         MSG_LBUTTONUP: 0x0202,      // Left mouse button released
+        MSG_LBUTTONDBLCLK: 0x0203,  // Left mouse button double-click
         MSG_RBUTTONDOWN: 0x0204,    // Right mouse button pressed
         MSG_RBUTTONUP: 0x0205,      // Right mouse button released
         MSG_MBUTTONDOWN: 0x0207,    // Middle mouse button pressed
@@ -965,6 +966,14 @@
                 self.dispatchTrackedEvent(MSG_TYPES.MSG_RCLICK, event);
             });
 
+            // Handle double-click (left button only)
+            document.addEventListener('dblclick', function (event) {
+                // Only handle left button double-clicks
+                if (event.button === 0) {
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONDBLCLK, event);
+                }
+            });
+
             /**
              * Handle mouse movement with throttling
              * Throttles updates to configured FPS (default 60fps = ~16ms)
@@ -1273,10 +1282,11 @@
                 // Mouse movement and button events - encode button states and coordinates
                 case MSG_TYPES.MSG_MOUSEMOVE:
                 case MSG_TYPES.MSG_LBUTTONDOWN:
-                case MSG_TYPES.MSG_RBUTTONDOWN:
-                case MSG_TYPES.MSG_MBUTTONDOWN:
                 case MSG_TYPES.MSG_LBUTTONUP:
+                case MSG_TYPES.MSG_LBUTTONDBLCLK:
+                case MSG_TYPES.MSG_RBUTTONDOWN:
                 case MSG_TYPES.MSG_RBUTTONUP:
+                case MSG_TYPES.MSG_MBUTTONDOWN:
                 case MSG_TYPES.MSG_MBUTTONUP:
                 case MSG_TYPES.MSG_LCLICK:
                 case MSG_TYPES.MSG_MCLICK:
@@ -3613,6 +3623,7 @@
             case MSG_TYPES.MSG_RBUTTONUP:
             case MSG_TYPES.MSG_MCLICK:
             case MSG_TYPES.MSG_RCLICK:
+            case MSG_TYPES.MSG_LBUTTONDBLCLK:
                 // Mouse movement and button events - no default action, handled by msgProc if needed
                 break;
 
