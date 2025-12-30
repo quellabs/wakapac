@@ -5,7 +5,7 @@
     <h1>Parent: {{message}}</h1>
     <button data-pac-bind="click: sendMessageToChild">Send to Child</button>
 
-    <div id="child-component">
+    <div id="child-component" data-pac-id="child-component">
         <h2>Child: {{childMessage}}</h2>
         <button data-pac-bind="click: sendNotificationToParent">Notify Parent</button>
     </div>
@@ -17,7 +17,7 @@
         message: 'Hello from parent',
 
         sendMessageToChild() {
-            this.notifyChild('#child-component', 'updateMessage', 'Hello from parent!');
+            this.notifyChild('child-component', 'updateMessage', 'Hello from parent!');
         },
 
         receiveFromChild(type, data, child) {
