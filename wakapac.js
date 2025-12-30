@@ -560,30 +560,40 @@
         },
 
         /**
-         * Extracts mouse coordinates from lParam value
-         * Mouse coordinates are packed into lParam as two 16-bit integers and are
-         * container-relative (client-area relative in Win32 terms).
-         * - Low 16 bits: x coordinate (relative to container's left edge)
-         * - High 16 bits: y coordinate (relative to container's top edge)
-         *
+         * Extracts the low-order word (x coordinate) from lParam
+         * Equivalent to Win32 LOWORD macro - gets bits 0-15
+         * Coordinates are container-relative (client-area relative in Win32 terms)
+         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * @returns {number} X coordinate relative to container's left edge
+         */
+        LOWORD(lParam) {
+            return lParam & 0xFFFF;
+        },
+
+        /**
+         * Extracts the high-order word (y coordinate) from lParam
+         * Equivalent to Win32 HIWORD macro - gets bits 16-31
+         * Coordinates are container-relative (client-area relative in Win32 terms)
+         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * @returns {number} Y coordinate relative to container's top edge
+         */
+        HIWORD(lParam) {
+            return (lParam >> 16) & 0xFFFF;
+        },
+
+        /**
+         * Extracts both x and y coordinates from lParam
+         * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
+         * Coordinates are container-relative (client-area relative in Win32 terms)
+         * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
          * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
          * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
          */
-        getMouseCoords(lParam) {
+        MAKEPOINTS(lParam) {
             return {
                 x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
                 y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
             };
-        },
-
-        /**
-         * Checks if a specific mouse button is currently held down
-         * @param {number} wParam - Modifier key flags from event.detail.wParam
-         * @param {number} button - Button constant (MK_LBUTTON, MK_RBUTTON, or MK_MBUTTON)
-         * @returns {boolean} True if the specified button is held down
-         */
-        isButtonDown(wParam, button) {
-            return (wParam & button) !== 0;
         }
     }
 
@@ -4472,20 +4482,34 @@
              * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
              * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
              */
-            getMouseCoords: {
-                value: (lParam) => Utils.getMouseCoords(lParam),
+            LOWORD: {
+                value: (lParam) => Utils.LOWORD(lParam),
                 writable: false,
                 enumerable: false
             },
 
             /**
-             * Checks if a specific mouse button is currently held down
-             * @param {number} wParam - Modifier key flags from event.detail.wParam
-             * @param {number} button - Button constant (MK_LBUTTON, MK_RBUTTON, or MK_MBUTTON)
-             * @returns {boolean} True if the specified button is held down
+             * Extracts the high-order word (y coordinate) from lParam
+             * Equivalent to Win32 HIWORD macro - gets bits 16-31
+             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * @returns {number} Y coordinate relative to container's top edge
              */
-            isButtonDown: {
-                value: (wParam, button) => Utils.isButtonDown(wParam, button),
+            HIWORD: {
+                value: (lParam) => Utils.HIWORD(lParam),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Extracts both x and y coordinates from lParam
+             * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
+             * Coordinates are container-relative (relative to the container's top-left corner)
+             * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
+             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
+             */
+            MAKEPOINTS: {
+                value: (lParam) => Utils.MAKEPOINTS(lParam),
                 writable: false,
                 enumerable: false
             }
