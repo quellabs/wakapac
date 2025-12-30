@@ -557,6 +557,32 @@
 
             // Convert to positive hex string
             return (hash >>> 0).toString(16);
+        },
+
+        /**
+         * Extracts mouse coordinates from lParam value
+         * Mouse coordinates are packed into lParam as two 16-bit integers:
+         * - Low 16 bits: x coordinate
+         * - High 16 bits: y coordinate
+         *
+         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * @returns {{x: number, y: number}} Object containing x and y coordinates
+         */
+        getMouseCoords(lParam) {
+            return {
+                x: lParam & 0xFFFF,           // Low 16 bits = x coordinate
+                y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate
+            };
+        },
+
+        /**
+         * Checks if a specific mouse button is currently held down
+         * @param {number} wParam - Modifier key flags from event.detail.wParam
+         * @param {number} button - Button constant (MK_LBUTTON, MK_RBUTTON, or MK_MBUTTON)
+         * @returns {boolean} True if the specified button is held down
+         */
+        isButtonDown(wParam, button) {
+            return (wParam & button) !== 0;
         }
     }
 
@@ -4423,6 +4449,30 @@
              */
             getElementPosition: {
                 value: (elementOrId) => Utils.getElementPosition(elementOrId),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Extracts mouse coordinates from lParam value
+             * Mouse coordinates are packed into lParam as two 16-bit integers
+             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * @returns {{x: number, y: number}} Object containing x and y coordinates
+             */
+            getMouseCoords: {
+                value: (lParam) => Utils.getMouseCoords(lParam),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Checks if a specific mouse button is currently held down
+             * @param {number} wParam - Modifier key flags from event.detail.wParam
+             * @param {number} button - Button constant (MK_LBUTTON, MK_RBUTTON, or MK_MBUTTON)
+             * @returns {boolean} True if the specified button is held down
+             */
+            isButtonDown: {
+                value: (wParam, button) => Utils.isButtonDown(wParam, button),
                 writable: false,
                 enumerable: false
             }
