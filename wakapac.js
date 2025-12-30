@@ -551,6 +551,7 @@
             for (let i = 0; i < str.length; i++) {
                 // hash * 33 + char_code
                 hash = ((hash << 5) + hash) + str.charCodeAt(i);
+                
                 // Keep within 32-bit integer range
                 hash = hash & 0xffffffff;
             }
@@ -4512,6 +4513,44 @@
                 value: (lParam) => Utils.MAKEPOINTS(lParam),
                 writable: false,
                 enumerable: false
+            },
+
+            /**
+             * Converts container-relative coordinates to viewport-absolute coordinates
+             * Equivalent to Win32 ClientToScreen - converts client-area to screen coordinates
+             * @param {number} x - Container-relative x coordinate
+             * @param {number} y - Container-relative y coordinate
+             * @returns {{x: number, y: number}} Viewport-absolute coordinates
+             */
+            containerToViewport: {
+                value: (x, y) => {
+                    const rect = self.container.getBoundingClientRect();
+                    return {
+                        x: x + rect.left,
+                        y: y + rect.top
+                    };
+                },
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Converts viewport-absolute coordinates to container-relative coordinates
+             * Equivalent to Win32 ScreenToClient - converts screen to client-area coordinates
+             * @param {number} x - Viewport-absolute x coordinate
+             * @param {number} y - Viewport-absolute y coordinate
+             * @returns {{x: number, y: number}} Container-relative coordinates
+             */
+            viewportToContainer: {
+                value: (x, y) => {
+                    const rect = self.container.getBoundingClientRect();
+                    return {
+                        x: x - rect.left,
+                        y: y - rect.top
+                    };
+                },
+                writable: false,
+                enumerable: false
             }
         });
 
@@ -5812,17 +5851,12 @@
 
     /**
      * Creates reactive PAC (Presentation-Abstraction-Control) components
-     *
      * @param {string} selector - CSS selector ('#id' returns single, '.class' returns array)
      * @param {Object} [abstraction={}] - Reactive data model with properties and methods
      * @param {Object} [options={}] - Configuration options
      * @param {string} [options.updateMode='immediate'] - Update strategy ('immediate' or 'debounced')
      * @param {number} [options.delay=300] - Debounce delay in milliseconds
      * @returns {Object|Object[]|undefined} Single abstraction for ID, array for class/tag selectors
-     *
-     * @example
-     * const app = wakaPAC('#app', { count: 0 });
-     * const todos = wakaPAC('.todo-item', { text: '', done: false });
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
         // Initialize global event tracking first
