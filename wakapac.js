@@ -74,6 +74,9 @@
         // Unknown message (should never occur)
         MSG_UNKNOWN: 0x0000,
 
+        // Mouse movement
+        MSG_MOUSEMOVE: 0x0200,      // Mouse position changed
+
         // Mouse button press/release events
         MSG_LBUTTONDOWN: 0x0201,    // Left mouse button pressed
         MSG_LBUTTONUP: 0x0202,      // Left mouse button released
@@ -410,7 +413,7 @@
                     return 'fast';
             }
         },
-        
+
         /**
          * Reads the current value from a DOM element (input, select, textarea, etc.)
          * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
@@ -925,6 +928,36 @@
             });
 
             /**
+             * Handle mouse movement with throttling
+             * Throttles updates to configured FPS (default 60fps = ~16ms)
+             * Set wakaPAC.mouseMoveThrottleFps = 0 for no throttling (updates on every mousemove)
+             * Set wakaPAC.mouseMoveThrottleFps = 120 for higher precision (gaming, drawing apps)
+             * Must be set before first wakaPAC() call
+             */
+            let mouseMoveThrottle = null;
+
+            document.addEventListener('mousemove', function (event) {
+                // Calculate throttle delay from FPS (0 = no throttle)
+                const throttleDelay = wakaPAC.mouseMoveThrottleFps > 0
+                    ? 1000 / wakaPAC.mouseMoveThrottleFps
+                    : 0;
+
+                // No throttling - dispatch immediately
+                if (throttleDelay === 0) {
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, event);
+                    return;
+                }
+
+                // Throttled - only dispatch if not currently throttled
+                if (!mouseMoveThrottle) {
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, event);
+                    mouseMoveThrottle = setTimeout(() => {
+                        mouseMoveThrottle = null;
+                    }, throttleDelay);
+                }
+            });
+
+            /**
              * Handle keyboard key release events
              * Tracks when user releases any key
              */
@@ -1198,7 +1231,8 @@
          */
         buildParams(messageType, event) {
             switch(messageType) {
-                // Mouse button events - encode button states and coordinates
+                // Mouse movement and button events - encode button states and coordinates
+                case MSG_TYPES.MSG_MOUSEMOVE:
                 case MSG_TYPES.MSG_LBUTTONDOWN:
                 case MSG_TYPES.MSG_RBUTTONDOWN:
                 case MSG_TYPES.MSG_MBUTTONDOWN:
@@ -1378,7 +1412,7 @@
                     if ('selectedIndex' in element) {
                         return element.selectedIndex;
                     }
-                    
+
                     // Fallback to 0 for unknown element types
                     return 0;
             }
@@ -1398,13 +1432,13 @@
             const extendedKeys = [
                 // Arrow keys
                 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-                
+
                 // Function keys
                 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
-                
+
                 // Navigation keys
                 'Home', 'End', 'PageUp', 'PageDown', 'Insert', 'Delete',
-                
+
                 // Numpad keys (when NumLock is on)
                 'NumpadEnter', 'NumpadDivide',
 
@@ -2370,7 +2404,7 @@
 
             // Ensure resolvedPath is a string for string operations
             resolvedPath = String(resolvedPath);
-            
+
             // Handle simple property access (no dots or brackets)
             if (resolvedPath.indexOf('.') === -1 && resolvedPath.indexOf('[') === -1) {
                 return (resolvedPath in obj) ? obj[resolvedPath] : undefined;
@@ -2792,7 +2826,7 @@
                 case 'foreach':
                     // foreach bindings are handled during renderForeach, not as attributes
                     break;
-                    
+
                 default:
                     this.applyAttributeBinding(element, bindingType, value);
                     break;
@@ -3522,6 +3556,7 @@
 
         // Call built in event handlers
         switch(event.detail.message) {
+            case MSG_TYPES.MSG_MOUSEMOVE:
             case MSG_TYPES.MSG_LBUTTONDOWN:
             case MSG_TYPES.MSG_MBUTTONDOWN:
             case MSG_TYPES.MSG_RBUTTONDOWN:
@@ -3530,7 +3565,7 @@
             case MSG_TYPES.MSG_RBUTTONUP:
             case MSG_TYPES.MSG_MCLICK:
             case MSG_TYPES.MSG_RCLICK:
-                // Mouse and click events - no default action, handled by msgProc if needed
+                // Mouse movement and button events - no default action, handled by msgProc if needed
                 break;
 
             case MSG_TYPES.MSG_KEYUP:
@@ -3567,7 +3602,7 @@
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
                 break;
-                
+
             default :
                 console.warn(`Unhandled event type ${event.detail.message}`);
                 break;
@@ -4128,7 +4163,7 @@
 
         // Extend data of foreach bindings
         this.extendBindingsWithForEachData(interpolationMap);
-        
+
         // Return the map
         return interpolationMap;
     };
@@ -4560,7 +4595,7 @@
 
                 // Put hash in map
                 hashMap.set(contentHash, originalIndex);
-                
+
                 // Build the HTML for this item
                 completeHTML +=
                     `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
@@ -4595,7 +4630,7 @@
      */
     Context.prototype.getSourceArrayForFiltered = function (foreachExpr, currentArray, mappingData) {
         const rootName = (mappingData && mappingData.sourceArray) || this.inferArrayRoot(foreachExpr);
-        
+
         if (!rootName) {
             return currentArray;
         }
@@ -5723,7 +5758,7 @@
         containers.forEach(container => {
             // Get or generate pac-id
             let pacId = container.getAttribute('data-pac-id');
-            
+
             if (!pacId) {
                 pacId = Utils.uniqid('pac-');
                 container.setAttribute('data-pac-id', pacId);
@@ -5763,7 +5798,7 @@
     // Export to global scope
     window.wakaPAC = wakaPAC;
     window.MSG_TYPES = MSG_TYPES;
-    
+
     // Export modifier key constants
     window.MK_LBUTTON = MK_LBUTTON;
     window.MK_RBUTTON = MK_RBUTTON;
@@ -5771,5 +5806,13 @@
     window.MK_SHIFT = MK_SHIFT;
     window.MK_CONTROL = MK_CONTROL;
     window.MK_ALT = MK_ALT;
+
+    /**
+     * Global mousemove throttling configuration
+     * Controls the maximum frame rate for mousemove event processing
+     * @type {number}
+     * @default 60
+     */
+    wakaPAC.mouseMoveThrottleFps = 60;
 
 })();
