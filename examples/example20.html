@@ -165,8 +165,8 @@
 
                     // Paint if left button is held
                     if (wParam & MK_LBUTTON) {
-                        // Draw line from last position to current position
-                        this.drawLine(this._lastX, this._lastY, canvasX, canvasY);
+                        // Fill gap between last position and current position with brush strokes
+                        this.fillGap(this._lastX, this._lastY, canvasX, canvasY);
                         this._lastX = canvasX;
                         this._lastY = canvasY;
                     }
@@ -189,10 +189,11 @@
             document.querySelector('.canvas-area').appendChild(brush);
         },
 
-        drawLine(x1, y1, x2, y2) {
-            // Calculate distance and steps for smooth line
+        fillGap(x1, y1, x2, y2) {
+            // Fill the gap between two points with overlapping brush dots
+            // This creates a smooth continuous stroke even when mouse moves fast
             const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-            const steps = Math.max(1, Math.floor(dist / 3)); // Adjust density
+            const steps = Math.max(1, Math.ceil(dist)); // One step per pixel for smooth strokes
 
             for (let i = 0; i <= steps; i++) {
                 const t = i / steps;
