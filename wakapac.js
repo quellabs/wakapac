@@ -561,17 +561,18 @@
 
         /**
          * Extracts mouse coordinates from lParam value
-         * Mouse coordinates are packed into lParam as two 16-bit integers:
-         * - Low 16 bits: x coordinate
-         * - High 16 bits: y coordinate
+         * Mouse coordinates are packed into lParam as two 16-bit integers and are
+         * container-relative (client-area relative in Win32 terms).
+         * - Low 16 bits: x coordinate (relative to container's left edge)
+         * - High 16 bits: y coordinate (relative to container's top edge)
          *
          * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
-         * @returns {{x: number, y: number}} Object containing x and y coordinates
+         * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
          */
         getMouseCoords(lParam) {
             return {
-                x: lParam & 0xFFFF,           // Low 16 bits = x coordinate
-                y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate
+                x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
+                y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
             };
         },
 
@@ -1112,7 +1113,7 @@
             }
 
             // Build Win32-style parameters based on the message type and original event
-            const params = this.buildParams(messageType, originalEvent);
+            const params = this.buildParams(messageType, originalEvent, container);
 
             // Create the custom event with comprehensive tracking data
             const customEvent = new CustomEvent('pac:event', {
@@ -1251,11 +1252,12 @@
          * encoding rules that match Win32 conventions.
          * @param {string} messageType - The Win32 message type constant
          * @param {Event} event - The original DOM event containing the raw data
+         * @param {Element} container - The PAC container element with data-pac-id
          * @returns {Object} Object containing wParam and lParam values
          * @returns {number} returns.wParam - The wParam value (typically flags or primary data)
          * @returns {number|Object} returns.lParam - The lParam value (typically coordinates or secondary data)
          */
-        buildParams(messageType, event) {
+        buildParams(messageType, event, container) {
             switch(messageType) {
                 // Mouse movement and button events - encode button states and coordinates
                 case MSG_TYPES.MSG_MOUSEMOVE:
@@ -1270,7 +1272,7 @@
                 case MSG_TYPES.MSG_RCLICK:
                     return {
                         wParam: this.buildMouseWParam(event),  // Mouse button and modifier key flags
-                        lParam: this.buildMouseLParam(event)   // Packed x,y coordinates
+                        lParam: this.buildMouseLParam(event, container)   // Packed x,y coordinates (container-relative)
                     };
 
                 // Keyboard events - encode key codes and modifier states
@@ -1375,15 +1377,24 @@
         /**
          * Builds lParam for mouse messages following Win32 format
          * Packs x,y coordinates into a single 32-bit value
+         * Coordinates are relative to the container element (client-area relative)
          * LOWORD (bits 0-15) = x-coordinate, HIWORD (bits 16-31) = y-coordinate
          * @param {MouseEvent} event - The mouse event
-         * @returns {number} lParam value with packed coordinates
+         * @param {Element} container - The PAC container element with data-pac-id
+         * @returns {number} lParam value with packed container-relative coordinates
          */
-        buildMouseLParam(event) {
-            // Use clientX/clientY for viewport-relative coordinates (most common)
-            // Alternative: pageX/pageY for document-relative coordinates
-            const x = Math.max(0, Math.min(0xFFFF, event.clientX || 0));
-            const y = Math.max(0, Math.min(0xFFFF, event.clientY || 0));
+        buildMouseLParam(event, container) {
+            // Get container's bounding rectangle to calculate relative coordinates
+            const rect = container.getBoundingClientRect();
+
+            // Calculate container-relative coordinates (client-area relative)
+            // This matches Win32 convention where coordinates are relative to the window's client area
+            const relativeX = event.clientX - rect.left;
+            const relativeY = event.clientY - rect.top;
+
+            // Clamp to 16-bit unsigned range and ensure non-negative
+            const x = Math.max(0, Math.min(0xFFFF, Math.round(relativeX)));
+            const y = Math.max(0, Math.min(0xFFFF, Math.round(relativeY)));
 
             // Pack coordinates: high 16 bits = y, low 16 bits = x
             return (y << 16) | x;
@@ -4456,8 +4467,10 @@
             /**
              * Extracts mouse coordinates from lParam value
              * Mouse coordinates are packed into lParam as two 16-bit integers
+             * Coordinates are container-relative (relative to the container's top-left corner)
+             * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
              * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
-             * @returns {{x: number, y: number}} Object containing x and y coordinates
+             * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
              */
             getMouseCoords: {
                 value: (lParam) => Utils.getMouseCoords(lParam),
