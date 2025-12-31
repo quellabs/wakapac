@@ -3623,13 +3623,16 @@
             case MSG_TYPES.MSG_RBUTTONUP:
             case MSG_TYPES.MSG_MCLICK:
             case MSG_TYPES.MSG_RCLICK:
-            case MSG_TYPES.MSG_LBUTTONDBLCLK:
                 // Mouse movement and button events - no default action, handled by msgProc if needed
                 break;
 
             case MSG_TYPES.MSG_KEYUP:
             case MSG_TYPES.MSG_KEYDOWN:
                 // Raw key events - no action taken
+                break;
+
+            case MSG_TYPES.MSG_LBUTTONDBLCLK:
+                // Double-click event - handled by msgProc
                 break;
 
             case MSG_TYPES.MSG_LCLICK:
@@ -5892,7 +5895,8 @@
             let pacId = container.getAttribute('data-pac-id');
 
             if (!pacId) {
-                pacId = Utils.uniqid('pac-');
+                // Use element's id if available, otherwise generate random id
+                pacId = container.id || Utils.uniqid('pac-');
                 container.setAttribute('data-pac-id', pacId);
             }
 
