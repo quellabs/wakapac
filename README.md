@@ -730,10 +730,18 @@ The `msgProc` method receives a CustomEvent with the following structure:
 
 #### Message Types Reference
 
+**Mouse Movement:**
+```javascript
+MSG_TYPES.MSG_MOUSEMOVE    // 0x0200 - Mouse position changed
+// Throttled to 60 FPS by default (configurable via wakaPAC.mouseMoveThrottleFps)
+// Coordinates in lParam are container-relative (client-area relative)
+```
+
 **Mouse Button Events (Raw Button Tracking):**
 ```javascript
 MSG_TYPES.MSG_LBUTTONDOWN  // 0x0201 - Left button pressed
 MSG_TYPES.MSG_LBUTTONUP    // 0x0202 - Left button released
+MSG_TYPES.MSG_LBUTTONDBLCLK// 0x0203 - Left button double-click
 MSG_TYPES.MSG_RBUTTONDOWN  // 0x0204 - Right button pressed
 MSG_TYPES.MSG_RBUTTONUP    // 0x0205 - Right button released
 MSG_TYPES.MSG_MBUTTONDOWN  // 0x0207 - Middle button pressed
@@ -1040,7 +1048,58 @@ wakaPAC('#text-editor', {
                 this.handleFunctionKey(originalEvent.key);
                 return true;
             }
+
+        return true;
+    }
+});
+```
+
+##### Example 3: Mouse Tracking
+
+```javascript
+wakaPAC('#app', {
+    msgProc(event) {
+        const { message, wParam, lParam } = event.detail;
+        
+        if (message === MSG_TYPES.MSG_MOUSEMOVE) {
+            // Extract container-relative coordinates
+            const pos = this.MAKEPOINTS(lParam);  // {x, y}
+            
+            // Check if left button is held while moving (dragging)
+            if (wParam & MK_LBUTTON) {
+                this.handleDrag(pos);
+            }
         }
+        
+        // Handle double-click
+        if (message === MSG_TYPES.MSG_LBUTTONDBLCLK) {
+            const pos = this.MAKEPOINTS(lParam);
+            this.openItem(pos);
+            return false;
+        }
+        
+        return true;
+    }
+});
+```
+
+**Mouse Coordinate Functions:**
+- `this.LOWORD(lParam)` - Extract x coordinate (low 16 bits)
+- `this.HIWORD(lParam)` - Extract y coordinate (high 16 bits)
+- `this.MAKEPOINTS(lParam)` - Extract both as `{x, y}` object
+- `this.containerToViewport(x, y)` - Convert container coords to viewport coords
+- `this.viewportToContainer(x, y)` - Convert viewport coords to container coords
+
+**Mouse Movement Throttling:**
+```javascript
+// Set before creating components (default: 60 FPS)
+wakaPAC.mouseMoveThrottleFps = 120;  // High precision (gaming, drawing)
+wakaPAC.mouseMoveThrottleFps = 30;   // Battery saving
+wakaPAC.mouseMoveThrottleFps = 0;    // No throttling (every event)
+```
+
+**Note:** All mouse coordinates in `lParam` are relative to the container's top-left corner (Win32 client-area style), making it easy to position elements or draw on canvas within the container.
+}
 
         return false;
     }
@@ -1111,6 +1170,43 @@ if (!target.matches('.draggable')) {
 
 ### Component Hierarchy
 
+#### Component Identification
+
+Each wakaPAC component is identified by a `data-pac-id` attribute. If your element has an `id` attribute, wakaPAC automatically uses it as the `data-pac-id` - otherwise it generates a unique identifier:
+
+```html
+<!-- Element with id - automatically uses "sidebar" as data-pac-id -->
+<div id="sidebar"></div>
+
+<!-- Element without id - generates "pac-abc123..." as data-pac-id -->
+<div class="widget"></div>
+
+<script>
+wakaPAC('#sidebar', { /* ... */ });  // data-pac-id="sidebar"
+wakaPAC('.widget', { /* ... */ });   // data-pac-id="pac-abc123..."
+</script>
+```
+
+This makes debugging easier with meaningful identifiers and simplifies parent-child communication:
+
+```html
+<div id="parent">
+    <div id="child-1"></div>
+    <div id="child-2"></div>
+</div>
+
+<script>
+wakaPAC('#parent', {
+    updateChild() {
+        // Target specific child using its id (used as data-pac-id)
+        this.notifyChild('child-1', 'update', { value: 42 });
+    }
+});
+</script>
+```
+
+#### Parent-Child Communication
+
 Parent-child communication system:
 
 ```javascript
@@ -1138,8 +1234,8 @@ const parent = wakaPAC('#parent-app', {
         // Notify all children
         this.notifyChildren('update', {theme: 'dark'});
 
-        // Notify specific child
-        this.notifyChild('#child-app', 'focus');
+        // Notify specific child by its data-pac-id
+        this.notifyChild('child-app', 'focus');
     }
 });
 
@@ -1354,10 +1450,17 @@ this.escapeHTML(str)                    // Escapes HTML entities to prevent XSS
 this.sanitizeUserInput(html)            // Strips HTML tags and returns plain text
 this.getElementPosition(element)        // Returns the global position of an element within the document
 
+// Mouse coordinate utilities (Win32-style)
+this.LOWORD(lParam)                     // Extract x coordinate from lParam
+this.HIWORD(lParam)                     // Extract y coordinate from lParam
+this.MAKEPOINTS(lParam)                 // Extract {x, y} from lParam
+this.containerToViewport(x, y)          // Convert container-relative to viewport-absolute
+this.viewportToContainer(x, y)          // Convert viewport-absolute to container-relative
+
 // Component communication
 this.notifyParent(type, data, bubble)   // Send message to parent component (bubble defaults to false)
 this.notifyChildren(command, data)      // Broadcast message to all child components
-this.notifyChild(selector, cmd, data)   // Send message to specific child component
+this.notifyChild(pacId, cmd, data)      // Send message to specific child by data-pac-id
 ```
 
 ### External Methods (Available on component instance)

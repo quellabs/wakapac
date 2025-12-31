@@ -74,9 +74,13 @@
         // Unknown message (should never occur)
         MSG_UNKNOWN: 0x0000,
 
+        // Mouse movement
+        MSG_MOUSEMOVE: 0x0200,      // Mouse position changed
+
         // Mouse button press/release events
         MSG_LBUTTONDOWN: 0x0201,    // Left mouse button pressed
         MSG_LBUTTONUP: 0x0202,      // Left mouse button released
+        MSG_LBUTTONDBLCLK: 0x0203,  // Left mouse button double-click
         MSG_RBUTTONDOWN: 0x0204,    // Right mouse button pressed
         MSG_RBUTTONUP: 0x0205,      // Right mouse button released
         MSG_MBUTTONDOWN: 0x0207,    // Middle mouse button pressed
@@ -410,7 +414,7 @@
                     return 'fast';
             }
         },
-        
+
         /**
          * Reads the current value from a DOM element (input, select, textarea, etc.)
          * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
@@ -548,12 +552,50 @@
             for (let i = 0; i < str.length; i++) {
                 // hash * 33 + char_code
                 hash = ((hash << 5) + hash) + str.charCodeAt(i);
+                
                 // Keep within 32-bit integer range
                 hash = hash & 0xffffffff;
             }
 
             // Convert to positive hex string
             return (hash >>> 0).toString(16);
+        },
+
+        /**
+         * Extracts the low-order word (x coordinate) from lParam
+         * Equivalent to Win32 LOWORD macro - gets bits 0-15
+         * Coordinates are container-relative (client-area relative in Win32 terms)
+         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * @returns {number} X coordinate relative to container's left edge
+         */
+        LOWORD(lParam) {
+            return lParam & 0xFFFF;
+        },
+
+        /**
+         * Extracts the high-order word (y coordinate) from lParam
+         * Equivalent to Win32 HIWORD macro - gets bits 16-31
+         * Coordinates are container-relative (client-area relative in Win32 terms)
+         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * @returns {number} Y coordinate relative to container's top edge
+         */
+        HIWORD(lParam) {
+            return (lParam >> 16) & 0xFFFF;
+        },
+
+        /**
+         * Extracts both x and y coordinates from lParam
+         * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
+         * Coordinates are container-relative (client-area relative in Win32 terms)
+         * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
+         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
+         */
+        MAKEPOINTS(lParam) {
+            return {
+                x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
+                y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
+            };
         }
     }
 
@@ -924,6 +966,44 @@
                 self.dispatchTrackedEvent(MSG_TYPES.MSG_RCLICK, event);
             });
 
+            // Handle double-click (left button only)
+            document.addEventListener('dblclick', function (event) {
+                // Only handle left button double-clicks
+                if (event.button === 0) {
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONDBLCLK, event);
+                }
+            });
+
+            /**
+             * Handle mouse movement with throttling
+             * Throttles updates to configured FPS (default 60fps = ~16ms)
+             * Set wakaPAC.mouseMoveThrottleFps = 0 for no throttling (updates on every mousemove)
+             * Set wakaPAC.mouseMoveThrottleFps = 120 for higher precision (gaming, drawing apps)
+             * Must be set before first wakaPAC() call
+             */
+            let mouseMoveThrottle = null;
+
+            document.addEventListener('mousemove', function (event) {
+                // Calculate throttle delay from FPS (0 = no throttle)
+                const throttleDelay = wakaPAC.mouseMoveThrottleFps > 0
+                    ? 1000 / wakaPAC.mouseMoveThrottleFps
+                    : 0;
+
+                // No throttling - dispatch immediately
+                if (throttleDelay === 0) {
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, event);
+                    return;
+                }
+
+                // Throttled - only dispatch if not currently throttled
+                if (!mouseMoveThrottle) {
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, event);
+                    mouseMoveThrottle = setTimeout(() => {
+                        mouseMoveThrottle = null;
+                    }, throttleDelay);
+                }
+            });
+
             /**
              * Handle keyboard key release events
              * Tracks when user releases any key
@@ -1053,7 +1133,7 @@
             }
 
             // Build Win32-style parameters based on the message type and original event
-            const params = this.buildParams(messageType, originalEvent);
+            const params = this.buildParams(messageType, originalEvent, container);
 
             // Create the custom event with comprehensive tracking data
             const customEvent = new CustomEvent('pac:event', {
@@ -1192,25 +1272,28 @@
          * encoding rules that match Win32 conventions.
          * @param {string} messageType - The Win32 message type constant
          * @param {Event} event - The original DOM event containing the raw data
+         * @param {Element} container - The PAC container element with data-pac-id
          * @returns {Object} Object containing wParam and lParam values
          * @returns {number} returns.wParam - The wParam value (typically flags or primary data)
          * @returns {number|Object} returns.lParam - The lParam value (typically coordinates or secondary data)
          */
-        buildParams(messageType, event) {
+        buildParams(messageType, event, container) {
             switch(messageType) {
-                // Mouse button events - encode button states and coordinates
+                // Mouse movement and button events - encode button states and coordinates
+                case MSG_TYPES.MSG_MOUSEMOVE:
                 case MSG_TYPES.MSG_LBUTTONDOWN:
-                case MSG_TYPES.MSG_RBUTTONDOWN:
-                case MSG_TYPES.MSG_MBUTTONDOWN:
                 case MSG_TYPES.MSG_LBUTTONUP:
+                case MSG_TYPES.MSG_LBUTTONDBLCLK:
+                case MSG_TYPES.MSG_RBUTTONDOWN:
                 case MSG_TYPES.MSG_RBUTTONUP:
+                case MSG_TYPES.MSG_MBUTTONDOWN:
                 case MSG_TYPES.MSG_MBUTTONUP:
                 case MSG_TYPES.MSG_LCLICK:
                 case MSG_TYPES.MSG_MCLICK:
                 case MSG_TYPES.MSG_RCLICK:
                     return {
                         wParam: this.buildMouseWParam(event),  // Mouse button and modifier key flags
-                        lParam: this.buildMouseLParam(event)   // Packed x,y coordinates
+                        lParam: this.buildMouseLParam(event, container)   // Packed x,y coordinates (container-relative)
                     };
 
                 // Keyboard events - encode key codes and modifier states
@@ -1315,15 +1398,24 @@
         /**
          * Builds lParam for mouse messages following Win32 format
          * Packs x,y coordinates into a single 32-bit value
+         * Coordinates are relative to the container element (client-area relative)
          * LOWORD (bits 0-15) = x-coordinate, HIWORD (bits 16-31) = y-coordinate
          * @param {MouseEvent} event - The mouse event
-         * @returns {number} lParam value with packed coordinates
+         * @param {Element} container - The PAC container element with data-pac-id
+         * @returns {number} lParam value with packed container-relative coordinates
          */
-        buildMouseLParam(event) {
-            // Use clientX/clientY for viewport-relative coordinates (most common)
-            // Alternative: pageX/pageY for document-relative coordinates
-            const x = Math.max(0, Math.min(0xFFFF, event.clientX || 0));
-            const y = Math.max(0, Math.min(0xFFFF, event.clientY || 0));
+        buildMouseLParam(event, container) {
+            // Get container's bounding rectangle to calculate relative coordinates
+            const rect = container.getBoundingClientRect();
+
+            // Calculate container-relative coordinates (client-area relative)
+            // This matches Win32 convention where coordinates are relative to the window's client area
+            const relativeX = event.clientX - rect.left;
+            const relativeY = event.clientY - rect.top;
+
+            // Clamp to 16-bit unsigned range and ensure non-negative
+            const x = Math.max(0, Math.min(0xFFFF, Math.round(relativeX)));
+            const y = Math.max(0, Math.min(0xFFFF, Math.round(relativeY)));
 
             // Pack coordinates: high 16 bits = y, low 16 bits = x
             return (y << 16) | x;
@@ -1378,7 +1470,7 @@
                     if ('selectedIndex' in element) {
                         return element.selectedIndex;
                     }
-                    
+
                     // Fallback to 0 for unknown element types
                     return 0;
             }
@@ -1398,13 +1490,13 @@
             const extendedKeys = [
                 // Arrow keys
                 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-                
+
                 // Function keys
                 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
-                
+
                 // Navigation keys
                 'Home', 'End', 'PageUp', 'PageDown', 'Insert', 'Delete',
-                
+
                 // Numpad keys (when NumLock is on)
                 'NumpadEnter', 'NumpadDivide',
 
@@ -2370,7 +2462,7 @@
 
             // Ensure resolvedPath is a string for string operations
             resolvedPath = String(resolvedPath);
-            
+
             // Handle simple property access (no dots or brackets)
             if (resolvedPath.indexOf('.') === -1 && resolvedPath.indexOf('[') === -1) {
                 return (resolvedPath in obj) ? obj[resolvedPath] : undefined;
@@ -2792,7 +2884,7 @@
                 case 'foreach':
                     // foreach bindings are handled during renderForeach, not as attributes
                     break;
-                    
+
                 default:
                     this.applyAttributeBinding(element, bindingType, value);
                     break;
@@ -3522,6 +3614,7 @@
 
         // Call built in event handlers
         switch(event.detail.message) {
+            case MSG_TYPES.MSG_MOUSEMOVE:
             case MSG_TYPES.MSG_LBUTTONDOWN:
             case MSG_TYPES.MSG_MBUTTONDOWN:
             case MSG_TYPES.MSG_RBUTTONDOWN:
@@ -3530,12 +3623,16 @@
             case MSG_TYPES.MSG_RBUTTONUP:
             case MSG_TYPES.MSG_MCLICK:
             case MSG_TYPES.MSG_RCLICK:
-                // Mouse and click events - no default action, handled by msgProc if needed
+                // Mouse movement and button events - no default action, handled by msgProc if needed
                 break;
 
             case MSG_TYPES.MSG_KEYUP:
             case MSG_TYPES.MSG_KEYDOWN:
                 // Raw key events - no action taken
+                break;
+
+            case MSG_TYPES.MSG_LBUTTONDBLCLK:
+                // Double-click event - handled by msgProc
                 break;
 
             case MSG_TYPES.MSG_LCLICK:
@@ -3567,7 +3664,7 @@
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
                 break;
-                
+
             default :
                 console.warn(`Unhandled event type ${event.detail.message}`);
                 break;
@@ -4128,7 +4225,7 @@
 
         // Extend data of foreach bindings
         this.extendBindingsWithForEachData(interpolationMap);
-        
+
         // Return the map
         return interpolationMap;
     };
@@ -4390,6 +4487,84 @@
                 value: (elementOrId) => Utils.getElementPosition(elementOrId),
                 writable: false,
                 enumerable: false
+            },
+
+            /**
+             * Extracts mouse coordinates from lParam value
+             * Mouse coordinates are packed into lParam as two 16-bit integers
+             * Coordinates are container-relative (relative to the container's top-left corner)
+             * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
+             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
+             */
+            LOWORD: {
+                value: (lParam) => Utils.LOWORD(lParam),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Extracts the high-order word (y coordinate) from lParam
+             * Equivalent to Win32 HIWORD macro - gets bits 16-31
+             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * @returns {number} Y coordinate relative to container's top edge
+             */
+            HIWORD: {
+                value: (lParam) => Utils.HIWORD(lParam),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Extracts both x and y coordinates from lParam
+             * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
+             * Coordinates are container-relative (relative to the container's top-left corner)
+             * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
+             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
+             */
+            MAKEPOINTS: {
+                value: (lParam) => Utils.MAKEPOINTS(lParam),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Converts container-relative coordinates to viewport-absolute coordinates
+             * Equivalent to Win32 ClientToScreen - converts client-area to screen coordinates
+             * @param {number} x - Container-relative x coordinate
+             * @param {number} y - Container-relative y coordinate
+             * @returns {{x: number, y: number}} Viewport-absolute coordinates
+             */
+            containerToViewport: {
+                value: (x, y) => {
+                    const rect = self.container.getBoundingClientRect();
+                    return {
+                        x: x + rect.left,
+                        y: y + rect.top
+                    };
+                },
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Converts viewport-absolute coordinates to container-relative coordinates
+             * Equivalent to Win32 ScreenToClient - converts screen to client-area coordinates
+             * @param {number} x - Viewport-absolute x coordinate
+             * @param {number} y - Viewport-absolute y coordinate
+             * @returns {{x: number, y: number}} Container-relative coordinates
+             */
+            viewportToContainer: {
+                value: (x, y) => {
+                    const rect = self.container.getBoundingClientRect();
+                    return {
+                        x: x - rect.left,
+                        y: y - rect.top
+                    };
+                },
+                writable: false,
+                enumerable: false
             }
         });
 
@@ -4560,7 +4735,7 @@
 
                 // Put hash in map
                 hashMap.set(contentHash, originalIndex);
-                
+
                 // Build the HTML for this item
                 completeHTML +=
                     `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
@@ -4595,7 +4770,7 @@
      */
     Context.prototype.getSourceArrayForFiltered = function (foreachExpr, currentArray, mappingData) {
         const rootName = (mappingData && mappingData.sourceArray) || this.inferArrayRoot(foreachExpr);
-        
+
         if (!rootName) {
             return currentArray;
         }
@@ -5690,17 +5865,12 @@
 
     /**
      * Creates reactive PAC (Presentation-Abstraction-Control) components
-     *
      * @param {string} selector - CSS selector ('#id' returns single, '.class' returns array)
      * @param {Object} [abstraction={}] - Reactive data model with properties and methods
      * @param {Object} [options={}] - Configuration options
      * @param {string} [options.updateMode='immediate'] - Update strategy ('immediate' or 'debounced')
      * @param {number} [options.delay=300] - Debounce delay in milliseconds
      * @returns {Object|Object[]|undefined} Single abstraction for ID, array for class/tag selectors
-     *
-     * @example
-     * const app = wakaPAC('#app', { count: 0 });
-     * const todos = wakaPAC('.todo-item', { text: '', done: false });
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
         // Initialize global event tracking first
@@ -5723,9 +5893,10 @@
         containers.forEach(container => {
             // Get or generate pac-id
             let pacId = container.getAttribute('data-pac-id');
-            
+
             if (!pacId) {
-                pacId = Utils.uniqid('pac-');
+                // Use element's id if available, otherwise generate random id
+                pacId = container.id || Utils.uniqid('pac-');
                 container.setAttribute('data-pac-id', pacId);
             }
 
@@ -5763,7 +5934,7 @@
     // Export to global scope
     window.wakaPAC = wakaPAC;
     window.MSG_TYPES = MSG_TYPES;
-    
+
     // Export modifier key constants
     window.MK_LBUTTON = MK_LBUTTON;
     window.MK_RBUTTON = MK_RBUTTON;
@@ -5771,5 +5942,13 @@
     window.MK_SHIFT = MK_SHIFT;
     window.MK_CONTROL = MK_CONTROL;
     window.MK_ALT = MK_ALT;
+
+    /**
+     * Global mousemove throttling configuration
+     * Controls the maximum frame rate for mousemove event processing
+     * @type {number}
+     * @default 60
+     */
+    wakaPAC.mouseMoveThrottleFps = 60;
 
 })();

@@ -219,7 +219,7 @@
 
             // Route commands between children
             if (type === 'scroll-command') {
-                this.notifyChild('#scrollable', data.command, data.payload);
+                this.notifyChild('scrollable', data.command, data.payload);
             }
         }
     });

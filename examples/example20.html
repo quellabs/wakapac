@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakaPAC Canvas Paint Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+
+        #app {
+            border: 3px solid #333;
+            background: #fff;
+            width: 800px;
+        }
+
+        .controls {
+            padding: 15px;
+            background: #f0f0f0;
+            border-bottom: 2px solid #333;
+        }
+
+        .controls label {
+            margin-right: 20px;
+            font-weight: bold;
+        }
+
+        .controls input[type="color"] {
+            width: 50px;
+            height: 30px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .controls input[type="range"] {
+            width: 150px;
+            vertical-align: middle;
+        }
+
+        .controls button {
+            padding: 8px 16px;
+            margin-left: 10px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .controls button:hover {
+            background: #45a049;
+        }
+
+        .info {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        #paintCanvas {
+            display: block;
+            cursor: crosshair;
+            background: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+<h1>WakaPAC Canvas Paint Demo</h1>
+<p>Click and drag to paint. Uses HTML5 Canvas for efficient rendering.</p>
+
+<div id="app">
+    <div class="controls">
+        <label>
+            Color: <input type="color" data-pac-bind="value: brushColor">
+        </label>
+
+        <label>
+            Size: <input type="range" min="5" max="50" data-pac-bind="value: brushSize">
+            <span>{{brushSize}}px</span>
+        </label>
+
+        <button data-pac-bind="click: clearCanvas">Clear Canvas</button>
+
+        <div class="info">
+            Mouse: {{mouseX}}, {{mouseY}} |
+            Painting: {{isPainting ? 'Yes' : 'No'}}
+        </div>
+    </div>
+
+    <canvas id="paintCanvas" width="800" height="600"></canvas>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    wakaPAC('#app', {
+        // State
+        mouseX: 0,
+        mouseY: 0,
+        isPainting: false,
+        brushColor: '#4CAF50',
+        brushSize: 15,
+        _lastX: 0,
+        _lastY: 0,
+        _canvas: null,
+        _ctx: null,
+
+        // Initialize canvas context (like GetDC in Win32)
+        init() {
+            this._canvas = document.getElementById('paintCanvas');
+            this._ctx = this._canvas.getContext('2d');
+
+            // Set canvas rendering properties
+            this._ctx.lineCap = 'round';
+            this._ctx.lineJoin = 'round';
+        },
+
+        msgProc(event) {
+            const { message, wParam, lParam } = event.detail;
+
+            // Get container-relative coordinates
+            const pos = this.MAKEPOINTS(lParam);
+
+            // Calculate canvas-relative coordinates
+            const canvasRect = this._canvas.getBoundingClientRect();
+            const containerRect = document.getElementById('app').getBoundingClientRect();
+            const canvasOffsetY = canvasRect.top - containerRect.top;
+
+            // Ignore events outside canvas
+            if (pos.y < canvasOffsetY) {
+                return true;
+            }
+
+            const canvasX = pos.x;
+            const canvasY = pos.y - canvasOffsetY;
+
+            switch (message) {
+                case MSG_TYPES.MSG_LBUTTONDOWN:
+                    // Start painting
+                    this.isPainting = true;
+                    this._lastX = canvasX;
+                    this._lastY = canvasY;
+                    this.mouseX = Math.round(canvasX);
+                    this.mouseY = Math.round(canvasY);
+
+                    // Draw initial dot
+                    this.drawDot(canvasX, canvasY);
+
+                    return false;
+
+                case MSG_TYPES.MSG_LBUTTONUP:
+                    // Stop painting
+                    this.isPainting = false;
+                    return false;
+
+                case MSG_TYPES.MSG_MOUSEMOVE:
+                    // Update mouse position display
+                    this.mouseX = Math.round(canvasX);
+                    this.mouseY = Math.round(canvasY);
+
+                    // Paint if left button is held
+                    if (wParam & MK_LBUTTON) {
+                        this.drawStroke(this._lastX, this._lastY, canvasX, canvasY);
+                        this._lastX = canvasX;
+                        this._lastY = canvasY;
+                    }
+
+                    return true;
+            }
+
+            return true;
+        },
+
+        // Draw a single dot (like Ellipse in Win32)
+        drawDot(x, y) {
+            const ctx = this._ctx;
+            const radius = this.brushSize / 2;
+
+            ctx.fillStyle = this.brushColor;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        },
+
+        // Draw a stroke from point to point (like LineTo in Win32)
+        drawStroke(x1, y1, x2, y2) {
+            const ctx = this._ctx;
+
+            ctx.strokeStyle = this.brushColor;
+            ctx.lineWidth = this.brushSize;
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        },
+
+        clearCanvas() {
+            // Clear the entire canvas (like FillRect with background)
+            this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
+        }
+    });
+
+    // Initialize canvas after wakaPAC is ready
+    document.addEventListener('pac:component-ready', (event) => {
+        if (event.detail.selector === '#app') {
+            event.detail.component.abstraction.init();
+        }
+    });
+</script>
+</body>
+</html>
