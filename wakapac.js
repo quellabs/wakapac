@@ -3149,6 +3149,44 @@
     }
 
     Context.prototype.destroy = function() {
+        // Call user's destroy hook FIRST (before any cleanup)
+        if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
+            try {
+                this.abstraction.destroy();
+            } catch (e) {
+                console.error('Error in user destroy() hook:', e);
+            }
+        }
+
+        // Destroy all child components first (cascade down the hierarchy)
+        if (this.children && this.children.length > 0) {
+            // Create a copy since children.destroy() will modify the array
+            const childrenCopy = [...this.children];
+
+            childrenCopy.forEach(child => {
+                try {
+                    child.destroy();
+                } catch (e) {
+                    console.error('Error destroying child component:', e);
+                }
+            });
+        }
+
+        // Remove this component from parent's children array
+        if (this.parent && this.parent.children) {
+            const idx = this.parent.children.indexOf(this);
+
+            if (idx !== -1) {
+                this.parent.children.splice(idx, 1);
+            }
+        }
+
+        // Clear debounce timer if exists
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+
         // Clear updateQueueCallback interval
         clearInterval(this.updateQueueInterval);
         this.updateQueueCallback = null;
@@ -3171,14 +3209,8 @@
         }
 
         // Clean up intersection observer
-        // The IntersectionObserver API is used to track when elements enter/exit the viewport
         if (this.intersectionObserver) {
-            // Disconnect the observer to stop monitoring all target elements
-            // This prevents the observer from continuing to fire callbacks after cleanup
             this.intersectionObserver.disconnect();
-
-            // Set reference to null to allow garbage collection
-            // Without this, the observer and its associated DOM references might remain in memory
             this.intersectionObserver = null;
         }
 
@@ -3187,6 +3219,23 @@
         this.textInterpolationMap.clear();
         this.arrayHashMaps.clear();
         this.updateQueue.clear();
+
+        // Remove from registry
+        const pacId = this.container.getAttribute('data-pac-id');
+
+        if (pacId) {
+            window.PACRegistry.deregister(pacId);
+        }
+
+        // Remove pac-id attribute from container
+        this.container.removeAttribute('data-pac-id');
+
+        // Nullify all references to allow garbage collection
+        this.abstraction = null;
+        this.container = null;
+        this.parent = null;
+        this.children = null;
+        this.config = null;
     }
 
     /**
@@ -5736,6 +5785,51 @@
     };
 
     // =============================================================================
+    // CLEANUP OBSERVER
+    // =============================================================================
+
+    /**
+     * Monitors DOM for removed components and automatically triggers cleanup
+     * Uses MutationObserver to detect when elements with data-pac-id are removed
+     */
+    const CleanupObserver = {
+        observer: null,
+
+        /**
+         * Initialize the MutationObserver to watch for removed PAC components
+         * Should be called once during framework initialization
+         */
+        initialize() {
+            if (this.observer) {
+                return; // Already initialized
+            }
+
+            this.observer = new MutationObserver(mutations => {
+                mutations.forEach(mutation => {
+                    mutation.removedNodes.forEach(node => {
+                        if (node.nodeType === 1) { // Element node
+                            const pacId = node.getAttribute('data-pac-id');
+
+                            if (pacId) {
+                                const context = window.PACRegistry.components.get(pacId);
+
+                                if (context) {
+                                    context.destroy();
+                                }
+                            }
+                        }
+                    });
+                });
+            });
+
+            this.observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+    };
+
+    // =============================================================================
     // COMPONENT REGISTRY
     // =============================================================================
 
@@ -5767,6 +5861,19 @@
             this.hierarchyTimer = setTimeout(() => {
                 this.establishAllHierarchies();
             }, 10); // Keep your current delay
+        },
+
+        /**
+         * Removes a component from the registry
+         * @param {string} id - The pac-id of the component to remove
+         */
+        deregister(id) {
+            const context = this.components.get(id);
+
+            if (context) {
+                this.pendingHierarchy.delete(context);
+                this.components.delete(id);
+            }
         },
 
         /**
@@ -5875,6 +5982,9 @@
     function wakaPAC(selector, abstraction = {}, options = {}) {
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
+
+        // Initialize automatic cleanup observer
+        CleanupObserver.initialize();
 
         // Fetch all matching elements (supports both ID and class selectors)
         const containers = document.querySelectorAll(selector);
