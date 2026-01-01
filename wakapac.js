@@ -1119,6 +1119,14 @@
          * @returns {void}
          */
         dispatchTrackedEvent(messageType, originalEvent, extended = {}) {
+            // Ensure we have a valid DOM element with closest() method
+            if (
+                !originalEvent || !originalEvent.target ||
+                typeof originalEvent.target.closest !== 'function'
+            ) {
+                return;
+            }
+
             // Find the nearest container element that should receive the event
             const container = originalEvent.target.closest('[data-pac-id]');
 
