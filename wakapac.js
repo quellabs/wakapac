@@ -5860,7 +5860,7 @@
             // Establish hierarchies
             this.hierarchyTimer = setTimeout(() => {
                 this.establishAllHierarchies();
-            }, 10); // Keep your current delay
+            }, 10);
         },
 
         /**
