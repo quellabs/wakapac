@@ -3158,20 +3158,6 @@
             }
         }
 
-        // Destroy all child components first (cascade down the hierarchy)
-        if (this.children && this.children.length > 0) {
-            // Create a copy since children.destroy() will modify the array
-            const childrenCopy = [...this.children];
-
-            childrenCopy.forEach(child => {
-                try {
-                    child.destroy();
-                } catch (e) {
-                    console.error('Error destroying child component:', e);
-                }
-            });
-        }
-
         // Remove this component from parent's children array
         if (this.parent && this.parent.children) {
             const idx = this.parent.children.indexOf(this);
