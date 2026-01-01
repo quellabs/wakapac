@@ -5941,8 +5941,24 @@
             const children = [];
 
             this.components.forEach(component => {
-                if (container.contains(component.container) && component.container !== container) {
-                    children.push(component);
+                // Check if component's container is directly contained (not nested deeper)
+                if (component.container.parentElement) {
+                    // Walk up to find the closest PAC container parent
+                    let parentContainer = component.container.parentElement;
+
+                    while (parentContainer) {
+                        // Check if this parent has a pac-id (is a PAC component)
+                        if (parentContainer.hasAttribute('data-pac-id')) {
+                            // If the closest PAC parent is this container, it's a direct child
+                            if (parentContainer === container) {
+                                children.push(component);
+                            }
+
+                            break;
+                        }
+
+                        parentContainer = parentContainer.parentElement;
+                    }
                 }
             });
 

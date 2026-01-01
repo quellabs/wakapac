@@ -939,7 +939,7 @@
             if (this.grandchildActive) {
                 logMessage('child', 'Deactivating grandchild worker');
 
-                this.notifyChildren('#grandchild-app', 'deactivate', {
+                this.notifyChildren('deactivate', {
                     reason: 'Deactivated by parent'
                 });
 
@@ -947,7 +947,7 @@
             } else {
                 logMessage('child', 'Activating grandchild worker');
 
-                this.notifyChild('#grandchild-app', 'activate', {
+                this.notifyChild('grandchild-app', 'activate', {
                     task: `Sub-task of ${this.taskName}`,
                     assignedBy: this.name
                 });
