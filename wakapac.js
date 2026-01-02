@@ -2959,7 +2959,7 @@
 
         if (shouldShow) {
             if (element.hasAttribute('data-pac-hidden')) {
-                element.style.display = element.getAttribute('data-pac-orig-display') || '';
+                element.style.display = element.getAttribute('data-pac-orig-display') || 'block';
                 element.removeAttribute('data-pac-hidden');
                 element.removeAttribute('data-pac-orig-display');
             }
