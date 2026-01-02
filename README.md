@@ -701,15 +701,14 @@ The `msgProc` method receives a CustomEvent with Win32-style message properties 
 ```javascript
 {
     type: 'pac:event',             // Always 'pac:event' for msgProc
-    message: 0x0201,               // Message type from MSG_TYPES constants
-    wParam: 0x0001,                // Primary parameter (varies by message type)
-    lParam: 0x00640032,            // Secondary parameter (varies by message type)
-    target: HTMLElement,           // The DOM element that triggered the event
-    originalEvent: Event,          // Original browser DOM event object
-    timestamp: 1640995200000,      // Timestamp when event was dispatched
-    id: 'element-id',              // Element ID if available, null otherwise
-    value: 'current-value',        // Current value from the element (via readDOMValue)
-    detail: {}                     // Extended data specific to certain event types (optional)
+        message: 0x0201,               // Message type from MSG_TYPES constants
+        wParam: 0x0001,                // Primary parameter (varies by message type)
+        lParam: 0x00640032,            // Secondary parameter (varies by message type)
+        target: HTMLElement,           // The DOM element that triggered the event
+        originalEvent: Event,          // Original browser DOM event object
+        timestamp: 1640995200000,      // Timestamp when event was dispatched
+        id: 'element-id',              // Element ID if available, null otherwise
+        detail: {}                     // Extended data specific to certain event types (optional)
 }
 ```
 
@@ -724,7 +723,6 @@ All Win32-style properties are directly on the event object (not nested in `even
 - **`originalEvent`**: Access to all native browser event properties and methods
 - **`timestamp`**: Milliseconds since epoch when the event was created
 - **`id`**: Convenience access to target.id (or null if not set)
-- **`value`**: Current value read from the target element (for form controls)
 - **`detail`**: Optional extended metadata (only present for certain event types like MSG_CHAR, MSG_CHANGE)
 
 **Note:** Prior versions of WakaPAC nested these properties in `event.detail`. The current version places them directly on the event for cleaner access. The `detail` property is now reserved only for optional extended data.
@@ -874,8 +872,8 @@ event.detail = {
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_CHAR:
-console.log(`Text field has ${wParam} characters`);
-console.log(`Value: ${event.value}`);
+console.log(`Text field has ${event.wParam} characters`);
+console.log(`Value: ${event.target.value}`);
 break;
 ```
 

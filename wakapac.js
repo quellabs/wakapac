@@ -1162,7 +1162,6 @@
                 timestamp: { value: Date.now(), enumerable: true, configurable: true },
                 target: { value: originalEvent.target, enumerable: true, configurable: true },
                 id: { value: originalEvent.target.id || null, enumerable: true, configurable: true },
-                value: { value: Utils.readDOMValue(originalEvent.target), enumerable: true, configurable: true },
 
                 // Reference to the original DOM event for debugging/advanced usage
                 originalEvent: { value: originalEvent, enumerable: true, configurable: true }
