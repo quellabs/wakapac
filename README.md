@@ -676,10 +676,8 @@ Standard data-pac-bind handlers execute (if msgProc returned true/undefined)
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        const { message, wParam, lParam, target, originalEvent } = event;
-
         // Handle specific message types
-        switch(message) {
+        switch(event.message) {
             case MSG_TYPES.MSG_KEYDOWN:
                 // Handle keyboard input
                 break;
@@ -994,31 +992,29 @@ For all other message types, the return value is ignored and standard processing
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        const { message, wParam, originalEvent } = event;
-
-        if (message === MSG_TYPES.MSG_KEYDOWN) {
+        if (event.message === MSG_TYPES.MSG_KEYDOWN) {
             // Check for Ctrl key combinations
-            if (originalEvent.ctrlKey) {
-                switch (originalEvent.key) {
+            if (event.wParam & MK_CONTROL) {
+                switch (event.originalEvent.key) {
                     case 's':
                         this.saveDocument();
-                        originalEvent.preventDefault();
+                        event.preventDefault();
                         return false;  // Stop processing
 
                     case 'o':
                         this.openDocument();
-                        originalEvent.preventDefault();
+                        event.preventDefault();
                         return false;
 
                     case 'f':
                         this.showFindDialog();
-                        originalEvent.preventDefault();
+                        event.preventDefault();
                         return false;
                 }
             }
 
             // Escape key closes modals
-            if (originalEvent.key === 'Escape') {
+            if (event.originalEvent.key === 'Escape') {
                 this.closeAllModals();
                 return true;
             }
@@ -1034,11 +1030,9 @@ wakaPAC('#app', {
 ```javascript
 wakaPAC('#text-editor', {
     msgProc(event) {
-        const { message, wParam, lParam, originalEvent } = event;
-
-        if (message === MSG_TYPES.MSG_KEYDOWN) {
-            const repeatCount = lParam & 0xFFFF;
-            const isExtended = (lParam & (1 << 24)) !== 0;
+        if (event.message === MSG_TYPES.MSG_KEYDOWN) {
+            const repeatCount = event.lParam & 0xFFFF;
+            const isExtended = (event.lParam & (1 << 24)) !== 0;
 
             // Track key repeats for auto-scroll
             if (repeatCount > 1 && isExtended) {
@@ -1047,8 +1041,8 @@ wakaPAC('#text-editor', {
             }
 
             // Special handling for function keys
-            if (isExtended && originalEvent.key.startsWith('F')) {
-                this.handleFunctionKey(originalEvent.key);
+            if (isExtended && event.originalEvent.key.startsWith('F')) {
+                this.handleFunctionKey(event.originalEvent.key);
                 return true;
             }
 
@@ -1062,25 +1056,23 @@ wakaPAC('#text-editor', {
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        const { message, wParam, lParam } = event;
-
-        if (message === MSG_TYPES.MSG_MOUSEMOVE) {
+        if (event.message === MSG_TYPES.MSG_MOUSEMOVE) {
             // Extract container-relative coordinates
-            const pos = this.MAKEPOINTS(lParam);  // {x, y}
-
+            const pos = this.MAKEPOINTS(event.lParam);  // {x, y}
+            
             // Check if left button is held while moving (dragging)
-            if (wParam & MK_LBUTTON) {
+            if (event.wParam & MK_LBUTTON) {
                 this.handleDrag(pos);
             }
         }
-
+        
         // Handle double-click
-        if (message === MSG_TYPES.MSG_LBUTTONDBLCLK) {
-            const pos = this.MAKEPOINTS(lParam);
+        if (event.message === MSG_TYPES.MSG_LBUTTONDBLCLK) {
+            const pos = this.MAKEPOINTS(event.lParam);
             this.openItem(pos);
             return false;
         }
-
+        
         return true;
     }
 });
@@ -1185,8 +1177,8 @@ Each wakaPAC component is identified by a `data-pac-id` attribute. If your eleme
 <div class="widget"></div>
 
 <script>
-    wakaPAC('#sidebar', { /* ... */ });  // data-pac-id="sidebar"
-    wakaPAC('.widget', { /* ... */ });   // data-pac-id="pac-abc123..."
+wakaPAC('#sidebar', { /* ... */ });  // data-pac-id="sidebar"
+wakaPAC('.widget', { /* ... */ });   // data-pac-id="pac-abc123..."
 </script>
 ```
 
