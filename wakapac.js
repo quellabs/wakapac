@@ -5871,6 +5871,15 @@
         },
 
         /**
+         * Retrieves a registered component by its pac-id
+         * @param {string} id - The pac-id of the component to retrieve
+         * @returns {Object|undefined} The component context or undefined if not found
+         */
+        get(id) {
+            return this.components.get(id);
+        },
+
+        /**
          * Processes all pending components to establish their parent-child relationships.
          *
          * This method handles cascading component registrations by:
@@ -6018,6 +6027,15 @@
                 // Use element's id if available, otherwise generate random id
                 pacId = container.id || Utils.uniqid('pac-');
                 container.setAttribute('data-pac-id', pacId);
+            }
+
+            // Check if component already exists for this container
+            // If so, return existing abstraction instead of creating new one
+            const existingComponent = window.PACRegistry.get(pacId);
+
+            if (existingComponent) {
+                abstractions.push(existingComponent.abstraction);
+                return; // Skip to next container
             }
 
             // Merge configuration
