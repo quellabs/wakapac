@@ -565,7 +565,7 @@
          * Extracts the low-order word (x coordinate) from lParam
          * Equivalent to Win32 LOWORD macro - gets bits 0-15
          * Coordinates are container-relative (client-area relative in Win32 terms)
-         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * @param {number} lParam - Packed mouse coordinates from event.lParam
          * @returns {number} X coordinate relative to container's left edge
          */
         LOWORD(lParam) {
@@ -576,7 +576,7 @@
          * Extracts the high-order word (y coordinate) from lParam
          * Equivalent to Win32 HIWORD macro - gets bits 16-31
          * Coordinates are container-relative (client-area relative in Win32 terms)
-         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * @param {number} lParam - Packed mouse coordinates from event.lParam
          * @returns {number} Y coordinate relative to container's top edge
          */
         HIWORD(lParam) {
@@ -587,8 +587,8 @@
          * Extracts both x and y coordinates from lParam
          * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
          * Coordinates are container-relative (client-area relative in Win32 terms)
-         * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
-         * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+         * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
+         * @param {number} lParam - Packed mouse coordinates from event.lParam
          * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
          */
         MAKEPOINTS(lParam) {
@@ -1109,13 +1109,13 @@
         },
 
         /**
-         * Creates a custom event that wraps the original DOM event with additional
-         * tracking data including Win32-style wParam/lParam values, timestamps,
-         * and extended metadata. The event is dispatched to the nearest container
-         * element with a [data-pac-id] attribute.
-         * @param {string} messageType - The Win32 message type (e.g., MSG_LBUTTONDOWN, MSG_KEYUP)
+         * Creates a custom event that wraps the original DOM event with Win32-style
+         * message properties (message, wParam, lParam) as top-level event properties.
+         * The event is dispatched to the nearest container element with a [data-pac-id] attribute.
+         *
+         * @param {number} messageType - The Win32 message type (e.g., MSG_LBUTTONDOWN, MSG_KEYUP)
          * @param {Event} originalEvent - The original DOM event to wrap
-         * @param {Object} [extended={}] - Additional extended data to include in the event detail
+         * @param {Object} [extended={}] - Additional extended data to include in event.detail
          * @returns {void}
          */
         dispatchTrackedEvent(messageType, originalEvent, extended = {}) {
@@ -1143,26 +1143,29 @@
             // Build Win32-style parameters based on the message type and original event
             const params = this.buildParams(messageType, originalEvent, container);
 
-            // Create the custom event with comprehensive tracking data
+            // Create custom event with extended data in detail (optional)
             const customEvent = new CustomEvent('pac:event', {
-                detail: {
-                    // Core Win32-style message data
-                    message: messageType,
-                    wParam: params.wParam,
-                    lParam: params.lParam,
+                bubbles: true,
+                cancelable: true,
+                detail: extended
+            });
 
-                    // Standard tracking fields for all events
-                    timestamp: Date.now(),
-                    target: originalEvent.target,
-                    id: originalEvent.target.id || null,
-                    value: Utils.readDOMValue(originalEvent.target),
+            // Add Win32-style message properties directly to the event object
+            // This avoids the event.detail.property nesting and keeps Win32 semantics clean
+            Object.defineProperties(customEvent, {
+                // Core Win32-style message data
+                message: { value: messageType, enumerable: true, configurable: true },
+                wParam: { value: params.wParam, enumerable: true, configurable: true },
+                lParam: { value: params.lParam, enumerable: true, configurable: true },
 
-                    // Reference to the original DOM event for debugging/advanced usage
-                    originalEvent: originalEvent,
+                // Standard tracking fields
+                timestamp: { value: Date.now(), enumerable: true, configurable: true },
+                target: { value: originalEvent.target, enumerable: true, configurable: true },
+                id: { value: originalEvent.target.id || null, enumerable: true, configurable: true },
+                value: { value: Utils.readDOMValue(originalEvent.target), enumerable: true, configurable: true },
 
-                    // Additional extended data provided by caller
-                    extended: extended,
-                }
+                // Reference to the original DOM event for debugging/advanced usage
+                originalEvent: { value: originalEvent, enumerable: true, configurable: true }
             });
 
             // Forward event control methods to the original event
@@ -1323,7 +1326,7 @@
                 case MSG_TYPES.MSG_CHANGE:
                     return {
                         wParam: this.buildChangeWParam(event),
-                        lParam: 0        // Not used for change events
+                        lParam: 0
                     }
 
                 // Form submission events - encode form data
@@ -1342,12 +1345,13 @@
                         const formObject = Object.fromEntries(formData.entries());
 
                         return {
-                            wParam: event.target.id || null,  // Form ID for identification
+                            wParam: event.target.id || null,   // Form ID for identification
                             lParam: formObject                 // Serialized form data
                         };
                     } catch (error) {
                         // Handle FormData creation failures gracefully
                         console.warn('Failed to extract form data:', error);
+
                         return {
                             wParam: event.target.id || null,
                             lParam: {}
@@ -3620,9 +3624,11 @@
 
     /**
      * Handles PAC events based on message type
-     * @param {CustomEvent} event - The PAC event containing message details
-     * @param {Object} event.detail - Event detail object
-     * @param {Number} event.detail.message - Message type from MSG_TYPES constants
+     * @param {CustomEvent} event - The PAC event with Win32-style message properties
+     * @param {Number} event.message - Message type from MSG_TYPES constants
+     * @param {Number} event.wParam - Windows-style wParam (modifier keys, button states)
+     * @param {Number} event.lParam - Windows-style lParam (coordinates, key codes)
+     * @param {Event} event.originalEvent - Reference to the original DOM event
      * @returns {void}
      */
     Context.prototype.handlePacEvent = function(event) {
@@ -3644,7 +3650,7 @@
                 MSG_TYPES.MSG_CHANGE
             ];
 
-            if (cancellableEvents.includes(event.detail.message) && msgProcResult === false) {
+            if (cancellableEvents.includes(event.message) && msgProcResult === false) {
                 allowDefault = false;
             }
         }
@@ -3656,7 +3662,7 @@
         }
 
         // Call built in event handlers
-        switch(event.detail.message) {
+        switch(event.message) {
             case MSG_TYPES.MSG_MOUSEMOVE:
             case MSG_TYPES.MSG_LBUTTONDOWN:
             case MSG_TYPES.MSG_MBUTTONDOWN:
@@ -3709,7 +3715,7 @@
                 break;
 
             default :
-                console.warn(`Unhandled event type ${event.detail.message}`);
+                console.warn(`Unhandled event type ${event.message}`);
                 break;
         }
     }
@@ -3718,12 +3724,12 @@
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
-     * @param {Element} event.detail.target - The DOM element that was clicked
+     * @param {Element} event.target - The DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
     Context.prototype.handleDomClicks = function(event) {
         // Get interpolation data for the clicked element
-        const mappingData = this.interpolationMap.get(event.detail.target);
+        const mappingData = this.interpolationMap.get(event.target);
         if (!mappingData?.bindings?.click) {
             return;
         }
@@ -3736,7 +3742,7 @@
 
         try {
             // Check if click occurred within a foreach loop context
-            const contextInfo = this.extractClosestForeachContext(event.detail.target);
+            const contextInfo = this.extractClosestForeachContext(event.target);
 
             // Simple case: call method with just the event
             if (!contextInfo) {
@@ -3757,7 +3763,7 @@
             // Get the foreach configuration and set up scope resolution
             const foreachData = this.interpolationMap.get(foreachElement);
             const scopeResolver = {
-                resolveScopedPath: (path) => this.normalizePath(path, event.detail.target)
+                resolveScopedPath: (path) => this.normalizePath(path, event.target)
             };
 
             // Evaluate the foreach expression to get the source array
@@ -3776,14 +3782,13 @@
 
     /**
      * Handles DOM submit events by executing bound abstraction methods.
-     * @param {CustomEvent} event - The DOM submit event containing target element details
-     * @param {Object} event.detail - Event detail object
-     * @param {HTMLElement} event.detail.target - The DOM element that triggered the submit
+     * @param {CustomEvent} event - The PAC submit event
+     * @param {HTMLElement} event.target - The DOM element that triggered the submit
      * @returns {void}
      */
     Context.prototype.handleDomSubmit = function(event) {
         // Retrieve mapping data for the target element from the interpolation map
-        const mappingData = this.interpolationMap.get(event.detail.target);
+        const mappingData = this.interpolationMap.get(event.target);
 
         // Early return if no mapping exists or no submit binding is configured
         if (!mappingData?.bindings?.submit) {
@@ -3812,12 +3817,12 @@
      * when form controls change their values. This enables two-way data binding by listening
      * for custom DOM change events and propagating changes back to the data context.
      * @param {CustomEvent} event - The DOM change event containing target element and new value
-     * @param {Element} event.detail.target - The DOM element that changed
-     * @param {*} event.detail.value - The new value from the changed element
+     * @param {Element} event.target - The DOM element that changed
+     * @param {*} event.value - The new value from the changed element
      */
     Context.prototype.handleDomChange = function(event) {
         const self = this;
-        const targetElement = event.detail.target;
+        const targetElement = event.target;
 
         // Get the mapping data for this specific element from the interpolation map
         // This contains all the binding information (value, checked, etc.) for the element
@@ -3839,7 +3844,7 @@
 
             // Update the data model using nested property setter to handle complex object paths
             // e.g., "user.profile.name" gets properly set in the nested object structure
-            Utils.setNestedProperty(resolvedPath, event.detail.value, this.abstraction);
+            Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
         }
 
         // Handle checked binding (for checkboxes and radio buttons)
@@ -3854,9 +3859,9 @@
             // Checkbox: set boolean value based on checked state
             // Radio button: only update when this radio is selected, use its value
             if (targetElement.type === 'checkbox') {
-                Utils.setNestedProperty(resolvedPath, event.detail.target.checked, this.abstraction);
-            } else if (targetElement.type === 'radio' && event.detail.target.checked) {
-                Utils.setNestedProperty(resolvedPath, event.detail.value, this.abstraction);
+                Utils.setNestedProperty(resolvedPath, event.target.checked, this.abstraction);
+            } else if (targetElement.type === 'radio' && event.target.checked) {
+                Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
             }
         }
 
@@ -3881,12 +3886,12 @@
      * when form controls change their values. This enables two-way data binding by listening
      * for custom DOM change events and propagating changes back to the data context.
      * @param {CustomEvent} event - The DOM change event containing target element and new value
-     * @param {Element} event.detail.target - The DOM element that changed
-     * @param {*} event.detail.value - The new value from the changed element
+     * @param {Element} event.target - The DOM element that changed
+     * @param {*} event.value - The new value from the changed element
      */
     Context.prototype.handleDomInput = function(event) {
         const self = this;
-        const targetElement = event.detail.target;
+        const targetElement = event.target;
 
         // Get the mapping data for this specific element from the interpolation map
         // This contains all the binding information (value, checked, etc.) for the element
@@ -3914,14 +3919,14 @@
             switch (config.updateMode) {
                 case 'immediate':
                     // Immediate update - bypass queue entirely
-                    Utils.setNestedProperty(resolvedPath, event.detail.value, this.abstraction);
+                    Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
                     break;
 
                 case 'delayed':
                     // Delayed update - add to queue with time trigger
                     this.updateQueue.set(resolvedPath, {
                         trigger: 'delay',
-                        value: event.detail.value,
+                        value: event.value,
                         executeAt: Date.now() + config.delay
                     });
 
@@ -3931,7 +3936,7 @@
                     // Change mode - add to queue with blur trigger
                     this.updateQueue.set(resolvedPath, {
                         trigger: 'blur',
-                        value: event.detail.value,
+                        value: event.value,
                         elementId: Utils.getElementIdentifier(targetElement)
                     });
 
@@ -3944,11 +3949,11 @@
      * Handles DOM focus events for data-bound elements
      * @param {CustomEvent} event - The focus event containing target element details
      * @param {Object} event.detail - Event detail object
-     * @param {HTMLElement} event.detail.target - The DOM element that gained focus
+     * @param {HTMLElement} event.target - The DOM element that gained focus
      * @returns {void}
      */
     Context.prototype.handleDomFocus = function(event) {
-        const targetElement = event.detail.target;
+        const targetElement = event.target;
 
         // Get the mapping data for this element
         const mappingData = this.interpolationMap.get(targetElement);
@@ -3979,11 +3984,11 @@
      * Processes any pending "change" mode updates that should trigger on blur
      * @param {CustomEvent} event - The blur event containing target element details
      * @param {Object} event.detail - Event detail object
-     * @param {HTMLElement} event.detail.target - The DOM element that lost focus
+     * @param {HTMLElement} event.target - The DOM element that lost focus
      * @returns {void}
      */
     Context.prototype.handleDomBlur = function (event) {
-        const targetElement = event.detail.target;
+        const targetElement = event.target;
 
         // Get the mapping data for this element
         const mappingData = this.interpolationMap.get(targetElement);
@@ -4536,8 +4541,8 @@
              * Extracts mouse coordinates from lParam value
              * Mouse coordinates are packed into lParam as two 16-bit integers
              * Coordinates are container-relative (relative to the container's top-left corner)
-             * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
-             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
+             * @param {number} lParam - Packed mouse coordinates from event.lParam
              * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
              */
             LOWORD: {
@@ -4549,7 +4554,7 @@
             /**
              * Extracts the high-order word (y coordinate) from lParam
              * Equivalent to Win32 HIWORD macro - gets bits 16-31
-             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * @param {number} lParam - Packed mouse coordinates from event.lParam
              * @returns {number} Y coordinate relative to container's top edge
              */
             HIWORD: {
@@ -4562,8 +4567,8 @@
              * Extracts both x and y coordinates from lParam
              * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
              * Coordinates are container-relative (relative to the container's top-left corner)
-             * To get absolute viewport coordinates, use event.detail.originalEvent.clientX/Y
-             * @param {number} lParam - Packed mouse coordinates from event.detail.lParam
+             * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
+             * @param {number} lParam - Packed mouse coordinates from event.lParam
              * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
              */
             MAKEPOINTS: {

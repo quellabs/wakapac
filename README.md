@@ -676,7 +676,7 @@ Standard data-pac-bind handlers execute (if msgProc returned true/undefined)
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        const { message, wParam, lParam, target, originalEvent } = event.detail;
+        const { message, wParam, lParam, target, originalEvent } = event;
 
         // Handle specific message types
         switch(message) {
@@ -698,26 +698,27 @@ wakaPAC('#app', {
 
 #### Event Object Structure
 
-The `msgProc` method receives a CustomEvent with the following structure:
+The `msgProc` method receives a CustomEvent with Win32-style message properties as top-level properties:
 
 ```javascript
 {
     type: 'pac:event',             // Always 'pac:event' for msgProc
-        detail: {
-        message: 0x0201,           // Message type from MSG_TYPES constants
-            wParam: 0x0001,            // Primary parameter (varies by message type)
-            lParam: 0x00640032,        // Secondary parameter (varies by message type)
-            target: HTMLElement,       // The DOM element that triggered the event
-            originalEvent: Event,      // Original browser DOM event object
-            timestamp: 1640995200000,  // Timestamp when event was dispatched
-            id: 'element-id',          // Element ID if available, null otherwise
-            value: 'current-value',    // Current value from the element (via readDOMValue)
-            extended: {}               // Additional data specific to certain event types
-    }
+    message: 0x0201,               // Message type from MSG_TYPES constants
+    wParam: 0x0001,                // Primary parameter (varies by message type)
+    lParam: 0x00640032,            // Secondary parameter (varies by message type)
+    target: HTMLElement,           // The DOM element that triggered the event
+    originalEvent: Event,          // Original browser DOM event object
+    timestamp: 1640995200000,      // Timestamp when event was dispatched
+    id: 'element-id',              // Element ID if available, null otherwise
+    value: 'current-value',        // Current value from the element (via readDOMValue)
+    detail: {}                     // Extended data specific to certain event types (optional)
 }
 ```
 
 **Key Properties:**
+
+All Win32-style properties are directly on the event object (not nested in `event.detail`):
+
 - **`message`**: Message type constant indicating what kind of event occurred
 - **`wParam`**: Primary parameter containing flags, button states, or primary data
 - **`lParam`**: Secondary parameter containing coordinates, form data, or other contextual info
@@ -726,7 +727,9 @@ The `msgProc` method receives a CustomEvent with the following structure:
 - **`timestamp`**: Milliseconds since epoch when the event was created
 - **`id`**: Convenience access to target.id (or null if not set)
 - **`value`**: Current value read from the target element (for form controls)
-- **`extended`**: Additional metadata that varies by event type
+- **`detail`**: Optional extended metadata (only present for certain event types like MSG_CHAR, MSG_CHANGE)
+
+**Note:** Prior versions of WakaPAC nested these properties in `event.detail`. The current version places them directly on the event for cleaner access. The `detail` property is now reserved only for optional extended data.
 
 #### Message Types Reference
 
@@ -865,7 +868,7 @@ const textLength = wParam;  // Length of text in the input field
 
 **Extended data:**
 ```javascript
-event.detail.extended = {
+event.detail = {
     elementType: 'input' | 'textarea'  // Type of input element
 };
 ```
@@ -874,7 +877,7 @@ event.detail.extended = {
 ```javascript
 case MSG_TYPES.MSG_CHAR:
 console.log(`Text field has ${wParam} characters`);
-console.log(`Value: ${event.detail.value}`);
+console.log(`Value: ${event.value}`);
 break;
 ```
 
@@ -891,7 +894,7 @@ break;
 
 **Extended data:**
 ```javascript
-event.detail.extended = {
+event.detail = {
     elementType: 'select' | 'radio' | 'checkbox'
 };
 ```
@@ -899,7 +902,7 @@ event.detail.extended = {
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_CHANGE:
-const target = event.detail.target;
+const target = event.target;
 
 if (target.type === 'checkbox') {
     const isChecked = wParam === 1;
@@ -948,11 +951,11 @@ break;
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_FOCUS:
-console.log('Element gained focus:', event.detail.target);
+console.log('Element gained focus:', event.target);
 break;
 
 case MSG_TYPES.MSG_BLUR:
-console.log('Element lost focus:', event.detail.target);
+console.log('Element lost focus:', event.target);
 break;
 ```
 
@@ -991,7 +994,7 @@ For all other message types, the return value is ignored and standard processing
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        const { message, wParam, originalEvent } = event.detail;
+        const { message, wParam, originalEvent } = event;
 
         if (message === MSG_TYPES.MSG_KEYDOWN) {
             // Check for Ctrl key combinations
@@ -1031,7 +1034,7 @@ wakaPAC('#app', {
 ```javascript
 wakaPAC('#text-editor', {
     msgProc(event) {
-        const { message, wParam, lParam, originalEvent } = event.detail;
+        const { message, wParam, lParam, originalEvent } = event;
 
         if (message === MSG_TYPES.MSG_KEYDOWN) {
             const repeatCount = lParam & 0xFFFF;
@@ -1059,25 +1062,25 @@ wakaPAC('#text-editor', {
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        const { message, wParam, lParam } = event.detail;
-        
+        const { message, wParam, lParam } = event;
+
         if (message === MSG_TYPES.MSG_MOUSEMOVE) {
             // Extract container-relative coordinates
             const pos = this.MAKEPOINTS(lParam);  // {x, y}
-            
+
             // Check if left button is held while moving (dragging)
             if (wParam & MK_LBUTTON) {
                 this.handleDrag(pos);
             }
         }
-        
+
         // Handle double-click
         if (message === MSG_TYPES.MSG_LBUTTONDBLCLK) {
             const pos = this.MAKEPOINTS(lParam);
             this.openItem(pos);
             return false;
         }
-        
+
         return true;
     }
 });
@@ -1182,8 +1185,8 @@ Each wakaPAC component is identified by a `data-pac-id` attribute. If your eleme
 <div class="widget"></div>
 
 <script>
-wakaPAC('#sidebar', { /* ... */ });  // data-pac-id="sidebar"
-wakaPAC('.widget', { /* ... */ });   // data-pac-id="pac-abc123..."
+    wakaPAC('#sidebar', { /* ... */ });  // data-pac-id="sidebar"
+    wakaPAC('.widget', { /* ... */ });   // data-pac-id="pac-abc123..."
 </script>
 ```
 
@@ -1196,12 +1199,12 @@ This makes debugging easier with meaningful identifiers and simplifies parent-ch
 </div>
 
 <script>
-wakaPAC('#parent', {
-    updateChild() {
-        // Target specific child using its id (used as data-pac-id)
-        this.notifyChild('child-1', 'update', { value: 42 });
-    }
-});
+    wakaPAC('#parent', {
+        updateChild() {
+            // Target specific child using its id (used as data-pac-id)
+            this.notifyChild('child-1', 'update', { value: 42 });
+        }
+    });
 </script>
 ```
 

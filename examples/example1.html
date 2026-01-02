@@ -22,13 +22,13 @@
         },
 
         msgProc(message) {
-            if (message.detail.message === MSG_TYPES.MSG_KEYUP) {
-                if (message.detail.extended.key === 'ArrowUp') {
+            if (message.message === MSG_TYPES.MSG_KEYUP) {
+                if (message.extended.key === 'ArrowUp') {
                     this.increment();
                     return true;
                 }
 
-                if (message.detail.extended.key === 'ArrowDown') {
+                if (message.extended.key === 'ArrowDown') {
                     this.decrement();
                     return true;
                 }
