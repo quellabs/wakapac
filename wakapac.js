@@ -5155,11 +5155,11 @@
     };
 
     /**
-     * Establishes parent-child relationships in component hierarchy
+     * Establishes parent-child relationships for this component
+     * @param {Context|null} parent - Parent component (or null if top-level)
+     * @param {Context[]} children - Array of child components
      */
-    Context.prototype.establishHierarchy = function() {
-        const { parent, children } = window.PACRegistry.getHierarchy(this.container);
-
+    Context.prototype.establishHierarchy = function(parent, children) {
         // Updates relationships
         this.updateParentRelationship(parent);
         this.updateChildrenRelationships(children);
@@ -5833,58 +5833,27 @@
 
     /**
      * Global registry for managing PAC components and their hierarchical relationships
-     *
-     * Maintains a cached hierarchy map that represents parent-child relationships
-     * between all registered components. The map is computed in a single pass through
-     * all components and reused until components are added or removed.
-     *
-     * Performance characteristics:
-     * - Component lookup by ID: O(1)
-     * - Hierarchy computation: O(n) for all components
-     * - Individual hierarchy retrieval: O(1) from cache
-     *
-     * @constructor
      */
     function ComponentRegistry() {
         /** @type {Map<string, Context>} All registered components indexed by pac-id */
         this.components = new Map();
-
-        /**
-         * Pre-computed hierarchy map for all components
-         * Maps container elements to {parent, children} objects
-         * Computed once and reused until components change
-         * @type {Map<Element, {parent: Context|null, children: Context[]}>|null}
-         */
-        this.hierarchyMap = null;
 
         /** @type {Set<Context>} Components waiting for hierarchy establishment */
         this.pendingHierarchy = new Set();
 
         /** @type {number|null} Timer reference for batched hierarchy processing */
         this.hierarchyTimer = null;
-
-        /**
-         * Indicates whether hierarchy map needs rebuilding
-         * Set to true when components are added or removed
-         * Reset to false after hierarchy map is rebuilt
-         * @type {boolean}
-         */
-        this.hierarchyDirty = true;
     }
 
     ComponentRegistry.prototype = {
         /**
          * Registers a new PAC component
-         * Marks the hierarchy as dirty to trigger rebuild on next access
          * @param {string} selector - Unique identifier for the component (from data-pac-id)
          * @param {Object} context - The PAC component context object
          */
         register(selector, context) {
             this.components.set(selector, context);
             this.pendingHierarchy.add(context);
-
-            // Mark hierarchy as needing rebuild
-            this.hierarchyDirty = true;
 
             // Clear existing timer and start new one
             clearTimeout(this.hierarchyTimer);
@@ -5897,7 +5866,6 @@
 
         /**
          * Removes a component from the registry
-         * Marks the hierarchy as dirty since component structure has changed
          * @param {string} id - The pac-id of the component to remove
          */
         deregister(id) {
@@ -5906,9 +5874,6 @@
             if (context) {
                 this.pendingHierarchy.delete(context);
                 this.components.delete(id);
-
-                // Mark hierarchy as needing rebuild
-                this.hierarchyDirty = true;
             }
         },
 
@@ -5924,11 +5889,10 @@
         /**
          * Processes all pending components to establish their parent-child relationships.
          *
-         * Uses a cached hierarchy map for efficiency. The map is rebuilt only when
-         * the hierarchyDirty flag indicates components have been added or removed.
+         * Builds a fresh hierarchy map and assigns parent/children to each pending component.
          *
-         * Handles cascading component registrations by:
-         * 1. Rebuilding the hierarchy map if needed
+         * This method handles cascading component registrations by:
+         * 1. Building hierarchy map for all components
          * 2. Processing all currently pending components in a batch
          * 3. Detecting if new components were registered during processing
          * 4. Scheduling another round if needed to handle the new components
@@ -5945,21 +5909,24 @@
                 return;
             }
 
-            // Rebuild hierarchy map if dirty (components were added/removed)
-            if (this.hierarchyDirty) {
-                this.hierarchyMap = this.buildHierarchyMap();
-                this.hierarchyDirty = false;
-            }
+            // Build fresh hierarchy map for all components
+            const hierarchyMap = this.buildHierarchyMap();
 
             // Snapshot the current pending components before clearing
             // This prevents infinite loops from components added during processing
             const componentsToProcess = Array.from(this.pendingHierarchy);
             this.pendingHierarchy.clear();
 
-            // Establish hierarchy for each component using the pre-computed map
+            // Establish hierarchy for each component
             // Note: This may trigger registration of new child components
             componentsToProcess.forEach(component => {
-                component.establishHierarchy();
+                const hierarchy = hierarchyMap.get(component.container);
+
+                if (hierarchy) {
+                    component.establishHierarchy(hierarchy.parent, hierarchy.children);
+                } else {
+                    component.establishHierarchy(null, []);
+                }
             });
 
             // Check if any new components were registered during processing
@@ -5975,26 +5942,6 @@
                     this.establishAllHierarchies();
                 }, 10);
             }
-        },
-
-        /**
-         * Gets the hierarchy (parent and children) for a given container
-         *
-         * Returns hierarchy from the cached hierarchy map. If the map doesn't exist
-         * or is marked as dirty, rebuilds the complete hierarchy map for all components.
-         *
-         * @param {Element} container - DOM element to find hierarchy for
-         * @returns {Object} Object with parent and children properties
-         */
-        getHierarchy(container) {
-            // Rebuild hierarchy map if dirty or doesn't exist
-            if (this.hierarchyDirty || !this.hierarchyMap) {
-                this.hierarchyMap = this.buildHierarchyMap();
-                this.hierarchyDirty = false;
-            }
-
-            // Return from pre-computed map, or empty hierarchy if not found
-            return this.hierarchyMap.get(container) || { parent: null, children: [] };
         },
 
         /**

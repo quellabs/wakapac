@@ -719,9 +719,13 @@
                 logMessage('grandchild', 'Cannot work - not active');
                 return;
             }
+
             this.progress = Math.min(100, this.progress + Math.floor(Math.random() * 20) + 10);
+
             this.updateWorkStatus();
+
             logMessage('grandchild', `Work completed, progress: ${this.progress}%`);
+
             this.notifyParent('progressUpdate', {
                 workerId: this.workerId,
                 progress: this.progress,
@@ -731,6 +735,7 @@
 
         reportProgress() {
             logMessage('grandchild', 'Progress report sent to parent');
+
             this.notifyParent('progressReport', {
                 workerId: this.workerId,
                 subTask: this.subTask,
@@ -839,11 +844,14 @@
 
             if (childId === 'grandchild-app' && eventType === 'statusChange') {
                 console.log('Setting grandchildActive from', this.grandchildActive, 'to', data.isActive);
+
                 this.grandchildActive = data.isActive;
+
                 console.log('grandchildActive is now', this.grandchildActive);
 
                 // FORCE computed property update
                 console.log('Manually triggering button text update...');
+
                 // Get current button text to force computed property evaluation
                 const buttonText = this.grandchildButtonText;
                 console.log('Current button text:', buttonText);
@@ -896,10 +904,13 @@
                 logMessage('child', 'Cannot increment - paused');
                 return;
             }
+
             this.count++;
             this.updateStatus();
             this.message = `Completed ${this.count} tasks`;
+
             logMessage('child', `Task completed, count: ${this.count}`);
+
             this.notifyParent('taskCompleted', {
                 taskName: this.taskName,
                 count: this.count,
@@ -912,7 +923,9 @@
             this.updateStatus();
             this.message = 'Reset completed';
             this.notifyChildren('setProgress', { progress: 0 });
+
             logMessage('child', 'Reset completed');
+
             this.notifyParent('reset', { taskName: this.taskName });
         },
 
@@ -926,7 +939,9 @@
 
         sendAlert() {
             const alertMsg = `Alert from ${this.taskName} at ${new Date().toLocaleTimeString()}`;
+
             logMessage('child', 'Sending alert to parent');
+
             this.notifyParent('alert', {
                 message: alertMsg,
                 severity: 'high',
@@ -976,15 +991,20 @@
                         this.parentStatus = 'medium';
                         this.parentStatusText = 'Normal operations';
                     }
+
                     break;
+
                 case 'alert':
                     this.parentStatus = 'high';
                     this.parentStatusText = `🚨 ${data.message}`;
+
                     setTimeout(() => {
                         this.parentStatus = 'low';
                         this.parentStatusText = 'System Active';
                     }, 5000);
+                    
                     break;
+
                 case 'focusRequest':
                     logMessage('parent', 'Handling focus request - blurring other children');
                     this.notifyChildren('blur');
