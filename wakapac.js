@@ -49,10 +49,11 @@
      * Matches wp-if comment directives
      * Format: <!-- wp-if: expression --> or <!-- /wp-if -->
      * Captures: expression for opening tags
+     * Note: Comment nodes don't include <!-- --> in their textContent
      * @type {RegExp}
      */
-    const WP_IF_COMMENT_REGEX = /<!--\s*wp-if:\s*([^-]+?)\s*-->/;
-    const WP_IF_CLOSE_COMMENT_REGEX = /<!--\s*\/wp-if\s*-->/;
+    const WP_IF_COMMENT_REGEX = /^\s*wp-if:\s*(.+?)\s*$/;
+    const WP_IF_CLOSE_COMMENT_REGEX = /^\s*\/wp-if\s*$/;
 
     /**
      * This regexp finds runs of dots and square brackets.
@@ -255,8 +256,8 @@
                 return false;
             }
 
-            // Handle Text nodes by getting their parent element for containment checking
-            const targetElement = element && element.nodeType === Node.TEXT_NODE
+            // Handle Text nodes and Comment nodes by getting their parent element for containment checking
+            const targetElement = element && (element.nodeType === Node.TEXT_NODE || element.nodeType === Node.COMMENT_NODE)
                 ? element.parentElement
                 : element;
 
@@ -3386,9 +3387,6 @@
         newCommentBindings.forEach((mappingData, commentNode) => {
             this.commentBindingMap.set(commentNode, mappingData);
 
-            // Parse and cache the expression AST on the comment node
-            mappingData.parsedExpression = ExpressionCache.parseExpression(mappingData.expression);
-
             // Apply initial state
             self.updateCommentConditional(commentNode, mappingData);
         });
@@ -4463,6 +4461,7 @@
                     if (!Utils.belongsToPacContainer(this.container, node)) {
                         return NodeFilter.FILTER_SKIP;
                     }
+
                     return NodeFilter.FILTER_ACCEPT;
                 }
             }
@@ -4476,6 +4475,7 @@
 
             // Check for opening wp-if comment
             const openMatch = commentText.match(WP_IF_COMMENT_REGEX);
+
             if (openMatch) {
                 const expression = openMatch[1].trim();
 
@@ -4488,6 +4488,7 @@
 
             // Check for closing /wp-if comment
             const closeMatch = commentText.match(WP_IF_CLOSE_COMMENT_REGEX);
+
             if (closeMatch && openComments.length > 0) {
                 const openData = openComments.pop();
 
@@ -4540,9 +4541,10 @@
         };
 
         try {
-            // Evaluate the expression
+            // Parse and evaluate the expression (ExpressionCache handles caching)
+            const parsed = ExpressionCache.parseExpression(mappingData.expression);
             const value = ExpressionParser.evaluate(
-                mappingData.parsedExpression,
+                parsed,
                 this.abstraction,
                 scopeResolver
             );
