@@ -46,6 +46,16 @@
     const FOREACH_INDEX_REGEX = /pac-foreach-item:\s*([^,]+),\s*index=(\d+),\s*renderIndex=(\d+)/;
 
     /**
+     * Matches wp-if comment directives
+     * Format: <!-- wp-if: expression --> or <!-- /wp-if -->
+     * Captures: expression for opening tags
+     * Note: Comment nodes don't include <!-- --> in their textContent
+     * @type {RegExp}
+     */
+    const WP_IF_COMMENT_REGEX = /^\s*wp-if:\s*(.+?)\s*$/;
+    const WP_IF_CLOSE_COMMENT_REGEX = /^\s*\/wp-if\s*$/;
+
+    /**
      * This regexp finds runs of dots and square brackets.
      * @type {RegExp}
      */
@@ -246,8 +256,8 @@
                 return false;
             }
 
-            // Handle Text nodes by getting their parent element for containment checking
-            const targetElement = element && element.nodeType === Node.TEXT_NODE
+            // Handle Text nodes and Comment nodes by getting their parent element for containment checking
+            const targetElement = element && (element.nodeType === Node.TEXT_NODE || element.nodeType === Node.COMMENT_NODE)
                 ? element.parentElement
                 : element;
 
@@ -412,56 +422,6 @@
 
                 default:
                     return 'fast';
-            }
-        },
-
-        /**
-         * Reads the current value from a DOM element (input, select, textarea, etc.)
-         * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
-         * @returns {string|boolean} The element's value (string for most inputs, boolean for checkboxes)
-         */
-        readDOMValue: (elementOrSelector) => {
-            // Find the element using either ID selector (#id) or CSS selector
-            // Check if selector starts with '#' to use getElementById for better performance
-            let element;
-
-            if (typeof elementOrSelector !== 'string') {
-                element = elementOrSelector && elementOrSelector.nodeType ? elementOrSelector : null;
-            } else if (elementOrSelector.startsWith('#')) {
-                element = document.getElementById(elementOrSelector.slice(1));
-            } else {
-                element = document.querySelector(elementOrSelector);
-            }
-
-            // Early return if element doesn't exist to prevent errors
-            if (!element) {
-                console.warn('Element not found: ' + elementOrSelector);
-                return false;
-            }
-
-            // Use switch(true) pattern to check multiple conditions in order of priority
-            switch (true) {
-                case element.tagName === 'SELECT':
-                    return element.value; // Get selected option value
-
-                case element.type === 'checkbox':
-                    return element.checked; // true/false based on checked state
-
-                case element.type === 'radio': {
-                    // Radio buttons work in groups, so find the currently checked one
-                    // Use the 'name' attribute to identify radio buttons in the same group
-                    const checkedRadio = document.querySelector('input[name="' + element.name + '"]:checked');
-                    return checkedRadio ? checkedRadio.value : ''; // Get value or empty string
-                }
-
-                case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA':
-                    return element.value; // Get the input value
-
-                default:
-                    // Extract text content, preferring textContent over innerText
-                    // textContent gets all text including hidden elements
-                    // innerText respects styling and returns visible text only
-                    return element.textContent || element.innerText;
             }
         },
 
@@ -2978,47 +2938,38 @@
     };
 
     /**
-     * Applies conditional binding to show/hide DOM elements based on a boolean value.
-     * This replaces elements with placeholder comments when hidden and restores them when shown.
-     * @param {HTMLElement} element - The DOM element to show/hide
-     * @param {*} value - Truthy values show the element, falsy values hide it
+     * Applies conditional binding to show/hide DOM element contents based on a boolean value.
+     * The element itself remains in the DOM; only its innerHTML is shown/hidden.
+     * @param {HTMLElement} element - The DOM element whose contents to show/hide
+     * @param {*} value - Truthy values show the contents, falsy values hide them
      */
     DomUpdater.prototype.applyConditionalBinding = function(element, value) {
         const shouldShow = !!value;
 
         // Initialize tracking properties if not already set
-        if (!element._pacPlaceholder) {
-            element._pacPlaceholder = document.createComment('pac-if: hidden');
-            element._pacOriginalParent = element.parentNode;
-            element._pacOriginalNextSibling = element.nextSibling;
-            element._pacIsRendered = true; // Initially rendered
-
-            // Store original HTML to restore if needed
+        if (element._pacOriginalHTML === undefined) {
             element._pacOriginalHTML = element.innerHTML;
+            element._pacIsRendered = true; // Initially rendered
         }
 
-        // Show the element: replace placeholder with actual element
+        // Show the element contents: restore original HTML
         if (shouldShow && !element._pacIsRendered) {
-            // Restore element
-            element._pacPlaceholder.parentNode.replaceChild(element, element._pacPlaceholder);
+            element.innerHTML = element._pacOriginalHTML;
             element._pacIsRendered = true;
 
+            // Re-scan and register any bindings within the restored content
             this.context.scanAndRegisterNewElements(element);
         }
 
-        // Hide the element: replace element with placeholder
+        // Hide the element contents: clear innerHTML
         if (!shouldShow && element._pacIsRendered) {
             // Update stored HTML before hiding in case content changed
             element._pacOriginalHTML = element.innerHTML;
-
-            // Replace element with placeholder comment
-            if (element.parentNode) {
-                element.parentNode.replaceChild(element._pacPlaceholder, element);
-            }
-
+            element.innerHTML = '';
             element._pacIsRendered = false;
         }
     };
+
 
     /**
      * Applies class binding to an element using either string or object syntax.
@@ -3122,6 +3073,7 @@
         this.dependencies = this.getDependencies();
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
+        this.commentBindingMap = new Map();
         this.arrayHashMaps = new Map();
         this._readyCalled = false;
 
@@ -3215,6 +3167,7 @@
         this.interpolationMap.clear();
         this.textInterpolationMap.clear();
         this.arrayHashMaps.clear();
+        this.commentBindingMap.clear();
         this.updateQueue.clear();
 
         // Remove from registry
@@ -3367,6 +3320,7 @@
         // Scan for new bound elements within this container
         const newBindings = this.scanBindings(parentElement);
         const newTextBindings = this.scanTextBindings(parentElement);
+        const newCommentBindings = this.scanCommentBindings(parentElement);
 
         // Add new bindings to main maps
         newBindings.forEach((mappingData, element) => {
@@ -3377,6 +3331,14 @@
 
         newTextBindings.forEach((mappingData, textNode) => {
             this.textInterpolationMap.set(textNode, mappingData);
+        });
+
+        // Store comment bindings
+        newCommentBindings.forEach((mappingData, commentNode) => {
+            this.commentBindingMap.set(commentNode, mappingData);
+
+            // Apply initial state
+            self.updateCommentConditional(commentNode, mappingData);
         });
 
         // Apply initial bindings to new elements
@@ -3843,7 +3805,7 @@
 
             // Update the data model using nested property setter to handle complex object paths
             // e.g., "user.profile.name" gets properly set in the nested object structure
-            Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
+            Utils.setNestedProperty(resolvedPath, targetElement.value, this.abstraction);
         }
 
         // Handle checked binding (for checkboxes and radio buttons)
@@ -3858,9 +3820,9 @@
             // Checkbox: set boolean value based on checked state
             // Radio button: only update when this radio is selected, use its value
             if (targetElement.type === 'checkbox') {
-                Utils.setNestedProperty(resolvedPath, event.target.checked, this.abstraction);
-            } else if (targetElement.type === 'radio' && event.target.checked) {
-                Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
+                Utils.setNestedProperty(resolvedPath, targetElement.checked, this.abstraction);
+            } else if (targetElement.type === 'radio' && targetElement.checked) {
+                Utils.setNestedProperty(resolvedPath, targetElement.value, this.abstraction);
             }
         }
 
@@ -3918,14 +3880,14 @@
             switch (config.updateMode) {
                 case 'immediate':
                     // Immediate update - bypass queue entirely
-                    Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
+                    Utils.setNestedProperty(resolvedPath, targetElement.value, this.abstraction);
                     break;
 
                 case 'delayed':
                     // Delayed update - add to queue with time trigger
                     this.updateQueue.set(resolvedPath, {
                         trigger: 'delay',
-                        value: event.value,
+                        value: targetElement.value,
                         executeAt: Date.now() + config.delay
                     });
 
@@ -3935,7 +3897,7 @@
                     // Change mode - add to queue with blur trigger
                     this.updateQueue.set(resolvedPath, {
                         trigger: 'blur',
-                        value: event.value,
+                        value: targetElement.value,
                         elementId: Utils.getElementIdentifier(targetElement)
                     });
 
@@ -4010,9 +3972,9 @@
     };
 
     /**
-     * Handles reactive data changes by determining which DOM elements need updates.
-     * This is the central event handler that responds to property changes in the reactive
-     * abstraction and coordinates DOM updates for both text interpolations and attribute bindings.
+     * Handles reactive data binding changes triggered by property updates
+     * Orchestrates updates to all binding types: element attributes, text interpolations,
+     * comment conditionals, watchers, and foreach loops
      * @param {CustomEvent} event - The pac:change event containing change details
      * @param {Object} event.detail - Event payload
      * @param {string[]} event.detail.path - Array representing the property path that changed (e.g., ['todos', '0', 'completed'])
@@ -4020,7 +3982,18 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Context.prototype.handleReactiveChange = function (event) {
-        // Simple approach: check every element binding to see if it needs updating
+        this.updateElementBindings();
+        this.updateTextInterpolations();
+        this.updateCommentConditionals();
+        this.handleWatchersForChange(event);
+        this.handleForeachRebuildForChange(event);
+    };
+
+    /**
+     * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.)
+     * Evaluates each binding expression and updates the DOM if the value has changed
+     */
+    Context.prototype.updateElementBindings = function() {
         this.interpolationMap.forEach((mappingData, element) => {
             const { bindings } = mappingData;
 
@@ -4062,8 +4035,13 @@
                 }
             });
         });
+    };
 
-        // Handle text interpolations with proper foreach context resolution
+    /**
+     * Updates all text interpolations ({{expression}} in text nodes)
+     * Re-evaluates template expressions and updates text content if changed
+     */
+    Context.prototype.updateTextInterpolations = function() {
         this.textInterpolationMap.forEach((mappingData, textNode) => {
             try {
                 // Store previous text content to detect changes
@@ -4094,12 +4072,34 @@
                 console.warn('Error updating text node:', error);
             }
         });
+    };
 
+    /**
+     * Updates all comment-based wp-if conditionals
+     * Re-evaluates conditions and shows/hides content as needed
+     */
+    Context.prototype.updateCommentConditionals = function() {
+        this.commentBindingMap.forEach((mappingData, commentNode) => {
+            this.updateCommentConditional(commentNode, mappingData);
+        });
+    };
+
+    /**
+     * Triggers watchers for root-level property changes
+     * @param {CustomEvent} event - The pac:change event with change details
+     */
+    Context.prototype.handleWatchersForChange = function(event) {
         // Handle watchers for root-level changes
         if (event.detail.path.length === 1) {
             this.triggerWatcher(event.detail.path[0], event.detail.newValue, event.detail.oldValue);
         }
+    };
 
+    /**
+     * Rebuilds foreach loops when their source arrays change
+     * @param {CustomEvent} event - The pac:change event with change details
+     */
+    Context.prototype.handleForeachRebuildForChange = function(event) {
         // Handle foreach rebuilds only for array changes
         if (event.detail.path.length === 1 && Array.isArray(this.abstraction[event.detail.path[0]])) {
             const foreachElements = this.findForeachElementsByArrayPath(event.detail.path[0]);
@@ -4390,6 +4390,157 @@
         }
 
         return interpolationMap;
+    };
+
+    /**
+     * Scans the container for comment nodes with wp-if conditionals
+     * Builds mapping similar to element bindings but for comment-based conditionals
+     * @param {Element} parentElement - The parent element to scan
+     * @returns {Map<Comment, {expression: string, closingComment: Comment, content: Node[]}>}
+     */
+    Context.prototype.scanCommentBindings = function(parentElement) {
+        const commentBindingMap = new Map();
+
+        // Create tree walker to find comment nodes
+        const walker = document.createTreeWalker(
+            parentElement,
+            NodeFilter.SHOW_COMMENT,
+            {
+                acceptNode: node => {
+                    // Only process comments that belong to this container
+                    return !Utils.belongsToPacContainer(this.container, node)
+                        ? NodeFilter.FILTER_SKIP
+                        : NodeFilter.FILTER_ACCEPT;
+                }
+            }
+        );
+
+        let commentNode;
+        const openComments = []; // Stack to track nested wp-if comments
+
+        while ((commentNode = walker.nextNode())) {
+            const commentText = commentNode.textContent;
+
+            // Check for opening wp-if comment
+            const openMatch = commentText.match(WP_IF_COMMENT_REGEX);
+
+            if (openMatch) {
+                const expression = openMatch[1].trim();
+
+                openComments.push({
+                    comment: commentNode,
+                    expression: expression
+                });
+                continue;
+            }
+
+            // Check for closing /wp-if comment
+            const closeMatch = commentText.match(WP_IF_CLOSE_COMMENT_REGEX);
+
+            if (closeMatch && openComments.length > 0) {
+                const openData = openComments.pop();
+
+                // Collect all nodes between opening and closing comments
+                const content = [];
+                let currentNode = openData.comment.nextSibling;
+
+                while (currentNode && currentNode !== commentNode) {
+                    content.push(currentNode);
+                    currentNode = currentNode.nextSibling;
+                }
+
+                // Store in map
+                commentBindingMap.set(openData.comment, {
+                    expression: openData.expression,
+                    closingComment: commentNode,
+                    content: content,
+                    isVisible: true // Track current visibility state
+                });
+            }
+        }
+
+        // Warn about unmatched opening tags
+        if (openComments.length > 0) {
+            console.warn('WakaPAC: Unmatched wp-if comment directives found', openComments);
+        }
+
+        return commentBindingMap;
+    };
+
+    /**
+     * Updates the visibility of content controlled by a wp-if comment
+     * @param {Comment} commentNode - The wp-if comment node
+     * @param {Object} mappingData - The binding data for this comment
+     */
+    Context.prototype.updateCommentConditional = function(commentNode, mappingData) {
+        const self = this;
+
+        // Create resolver context
+        const scopeResolver = {
+            resolveScopedPath: (path) => {
+                // For comment bindings, we need to check parent scope
+                // Find the nearest parent element to get proper scope
+                let parentElement = commentNode.parentNode;
+                while (parentElement && parentElement.nodeType !== Node.ELEMENT_NODE) {
+                    parentElement = parentElement.parentNode;
+                }
+                return parentElement ? self.normalizePath(path, parentElement) : path;
+            }
+        };
+
+        try {
+            // Parse and evaluate the expression (ExpressionCache handles caching)
+            const parsed = ExpressionCache.parseExpression(mappingData.expression);
+            const value = ExpressionParser.evaluate(
+                parsed,
+                this.abstraction,
+                scopeResolver
+            );
+
+            const shouldShow = !!value;
+
+            // If state hasn't changed, do nothing
+            if (shouldShow === mappingData.isVisible) {
+                return;
+            }
+
+            // Update visibility state
+            mappingData.isVisible = shouldShow;
+
+            if (shouldShow) {
+                // Show: Replace placeholder comments with actual content nodes
+                mappingData.content.forEach(node => {
+                    // Each node should have a corresponding placeholder
+                    const placeholder = node._wpIfPlaceholder;
+                    if (placeholder && placeholder.parentNode) {
+                        placeholder.parentNode.replaceChild(node, placeholder);
+                    }
+                });
+
+                // Re-scan and register any new elements in the content
+                mappingData.content.forEach(node => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        self.scanAndRegisterNewElements(node);
+                    }
+                });
+
+            } else {
+                // Hide: Replace content nodes with placeholder comments
+                mappingData.content.forEach(node => {
+                    if (node.parentNode) {
+                        // Create placeholder comment if it doesn't exist
+                        if (!node._wpIfPlaceholder) {
+                            node._wpIfPlaceholder = document.createComment('wp-if: hidden');
+                        }
+                        // Replace node with its placeholder
+                        node.parentNode.replaceChild(node._wpIfPlaceholder, node);
+                    }
+                });
+            }
+
+        } catch (error) {
+            console.warn('Error evaluating wp-if comment expression:', mappingData.expression, error);
+        }
     };
 
     /**

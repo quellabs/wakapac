@@ -3,28 +3,135 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PAC If Binding Demo</title>
+    <title>WakaPAC Conditionals Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+
+        .control {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+
+        .control label {
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        .control input[type="checkbox"] {
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        .test-section {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: #f9f9f9;
+        }
+
+        .test-section h2 {
+            margin-top: 0;
+            color: #007bff;
+        }
+
+        .message {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: 500;
+        }
+
+        .message-visible {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .message-hidden {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+    </style>
 </head>
 <body>
+<h1>WakaPAC Conditionals Test</h1>
 
 <div id="app">
-    <p>
+    <!-- Control -->
+    <div class="control">
         <label>
-            <input type="checkbox" data-pac-bind="checked:showMessage"> Show Message
+            <input type="checkbox" data-pac-bind="checked: showMessage">
+            Show Message (currently: {{showMessage}})
         </label>
-    </p>
-
-    <div data-pac-bind="if: showMessage">
-        <p>Hello! This message appears when checkbox is checked.</p>
     </div>
 
-    <div data-pac-bind="if: !showMessage">
-        <p>Check the box above to see a message.</p>
+    <!-- Test 1: Element-based IF -->
+    <div class="test-section">
+        <h2>Element-Based IF (data-pac-bind="if: ...")</h2>
+        <p><strong>Note:</strong> The outer div stays in the DOM (with its styling), only the innerHTML is hidden.</p>
+
+        <div data-pac-bind="if: showMessage" class="message message-visible">
+            ✓ Message is visible (element-based if)
+        </div>
+
+        <div data-pac-bind="if: !showMessage" class="message message-hidden">
+            ✗ Message is hidden (element-based if with negation)
+        </div>
+
+        <p><em>Inspect in DevTools: Empty divs with classes remain visible when conditions are false.</em></p>
+    </div>
+
+    <!-- Test 2: Comment-based WP-IF with elements -->
+    <div class="test-section">
+        <h2>Comment-Based IF (elements)</h2>
+
+        <!-- wp-if: showMessage -->
+        <div class="message message-visible">
+            ✓ Message is visible (comment-based wp-if)
+        </div>
+        <!-- /wp-if -->
+
+        <!-- wp-if: !showMessage -->
+        <div class="message message-hidden">
+            ✗ Message is hidden (comment-based wp-if with negation)
+        </div>
+        <!-- /wp-if -->
+    </div>
+
+    <!-- Test 3: Comment-based WP-IF with multiple siblings -->
+    <div class="test-section">
+        <h2>Comment-Based IF (multiple siblings)</h2>
+
+        <!-- wp-if: showMessage -->
+        <div class="message message-visible">Item 1</div>
+        <div class="message message-visible">Item 2</div>
+        <div class="message message-visible">Item 3</div>
+        <!-- /wp-if -->
+
+        <!-- wp-if: !showMessage -->
+        <div class="message message-hidden">
+            All items hidden - check the box to see them
+        </div>
+        <!-- /wp-if -->
     </div>
 </div>
 
 <script src="../wakapac.js"></script>
-
 <script>
     wakaPAC('#app', {
         showMessage: false
