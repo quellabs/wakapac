@@ -426,56 +426,6 @@
         },
 
         /**
-         * Reads the current value from a DOM element (input, select, textarea, etc.)
-         * @param {string|Element} elementOrSelector - CSS selector, ID selector, or DOM element reference
-         * @returns {string|boolean} The element's value (string for most inputs, boolean for checkboxes)
-         */
-        readDOMValue: (elementOrSelector) => {
-            // Find the element using either ID selector (#id) or CSS selector
-            // Check if selector starts with '#' to use getElementById for better performance
-            let element;
-
-            if (typeof elementOrSelector !== 'string') {
-                element = elementOrSelector && elementOrSelector.nodeType ? elementOrSelector : null;
-            } else if (elementOrSelector.startsWith('#')) {
-                element = document.getElementById(elementOrSelector.slice(1));
-            } else {
-                element = document.querySelector(elementOrSelector);
-            }
-
-            // Early return if element doesn't exist to prevent errors
-            if (!element) {
-                console.warn('Element not found: ' + elementOrSelector);
-                return false;
-            }
-
-            // Use switch(true) pattern to check multiple conditions in order of priority
-            switch (true) {
-                case element.tagName === 'SELECT':
-                    return element.value; // Get selected option value
-
-                case element.type === 'checkbox':
-                    return element.checked; // true/false based on checked state
-
-                case element.type === 'radio': {
-                    // Radio buttons work in groups, so find the currently checked one
-                    // Use the 'name' attribute to identify radio buttons in the same group
-                    const checkedRadio = document.querySelector('input[name="' + element.name + '"]:checked');
-                    return checkedRadio ? checkedRadio.value : ''; // Get value or empty string
-                }
-
-                case element.tagName === 'INPUT' || element.tagName === 'TEXTAREA':
-                    return element.value; // Get the input value
-
-                default:
-                    // Extract text content, preferring textContent over innerText
-                    // textContent gets all text including hidden elements
-                    // innerText respects styling and returns visible text only
-                    return element.textContent || element.innerText;
-            }
-        },
-
-        /**
          * Formats a value for display in text content
          * @param {*} value - Value to format
          * @returns {string} Formatted string
@@ -3855,7 +3805,7 @@
 
             // Update the data model using nested property setter to handle complex object paths
             // e.g., "user.profile.name" gets properly set in the nested object structure
-            Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
+            Utils.setNestedProperty(resolvedPath, targetElement.value, this.abstraction);
         }
 
         // Handle checked binding (for checkboxes and radio buttons)
@@ -3870,9 +3820,9 @@
             // Checkbox: set boolean value based on checked state
             // Radio button: only update when this radio is selected, use its value
             if (targetElement.type === 'checkbox') {
-                Utils.setNestedProperty(resolvedPath, event.target.checked, this.abstraction);
-            } else if (targetElement.type === 'radio' && event.target.checked) {
-                Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
+                Utils.setNestedProperty(resolvedPath, targetElement.checked, this.abstraction);
+            } else if (targetElement.type === 'radio' && targetElement.checked) {
+                Utils.setNestedProperty(resolvedPath, targetElement.value, this.abstraction);
             }
         }
 
@@ -3930,14 +3880,14 @@
             switch (config.updateMode) {
                 case 'immediate':
                     // Immediate update - bypass queue entirely
-                    Utils.setNestedProperty(resolvedPath, event.value, this.abstraction);
+                    Utils.setNestedProperty(resolvedPath, targetElement.value, this.abstraction);
                     break;
 
                 case 'delayed':
                     // Delayed update - add to queue with time trigger
                     this.updateQueue.set(resolvedPath, {
                         trigger: 'delay',
-                        value: event.value,
+                        value: targetElement.value,
                         executeAt: Date.now() + config.delay
                     });
 
@@ -3947,7 +3897,7 @@
                     // Change mode - add to queue with blur trigger
                     this.updateQueue.set(resolvedPath, {
                         trigger: 'blur',
-                        value: event.value,
+                        value: targetElement.value,
                         elementId: Utils.getElementIdentifier(targetElement)
                     });
 
@@ -4458,11 +4408,9 @@
             {
                 acceptNode: node => {
                     // Only process comments that belong to this container
-                    if (!Utils.belongsToPacContainer(this.container, node)) {
-                        return NodeFilter.FILTER_SKIP;
-                    }
-
-                    return NodeFilter.FILTER_ACCEPT;
+                    return !Utils.belongsToPacContainer(this.container, node)
+                        ? NodeFilter.FILTER_SKIP
+                        : NodeFilter.FILTER_ACCEPT;
                 }
             }
         );
