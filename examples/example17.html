@@ -44,10 +44,25 @@
             font-size: 12px;
         }
 
-        .fast { background: #28a745; color: white; }
-        .slow { background: #ffc107; color: black; }
-        .offline { background: #dc3545; color: white; }
-        .unknown { background: #6c757d; color: white; }
+        .fast {
+            background: #28a745;
+            color: white;
+        }
+
+        .slow {
+            background: #ffc107;
+            color: black;
+        }
+
+        .offline {
+            background: #dc3545;
+            color: white;
+        }
+
+        .unknown {
+            background: #6c757d;
+            color: white;
+        }
 
         .demo-section {
             margin: 30px 0;
@@ -148,9 +163,11 @@
             </div>
         </div>
 
-        <div data-pac-bind="if: !browserOnline" class="offline-message">
+        <!-- wp-if: !browserOnline -->
+        <div class="offline-message">
             ⚠️ You're currently offline. Some features may not work properly.
         </div>
+        <!-- /wp-if -->
     </div>
 
     <div class="demo-section">
@@ -173,9 +190,11 @@
                 {{statusMessage}}
             </div>
 
-            <div data-pac-bind="if: !browserOnline && message.length > 0" class="offline-message">
+            <!-- wp-if: !browserOnline && message.length > 0 -->
+            <div class="offline-message">
                 💾 Your message will be saved locally and sent when you're back online
             </div>
+            <!-- /wp-if -->
         </form>
     </div>
 
@@ -183,21 +202,21 @@
         <h3>Adaptive Features</h3>
         <p>Network Quality: <strong>{{browserNetworkQuality}} ({{browserNetworkEffectiveType}})</strong></p>
 
-        <div data-pac-bind="if: browserNetworkQuality === 'fast'">
-            ✅ High-quality images and videos enabled
-        </div>
+        <!-- wp-if: browserNetworkQuality === 'fast' -->
+        ✅ High-quality images and videos enabled
+        <!-- /wp-if -->
 
-        <div data-pac-bind="if: browserNetworkQuality === 'slow'">
-            📶 Using data-saver mode - optimized for slow connections
-        </div>
+        <!-- wp-if: browserNetworkQuality === 'slow' -->
+        📶 Using data-saver mode - optimized for slow connections
+        <!-- /wp-if -->
 
-        <div data-pac-bind="if: browserNetworkQuality === 'offline'">
-            📴 Offline mode - showing cached content only
-        </div>
+        <!-- wp-if: browserNetworkQuality === 'offline' -->
+        📴 Offline mode - showing cached content only
+        <!-- /wp-if -->
 
-        <div data-pac-bind="if: browserNetworkQuality === 'unknown'">
-            🔍 Detecting network quality...
-        </div>
+        <!-- wp-if: browserNetworkQuality === 'unknown' -->
+        🔍 Detecting network quality...
+        <!-- /wp-if -->
     </div>
 
     <div class="demo-section">
@@ -268,7 +287,9 @@
         handleSubmit(event) {
             event.preventDefault();
 
-            if (!this.message.trim()) return;
+            if (!this.message.trim()) {
+                return;
+            }
 
             if (this.browserOnline) {
                 // Online: send immediately
@@ -301,7 +322,9 @@
         },
 
         syncPendingItems() {
-            if (this.pendingItems.length === 0) return;
+            if (this.pendingItems.length === 0) {
+                return;
+            }
 
             console.log(`Syncing ${this.pendingItems.length} pending items...`);
 
