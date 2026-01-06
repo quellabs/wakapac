@@ -183,15 +183,47 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <div data-pac-bind="visible: !hideContent">Always shown unless hideContent is true</div>
 ```
 
-**`if`** - Conditional rendering (element added/removed from DOM)
+**`if`** - Conditional rendering (clears/restores innerHTML, element stays in DOM)
 ```html
 <div data-pac-bind="if: user.isAdmin">Admin Panel</div>
 <div data-pac-bind="if: !isLoading">Content loaded</div>
 ```
 
+**`<!-- wp-if: expression -->`** - Conditional rendering without wrapper elements
+```html
+<!-- wp-if: showMessage -->
+<div>This content is conditionally rendered</div>
+<!-- /wp-if -->
+
+<!-- Perfect for tables (no wrapper needed) -->
+<table>
+  <tbody>
+    <!-- wp-if: user.isLoggedIn -->
+    <tr><td>User data row 1</td></tr>
+    <tr><td>User data row 2</td></tr>
+    <!-- /wp-if -->
+  </tbody>
+</table>
+
+<!-- Multiple siblings controlled together -->
+<!-- wp-if: user.isPremium -->
+<div>Premium Feature 1</div>
+<div>Premium Feature 2</div>
+<div>Premium Feature 3</div>
+<!-- /wp-if -->
+```
+
 **When to use each:**
-- **`visible`**: Fast toggling, preserving form values, CSS transitions
-- **`if`**: Better performance for large DOM trees, security-sensitive content
+
+| Use Case                         | Best Choice      | Why                                          |
+|----------------------------------|------------------|----------------------------------------------|
+| Fast toggling, CSS transitions   | `visible`        | Element stays rendered, just hidden with CSS |
+| Complex nested structures        | `if`             | Removes content from memory when hidden      |
+| Form inputs you want to preserve | `visible`        | Input values remain intact                   |
+| Table rows, grid items           | `<!-- wp-if -->` | No wrapper element needed                    |
+| Multiple siblings as group       | `<!-- wp-if -->` | Controls multiple elements together          |
+| Text nodes without wrapper       | `<!-- wp-if -->` | Works directly with text                     |
+| Single element with wrapper      | `if`             | Simpler when wrapper already exists          |
 
 #### Attribute Bindings
 
@@ -1175,8 +1207,8 @@ Each wakaPAC component is identified by a `data-pac-id` attribute. If your eleme
 <div class="widget"></div>
 
 <script>
-wakaPAC('#sidebar', { /* ... */ });  // data-pac-id="sidebar"
-wakaPAC('.widget', { /* ... */ });   // data-pac-id="pac-abc123..."
+    wakaPAC('#sidebar', { /* ... */ });  // data-pac-id="sidebar"
+    wakaPAC('.widget', { /* ... */ });   // data-pac-id="pac-abc123..."
 </script>
 ```
 
