@@ -23,12 +23,12 @@
 
         msgProc(message) {
             if (message.message === MSG_TYPES.MSG_KEYUP) {
-                if (message.extended.key === 'ArrowUp') {
+                if (message.originalEvent.key === 'ArrowUp') {
                     this.increment();
                     return true;
                 }
 
-                if (message.extended.key === 'ArrowDown') {
+                if (message.originalEvent.key === 'ArrowDown') {
                     this.decrement();
                     return true;
                 }
