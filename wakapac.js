@@ -941,26 +941,37 @@
              * Set wakaPAC.mouseMoveThrottleFps = 120 for higher precision (gaming, drawing apps)
              * Must be set before first wakaPAC() call
              */
-            let mouseMoveThrottle = null;
+            self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (ev) => {
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, ev);
+            });
 
-            document.addEventListener('mousemove', function (event) {
-                // Calculate throttle delay from FPS (0 = no throttle)
-                const throttleDelay = wakaPAC.mouseMoveThrottleFps > 0
-                    ? 1000 / wakaPAC.mouseMoveThrottleFps
-                    : 0;
+            /**
+             * Touch start simulates left button down
+             */
+            document.addEventListener('touchstart', function (event) {
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONDOWN, event);
+            });
 
-                // No throttling - dispatch immediately
-                if (throttleDelay === 0) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, event);
-                    return;
-                }
+            /**
+             * Touch end simulates left button up
+             */
+            document.addEventListener('touchend', function (event) {
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONUP, event);
+            });
 
-                // Throttled - only dispatch if not currently throttled
-                if (!mouseMoveThrottle) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, event);
-                    mouseMoveThrottle = setTimeout(() => {
-                        mouseMoveThrottle = null;
-                    }, throttleDelay);
+            /**
+             * Touch cancel also simulates left button up
+             */
+            document.addEventListener('touchcancel', function (event) {
+                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONUP, event);
+            });
+
+            /**
+             * Touch move simulates mouse move
+             */
+            self.setupMoveCoalescer('touchmove', wakaPAC.touchMoveThrottleFps, (ev) => {
+                if (ev.touches.length > 0) {
+                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, ev);
                 }
             });
 
@@ -1027,44 +1038,99 @@
              * Handle scroll events (debounced for performance)
              * Updates current scroll position for all PAC containers
              */
-            let scrollTimeout;
-            window.addEventListener('scroll', function() {
-                if (scrollTimeout) {
-                    return;
-                }
-
-                scrollTimeout = setTimeout(() => {
-                    self.dispatchBrowserStateEvent('scroll', {
-                        scrollX: window.scrollX,
-                        scrollY: window.scrollY
-                    });
-
-                    scrollTimeout = null;
-                }, 16); // ~60fps
+            self.setupMoveCoalescer('window.scroll', 60, function() {
+                self.dispatchBrowserStateEvent('scroll', {
+                    scrollX: window.scrollX,
+                    scrollY: window.scrollY
+                });
             });
 
             /**
              * Handle window resize events (debounced for performance)
              * Updates viewport/document dimensions and scroll position
              */
-            let resizeTimeout;
-            window.addEventListener('resize', function() {
-                if (resizeTimeout) {
-                    return;
+            self.setupMoveCoalescer('window.resize', 60, function() {
+                self.dispatchBrowserStateEvent('resize', {
+                    viewportWidth: window.innerWidth,
+                    viewportHeight: window.innerHeight,
+                    documentWidth: document.documentElement.scrollWidth,
+                    documentHeight: document.documentElement.scrollHeight,
+                    scrollX: window.scrollX,
+                    scrollY: window.scrollY
+                });
+            });
+        },
+
+        /**
+         * Coalesce high-frequency pointer events (e.g. mousemove, touchmove) to
+         * at most once per animation frame, with optional FPS limiting.
+         * @param {string} domEventName - Name of the DOM event to listen for.
+         * @param {number} targetFps - Desired dispatch rate. Set 0 for uncapped (≈60Hz).
+         * @param {(event: Event) => void} dispatch - Callback to receive the coalesced event.
+         */
+        setupMoveCoalescer(domEventName, targetFps, dispatch) {
+            // Timestamp of the last dispatched event
+            let lastTime = 0;
+
+            // Most recent event to dispatch
+            let pendingEvent = null;
+
+            // Flag to ensure only one RAF callback is queued at a time
+            let scheduled = false;
+
+            // Milliseconds between allowed dispatches (0 = uncapped)
+            const interval = targetFps > 0 ? 1000 / targetFps : 0;
+
+            // Determine listening target
+            let target = document;
+            let event = domEventName;
+
+            if (domEventName.indexOf(".") !== -1) {
+                // Split target and event
+                const [targetName, eventName] = domEventName.split('.');
+
+                // Set event name
+                event = eventName;
+
+                // Map string to actual object
+                switch (targetName) {
+                    case 'window':
+                        target = window;
+                        break;
+
+                    case 'document':
+                        target = document;
+                        break;
+
+                    case 'body':
+                        target = document.body;
+                        break;
+
+                    default:
+                        // Unsupported target; optionally ignore or throw
+                        return;
                 }
+            }
 
-                resizeTimeout = setTimeout(() => {
-                    self.dispatchBrowserStateEvent('resize', {
-                        viewportWidth: window.innerWidth,
-                        viewportHeight: window.innerHeight,
-                        documentWidth: document.documentElement.scrollWidth,
-                        documentHeight: document.documentElement.scrollHeight,
-                        scrollX: window.scrollX,
-                        scrollY: window.scrollY
+            // Start listening
+            target.addEventListener(event, (ev) => {
+                // Only keep the latest event until the next frame
+                pendingEvent = ev;
+
+                // Schedule a frame callback if none is pending
+                if (!scheduled) {
+                    scheduled = true;
+
+                    requestAnimationFrame((now) => {
+                        // Dispatch if uncapped or enough time elapsed
+                        if (interval === 0 || now - lastTime >= interval) {
+                            dispatch(pendingEvent);
+                            lastTime = now;
+                        }
+
+                        scheduled = false;
                     });
-
-                    resizeTimeout = null;
-                }, 100);
+                }
             });
         },
 
@@ -1336,7 +1402,6 @@
         buildMouseWParam(event) {
             let wParam = 0;
 
-            // Modifier key states
             if (event.ctrlKey) {
                 wParam |= MK_CONTROL;
             }
@@ -1349,18 +1414,22 @@
                 wParam |= MK_ALT;
             }
 
-            // Mouse button states (which buttons are currently held down)
-            // Note: This shows ALL buttons held, not just the one that triggered the event
-            if (event.buttons & 1) {
+            if (event.buttons !== undefined) {
+                // Real mouse event
+                if (event.buttons & 1) {
+                    wParam |= MK_LBUTTON;
+                }
+
+                if (event.buttons & 2) {
+                    wParam |= MK_RBUTTON;
+                }
+
+                if (event.buttons & 4) {
+                    wParam |= MK_MBUTTON;
+                }
+            } else if (event.touches && event.touches.length > 0) {
+                // Touch event with active touches = simulate left button
                 wParam |= MK_LBUTTON;
-            }
-
-            if (event.buttons & 2) {
-                wParam |= MK_RBUTTON;
-            }
-
-            if (event.buttons & 4) {
-                wParam |= MK_MBUTTON;
             }
 
             return wParam;
@@ -1371,18 +1440,23 @@
          * Packs x,y coordinates into a single 32-bit value
          * Coordinates are relative to the container element (client-area relative)
          * LOWORD (bits 0-15) = x-coordinate, HIWORD (bits 16-31) = y-coordinate
-         * @param {MouseEvent} event - The mouse event
+         * @param {MouseEvent|TouchEvent} event - The mouse event
          * @param {Element} container - The PAC container element with data-pac-id
          * @returns {number} lParam value with packed container-relative coordinates
          */
         buildMouseLParam(event, container) {
+            // Fetch clientX and Y from event
+            const touch = event.touches?.[0] || event.changedTouches?.[0];
+            const clientX = touch ? touch.clientX : event.clientX;
+            const clientY = touch ? touch.clientY : event.clientY;
+
             // Get container's bounding rectangle to calculate relative coordinates
             const rect = container.getBoundingClientRect();
 
             // Calculate container-relative coordinates (client-area relative)
             // This matches Win32 convention where coordinates are relative to the window's client area
-            const relativeX = event.clientX - rect.left;
-            const relativeY = event.clientY - rect.top;
+            const relativeX = clientX - rect.left;
+            const relativeY = clientY - rect.top;
 
             // Clamp to 16-bit unsigned range and ensure non-negative
             const x = Math.max(0, Math.min(0xFFFF, Math.round(relativeX)));
