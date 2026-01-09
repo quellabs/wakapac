@@ -651,6 +651,7 @@
 
                     // Check if this property is a getter-only property (computed property)
                     const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+
                     if (descriptor && descriptor.get && !descriptor.set) {
                         // This is a getter-only property (computed), return the value as-is
                         return val;
@@ -4399,7 +4400,7 @@
             // Store the updated mapping data into the map
             const foreachExpr = mappingData.bindings.foreach.target;
             const itemVar = element.getAttribute('data-pac-item') || 'item';
-            const indexVar = element.getAttribute('data-pac-index') || 'index';
+            const indexVar = element.getAttribute('data-pac-index') || '$index';
 
             Object.assign(mappingData, {
                 foreachId: foreachId,
