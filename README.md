@@ -279,7 +279,7 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 ```html
 <div data-pac-bind="foreach: items" data-pac-item="item" data-pac-index="index">
     <div class="item">
-        <span>{{ index }}. {{ item.name }}</span>
+        <span>{{ $index }}. {{ item.name }}</span>
         <button data-pac-bind="click: removeItem">Remove</button>
     </div>
 </div>
@@ -376,7 +376,7 @@ wakaPAC('#app', {
 ```html
 <div data-pac-bind="foreach: todos" data-pac-item="todo" data-pac-index="index">
     <div class="todo-item">
-        <span>{{ index }}. {{ todo.text }}</span>
+        <span>{{ $index }}. {{ todo.text }}</span>
         <input type="checkbox" data-pac-bind="checked: todo.completed">
         <button data-pac-bind="click: removeTodo">Remove</button>
     </div>
@@ -930,17 +930,18 @@ event.detail = {
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_CHANGE:
-const target = event.target;
-
-if (target.type === 'checkbox') {
-    const isChecked = wParam === 1;
-    console.log(`Checkbox is now ${isChecked ? 'checked' : 'unchecked'}`);
-}
-
-if (target.tagName === 'SELECT') {
-    console.log(`Selected index: ${wParam}`);
-}
-break;
+    const target = event.target;
+    
+    if (target.type === 'checkbox') {
+        const isChecked = wParam === 1;
+        console.log(`Checkbox is now ${isChecked ? 'checked' : 'unchecked'}`);
+    }
+    
+    if (target.tagName === 'SELECT') {
+        console.log(`Selected index: ${wParam}`);
+    }
+    
+    break;
 ```
 
 ##### Form Submit Events (SUBMIT)

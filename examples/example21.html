@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WakaPAC Slider Demo</title>
-    <script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.min.js"></script>
+    <script src="../wakapac.js"></script>
     <style>
         * {
             margin: 0;
@@ -28,7 +28,7 @@
             max-width: 800px;
             margin: 0 auto;
             border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             background: white;
         }
 
@@ -38,14 +38,18 @@
             border-radius: 12px 12px 0 0;
         }
 
-        .slider-track {
+        .slider-track-wrapper {
             display: flex;
             cursor: grab;
             user-select: none;
         }
 
-        .slider-track:active {
+        .slider-track-wrapper:active {
             cursor: grabbing;
+        }
+
+        .slider-track {
+            display: contents;
         }
 
         .slide {
@@ -59,25 +63,11 @@
             color: white;
         }
 
-        .slide:nth-child(1) {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-
-        .slide:nth-child(2) {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        }
-
-        .slide:nth-child(3) {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        }
-
-        .slide:nth-child(4) {
-            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-        }
-
-        .slide:nth-child(5) {
-            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-        }
+        .slide:nth-child(1) { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .slide:nth-child(2) { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .slide:nth-child(3) { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .slide:nth-child(4) { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+        .slide:nth-child(5) { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
 
         .slider-nav {
             position: absolute;
@@ -93,7 +83,7 @@
             width: 12px;
             height: 12px;
             border-radius: 50%;
-            background: rgba(255, 255, 255, 0.5);
+            background: rgba(255,255,255,0.5);
             cursor: pointer;
             transition: background 0.3s;
         }
@@ -128,7 +118,7 @@
             height: 40px;
             border-radius: 50%;
             border: none;
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255,255,255,0.9);
             cursor: pointer;
             font-size: 20px;
             display: flex;
@@ -155,35 +145,24 @@
 
 <div id="slider" class="slider-container">
     <div class="slider-wrapper">
-        <div class="slider-track" data-pac-bind="style: sliderStyle">
-            <div class="slide">Slide 1</div>
-            <div class="slide">Slide 2</div>
-            <div class="slide">Slide 3</div>
-            <div class="slide">Slide 4</div>
-            <div class="slide">Slide 5</div>
+        <div class="slider-track-wrapper" data-pac-bind="style: sliderStyle">
+            <div class="slider-track" data-pac-bind="foreach: slides">
+                <div class="slide">{{item}}</div>
+            </div>
         </div>
 
-        <div class="slider-nav">
-            <div class="dot" data-pac-bind="class: { active: currentSlide === 0 }, click: goToSlide"
-                 data-index="0"></div>
-            <div class="dot" data-pac-bind="class: { active: currentSlide === 1 }, click: goToSlide"
-                 data-index="1"></div>
-            <div class="dot" data-pac-bind="class: { active: currentSlide === 2 }, click: goToSlide"
-                 data-index="2"></div>
-            <div class="dot" data-pac-bind="class: { active: currentSlide === 3 }, click: goToSlide"
-                 data-index="3"></div>
-            <div class="dot" data-pac-bind="class: { active: currentSlide === 4 }, click: goToSlide"
-                 data-index="4"></div>
+        <div class="slider-nav" data-pac-bind="foreach: slides">
+            <div class="dot" data-pac-bind="class: { active: currentSlide === $index }, click: goToSlide"></div>
         </div>
 
         <div class="slider-buttons">
             <button data-pac-bind="click: prevSlide, visible: currentSlide > 0" style="display: none;">←</button>
-            <button data-pac-bind="click: nextSlide, visible: currentSlide < totalSlides - 1">→</button>
+            <button data-pac-bind="click: nextSlide, visible: currentSlide < slides.length - 1">→</button>
         </div>
     </div>
 
     <div class="info">
-        Current slide: {{currentSlide + 1}} / 5<br>
+        Current slide: {{currentSlide + 1}} / {{totalSlides}}<br>
         Drag or use buttons/dots to navigate
     </div>
 </div>
@@ -191,6 +170,7 @@
 <script>
     wakaPAC('#slider', {
         currentSlide: 0,
+        slides: ['Slide 1', 'Slide 2', 'Slide 3', 'Slide 4', 'Slide 5'],
         totalSlides: 5,
 
         // Private state (underscore prefix prevents DOM updates)
@@ -198,11 +178,6 @@
         _startX: 0,
         _dragOffset: 0,
         _containerWidth: 0,
-
-        ready() {
-            // Store container width for percentage calculations
-            this._containerWidth = this.container.querySelector('.slider-wrapper').offsetWidth;
-        },
 
         computed: {
             sliderStyle() {
@@ -227,8 +202,14 @@
         msgProc(event) {
             const pos = this.MAKEPOINTS(event.lParam);
 
-            switch (event.message) {
+            switch(event.message) {
                 case MSG_TYPES.MSG_LBUTTONDOWN:
+                    // Calculate width on first drag if not set
+                    if (!this._containerWidth) {
+                        const wrapper = event.target.closest('.slider-wrapper');
+                        this._containerWidth = wrapper ? wrapper.offsetWidth : 800;
+                    }
+
                     this._dragging = true;
                     this._startX = pos.x;
                     this._dragOffset = 0;
@@ -236,12 +217,11 @@
 
                 case MSG_TYPES.MSG_MOUSEMOVE:
                     if (this._dragging) {
-                        // Determine delta
                         const deltaX = pos.x - this._startX;
-
                         // Convert pixels to percentage
                         this._dragOffset = (deltaX / this._containerWidth) * 100;
                     }
+
                     break;
 
                 case MSG_TYPES.MSG_LBUTTONUP:
@@ -256,6 +236,7 @@
                         this.currentSlide = Math.max(0, Math.min(targetSlide, this.totalSlides - 1));
                         this._dragOffset = 0;
                     }
+
                     break;
             }
         },
@@ -272,8 +253,8 @@
             }
         },
 
-        goToSlide(event) {
-            this.currentSlide = parseInt(event.target.getAttribute('data-index'));
+        goToSlide(item, index) {
+            this.currentSlide = index;
         }
     });
 </script>
