@@ -6329,23 +6329,28 @@
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.postMessage = function(messageId, wParam, lParam, extraData = {}) {
-        const customEvent = new CustomEvent('pac:event', {
-            bubbles: true,
-            cancelable: true,
-            detail: extraData
-        });
+        // Query all containers
+        const containers = document.querySelectorAll('[data-pac-id]');
 
-        Object.defineProperties(customEvent, {
-            message: { value: messageId, enumerable: true, configurable: true },
-            wParam: { value: wParam, enumerable: true, configurable: true },
-            lParam: { value: lParam, enumerable: true, configurable: true },
-            timestamp: { value: Date.now(), enumerable: true, configurable: true },
-            target: { value: null, enumerable: true, configurable: true },
-            id: { value: null, enumerable: true, configurable: true },
-            targetContainer: { value: null, enumerable: true, configurable: true }
-        });
+        containers.forEach(container => {
+            const customEvent = new CustomEvent('pac:event', {
+                bubbles: false,
+                cancelable: true,
+                detail: extraData
+            });
 
-        document.dispatchEvent(customEvent);
+            Object.defineProperties(customEvent, {
+                message: { value: messageId, enumerable: true, configurable: true },
+                wParam: { value: wParam, enumerable: true, configurable: true },
+                lParam: { value: lParam, enumerable: true, configurable: true },
+                timestamp: { value: Date.now(), enumerable: true, configurable: true },
+                target: { value: null, enumerable: true, configurable: true },
+                id: { value: container.dataset.pacId, enumerable: true, configurable: true },
+                targetContainer: { value: null, enumerable: true, configurable: true }  // null = broadcast
+            });
+
+            container.dispatchEvent(customEvent);
+        });
     };
 
     /**
@@ -6358,8 +6363,15 @@
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessage = function(containerId, messageId, wParam, lParam, extraData = {}) {
+        const container = document.querySelector(`[data-pac-id="${containerId}"]`);
+
+        if (!container) {
+            console.warn(`sendMessage: Container with id "${containerId}" not found`);
+            return;
+        }
+
         const customEvent = new CustomEvent('pac:event', {
-            bubbles: true,
+            bubbles: false,
             cancelable: true,
             detail: extraData
         });
@@ -6370,11 +6382,11 @@
             lParam: { value: lParam, enumerable: true, configurable: true },
             timestamp: { value: Date.now(), enumerable: true, configurable: true },
             target: { value: null, enumerable: true, configurable: true },
-            id: { value: null, enumerable: true, configurable: true },
+            id: { value: containerId, enumerable: true, configurable: true },
             targetContainer: { value: containerId, enumerable: true, configurable: true }
         });
 
-        document.dispatchEvent(customEvent);
+        container.dispatchEvent(customEvent);
     };
 
     // ========================================================================
