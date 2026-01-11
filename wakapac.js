@@ -3669,17 +3669,16 @@
      */
     Context.prototype.handlePacEvent = function(event) {
         // Check if this event is targeted at a specific container
-        if (event.targetContainer != null && event.targetContainer !== this.container.dataset.pacId) {
+        if (event.targetContainer !== null && event.targetContainer !== this.container.dataset.pacId) {
             return;
         }
-
         // Call msgProc if it exists
         let allowDefault = true;
 
         if (this.originalAbstraction.msgProc && typeof this.originalAbstraction.msgProc === 'function') {
             const msgProcResult = this.originalAbstraction.msgProc.call(this.abstraction, event);
 
-            // Only certain message types can be canceled by msgProc
+            // Only certain message types can be cancelled by msgProc
             const cancellableEvents = [
                 MSG_TYPES.MSG_LBUTTONUP,
                 MSG_TYPES.MSG_MBUTTONUP,
@@ -3753,6 +3752,10 @@
             case MSG_TYPES.MSG_BLUR:
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
+                break;
+
+            default :
+                console.warn(`Unhandled event type ${event.message}`);
                 break;
         }
     }
@@ -6321,8 +6324,8 @@
      * Broadcast a message to all WakaPAC containers
      * Similar to Win32 PostMessage with HWND_BROADCAST
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
-     * @param {*} wParam - First message parameter (typically numeric data or flags)
-     * @param {*} lParam - Second message parameter (typically object data or additional info)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.postMessage = function(messageId, wParam, lParam, extraData = {}) {
@@ -6339,7 +6342,7 @@
             timestamp: { value: Date.now(), enumerable: true, configurable: true },
             target: { value: null, enumerable: true, configurable: true },
             id: { value: null, enumerable: true, configurable: true },
-            targetContainer: { value: null, enumerable: true, configurable: true },
+            targetContainer: { value: null, enumerable: true, configurable: true }
         });
 
         document.dispatchEvent(customEvent);
@@ -6350,8 +6353,8 @@
      * Similar to Win32 SendMessage with a specific HWND
      * @param {string} containerId - Target container's data-pac-id attribute value
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
-     * @param {*} wParam - First message parameter (typically numeric data or flags)
-     * @param {*} lParam - Second message parameter (typically object data or additional info)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessage = function(containerId, messageId, wParam, lParam, extraData = {}) {
