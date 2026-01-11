@@ -6321,39 +6321,6 @@
     }
 
     /**
-     * Broadcast a message to all WakaPAC containers
-     * Similar to Win32 PostMessage with HWND_BROADCAST
-     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
-     * @param {number} wParam - First message parameter (integer)
-     * @param {number} lParam - Second message parameter (integer)
-     * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
-     */
-    wakaPAC.postMessage = function(messageId, wParam, lParam, extraData = {}) {
-        // Query all containers
-        const containers = document.querySelectorAll('[data-pac-id]');
-
-        containers.forEach(container => {
-            const customEvent = new CustomEvent('pac:event', {
-                bubbles: false,
-                cancelable: true,
-                detail: extraData
-            });
-
-            Object.defineProperties(customEvent, {
-                message: { value: messageId, enumerable: true, configurable: true },
-                wParam: { value: wParam, enumerable: true, configurable: true },
-                lParam: { value: lParam, enumerable: true, configurable: true },
-                timestamp: { value: Date.now(), enumerable: true, configurable: true },
-                target: { value: null, enumerable: true, configurable: true },
-                id: { value: container.dataset.pacId, enumerable: true, configurable: true },
-                targetContainer: { value: null, enumerable: true, configurable: true }  // null = broadcast
-            });
-
-            container.dispatchEvent(customEvent);
-        });
-    };
-
-    /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 SendMessage with a specific HWND
      * @param {string} containerId - Target container's data-pac-id attribute value
@@ -6382,11 +6349,30 @@
             lParam: { value: lParam, enumerable: true, configurable: true },
             timestamp: { value: Date.now(), enumerable: true, configurable: true },
             target: { value: null, enumerable: true, configurable: true },
-            id: { value: containerId, enumerable: true, configurable: true },
+            id: { value: container.id || null, enumerable: true, configurable: true },
             targetContainer: { value: containerId, enumerable: true, configurable: true }
         });
 
         container.dispatchEvent(customEvent);
+    };
+
+    /**
+     * Broadcast a message to all WakaPAC containers
+     * Similar to Win32 PostMessage with HWND_BROADCAST
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
+     */
+    wakaPAC.postMessage = function(messageId, wParam, lParam, extraData = {}) {
+        // Query all PAC containers in the document
+        const containers = document.querySelectorAll('[data-pac-id]');
+
+        // Broadcast the message to each container by calling sendMessage
+        // This ensures consistent event structure and behavior across both functions
+        containers.forEach(container => {
+            wakaPAC.sendMessage(container.dataset.pacId, messageId, wParam, lParam, extraData);
+        });
     };
 
     // ========================================================================
