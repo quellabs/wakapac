@@ -6383,6 +6383,8 @@
 
     // Export to global scope
     window.wakaPAC = wakaPAC;
+
+    // Export built in message types
     window.MSG_TYPES = MSG_TYPES;
 
     // Export modifier key constants
