@@ -2906,7 +2906,7 @@ WakaPAC provides Win32-style messaging for communication between containers that
 
 #### Message Broadcasting
 
-Broadcast a message to all containers using `postMessage(messageId, wParam, lParam, extraData)`:
+Broadcast a message to all containers using `broadcastMessage(messageId, wParam, lParam, extraData)`:
 - **messageId**: Integer constant identifying the message type
 - **wParam**, **lParam**: Integer parameters for numeric data
 - **extraData**: Optional object for complex data (objects, arrays, strings)
@@ -2916,10 +2916,10 @@ Broadcast a message to all containers using `postMessage(messageId, wParam, lPar
 const WM_USER_LOGIN = MSG_TYPES.MSG_USER + 1;
 
 // wParam and lParam as integers
-wakaPAC.postMessage(WM_USER_LOGIN, 123, 0);  // wParam = userId
+wakaPAC.broadcastMessage(WM_USER_LOGIN, 123, 0);  // wParam = userId
 
 // Complex data goes in extraData parameter
-wakaPAC.postMessage(WM_USER_LOGIN, 123, 0, {
+wakaPAC.broadcastMessage(WM_USER_LOGIN, 123, 0, {
     name: 'Floris',
     role: 'admin'
 });
@@ -2929,7 +2929,7 @@ wakaPAC.postMessage(WM_USER_LOGIN, 123, 0, {
 
 Send a message to a specific container using `sendMessage(containerId, messageId, wParam, lParam, extraData)`:
 - **containerId**: The `data-pac-id` of the target container
-- **messageId**, **wParam**, **lParam**, **extraData**: Same as `postMessage`
+- **messageId**, **wParam**, **lParam**, **extraData**: Same as `broadcastMessage`
 
 ```javascript
 // Send to specific container (wParam/lParam as integers)
@@ -2966,7 +2966,7 @@ wakaPAC('#user-panel', {
 });
 
 // Trigger from anywhere
-wakaPAC.postMessage(WM_USER_LOGIN, 123, 0, { name: 'Floris' });
+wakaPAC.broadcastMessage(WM_USER_LOGIN, 123, 0, { name: 'Floris' });
 ```
 
 ### Data Safety and Display Utilities

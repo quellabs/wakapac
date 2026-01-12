@@ -6365,7 +6365,7 @@
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.postMessage = function(messageId, wParam, lParam, extraData = {}) {
+    wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extraData = {}) {
         // Query all PAC containers in the document
         const containers = document.querySelectorAll('[data-pac-id]');
 
