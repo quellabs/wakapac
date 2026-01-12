@@ -3246,14 +3246,9 @@
         this.updateQueue.clear();
 
         // Remove from registry
-        const pacId = this.container.getAttribute('data-pac-id');
-
-        if (pacId) {
-            window.PACRegistry.deregister(pacId);
+        if (this.abstraction.pacId) {
+            window.PACRegistry.deregister(this.abstraction.pacId);
         }
-
-        // Remove pac-id attribute from container
-        this.container.removeAttribute('data-pac-id');
 
         // Nullify all references to allow garbage collection
         this.abstraction = null;
