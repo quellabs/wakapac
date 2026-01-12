@@ -4870,6 +4870,9 @@
      * @param {Object} abstraction - The abstraction to enhance
      */
     Context.prototype.injectSystemProperties = function(abstraction) {
+        // Add container identification
+        abstraction.pacId = this.container.getAttribute('data-pac-id') || this.container.id;
+
         // Initialize online/offline state and network quality
         abstraction.browserOnline = navigator.onLine;
         abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
