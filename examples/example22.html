@@ -363,9 +363,6 @@
                         // Counter components ignore status messages
                         this.logMessage(`${msgName}: Ignored (not a counter message)`);
                         break;
-
-                    default:
-                        this.logMessage(`Unknown message: 0x${event.message.toString(16)}`);
                 }
 
                 // Return true to allow default processing
@@ -379,6 +376,7 @@
                     [MSG_RESET]: 'RESET',
                     [MSG_SET_STATUS]: 'SET_STATUS'
                 };
+
                 return names[msgId] || `UNKNOWN(0x${msgId.toString(16)})`;
             }
         };
@@ -396,41 +394,41 @@
                 const timestamp = new Date().toLocaleTimeString();
                 const messageText = `${timestamp}: ${msg}`;
                 this.messages.unshift(messageText);
+
                 if (this.messages.length > 10) {
                     this.messages.pop();
                 }
             },
 
             msgProc(event) {
-                this.messageCount++;
                 const msgName = this.getMessageName(event.message);
 
                 switch(event.message) {
                     case MSG_INCREMENT:
+                        this.messageCount++;
                         this.lastMessage = `INCREMENT by ${event.wParam}`;
                         this.logMessage(`${msgName}: wParam=${event.wParam}, lParam=${event.lParam}`);
                         break;
 
                     case MSG_DECREMENT:
+                        this.messageCount++;
                         this.lastMessage = `DECREMENT by ${event.wParam}`;
                         this.logMessage(`${msgName}: wParam=${event.wParam}, lParam=${event.lParam}`);
                         break;
 
                     case MSG_RESET:
+                        this.messageCount++;
                         this.lastMessage = 'RESET command received';
                         this.logMessage(`${msgName}: Counter reset requested`);
                         break;
 
                     case MSG_SET_STATUS:
+                        this.messageCount++;
                         const statuses = ['Ready', 'Processing', 'Complete', 'Error', 'Idle'];
                         this.status = statuses[event.wParam] || `Custom(${event.wParam})`;
                         this.lastMessage = `STATUS changed to ${this.status}`;
                         this.logMessage(`${msgName}: Status = ${this.status}`);
                         break;
-
-                    default:
-                        this.lastMessage = `Unknown: 0x${event.message.toString(16)}`;
-                        this.logMessage(`Unknown message: 0x${event.message.toString(16)}`);
                 }
 
                 return true;
@@ -443,6 +441,7 @@
                     [MSG_RESET]: 'RESET',
                     [MSG_SET_STATUS]: 'SET_STATUS'
                 };
+
                 return names[msgId] || `UNKNOWN`;
             }
         };
@@ -489,18 +488,21 @@
     function clearAllLogs() {
         // Clear counter A messages
         const counterAContext = window.PACRegistry.get('counterA');
+
         if (counterAContext) {
             counterAContext.abstraction.messages = [];
         }
 
         // Clear counter B messages
         const counterBContext = window.PACRegistry.get('counterB');
+
         if (counterBContext) {
             counterBContext.abstraction.messages = [];
         }
 
         // Clear status monitor messages
         const statusMonitorContext = window.PACRegistry.get('statusMonitor');
+
         if (statusMonitorContext) {
             statusMonitorContext.abstraction.messages = [];
             statusMonitorContext.abstraction.messageCount = 0;

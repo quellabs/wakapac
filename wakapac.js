@@ -3682,7 +3682,7 @@
         if (this.originalAbstraction.msgProc && typeof this.originalAbstraction.msgProc === 'function') {
             const msgProcResult = this.originalAbstraction.msgProc.call(this.abstraction, event);
 
-            // Only certain message types can be cancelled by msgProc
+            // Only certain message types can be canceled by msgProc
             const cancellableEvents = [
                 MSG_TYPES.MSG_LBUTTONUP,
                 MSG_TYPES.MSG_MBUTTONUP,
@@ -3756,10 +3756,6 @@
             case MSG_TYPES.MSG_BLUR:
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
-                break;
-
-            default :
-                console.warn(`Unhandled event type ${event.message}`);
                 break;
         }
     }
