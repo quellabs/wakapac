@@ -3671,11 +3671,6 @@
      * @returns {void}
      */
     Context.prototype.handlePacEvent = function(event) {
-        // Check if this event is targeted at a specific container
-        if (event.targetContainer != null && event.targetContainer !== this.container.dataset.pacId) {
-            return;
-        }
-
         // Call msgProc if it exists
         let allowDefault = true;
 
@@ -6350,8 +6345,7 @@
             message: { value: messageId, enumerable: true, configurable: true },
             wParam: { value: wParam, enumerable: true, configurable: true },
             lParam: { value: lParam, enumerable: true, configurable: true },
-            timestamp: { value: Date.now(), enumerable: true, configurable: true },
-            targetContainer: { value: containerId, enumerable: true, configurable: true }
+            timestamp: { value: Date.now(), enumerable: true, configurable: true }
         });
 
         container.dispatchEvent(customEvent);
