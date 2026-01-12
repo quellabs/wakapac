@@ -1142,7 +1142,6 @@
          * Creates a custom event that wraps the original DOM event with Win32-style
          * message properties (message, wParam, lParam) as top-level event properties.
          * The event is dispatched to the nearest container element with a [data-pac-id] attribute.
-         *
          * @param {number} messageType - The Win32 message type (e.g., MSG_LBUTTONDOWN, MSG_KEYUP)
          * @param {Event} originalEvent - The original DOM event to wrap
          * @param {Object} [extended={}] - Additional extended data to include in event.detail
@@ -1230,19 +1229,17 @@
          * @param {Object} stateData - State data to include in event
          */
         dispatchBrowserStateEvent(stateType, stateData) {
-            const containers = document.querySelectorAll('[data-pac-id]');
-
-            containers.forEach(container => {
+            window.PACRegistry.components.forEach((context, pacId) => {
                 const customEvent = new CustomEvent('pac:browser-state', {
                     detail: {
-                        target: container,
+                        target: context.container,
                         stateType: stateType,
                         stateData: stateData,
                         timestamp: Date.now()
                     }
                 });
 
-                container.dispatchEvent(customEvent);
+                context.container.dispatchEvent(customEvent);
             });
         },
 
@@ -1253,10 +1250,10 @@
          * @param originalEvent
          */
         dispatchFocusEvent(focusType, originalEvent) {
-            const containers = document.querySelectorAll('[data-pac-id]');
             const { target, relatedTarget } = originalEvent;
 
-            containers.forEach(container => {
+            window.PACRegistry.components.forEach((context, pacId) => {
+                const container = context.container;
                 if (!this.isContainerAffected(container, target, relatedTarget)) {
                     return;
                 }
@@ -1310,7 +1307,7 @@
          * Converts DOM event data into Win32 message format for consistent handling
          * across different event types. Each message type has specific parameter
          * encoding rules that match Win32 conventions.
-         * @param {string} messageType - The Win32 message type constant
+         * @param {number} messageType - The Win32 message type constant
          * @param {Event} event - The original DOM event containing the raw data
          * @param {Element} container - The PAC container element with data-pac-id
          * @returns {Object} Object containing wParam and lParam values
@@ -3249,14 +3246,9 @@
         this.updateQueue.clear();
 
         // Remove from registry
-        const pacId = this.container.getAttribute('data-pac-id');
-
-        if (pacId) {
-            window.PACRegistry.deregister(pacId);
+        if (this.abstraction.pacId) {
+            window.PACRegistry.deregister(this.abstraction.pacId);
         }
-
-        // Remove pac-id attribute from container
-        this.container.removeAttribute('data-pac-id');
 
         // Nullify all references to allow garbage collection
         this.abstraction = null;
@@ -6328,9 +6320,9 @@
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extraData = {}) {
-        const container = document.querySelector(`[data-pac-id="${pacId}"]`);
+        const context = window.PACRegistry.get(pacId);
 
-        if (!container) {
+        if (!context) {
             console.warn(`sendMessage: Container with id "${pacId}" not found`);
             return;
         }
@@ -6348,7 +6340,7 @@
             timestamp: { value: Date.now(), enumerable: true, configurable: true }
         });
 
-        container.dispatchEvent(customEvent);
+        context.container.dispatchEvent(customEvent);
     };
 
     /**
@@ -6360,13 +6352,10 @@
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extraData = {}) {
-        // Query all PAC containers in the document
-        const containers = document.querySelectorAll('[data-pac-id]');
-
-        // Broadcast the message to each container by calling sendMessage
-        // This ensures consistent event structure and behavior across both functions
-        containers.forEach(container => {
-            wakaPAC.sendMessage(container.dataset.pacId, messageId, wParam, lParam, extraData);
+        // Broadcast the message to each registered container
+        // Uses the registry instead of DOM queries for better performance
+        window.PACRegistry.components.forEach((context, pacId) => {
+            wakaPAC.sendMessage(pacId, messageId, wParam, lParam, extraData);
         });
     };
 
