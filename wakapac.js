@@ -6321,17 +6321,17 @@
     /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 SendMessage with a specific HWND
-     * @param {string} containerId - Target container's data-pac-id attribute value
+     * @param {string} pacId - Target container's data-pac-id attribute value
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.sendMessage = function(containerId, messageId, wParam, lParam, extraData = {}) {
-        const container = document.querySelector(`[data-pac-id="${containerId}"]`);
+    wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extraData = {}) {
+        const container = document.querySelector(`[data-pac-id="${pacId}"]`);
 
         if (!container) {
-            console.warn(`sendMessage: Container with id "${containerId}" not found`);
+            console.warn(`sendMessage: Container with id "${pacId}" not found`);
             return;
         }
 
