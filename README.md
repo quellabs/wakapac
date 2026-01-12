@@ -2910,10 +2910,7 @@ Broadcast a message to all containers using `postMessage(messageId, wParam, lPar
 
 ```javascript
 // Define message constants (recommended)
-const WM_USER_LOGIN = 0x0001;
-
-// Simple broadcast with no parameters
-wakaPAC.postMessage(WM_USER_LOGIN, 0, 0);
+const WM_USER_LOGIN = MSG_TYPES.MSG_USER + 1;
 
 // wParam and lParam as integers
 wakaPAC.postMessage(WM_USER_LOGIN, 123, 0);  // wParam = userId
@@ -2947,7 +2944,7 @@ wakaPAC.sendMessage('user-panel', WM_USER_LOGIN, 123, 0, {
 Containers receive messages through their `msgProc` function:
 
 ```javascript
-const WM_USER_LOGIN = 0x0001;
+const WM_USER_LOGIN = MSG_TYPES.MSG_USER + 1;
 
 wakaPAC('#user-panel', {
     userName: '',

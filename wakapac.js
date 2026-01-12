@@ -112,7 +112,10 @@
 
         // Keyboard key press/release events
         MSG_KEYDOWN: 0x0100,        // Key pressed down
-        MSG_KEYUP: 0x0101           // Key released
+        MSG_KEYUP: 0x0101,          // Key released
+
+        // User messages
+        MSG_USER: 0x1000            // User messages
     };
 
     /**
