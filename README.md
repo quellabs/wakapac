@@ -544,6 +544,9 @@ WakaPAC automatically provides reactive browser state properties that update whe
 
 ### Available Properties
 
+**Component Identity:**
+- **`pacId`**: The unique identifier for this component (same as the `data-pac-id` attribute value)
+
 **Network Status:**
 - **`browserOnline`**: `true` when the browser is online, `false` when offline
 - **`browserNetworkQuality`**: Network performance insights: `'fast'`, `'slow'` or `'offline'`
