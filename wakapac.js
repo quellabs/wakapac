@@ -112,7 +112,10 @@
 
         // Keyboard key press/release events
         MSG_KEYDOWN: 0x0100,        // Key pressed down
-        MSG_KEYUP: 0x0101           // Key released
+        MSG_KEYUP: 0x0101,          // Key released
+
+        // User messages
+        MSG_USER: 0x1000            // User messages
     };
 
     /**
@@ -3668,13 +3671,18 @@
      * @returns {void}
      */
     Context.prototype.handlePacEvent = function(event) {
+        // Check if this event is targeted at a specific container
+        if (event.targetContainer != null && event.targetContainer !== this.container.dataset.pacId) {
+            return;
+        }
+
         // Call msgProc if it exists
         let allowDefault = true;
 
         if (this.originalAbstraction.msgProc && typeof this.originalAbstraction.msgProc === 'function') {
             const msgProcResult = this.originalAbstraction.msgProc.call(this.abstraction, event);
 
-            // Only certain message types can be cancelled by msgProc
+            // Only certain message types can be canceled by msgProc
             const cancellableEvents = [
                 MSG_TYPES.MSG_LBUTTONUP,
                 MSG_TYPES.MSG_MBUTTONUP,
@@ -3748,10 +3756,6 @@
             case MSG_TYPES.MSG_BLUR:
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
-                break;
-
-            default :
-                console.warn(`Unhandled event type ${event.message}`);
                 break;
         }
     }
@@ -4863,6 +4867,9 @@
      * @param {Object} abstraction - The abstraction to enhance
      */
     Context.prototype.injectSystemProperties = function(abstraction) {
+        // Add container identification
+        abstraction.pacId = this.container.getAttribute('data-pac-id') || this.container.id;
+
         // Initialize online/offline state and network quality
         abstraction.browserOnline = navigator.onLine;
         abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
@@ -6316,6 +6323,59 @@
         return isMultiSelector ? abstractions : abstractions[0];
     }
 
+    /**
+     * Send a message to a specific WakaPAC container by its data-pac-id
+     * Similar to Win32 SendMessage with a specific HWND
+     * @param {string} containerId - Target container's data-pac-id attribute value
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
+     */
+    wakaPAC.sendMessage = function(containerId, messageId, wParam, lParam, extraData = {}) {
+        const container = document.querySelector(`[data-pac-id="${containerId}"]`);
+
+        if (!container) {
+            console.warn(`sendMessage: Container with id "${containerId}" not found`);
+            return;
+        }
+
+        const customEvent = new CustomEvent('pac:event', {
+            bubbles: false,
+            cancelable: true,
+            detail: extraData
+        });
+
+        Object.defineProperties(customEvent, {
+            message: { value: messageId, enumerable: true, configurable: true },
+            wParam: { value: wParam, enumerable: true, configurable: true },
+            lParam: { value: lParam, enumerable: true, configurable: true },
+            timestamp: { value: Date.now(), enumerable: true, configurable: true },
+            targetContainer: { value: containerId, enumerable: true, configurable: true }
+        });
+
+        container.dispatchEvent(customEvent);
+    };
+
+    /**
+     * Broadcast a message to all WakaPAC containers
+     * Similar to Win32 PostMessage with HWND_BROADCAST
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
+     */
+    wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extraData = {}) {
+        // Query all PAC containers in the document
+        const containers = document.querySelectorAll('[data-pac-id]');
+
+        // Broadcast the message to each container by calling sendMessage
+        // This ensures consistent event structure and behavior across both functions
+        containers.forEach(container => {
+            wakaPAC.sendMessage(container.dataset.pacId, messageId, wParam, lParam, extraData);
+        });
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
@@ -6324,6 +6384,8 @@
 
     // Export to global scope
     window.wakaPAC = wakaPAC;
+
+    // Export built in message types
     window.MSG_TYPES = MSG_TYPES;
 
     // Export modifier key constants
