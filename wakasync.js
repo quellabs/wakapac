@@ -20,6 +20,8 @@
 (function() {
     "use strict";
 
+    const VERSION = '1.1.0';
+
     /**
      * WakaSync - Advanced HTTP Client
      * @constructor
@@ -28,15 +30,21 @@
         // Request tracking for grouping and cancellation
         this._requestGroups = new Map();
 
+        // Interceptors
+        this.interceptors = {
+            request: [],
+            response: []
+        };
+
         // Default configuration
         this.config = {
             timeout: 30000,
             retries: 0,
             retryDelay: 1000,
-            validateStatus: (response) => response.ok,
+            validateStatus: function(response) { return response.ok; },
             responseType: 'auto',
             headers: {
-                'User-Agent': 'WakaSync/1.0'
+                'User-Agent': `WakaSync/${VERSION}`
             }
         };
     }
@@ -74,7 +82,19 @@
          */
         request(url, opts = {}) {
             // Extract and validate configuration
-            const config = this.validateAndNormalizeConfig(url, opts);
+            // Apply request interceptors
+            let interceptedConfig = this.validateAndNormalizeConfig(url, opts);
+
+            for (const interceptor of this.interceptors.request) {
+                try {
+                    interceptedConfig = interceptor(interceptedConfig) || interceptedConfig;
+                } catch (e) {
+                    const error = new Error('Request interceptor failed');
+                    error.code = 'INTERCEPTOR_ERROR';
+                    error.originalError = e;
+                    return Promise.reject(error);
+                }
+            }
 
             // Initialize request tracking
             if (!this._requestGroups) {
@@ -82,26 +102,48 @@
             }
 
             // Setup request state and immediately register to prevent race conditions
-            const requestState = this.setupRequestState(config);
+            const requestState = this.setupRequestState(interceptedConfig);
 
             // Create timeout promise for request timeout handling
-            const timeoutPromise = config.timeout > 0 ?
-                this.createTimeoutPromise(config.timeout, requestState.controller) :
+            const timeoutPromise = interceptedConfig.timeout > 0 ?
+                this.createTimeoutPromise(interceptedConfig.timeout, requestState.controller) :
                 null;
 
             // Create the main fetch promise with retry logic
-            const fetchPromise = this.executeWithRetry(config, requestState)
-                .then(response => this.processResponse(response, config, requestState))
-                .then(data => this.handleSuccess(data, config, requestState))
-                .catch(error => this.handleError(error, config));
+            const self = this;
+            const fetchPromise = this.executeWithRetry(interceptedConfig, requestState)
+                .then(function(response) {
+                    return self.processResponse(response, interceptedConfig, requestState);
+                })
+                .then(function(data) {
+                    // Apply response interceptors
+                    let interceptedData = data;
+                    for (const interceptor of self.interceptors.response) {
+                        try {
+                            interceptedData = interceptor(interceptedData, interceptedConfig) || interceptedData;
+                        } catch (e) {
+                            const error = new Error('Response interceptor failed');
+                            error.code = 'INTERCEPTOR_ERROR';
+                            error.originalError = e;
+                            throw error;
+                        }
+                    }
+                    return interceptedData;
+                })
+                .then(function(data) {
+                    return self.handleSuccess(data, interceptedConfig, requestState);
+                })
+                .catch(function(error) {
+                    return self.handleError(error, interceptedConfig);
+                });
 
             // Race between fetch and timeout (if timeout is enabled)
             const finalPromise = timeoutPromise ?
                 Promise.race([fetchPromise, timeoutPromise]) :
                 fetchPromise;
 
-            return finalPromise.finally(() => {
-                this.cleanupRequest(config.groupKey, requestState.token);
+            return finalPromise.finally(function() {
+                self.cleanupRequest(interceptedConfig.groupKey, requestState.token);
             });
         },
 
@@ -202,7 +244,7 @@
                 return;
             }
 
-            this._requestGroups.forEach(group => {
+            this._requestGroups.forEach(function(group) {
                 if (group.controller && !group.controller.signal.aborted) {
                     group.controller.abort();
                 }
@@ -221,7 +263,7 @@
             }
 
             let count = 0;
-            this._requestGroups.forEach(group => {
+            this._requestGroups.forEach(function(group) {
                 if (group.controller && !group.controller.signal.aborted) {
                     count++;
                 }
@@ -239,7 +281,9 @@
         validateAndNormalizeConfig(url, opts) {
             // Validate required URL parameter
             if (!url || typeof url !== 'string') {
-                throw new Error('URL must be a non-empty string');
+                const error = new Error('URL must be a non-empty string');
+                error.code = 'INVALID_URL';
+                throw error;
             }
 
             // Merge with instance config and provided options
@@ -278,7 +322,9 @@
                 abortController: merged.abortController,
                 retries: Math.max(0, parseInt(merged.retries) || 0),
                 retryDelay: Math.max(0, parseInt(merged.retryDelay) || 1000),
-                shouldRetry: merged.shouldRetry
+                shouldRetry: merged.shouldRetry,
+                urlNormalizer: merged.urlNormalizer,
+                baseUrl: merged.baseUrl
             };
         },
 
@@ -295,9 +341,14 @@
                 ['shouldRetry', opts.shouldRetry]
             ];
 
-            validators.forEach(([name, fn]) => {
+            validators.forEach(function(validator) {
+                const name = validator[0];
+                const fn = validator[1];
+
                 if (fn && typeof fn !== 'function') {
-                    throw new Error(`${name} must be a function`);
+                    const error = new Error(`${name} must be a function`);
+                    error.code = 'INVALID_CALLBACK';
+                    throw error;
                 }
             });
         },
@@ -308,7 +359,9 @@
          */
         validateAbortControls(opts) {
             if (opts.abortController && typeof opts.abortController.abort !== 'function') {
-                throw new Error('abortController must have an abort method');
+                const error = new Error('abortController must have an abort method');
+                error.code = 'INVALID_ABORT_CONTROLLER';
+                throw error;
             }
         },
 
@@ -355,6 +408,7 @@
 
             // Add default headers
             headers.set('X-WakaSync-Request', 'true');
+            headers.set('X-WakaSync-Version', VERSION);
 
             // Add content type based on body
             if (body !== undefined) {
@@ -414,7 +468,7 @@
          */
         getGroupKeyFromUrl(url, opts) {
             if (opts.urlNormalizer) {
-                return opts.urlNormalizer(url);
+                return opts.urlNormalizer(url, opts);
             } else {
                 return this.normalizeUrlForGrouping(url, opts.baseUrl);
             }
@@ -450,8 +504,11 @@
 
                 urlObj.search = sortedParams.toString();
                 return urlObj.toString();
-            } catch {
-                return url;
+            } catch (e) {
+                const error = new Error('Invalid URL for request');
+                error.code = 'INVALID_URL';
+                error.originalError = e;
+                throw error;
             }
         },
 
@@ -502,20 +559,24 @@
          * @returns {Promise} Timeout promise
          */
         createTimeoutPromise(timeout, controller) {
-            return new Promise((_, reject) => {
+            const self = this;
+
+            return new Promise(function(_, reject) {
                 if (controller.signal.aborted) {
-                    reject(this.createTaggedCancellationError('Request was cancelled before timeout', 'timeout'));
+                    reject(self.createTaggedCancellationError('Request was cancelled before timeout', 'timeout'));
                     return;
                 }
 
-                const timeoutId = setTimeout(() => {
+                const timeoutId = setTimeout(function() {
                     if (!controller.signal.aborted) {
                         controller.abort();
-                        reject(this.createTaggedCancellationError(`Request timeout after ${timeout}ms`, 'timeout'));
+                        reject(self.createTaggedCancellationError(`Request timeout after ${timeout}ms`, 'timeout'));
                     }
                 }, timeout);
 
-                controller.signal.addEventListener('abort', () => clearTimeout(timeoutId), { once: true });
+                controller.signal.addEventListener('abort', function() {
+                    clearTimeout(timeoutId);
+                }, { once: true });
             });
         },
 
@@ -549,9 +610,9 @@
                         throw error;
                     }
 
-                    // Wait before retry
+                    // Wait before retry, but check for abort during delay
                     if (config.retryDelay > 0) {
-                        await this.delay(config.retryDelay);
+                        await this.delayWithAbortCheck(config.retryDelay, requestState.controller);
                     }
                 }
             }
@@ -596,12 +657,43 @@
         },
 
         /**
+         * Creates a delay promise that respects abort signals
+         * @param {number} ms - Milliseconds to delay
+         * @param {AbortController} controller - Abort controller to check
+         * @returns {Promise} Delay promise
+         */
+        delayWithAbortCheck(ms, controller) {
+            const self = this;
+            return new Promise(function(resolve, reject) {
+                if (controller.signal.aborted) {
+                    reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
+                    return;
+                }
+
+                const timeoutId = setTimeout(function() {
+                    if (controller.signal.aborted) {
+                        reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
+                    } else {
+                        resolve();
+                    }
+                }, ms);
+
+                controller.signal.addEventListener('abort', function() {
+                    clearTimeout(timeoutId);
+                    reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
+                }, { once: true });
+            });
+        },
+
+        /**
          * Creates a delay promise
          * @param {number} ms - Milliseconds to delay
          * @returns {Promise} Delay promise
          */
         delay(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
+            return new Promise(function(resolve) {
+                setTimeout(resolve, ms);
+            });
         },
 
         /**
@@ -641,13 +733,19 @@
          * @returns {Promise} Parsed response
          */
         async processResponse(response, config, requestState) {
+            // Check abort state with ignoreAbort handling
             if (requestState.controller.signal.aborted) {
+                if (config.ignoreAbort) {
+                    return undefined;
+                }
+
                 throw this.createTaggedCancellationError('Request was cancelled during processing', 'cancelled');
             }
 
             if (!config.validateStatus(response)) {
                 const errorText = await this.safeGetResponseText(response);
                 const error = new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
+                error.code = `HTTP_${response.status}`;
                 error.response = response;
                 throw error;
             }
@@ -680,7 +778,11 @@
                         return this.autoParseResponse(response);
                 }
             } catch (error) {
-                throw new Error(`Failed to parse response as ${responseType}: ${error.message}`);
+                const parseError = new Error(`Failed to parse response as ${responseType}: ${error.message}`);
+                parseError.code = 'PARSE_ERROR';
+                parseError.response = response;
+                parseError.originalError = error;
+                throw parseError;
             }
         },
 
@@ -697,7 +799,8 @@
                 return undefined;
             }
 
-            if (/json|\+json/i.test(contentType)) {
+            // More specific JSON detection: application/json or application/*+json
+            if (/application\/(.+\+)?json/i.test(contentType)) {
                 const text = await response.text();
                 return text.trim() ? JSON.parse(text) : undefined;
             }
@@ -721,7 +824,7 @@
                 }
                 const clone = response.clone();
                 const text = await clone.text();
-                return text.substring(0, 200);
+                return text.slice(0, 200);
             } catch {
                 return null;
             }
@@ -787,6 +890,7 @@
         createTaggedCancellationError(message, type) {
             const error = new Error(message);
             error.name = 'CancellationError';
+            error.code = `CANCEL_${type.toUpperCase()}`;
             error.cancellationType = type;
             return error;
         },
@@ -820,18 +924,20 @@
             }
 
             const current = this._requestGroups.get(groupKey);
+
             if (!current) {
                 return;
             }
 
+            // Only cleanup if this is the current request or no newer request exists
             if (current.token === token) {
-                this._requestGroups.delete(groupKey);
-            } else if (current.token < token) {
-                console.warn(`Cleaning up stale request entry for ${groupKey}`);
                 this._requestGroups.delete(groupKey);
             }
         }
     };
+
+    // Static version property
+    WakaSync.VERSION = VERSION;
 
     // Create default instance
     const wakaSync = new WakaSync();
