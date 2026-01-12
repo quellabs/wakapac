@@ -3672,9 +3672,10 @@
      */
     Context.prototype.handlePacEvent = function(event) {
         // Check if this event is targeted at a specific container
-        if (event.targetContainer !== null && event.targetContainer !== this.container.dataset.pacId) {
+        if (event.targetContainer != null && event.targetContainer !== this.container.dataset.pacId) {
             return;
         }
+
         // Call msgProc if it exists
         let allowDefault = true;
 
