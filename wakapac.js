@@ -6348,8 +6348,6 @@
             wParam: { value: wParam, enumerable: true, configurable: true },
             lParam: { value: lParam, enumerable: true, configurable: true },
             timestamp: { value: Date.now(), enumerable: true, configurable: true },
-            target: { value: null, enumerable: true, configurable: true },
-            id: { value: container.id || null, enumerable: true, configurable: true },
             targetContainer: { value: containerId, enumerable: true, configurable: true }
         });
 

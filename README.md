@@ -1077,9 +1077,9 @@ wakaPAC('#text-editor', {
                 return true;
             }
 
-        return true;
-    }
-});
+            return true;
+        }
+    });
 ```
 
 ##### Example 3: Mouse Tracking
@@ -1090,20 +1090,20 @@ wakaPAC('#app', {
         if (event.message === MSG_TYPES.MSG_MOUSEMOVE) {
             // Extract container-relative coordinates
             const pos = this.MAKEPOINTS(event.lParam);  // {x, y}
-            
+
             // Check if left button is held while moving (dragging)
             if (event.wParam & MK_LBUTTON) {
                 this.handleDrag(pos);
             }
         }
-        
+
         // Handle double-click
         if (event.message === MSG_TYPES.MSG_LBUTTONDBLCLK) {
             const pos = this.MAKEPOINTS(event.lParam);
             this.openItem(pos);
             return false;
         }
-        
+
         return true;
     }
 });
@@ -1324,46 +1324,6 @@ const grandparent = wakaPAC('#grandparent-app', {
 - Direct parent-child communication
 - Events specific to immediate parent
 - Better performance (fewer handler calls)
-
-
-### Inter-Container Communication
-
-WakaPAC provides Win32-style messaging for communication between containers that aren't in a parent-child hierarchy.
-
-#### Message Broadcasting
-
-Broadcast a message to all containers using `postMessage`:
-
-```javascript
-wakaPAC.postMessage(WM_USER_LOGIN, 123, 0, { name: 'Harry', role: 'admin' });
-```
-
-#### Targeted Messaging
-
-Send a message to a specific container using its `data-pac-id` with `sendMessage`:
-
-```javascript
-wakaPAC.sendMessage('user-panel', WM_USER_LOGIN, 123, 0, { name: 'Harry', role: 'admin' });
-```
-
-#### Handling Messages
-
-Containers receive messages through their `msgProc` function:
-
-```javascript
-const WM_USER_LOGIN = 0x0001;
-
-wakaPAC('#user-panel', {
-    userName: '',
-    
-    msgProc(event) {
-        if (event.message === WM_USER_LOGIN) {
-            // Update container state using extraData
-            this.userName = event.detail.name;
-        }
-    }
-});
-```
 
 ## Data Safety and Display Utilities
 
@@ -1799,12 +1759,12 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 
 <!-- Perfect for tables (no wrapper needed) -->
 <table>
-  <tbody>
+    <tbody>
     <!-- wp-if: user.isLoggedIn -->
     <tr><td>User data row 1</td></tr>
     <tr><td>User data row 2</td></tr>
     <!-- /wp-if -->
-  </tbody>
+    </tbody>
 </table>
 
 <!-- Multiple siblings controlled together -->
@@ -2532,18 +2492,18 @@ event.detail = {
 **Example:**
 ```javascript
 case MSG_TYPES.MSG_CHANGE:
-    const target = event.target;
-    
-    if (target.type === 'checkbox') {
-        const isChecked = wParam === 1;
-        console.log(`Checkbox is now ${isChecked ? 'checked' : 'unchecked'}`);
-    }
-    
-    if (target.tagName === 'SELECT') {
-        console.log(`Selected index: ${wParam}`);
-    }
-    
-    break;
+const target = event.target;
+
+if (target.type === 'checkbox') {
+    const isChecked = wParam === 1;
+    console.log(`Checkbox is now ${isChecked ? 'checked' : 'unchecked'}`);
+}
+
+if (target.tagName === 'SELECT') {
+    console.log(`Selected index: ${wParam}`);
+}
+
+break;
 ```
 
 ##### Form Submit Events (SUBMIT)
@@ -2679,9 +2639,9 @@ wakaPAC('#text-editor', {
                 return true;
             }
 
-        return true;
-    }
-});
+            return true;
+        }
+    });
 ```
 
 ##### Example 3: Mouse Tracking
@@ -2692,20 +2652,20 @@ wakaPAC('#app', {
         if (event.message === MSG_TYPES.MSG_MOUSEMOVE) {
             // Extract container-relative coordinates
             const pos = this.MAKEPOINTS(event.lParam);  // {x, y}
-            
+
             // Check if left button is held while moving (dragging)
             if (event.wParam & MK_LBUTTON) {
                 this.handleDrag(pos);
             }
         }
-        
+
         // Handle double-click
         if (event.message === MSG_TYPES.MSG_LBUTTONDBLCLK) {
             const pos = this.MAKEPOINTS(event.lParam);
             this.openItem(pos);
             return false;
         }
-        
+
         return true;
     }
 });
@@ -2927,14 +2887,26 @@ const grandparent = wakaPAC('#grandparent-app', {
 - Events specific to immediate parent
 - Better performance (fewer handler calls)
 
-
-## Inter-Container Communication
+### Inter-Container Messaging (External Integration)
 
 WakaPAC provides Win32-style messaging for communication between containers that aren't in a parent-child hierarchy.
 
-### Message Broadcasting
+**When to use messaging:**
+- External JavaScript needs to trigger actions in WakaPAC containers
+- Multiple independent WakaPAC instances need to coordinate (not parent/child)
+- Plugin or third-party code integrating with your app
+- System-wide broadcasts (login, logout, theme change)
 
-Broadcast a message to all containers using `postMessage`:
+**When NOT to use messaging:**
+- Components have a parent/child relationship in the DOM → use `notifyParent`/`notifyChild` instead
+- Sibling components need to communicate → communicate through their shared parent
+
+#### Message Broadcasting
+
+Broadcast a message to all containers using `postMessage(messageId, wParam, lParam, extraData)`:
+- **messageId**: Integer constant identifying the message type
+- **wParam**, **lParam**: Integer parameters for numeric data
+- **extraData**: Optional object for complex data (objects, arrays, strings)
 
 ```javascript
 // Define message constants (recommended)
@@ -2947,28 +2919,30 @@ wakaPAC.postMessage(WM_USER_LOGIN, 0, 0);
 wakaPAC.postMessage(WM_USER_LOGIN, 123, 0);  // wParam = userId
 
 // Complex data goes in extraData parameter
-wakaPAC.postMessage(WM_USER_LOGIN, 123, 0, { 
-    name: 'Floris', 
-    role: 'admin' 
+wakaPAC.postMessage(WM_USER_LOGIN, 123, 0, {
+    name: 'Floris',
+    role: 'admin'
 });
 ```
 
-### Targeted Messaging
+#### Targeted Messaging
 
-Send a message to a specific container using its `data-pac-id`:
+Send a message to a specific container using `sendMessage(containerId, messageId, wParam, lParam, extraData)`:
+- **containerId**: The `data-pac-id` of the target container
+- **messageId**, **wParam**, **lParam**, **extraData**: Same as `postMessage`
 
 ```javascript
 // Send to specific container (wParam/lParam as integers)
 wakaPAC.sendMessage('user-panel', WM_USER_LOGIN, 123, 0);
 
 // With complex data in extraData
-wakaPAC.sendMessage('user-panel', WM_USER_LOGIN, 123, 0, { 
+wakaPAC.sendMessage('user-panel', WM_USER_LOGIN, 123, 0, {
     name: 'Floris',
     role: 'admin'
 });
 ```
 
-### Handling Messages
+#### Handling Messages
 
 Containers receive messages through their `msgProc` function:
 
@@ -2977,14 +2951,14 @@ const WM_USER_LOGIN = 0x0001;
 
 wakaPAC('#user-panel', {
     userName: '',
-    
+
     msgProc(event) {
         if (event.message === WM_USER_LOGIN) {
             console.log('Message:', event.message);
             console.log('wParam:', event.wParam);      // integer
             console.log('lParam:', event.lParam);      // integer
             console.log('Extra data:', event.detail);  // object with complex data
-            
+
             // Update container state using extraData
             this.userName = event.detail.name;
         }
@@ -2993,98 +2967,6 @@ wakaPAC('#user-panel', {
 
 // Trigger from anywhere
 wakaPAC.postMessage(WM_USER_LOGIN, 123, 0, { name: 'Floris' });
-```
-
-### Message Parameters
-
-Following Win32 conventions:
-
-- **messageId** (required): Integer constant identifying the message type (e.g., `0x0001`, `WM_USER + 1`)
-- **wParam**: First message parameter - must be an **integer** (use for IDs, flags, counts, etc.)
-- **lParam**: Second message parameter - must be an **integer** (use for secondary numeric data)
-- **extraData**: Optional object stored in `event.detail` for complex data (objects, arrays, strings, etc.)
-
-**Important:** Unlike Win32 where wParam/lParam can hold pointers, in WakaPAC they are strictly integers. Use `extraData` for any complex data structures.
-
-### Message Constants
-
-Define message constants like Win32:
-
-```javascript
-// User-defined messages start at WM_USER (0x0400)
-const WM_USER = 0x0400;
-const WM_CUSTOM_ACTION = WM_USER + 1;
-const WM_DATA_LOADED = WM_USER + 2;
-const WM_STATE_CHANGED = WM_USER + 3;
-
-// Or use simple incrementing integers
-const MSG_LOGIN = 0x0001;
-const MSG_LOGOUT = 0x0002;
-const MSG_REFRESH = 0x0003;
-```
-
-### Broadcast vs Targeted Messages
-
-**Use `postMessage` when:**
-- Multiple containers need to respond to the same event
-- You don't know which containers exist or care
-- Broadcasting application-wide state changes
-
-**Use `sendMessage` when:**
-- You need to communicate with a specific container
-- You want to avoid unnecessary processing in other containers
-- Implementing direct container-to-container communication
-
-### Example: Login Flow
-
-```javascript
-const WM_USER_LOGIN = 0x0001;
-const WM_USER_LOGOUT = 0x0002;
-
-// Header container
-wakaPAC('#header', {
-    userId: 0,
-    userName: '',
-    showLogoutButton: false,
-
-    msgProc(event) {
-        if (event.message === WM_USER_LOGIN) {
-            // userId in wParam, user data in extraData
-            this.userId = event.wParam;
-            this.userName = event.detail.name;
-            this.showLogoutButton = true;
-        }
-    }
-});
-
-// Sidebar container
-wakaPAC('#sidebar', {
-    userId: 0,
-    userRole: '',
-
-    msgProc(event) {
-        if (event.message === WM_USER_LOGIN) {
-            this.userId = event.wParam;
-            this.userRole = event.detail.role;
-            this.loadUserMenu();
-        }
-    },
-
-    loadUserMenu() {
-        // Load menu based on role
-    }
-});
-
-// Login form triggers broadcast
-document.getElementById('login-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const userId = 123;
-    const userData = { name: 'Floris', role: 'admin' };
-
-    // All containers receive this
-    // wParam = userId (integer), extraData = user details (object)
-    wakaPAC.postMessage(WM_USER_LOGIN, userId, 0, userData);
-});
 ```
 
 ### Data Safety and Display Utilities
