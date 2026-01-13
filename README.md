@@ -122,11 +122,11 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Array literals -->
 <div data-pac-bind="visible: [1, 2, 3][selectedIndex]">
 
-    <!-- Array indexing -->
-    <span>{{ items[currentIndex].title }}</span>
+<!-- Array indexing -->
+<span>{{ items[currentIndex].title }}</span>
 
-    <!-- Array length -->
-    <p>Total items: {{ items.length }}</p>
+<!-- Array length -->
+<p>Total items: {{ items.length }}</p>
 ```
 
 #### Object Literals
@@ -134,8 +134,8 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Object creation -->
 <div data-pac-bind="style: {color: textColor, fontSize: size + 'px'}">
 
-    <!-- Conditional object properties -->
-    <div data-pac-bind="class: {active: isSelected, disabled: !isEnabled}">
+<!-- Conditional object properties -->
+<div data-pac-bind="class: {active: isSelected, disabled: !isEnabled}">
 ```
 
 #### Complex Conditionals
@@ -143,11 +143,11 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Multiple conditions -->
 <div data-pac-bind="visible: user.role === 'admin' && user.active">
 
-    <!-- Nested ternary -->
-    <span>{{ status === 'loading' ? 'Please wait...' : status === 'error' ? 'Try again' : 'Ready' }}</span>
+<!-- Nested ternary -->
+<span>{{ status === 'loading' ? 'Please wait...' : status === 'error' ? 'Try again' : 'Ready' }}</span>
 
-    <!-- Array operations -->
-    <div data-pac-bind="if: allowedRoles.includes(user.role)">
+<!-- Array operations -->
+<div data-pac-bind="if: allowedRoles.includes(user.role)">
 ```
 
 ### Complete Binding Reference
@@ -234,31 +234,33 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 ```
 
 **Custom attributes** - Any HTML attribute can be bound directly
+
 ```html
 <!-- Standard attributes -->
 <input data-pac-bind="placeholder: hintText, title: tooltipText">
 <img data-pac-bind="src: imageUrl, alt: altText">
 <div data-pac-bind="id: dynamicId, role: userRole">
 
-    <!-- Data attributes -->
-    <div data-pac-bind="data-id: userId, data-category: itemCategory">
+<!-- Data attributes -->
+<div data-pac-bind="data-id: userId, data-category: itemCategory">
 
-        <!-- ARIA attributes -->
-        <button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
+<!-- ARIA attributes -->
+<button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
 
-            <!-- Multiple custom attributes -->
-            <div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
+<!-- Multiple custom attributes -->
+<div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
 ```
 
 #### Style and Appearance Bindings
 
 **`class`** - CSS class manipulation (supports object syntax)
+
 ```html
 <!-- Simple class binding -->
 <div data-pac-bind="class: statusClass">
 
-    <!-- Object syntax: conditional classes -->
-    <div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
+<!-- Object syntax: conditional classes -->
+<div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
 ```
 
 **`style`** - CSS style manipulation (supports object syntax)
@@ -266,11 +268,11 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <!-- Simple style binding -->
 <div data-pac-bind="style: dynamicStyleString">
 
-    <!-- Object syntax: multiple CSS properties -->
-    <div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
+<!-- Object syntax: multiple CSS properties -->
+<div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
 
-        <!-- CSS custom properties -->
-        <div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
+<!-- CSS custom properties -->
+<div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
 ```
 
 #### List Rendering Binding
@@ -328,14 +330,14 @@ Event modifiers allow you to control how events behave by using the `data-pac-ev
 <!-- Prevent form submission redirect -->
 <form data-pac-bind="submit: handleSubmit" data-pac-event="prevent">
 
-    <!-- Search on Enter key -->
-    <input data-pac-bind="keyup: search" data-pac-event="enter">
+<!-- Search on Enter key -->
+<input data-pac-bind="keyup: search" data-pac-event="enter">
 
-    <!-- Close modal on Escape -->
-    <div data-pac-bind="keyup: closeModal" data-pac-event="escape">
+<!-- Close modal on Escape -->
+<div data-pac-bind="keyup: closeModal" data-pac-event="escape">
 
-        <!-- Multiple modifiers -->
-        <form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
+<!-- Multiple modifiers -->
+<form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
 ```
 
 **Available modifiers:**
