@@ -2765,8 +2765,8 @@
      * Registry of binding handlers. Each handler is a function that applies
      * a binding value to a DOM element.
      *
-     * Handler signature: function(domUpdater, element, value)
-     * - domUpdater: Reference to DomUpdater instance for context access
+     * Handler signature: function(context, element, value)
+     * - context: Reference to context
      * - element: The DOM element to update
      * - value: The evaluated binding value
      *
