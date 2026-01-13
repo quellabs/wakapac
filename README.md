@@ -122,11 +122,11 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Array literals -->
 <div data-pac-bind="visible: [1, 2, 3][selectedIndex]">
 
-    <!-- Array indexing -->
-    <span>{{ items[currentIndex].title }}</span>
+<!-- Array indexing -->
+<span>{{ items[currentIndex].title }}</span>
 
-    <!-- Array length -->
-    <p>Total items: {{ items.length }}</p>
+<!-- Array length -->
+<p>Total items: {{ items.length }}</p>
 ```
 
 #### Object Literals
@@ -134,8 +134,8 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Object creation -->
 <div data-pac-bind="style: {color: textColor, fontSize: size + 'px'}">
 
-    <!-- Conditional object properties -->
-    <div data-pac-bind="class: {active: isSelected, disabled: !isEnabled}">
+<!-- Conditional object properties -->
+<div data-pac-bind="class: {active: isSelected, disabled: !isEnabled}">
 ```
 
 #### Complex Conditionals
@@ -143,11 +143,11 @@ WakaPAC supports JavaScript-like expressions in templates and bindings, enabling
 <!-- Multiple conditions -->
 <div data-pac-bind="visible: user.role === 'admin' && user.active">
 
-    <!-- Nested ternary -->
-    <span>{{ status === 'loading' ? 'Please wait...' : status === 'error' ? 'Try again' : 'Ready' }}</span>
+<!-- Nested ternary -->
+<span>{{ status === 'loading' ? 'Please wait...' : status === 'error' ? 'Try again' : 'Ready' }}</span>
 
-    <!-- Array operations -->
-    <div data-pac-bind="if: allowedRoles.includes(user.role)">
+<!-- Array operations -->
+<div data-pac-bind="if: allowedRoles.includes(user.role)">
 ```
 
 ### Complete Binding Reference
@@ -234,31 +234,33 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 ```
 
 **Custom attributes** - Any HTML attribute can be bound directly
+
 ```html
 <!-- Standard attributes -->
 <input data-pac-bind="placeholder: hintText, title: tooltipText">
 <img data-pac-bind="src: imageUrl, alt: altText">
 <div data-pac-bind="id: dynamicId, role: userRole">
 
-    <!-- Data attributes -->
-    <div data-pac-bind="data-id: userId, data-category: itemCategory">
+<!-- Data attributes -->
+<div data-pac-bind="data-id: userId, data-category: itemCategory">
 
-        <!-- ARIA attributes -->
-        <button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
+<!-- ARIA attributes -->
+<button data-pac-bind="aria-label: accessibilityLabel, aria-expanded: isExpanded">
 
-            <!-- Multiple custom attributes -->
-            <div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
+<!-- Multiple custom attributes -->
+<div data-pac-bind="title: tooltipText, data-id: itemId, tabindex: tabOrder">
 ```
 
 #### Style and Appearance Bindings
 
 **`class`** - CSS class manipulation (supports object syntax)
+
 ```html
 <!-- Simple class binding -->
 <div data-pac-bind="class: statusClass">
 
-    <!-- Object syntax: conditional classes -->
-    <div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
+<!-- Object syntax: conditional classes -->
+<div data-pac-bind="class: { active: isActive, disabled: !enabled, error: hasError }">
 ```
 
 **`style`** - CSS style manipulation (supports object syntax)
@@ -266,11 +268,11 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 <!-- Simple style binding -->
 <div data-pac-bind="style: dynamicStyleString">
 
-    <!-- Object syntax: multiple CSS properties -->
-    <div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
+<!-- Object syntax: multiple CSS properties -->
+<div data-pac-bind="style: { color: textColor, backgroundColor: bgColor }">
 
-        <!-- CSS custom properties -->
-        <div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
+<!-- CSS custom properties -->
+<div data-pac-bind="style: { '--theme-color': primaryColor, '--border-width': borderSize + 'px' }">
 ```
 
 #### List Rendering Binding
@@ -328,19 +330,32 @@ Event modifiers allow you to control how events behave by using the `data-pac-ev
 <!-- Prevent form submission redirect -->
 <form data-pac-bind="submit: handleSubmit" data-pac-event="prevent">
 
-    <!-- Search on Enter key -->
-    <input data-pac-bind="keyup: search" data-pac-event="enter">
+<!-- Search on Enter key -->
+<input data-pac-bind="keyup: search" data-pac-event="enter">
 
-    <!-- Close modal on Escape -->
-    <div data-pac-bind="keyup: closeModal" data-pac-event="escape">
+<!-- Close modal on Escape -->
+<div data-pac-bind="keyup: closeModal" data-pac-event="escape">
 
-        <!-- Multiple modifiers -->
-        <form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
+<!-- Multiple modifiers -->
+<form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
 ```
 
 **Available modifiers:**
 - **Keys**: `enter`, `escape`/`esc`, `space`, `tab`, `delete`/`del`, `up`, `down`, `left`, `right`
 - **Behavior**: `prevent`, `stop`
+
+### Custom Bindings
+
+Register custom binding types to extend WakaPAC:
+
+```javascript
+wakaPAC.registerBinding('tooltip', function(domUpdater, element, value) {
+    element.setAttribute('title', value || '');
+});
+
+// Usage
+<div data-pac-bind="tooltip: user.helpText">Hover me</div>
+```
 
 ### Deep Reactivity
 
@@ -713,11 +728,11 @@ wakaPAC('#app', {
     msgProc(event) {
         // Handle specific message types
         switch(event.message) {
-            case MSG_TYPES.MSG_KEYDOWN:
+            case wakaPAC.MSG_KEYDOWN:
                 // Handle keyboard input
                 break;
 
-            case MSG_TYPES.MSG_LCLICK:
+            case wakaPAC.MSG_LCLICK:
                 // Handle mouse clicks
                 break;
         }
@@ -766,46 +781,46 @@ All Win32-style properties are directly on the event object (not nested in `even
 
 **Mouse Movement:**
 ```javascript
-MSG_TYPES.MSG_MOUSEMOVE    // 0x0200 - Mouse position changed
+wakaPAC.MSG_MOUSEMOVE    // 0x0200 - Mouse position changed
 // Throttled to 60 FPS by default (configurable via wakaPAC.mouseMoveThrottleFps)
 // Coordinates in lParam are container-relative (client-area relative)
 ```
 
 **Mouse Button Events (Raw Button Tracking):**
 ```javascript
-MSG_TYPES.MSG_LBUTTONDOWN  // 0x0201 - Left button pressed
-MSG_TYPES.MSG_LBUTTONUP    // 0x0202 - Left button released
-MSG_TYPES.MSG_LBUTTONDBLCLK// 0x0203 - Left button double-click
-MSG_TYPES.MSG_RBUTTONDOWN  // 0x0204 - Right button pressed
-MSG_TYPES.MSG_RBUTTONUP    // 0x0205 - Right button released
-MSG_TYPES.MSG_MBUTTONDOWN  // 0x0207 - Middle button pressed
-MSG_TYPES.MSG_MBUTTONUP    // 0x0208 - Middle button released
+wakaPAC.MSG_LBUTTONDOWN  // 0x0201 - Left button pressed
+wakaPAC.MSG_LBUTTONUP    // 0x0202 - Left button released
+wakaPAC.MSG_LBUTTONDBLCLK// 0x0203 - Left button double-click
+wakaPAC.MSG_RBUTTONDOWN  // 0x0204 - Right button pressed
+wakaPAC.MSG_RBUTTONUP    // 0x0205 - Right button released
+wakaPAC.MSG_MBUTTONDOWN  // 0x0207 - Middle button pressed
+wakaPAC.MSG_MBUTTONUP    // 0x0208 - Middle button released
 ```
 
 **Click Events (Semantic User Actions):**
 ```javascript
-MSG_TYPES.MSG_LCLICK       // 0x0210 - Left click (triggers click: bindings)
-MSG_TYPES.MSG_MCLICK       // 0x0211 - Middle click
-MSG_TYPES.MSG_RCLICK       // 0x0212 - Right click (contextmenu)
+wakaPAC.MSG_LCLICK       // 0x0210 - Left click (triggers click: bindings)
+wakaPAC.MSG_MCLICK       // 0x0211 - Middle click
+wakaPAC.MSG_RCLICK       // 0x0212 - Right click (contextmenu)
 ```
 
 **Keyboard Events:**
 ```javascript
-MSG_TYPES.MSG_KEYDOWN      // 0x0100 - Key pressed down
-MSG_TYPES.MSG_KEYUP        // 0x0101 - Key released
+wakaPAC.MSG_KEYDOWN      // 0x0100 - Key pressed down
+wakaPAC.MSG_KEYUP        // 0x0101 - Key released
 ```
 
 **Form Events:**
 ```javascript
-MSG_TYPES.MSG_CHAR         // 0x0300 - Text input (typing in fields)
-MSG_TYPES.MSG_CHANGE       // 0x0301 - Form control changed (triggers change: bindings)
-MSG_TYPES.MSG_SUBMIT       // 0x0302 - Form submitted (triggers submit: bindings)
+wakaPAC.MSG_CHAR         // 0x0300 - Text input (typing in fields)
+wakaPAC.MSG_CHANGE       // 0x0301 - Form control changed (triggers change: bindings)
+wakaPAC.MSG_SUBMIT       // 0x0302 - Form submitted (triggers submit: bindings)
 ```
 
 **Focus Events:**
 ```javascript
-MSG_TYPES.MSG_FOCUS        // 0x0007 - Element gained focus
-MSG_TYPES.MSG_BLUR         // 0x0008 - Element lost focus
+wakaPAC.MSG_FOCUS        // 0x0007 - Element gained focus
+wakaPAC.MSG_BLUR         // 0x0008 - Element lost focus
 ```
 
 #### wParam and lParam by Message Type
@@ -815,12 +830,12 @@ MSG_TYPES.MSG_BLUR         // 0x0008 - Element lost focus
 **wParam** - Modifier key and button state flags (bitwise OR of flags):
 ```javascript
 // Extract modifier keys and button states
-if (wParam & MK_CONTROL) { /* Ctrl key held */ }     // 0x0010
-if (wParam & MK_SHIFT)   { /* Shift key held */ }    // 0x0008
-if (wParam & MK_ALT)     { /* Alt key held */ }      // 0x0020
-if (wParam & MK_LBUTTON) { /* Left button held */ }  // 0x0001
-if (wParam & MK_RBUTTON) { /* Right button held */ } // 0x0002
-if (wParam & MK_MBUTTON) { /* Middle button held */ }// 0x0004
+if (wParam & wakaPAC.MK_CONTROL) { /* Ctrl key held */ }     // 0x0010
+if (wParam & wakaPAC.MK_SHIFT)   { /* Shift key held */ }    // 0x0008
+if (wParam & wakaPAC.MK_ALT)     { /* Alt key held */ }      // 0x0020
+if (wParam & wakaPAC.MK_LBUTTON) { /* Left button held */ }  // 0x0001
+if (wParam & wakaPAC.MK_RBUTTON) { /* Right button held */ } // 0x0002
+if (wParam & wakaPAC.MK_MBUTTON) { /* Middle button held */ }// 0x0004
 ```
 
 **lParam** - Mouse coordinates packed into 32 bits:
@@ -834,11 +849,11 @@ const y = (lParam >> 16) & 0xFFFF;   // High 16 bits = y coordinate
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_LBUTTONDOWN:
+case wakaPAC.MSG_LBUTTONDOWN:
 const x = lParam & 0xFFFF;
 const y = (lParam >> 16) & 0xFFFF;
 
-if (wParam & MK_CONTROL) {
+if (wParam & wakaPAC.MK_CONTROL) {
     console.log(`Ctrl+Click at (${x}, ${y})`);
 }
 break;
@@ -874,7 +889,7 @@ const isRelease = (lParam & (1 << 31)) !== 0;
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_KEYDOWN:
+case wakaPAC.MSG_KEYDOWN:
 const keyCode = wParam;
 const isExtended = (lParam & (1 << 24)) !== 0;
 
@@ -906,7 +921,7 @@ event.detail = {
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_CHAR:
+case wakaPAC.MSG_CHAR:
 console.log(`Text field has ${event.wParam} characters`);
 console.log(`Value: ${event.target.value}`);
 break;
@@ -932,7 +947,7 @@ event.detail = {
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_CHANGE:
+case wakaPAC.MSG_CHANGE:
 const target = event.target;
 
 if (target.type === 'checkbox') {
@@ -962,7 +977,7 @@ const formData = lParam;  // e.g., { name: 'John', email: 'john@example.com' }
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_SUBMIT:
+case wakaPAC.MSG_SUBMIT:
 console.log('Form submitted:', lParam);
 console.log('Form ID:', wParam);
 
@@ -982,11 +997,11 @@ break;
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_FOCUS:
+case wakaPAC.MSG_FOCUS:
 console.log('Element gained focus:', event.target);
 break;
 
-case MSG_TYPES.MSG_BLUR:
+case wakaPAC.MSG_BLUR:
 console.log('Element lost focus:', event.target);
 break;
 ```
@@ -1026,7 +1041,7 @@ For all other message types, the return value is ignored and standard processing
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        if (event.message === MSG_TYPES.MSG_KEYDOWN) {
+        if (event.message === wakaPAC.MSG_KEYDOWN) {
             // Check for Ctrl key combinations
             if (event.wParam & MK_CONTROL) {
                 switch (event.originalEvent.key) {
@@ -1064,7 +1079,7 @@ wakaPAC('#app', {
 ```javascript
 wakaPAC('#text-editor', {
     msgProc(event) {
-        if (event.message === MSG_TYPES.MSG_KEYDOWN) {
+        if (event.message === wakaPAC.MSG_KEYDOWN) {
             const repeatCount = event.lParam & 0xFFFF;
             const isExtended = (event.lParam & (1 << 24)) !== 0;
 
@@ -1090,9 +1105,9 @@ wakaPAC('#text-editor', {
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        if (event.message === MSG_TYPES.MSG_MOUSEMOVE) {
+        if (event.message === wakaPAC.MSG_MOUSEMOVE) {
             // Extract container-relative coordinates
-            const pos = this.MAKEPOINTS(event.lParam);  // {x, y}
+            const pos = wakaPAC.MAKEPOINTS(event.lParam);  // {x, y}
 
             // Check if left button is held while moving (dragging)
             if (event.wParam & MK_LBUTTON) {
@@ -1101,8 +1116,8 @@ wakaPAC('#app', {
         }
 
         // Handle double-click
-        if (event.message === MSG_TYPES.MSG_LBUTTONDBLCLK) {
-            const pos = this.MAKEPOINTS(event.lParam);
+        if (event.message === wakaPAC.MSG_LBUTTONDBLCLK) {
+            const pos = wakaPAC.MAKEPOINTS(event.lParam);
             this.openItem(pos);
             return false;
         }
@@ -1113,9 +1128,9 @@ wakaPAC('#app', {
 ```
 
 **Mouse Coordinate Functions:**
-- `this.LOWORD(lParam)` - Extract x coordinate (low 16 bits)
-- `this.HIWORD(lParam)` - Extract y coordinate (high 16 bits)
-- `this.MAKEPOINTS(lParam)` - Extract both as `{x, y}` object
+- `wakaPAC.LOWORD(lParam)` - Extract x coordinate (low 16 bits)
+- `wakaPAC.HIWORD(lParam)` - Extract y coordinate (high 16 bits)
+- `wakaPAC.MAKEPOINTS(lParam)` - Extract both as `{x, y}` object
 - `this.containerToViewport(x, y)` - Convert container coords to viewport coords
 - `this.viewportToContainer(x, y)` - Convert viewport coords to container coords
 
@@ -1163,7 +1178,7 @@ wakaPAC.mouseMoveThrottleFps = 0;    // No throttling (every event)
 
 **Pattern 1: Modifier Key Combos**
 ```javascript
-if (message === MSG_TYPES.MSG_LCLICK) {
+if (message === wakaPAC.MSG_LCLICK) {
     if ((wParam & MK_CONTROL) && (wParam & MK_SHIFT)) {
         // Ctrl+Shift+Click
     } else if (wParam & MK_CONTROL) {
@@ -1480,9 +1495,9 @@ this.sanitizeUserInput(html)            // Strips HTML tags and returns plain te
 this.getElementPosition(element)        // Returns the global position of an element within the document
 
 // Mouse coordinate utilities (Win32-style)
-this.LOWORD(lParam)                     // Extract x coordinate from lParam
-this.HIWORD(lParam)                     // Extract y coordinate from lParam
-this.MAKEPOINTS(lParam)                 // Extract {x, y} from lParam
+wakaPAC.LOWORD(lParam)                     // Extract x coordinate from lParam
+wakaPAC.HIWORD(lParam)                     // Extract y coordinate from lParam
+wakaPAC.MAKEPOINTS(lParam)                 // Extract {x, y} from lParam
 this.containerToViewport(x, y)          // Convert container-relative to viewport-absolute
 this.viewportToContainer(x, y)          // Convert viewport-absolute to container-relative
 
@@ -1500,6 +1515,7 @@ These methods are available when you have a reference to the component instance:
 // Lifecycle management (external only)
 component.destroy()   // Destroys component and cleans up resources
 ```
+
 
 ### Configuration Options
 
@@ -2275,11 +2291,11 @@ wakaPAC('#app', {
     msgProc(event) {
         // Handle specific message types
         switch(event.message) {
-            case MSG_TYPES.MSG_KEYDOWN:
+            case wakaPAC.MSG_KEYDOWN:
                 // Handle keyboard input
                 break;
 
-            case MSG_TYPES.MSG_LCLICK:
+            case wakaPAC.MSG_LCLICK:
                 // Handle mouse clicks
                 break;
         }
@@ -2328,46 +2344,46 @@ All Win32-style properties are directly on the event object (not nested in `even
 
 **Mouse Movement:**
 ```javascript
-MSG_TYPES.MSG_MOUSEMOVE    // 0x0200 - Mouse position changed
+wakaPAC.MSG_MOUSEMOVE    // 0x0200 - Mouse position changed
 // Throttled to 60 FPS by default (configurable via wakaPAC.mouseMoveThrottleFps)
 // Coordinates in lParam are container-relative (client-area relative)
 ```
 
 **Mouse Button Events (Raw Button Tracking):**
 ```javascript
-MSG_TYPES.MSG_LBUTTONDOWN  // 0x0201 - Left button pressed
-MSG_TYPES.MSG_LBUTTONUP    // 0x0202 - Left button released
-MSG_TYPES.MSG_LBUTTONDBLCLK// 0x0203 - Left button double-click
-MSG_TYPES.MSG_RBUTTONDOWN  // 0x0204 - Right button pressed
-MSG_TYPES.MSG_RBUTTONUP    // 0x0205 - Right button released
-MSG_TYPES.MSG_MBUTTONDOWN  // 0x0207 - Middle button pressed
-MSG_TYPES.MSG_MBUTTONUP    // 0x0208 - Middle button released
+wakaPAC.MSG_LBUTTONDOWN  // 0x0201 - Left button pressed
+wakaPAC.MSG_LBUTTONUP    // 0x0202 - Left button released
+wakaPAC.MSG_LBUTTONDBLCLK// 0x0203 - Left button double-click
+wakaPAC.MSG_RBUTTONDOWN  // 0x0204 - Right button pressed
+wakaPAC.MSG_RBUTTONUP    // 0x0205 - Right button released
+wakaPAC.MSG_MBUTTONDOWN  // 0x0207 - Middle button pressed
+wakaPAC.MSG_MBUTTONUP    // 0x0208 - Middle button released
 ```
 
 **Click Events (Semantic User Actions):**
 ```javascript
-MSG_TYPES.MSG_LCLICK       // 0x0210 - Left click (triggers click: bindings)
-MSG_TYPES.MSG_MCLICK       // 0x0211 - Middle click
-MSG_TYPES.MSG_RCLICK       // 0x0212 - Right click (contextmenu)
+wakaPAC.MSG_LCLICK       // 0x0210 - Left click (triggers click: bindings)
+wakaPAC.MSG_MCLICK       // 0x0211 - Middle click
+wakaPAC.MSG_RCLICK       // 0x0212 - Right click (contextmenu)
 ```
 
 **Keyboard Events:**
 ```javascript
-MSG_TYPES.MSG_KEYDOWN      // 0x0100 - Key pressed down
-MSG_TYPES.MSG_KEYUP        // 0x0101 - Key released
+wakaPAC.MSG_KEYDOWN      // 0x0100 - Key pressed down
+wakaPAC.MSG_KEYUP        // 0x0101 - Key released
 ```
 
 **Form Events:**
 ```javascript
-MSG_TYPES.MSG_CHAR         // 0x0300 - Text input (typing in fields)
-MSG_TYPES.MSG_CHANGE       // 0x0301 - Form control changed (triggers change: bindings)
-MSG_TYPES.MSG_SUBMIT       // 0x0302 - Form submitted (triggers submit: bindings)
+wakaPAC.MSG_CHAR         // 0x0300 - Text input (typing in fields)
+wakaPAC.MSG_CHANGE       // 0x0301 - Form control changed (triggers change: bindings)
+wakaPAC.MSG_SUBMIT       // 0x0302 - Form submitted (triggers submit: bindings)
 ```
 
 **Focus Events:**
 ```javascript
-MSG_TYPES.MSG_FOCUS        // 0x0007 - Element gained focus
-MSG_TYPES.MSG_BLUR         // 0x0008 - Element lost focus
+wakaPAC.MSG_FOCUS        // 0x0007 - Element gained focus
+wakaPAC.MSG_BLUR         // 0x0008 - Element lost focus
 ```
 
 #### wParam and lParam by Message Type
@@ -2396,7 +2412,7 @@ const y = (lParam >> 16) & 0xFFFF;   // High 16 bits = y coordinate
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_LBUTTONDOWN:
+case wakaPAC.MSG_LBUTTONDOWN:
 const x = lParam & 0xFFFF;
 const y = (lParam >> 16) & 0xFFFF;
 
@@ -2436,7 +2452,7 @@ const isRelease = (lParam & (1 << 31)) !== 0;
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_KEYDOWN:
+case wakaPAC.MSG_KEYDOWN:
 const keyCode = wParam;
 const isExtended = (lParam & (1 << 24)) !== 0;
 
@@ -2468,7 +2484,7 @@ event.detail = {
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_CHAR:
+case wakaPAC.MSG_CHAR:
 console.log(`Text field has ${event.wParam} characters`);
 console.log(`Value: ${event.target.value}`);
 break;
@@ -2494,7 +2510,7 @@ event.detail = {
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_CHANGE:
+case wakaPAC.MSG_CHANGE:
 const target = event.target;
 
 if (target.type === 'checkbox') {
@@ -2524,7 +2540,7 @@ const formData = lParam;  // e.g., { name: 'John', email: 'john@example.com' }
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_SUBMIT:
+case wakaPAC.MSG_SUBMIT:
 console.log('Form submitted:', lParam);
 console.log('Form ID:', wParam);
 
@@ -2544,11 +2560,11 @@ break;
 
 **Example:**
 ```javascript
-case MSG_TYPES.MSG_FOCUS:
+case wakaPAC.MSG_FOCUS:
 console.log('Element gained focus:', event.target);
 break;
 
-case MSG_TYPES.MSG_BLUR:
+case wakaPAC.MSG_BLUR:
 console.log('Element lost focus:', event.target);
 break;
 ```
@@ -2588,7 +2604,7 @@ For all other message types, the return value is ignored and standard processing
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        if (event.message === MSG_TYPES.MSG_KEYDOWN) {
+        if (event.message === wakaPAC.MSG_KEYDOWN) {
             // Check for Ctrl key combinations
             if (event.wParam & MK_CONTROL) {
                 switch (event.originalEvent.key) {
@@ -2626,7 +2642,7 @@ wakaPAC('#app', {
 ```javascript
 wakaPAC('#text-editor', {
     msgProc(event) {
-        if (event.message === MSG_TYPES.MSG_KEYDOWN) {
+        if (event.message === wakaPAC.MSG_KEYDOWN) {
             const repeatCount = event.lParam & 0xFFFF;
             const isExtended = (event.lParam & (1 << 24)) !== 0;
 
@@ -2652,9 +2668,9 @@ wakaPAC('#text-editor', {
 ```javascript
 wakaPAC('#app', {
     msgProc(event) {
-        if (event.message === MSG_TYPES.MSG_MOUSEMOVE) {
+        if (event.message === wakaPAC.MSG_MOUSEMOVE) {
             // Extract container-relative coordinates
-            const pos = this.MAKEPOINTS(event.lParam);  // {x, y}
+            const pos = wakaPAC.MAKEPOINTS(event.lParam);  // {x, y}
 
             // Check if left button is held while moving (dragging)
             if (event.wParam & MK_LBUTTON) {
@@ -2663,8 +2679,8 @@ wakaPAC('#app', {
         }
 
         // Handle double-click
-        if (event.message === MSG_TYPES.MSG_LBUTTONDBLCLK) {
-            const pos = this.MAKEPOINTS(event.lParam);
+        if (event.message === wakaPAC.MSG_LBUTTONDBLCLK) {
+            const pos = wakaPAC.MAKEPOINTS(event.lParam);
             this.openItem(pos);
             return false;
         }
@@ -2675,9 +2691,9 @@ wakaPAC('#app', {
 ```
 
 **Mouse Coordinate Functions:**
-- `this.LOWORD(lParam)` - Extract x coordinate (low 16 bits)
-- `this.HIWORD(lParam)` - Extract y coordinate (high 16 bits)
-- `this.MAKEPOINTS(lParam)` - Extract both as `{x, y}` object
+- `wakaPAC.LOWORD(lParam)` - Extract x coordinate (low 16 bits)
+- `wakaPAC.HIWORD(lParam)` - Extract y coordinate (high 16 bits)
+- `wakaPAC.MAKEPOINTS(lParam)` - Extract both as `{x, y}` object
 - `this.containerToViewport(x, y)` - Convert container coords to viewport coords
 - `this.viewportToContainer(x, y)` - Convert viewport coords to container coords
 
@@ -2725,7 +2741,7 @@ wakaPAC.mouseMoveThrottleFps = 0;    // No throttling (every event)
 
 **Pattern 1: Modifier Key Combos**
 ```javascript
-if (message === MSG_TYPES.MSG_LCLICK) {
+if (message === wakaPAC.MSG_LCLICK) {
     if ((wParam & MK_CONTROL) && (wParam & MK_SHIFT)) {
         // Ctrl+Shift+Click
     } else if (wParam & MK_CONTROL) {
@@ -2913,7 +2929,7 @@ Broadcast a message to all containers using `broadcastMessage(messageId, wParam,
 
 ```javascript
 // Define message constants (recommended)
-const WM_USER_LOGIN = MSG_TYPES.MSG_USER + 1;
+const WM_USER_LOGIN = wakaPAC.MSG_USER + 1;
 
 // wParam and lParam as integers
 wakaPAC.broadcastMessage(WM_USER_LOGIN, 123, 0);  // wParam = userId
@@ -2947,7 +2963,7 @@ wakaPAC.sendMessage('user-panel', WM_USER_LOGIN, 123, 0, {
 Containers receive messages through their `msgProc` function:
 
 ```javascript
-const WM_USER_LOGIN = MSG_TYPES.MSG_USER + 1;
+const WM_USER_LOGIN = wakaPAC.MSG_USER + 1;
 
 wakaPAC('#user-panel', {
     userName: '',
@@ -3121,9 +3137,9 @@ this.sanitizeUserInput(html)            // Strips HTML tags and returns plain te
 this.getElementPosition(element)        // Returns the global position of an element within the document
 
 // Mouse coordinate utilities (Win32-style)
-this.LOWORD(lParam)                     // Extract x coordinate from lParam
-this.HIWORD(lParam)                     // Extract y coordinate from lParam
-this.MAKEPOINTS(lParam)                 // Extract {x, y} from lParam
+wakaPAC.LOWORD(lParam)                     // Extract x coordinate from lParam
+wakaPAC.HIWORD(lParam)                     // Extract y coordinate from lParam
+wakaPAC.MAKEPOINTS(lParam)                 // Extract {x, y} from lParam
 this.containerToViewport(x, y)          // Convert container-relative to viewport-absolute
 this.viewportToContainer(x, y)          // Convert viewport-absolute to container-relative
 

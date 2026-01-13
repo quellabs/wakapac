@@ -306,10 +306,10 @@
 
 <script>
     // Custom message constants using MSG_USER base
-    const MSG_INCREMENT = MSG_TYPES.MSG_USER + 1;
-    const MSG_DECREMENT = MSG_TYPES.MSG_USER + 2;
-    const MSG_RESET = MSG_TYPES.MSG_USER + 3;
-    const MSG_SET_STATUS = MSG_TYPES.MSG_USER + 4;
+    const MSG_INCREMENT = wakaPAC.MSG_USER + 1;
+    const MSG_DECREMENT = wakaPAC.MSG_USER + 2;
+    const MSG_RESET = wakaPAC.MSG_USER + 3;
+    const MSG_SET_STATUS = wakaPAC.MSG_USER + 4;
 
     // Counter Component Abstraction Factory
     function createCounterAbstraction() {
@@ -513,9 +513,9 @@
     // Quick test buttons for demonstration
     console.log('WakaPAC Message System Demo loaded');
     console.log('Try these commands in console:');
-    console.log('  wakaPAC.sendMessage("counterA", MSG_TYPES.MSG_USER + 1, 5, 0)  // Increment counter A by 5');
-    console.log('  wakaPAC.broadcastMessage(MSG_TYPES.MSG_USER + 3, 0, 0)               // Reset all counters');
-    console.log('  wakaPAC.sendMessage("statusMonitor", MSG_TYPES.MSG_USER + 4, 2, 0)  // Set status to "Complete"');
+    console.log('  wakaPAC.sendMessage("counterA", wakaPAC.MSG_USER + 1, 5, 0)  // Increment counter A by 5');
+    console.log('  wakaPAC.broadcastMessage(wakaPAC.MSG_USER + 3, 0, 0)               // Reset all counters');
+    console.log('  wakaPAC.sendMessage("statusMonitor", wakaPAC.MSG_USER + 4, 2, 0)  // Set status to "Complete"');
 </script>
 </body>
 </html>

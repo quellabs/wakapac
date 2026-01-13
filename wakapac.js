@@ -80,43 +80,26 @@
      * Windows-style message type constants for event handling
      * Hex values match Win32 API message identifiers
      */
-    const MSG_TYPES = {
-        // Unknown message (should never occur)
-        MSG_UNKNOWN: 0x0000,
-
-        // Mouse movement
-        MSG_MOUSEMOVE: 0x0200,      // Mouse position changed
-
-        // Mouse button press/release events
-        MSG_LBUTTONDOWN: 0x0201,    // Left mouse button pressed
-        MSG_LBUTTONUP: 0x0202,      // Left mouse button released
-        MSG_LBUTTONDBLCLK: 0x0203,  // Left mouse button double-click
-        MSG_RBUTTONDOWN: 0x0204,    // Right mouse button pressed
-        MSG_RBUTTONUP: 0x0205,      // Right mouse button released
-        MSG_MBUTTONDOWN: 0x0207,    // Middle mouse button pressed
-        MSG_MBUTTONUP: 0x0208,      // Middle mouse button released
-
-        // Click event (semantic user activation)
-        MSG_LCLICK: 0x0210,          // Web-style click event
-        MSG_MCLICK: 0x0211,          // Web-style click event
-        MSG_RCLICK: 0x0212,          // Web-style click event
-
-        // Text input and form events
-        MSG_CHAR: 0x0300,           // Character input received
-        MSG_CHANGE: 0x0301,         // Input value changed
-        MSG_SUBMIT: 0x0302,         // Form submission triggered
-
-        // Element focus state changes
-        MSG_FOCUS: 0x0007,          // Element gained focus
-        MSG_BLUR: 0x0008,           // Element lost focus
-
-        // Keyboard key press/release events
-        MSG_KEYDOWN: 0x0100,        // Key pressed down
-        MSG_KEYUP: 0x0101,          // Key released
-
-        // User messages
-        MSG_USER: 0x1000            // User messages
-    };
+    const MSG_UNKNOWN = 0x0000;
+    const MSG_MOUSEMOVE = 0x0200;
+    const MSG_LBUTTONDOWN = 0x0201;
+    const MSG_LBUTTONUP = 0x0202;
+    const MSG_LBUTTONDBLCLK = 0x0203;
+    const MSG_RBUTTONDOWN = 0x0204;
+    const MSG_RBUTTONUP = 0x0205;
+    const MSG_MBUTTONDOWN = 0x0207;
+    const MSG_MBUTTONUP = 0x0208;
+    const MSG_LCLICK = 0x0210;
+    const MSG_MCLICK = 0x0211;
+    const MSG_RCLICK = 0x0212;
+    const MSG_CHAR = 0x0300;
+    const MSG_CHANGE = 0x0301;
+    const MSG_SUBMIT = 0x0302;
+    const MSG_FOCUS = 0x0007;
+    const MSG_BLUR = 0x0008;
+    const MSG_KEYDOWN = 0x0100;
+    const MSG_KEYUP = 0x0101;
+    const MSG_USER = 0x1000;
 
     /**
      * Mouse and keyboard modifier key state flags
@@ -860,7 +843,7 @@
              */
             document.addEventListener('focusin', function(event) {
                 self.dispatchFocusEvent('focusin', event);
-            }, true);
+            });
 
             /**
              * Handle focus leaving any element (captures phase)
@@ -868,7 +851,7 @@
              */
             document.addEventListener('focusout', function(event) {
                 self.dispatchFocusEvent('focusout', event);
-            }, true);
+            });
 
             /**
              * Handle mouse button down events
@@ -878,11 +861,11 @@
                 let messageType;
 
                 if (event.button === 0) {
-                    messageType = MSG_TYPES.MSG_LBUTTONDOWN;
+                    messageType = MSG_LBUTTONDOWN;
                 } else if (event.button === 1) {
-                    messageType = MSG_TYPES.MSG_MBUTTONDOWN;
+                    messageType = MSG_MBUTTONDOWN;
                 } else if (event.button === 2) {
-                    messageType = MSG_TYPES.MSG_RBUTTONDOWN;
+                    messageType = MSG_RBUTTONDOWN;
                 } else {
                     return; // Unknown button
                 }
@@ -898,11 +881,11 @@
                 let messageType;
 
                 if (event.button === 0) {
-                    messageType = MSG_TYPES.MSG_LBUTTONUP;
+                    messageType = MSG_LBUTTONUP;
                 } else if (event.button === 1) {
-                    messageType = MSG_TYPES.MSG_MBUTTONUP;
+                    messageType = MSG_MBUTTONUP;
                 } else if (event.button === 2) {
-                    messageType = MSG_TYPES.MSG_RBUTTONUP;
+                    messageType = MSG_RBUTTONUP;
                 } else {
                     return; // Unknown button
                 }
@@ -915,9 +898,9 @@
                 let messageType;
 
                 if (event.button === 0) {
-                    messageType = MSG_TYPES.MSG_LCLICK;  // Left click
+                    messageType = MSG_LCLICK;  // Left click
                 } else if (event.button === 1) {
-                    messageType = MSG_TYPES.MSG_MCLICK;  // Middle click
+                    messageType = MSG_MCLICK;  // Middle click
                 } else {
                     return;  // Should never happen for click events
                 }
@@ -927,14 +910,14 @@
 
             // Handle right click
             document.addEventListener('contextmenu', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_RCLICK, event);
+                self.dispatchTrackedEvent(MSG_RCLICK, event);
             });
 
             // Handle double-click (left button only)
             document.addEventListener('dblclick', function (event) {
                 // Only handle left button double-clicks
                 if (event.button === 0) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONDBLCLK, event);
+                    self.dispatchTrackedEvent(MSG_LBUTTONDBLCLK, event);
                 }
             });
 
@@ -946,28 +929,28 @@
              * Must be set before first wakaPAC() call
              */
             self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (ev) => {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, ev);
+                self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
             });
 
             /**
              * Touch start simulates left button down
              */
             document.addEventListener('touchstart', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONDOWN, event);
+                self.dispatchTrackedEvent(MSG_LBUTTONDOWN, event);
             });
 
             /**
              * Touch end simulates left button up
              */
             document.addEventListener('touchend', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONUP, event);
+                self.dispatchTrackedEvent(MSG_LBUTTONUP, event);
             });
 
             /**
              * Touch cancel also simulates left button up
              */
             document.addEventListener('touchcancel', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONUP, event);
+                self.dispatchTrackedEvent(MSG_LBUTTONUP, event);
             });
 
             /**
@@ -975,7 +958,7 @@
              */
             self.setupMoveCoalescer('touchmove', wakaPAC.touchMoveThrottleFps, (ev) => {
                 if (ev.touches.length > 0) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, ev);
+                    self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
                 }
             });
 
@@ -984,7 +967,7 @@
              * Tracks when user releases any key
              */
             document.addEventListener('keyup', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_KEYUP, event, {
+                self.dispatchTrackedEvent(MSG_KEYUP, event, {
                     key: event.key,
                     code: event.code
                 });
@@ -995,7 +978,7 @@
              * Tracks when user presses any key down
              */
             document.addEventListener('keydown', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_KEYDOWN, event);
+                self.dispatchTrackedEvent(MSG_KEYDOWN, event);
             });
 
             /**
@@ -1007,7 +990,7 @@
                     event.target.type === 'radio' ||
                     event.target.type === 'checkbox'
                 ) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHANGE, event, {
+                    self.dispatchTrackedEvent(MSG_CHANGE, event, {
                         elementType: (event.target.tagName === 'SELECT') ? 'select' : event.target.type
                     });
                 }
@@ -1024,7 +1007,7 @@
                     (event.target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(event.target.type)) ||
                     event.target.tagName === 'TEXTAREA'
                 ) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHAR, event, {
+                    self.dispatchTrackedEvent(MSG_CHAR, event, {
                         elementType: (event.target.tagName === 'TEXTAREA') ? 'textarea' : 'input'
                     });
                 }
@@ -1035,7 +1018,7 @@
              * Tracks when user submits any form on the page
              */
             document.addEventListener('submit', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_SUBMIT, event);
+                self.dispatchTrackedEvent(MSG_SUBMIT, event);
             });
 
             /**
@@ -1229,7 +1212,7 @@
          * @param {Object} stateData - State data to include in event
          */
         dispatchBrowserStateEvent(stateType, stateData) {
-            window.PACRegistry.components.forEach((context, pacId) => {
+            window.PACRegistry.components.forEach((context) => {
                 const customEvent = new CustomEvent('pac:browser-state', {
                     detail: {
                         target: context.container,
@@ -1252,7 +1235,7 @@
         dispatchFocusEvent(focusType, originalEvent) {
             const { target, relatedTarget } = originalEvent;
 
-            window.PACRegistry.components.forEach((context, pacId) => {
+            window.PACRegistry.components.forEach((context) => {
                 const container = context.container;
                 if (!this.isContainerAffected(container, target, relatedTarget)) {
                     return;
@@ -1273,9 +1256,9 @@
                 // Also dispatch PAC events for form elements within this container
                 if (Utils.belongsToPacContainer(container, target) && this.isFormElement(target)) {
                     if (focusType === 'focusin') {
-                        this.dispatchTrackedEvent(MSG_TYPES.MSG_FOCUS, originalEvent);
+                        this.dispatchTrackedEvent(MSG_FOCUS, originalEvent);
                     } else if (focusType === 'focusout') {
-                        this.dispatchTrackedEvent(MSG_TYPES.MSG_BLUR, originalEvent);
+                        this.dispatchTrackedEvent(MSG_BLUR, originalEvent);
                     }
                 }
             });
@@ -1317,46 +1300,46 @@
         buildParams(messageType, event, container) {
             switch(messageType) {
                 // Mouse movement and button events - encode button states and coordinates
-                case MSG_TYPES.MSG_MOUSEMOVE:
-                case MSG_TYPES.MSG_LBUTTONDOWN:
-                case MSG_TYPES.MSG_LBUTTONUP:
-                case MSG_TYPES.MSG_LBUTTONDBLCLK:
-                case MSG_TYPES.MSG_RBUTTONDOWN:
-                case MSG_TYPES.MSG_RBUTTONUP:
-                case MSG_TYPES.MSG_MBUTTONDOWN:
-                case MSG_TYPES.MSG_MBUTTONUP:
-                case MSG_TYPES.MSG_LCLICK:
-                case MSG_TYPES.MSG_MCLICK:
-                case MSG_TYPES.MSG_RCLICK:
+                case MSG_MOUSEMOVE:
+                case MSG_LBUTTONDOWN:
+                case MSG_LBUTTONUP:
+                case MSG_LBUTTONDBLCLK:
+                case MSG_RBUTTONDOWN:
+                case MSG_RBUTTONUP:
+                case MSG_MBUTTONDOWN:
+                case MSG_MBUTTONUP:
+                case MSG_LCLICK:
+                case MSG_MCLICK:
+                case MSG_RCLICK:
                     return {
                         wParam: this.buildMouseWParam(event),  // Mouse button and modifier key flags
                         lParam: this.buildMouseLParam(event, container)   // Packed x,y coordinates (container-relative)
                     };
 
                 // Keyboard events - encode key codes and modifier states
-                case MSG_TYPES.MSG_KEYDOWN:
-                case MSG_TYPES.MSG_KEYUP:
+                case MSG_KEYDOWN:
+                case MSG_KEYUP:
                     return {
                         wParam: event.keyCode || event.which || 0,  // Virtual key code (fallback to 0 if undefined)
                         lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
                     };
 
                 // Character and input change events - encode text length
-                case MSG_TYPES.MSG_CHAR:
+                case MSG_CHAR:
                     return {
                         wParam: (event.target && event.target.value) ? event.target.value.length : 0,  // Text length
                         lParam: 0  // Not used for these message types
                     };
 
                 // Select/radio change event
-                case MSG_TYPES.MSG_CHANGE:
+                case MSG_CHANGE:
                     return {
                         wParam: this.buildChangeWParam(event),
                         lParam: 0
                     }
 
                 // Form submission events - encode form data
-                case MSG_TYPES.MSG_SUBMIT: {
+                case MSG_SUBMIT: {
                     // Safety check for form element
                     if (!event.target || typeof event.target.elements === 'undefined') {
                         return {
@@ -2835,6 +2818,170 @@
     };
 
     // ========================================================================
+    // BINDING HANDLERS - Extensible binding type registry
+    // ========================================================================
+
+    /**
+     * Registry of binding handlers. Each handler is a function that applies
+     * a binding value to a DOM element.
+     *
+     * Handler signature: function(domUpdater, element, value)
+     * - domUpdater: Reference to DomUpdater instance for context access
+     * - element: The DOM element to update
+     * - value: The evaluated binding value
+     *
+     * Users can register custom bindings via wakaPAC.registerBinding()
+     */
+    const BindingHandlers = {};
+
+    // =============================================================================
+    // BUILT-IN BINDING HANDLERS
+    // =============================================================================
+
+    /**
+     * Value binding - Updates form element values
+     */
+    BindingHandlers.value = function(domUpdater, element, value) {
+        // Handle radio buttons specially - they should be checked/unchecked based on value match
+        if (element.type === 'radio') {
+            element.checked = (element.value === String(value));
+            return;
+        }
+
+        // Handle all other elements with value property (input, select, textarea, etc.)
+        if ('value' in element) {
+            const stringValue = String(value || '');
+
+            if (element.value !== stringValue) {
+                element.value = stringValue;
+            }
+        }
+    };
+
+    /**
+     * Checked binding - Updates checkbox/radio checked state
+     */
+    BindingHandlers.checked = function(domUpdater, element, value) {
+        if (element.type === 'checkbox' || element.type === 'radio') {
+            const newChecked = Boolean(value);
+
+            // Only update if the value is actually different
+            if (element.checked !== newChecked) {
+                element.checked = newChecked;
+            }
+        }
+    };
+
+    /**
+     * Visible binding - Shows/hides elements by managing display CSS
+     */
+    BindingHandlers.visible = function(domUpdater, element, value) {
+        const shouldShow = !!value;
+
+        if (shouldShow) {
+            if (element.hasAttribute('data-pac-hidden')) {
+                element.style.display = element.getAttribute('data-pac-orig-display') || 'block';
+                element.removeAttribute('data-pac-hidden');
+                element.removeAttribute('data-pac-orig-display');
+            }
+        } else {
+            if (!element.hasAttribute('data-pac-hidden')) {
+                const currentDisplay = getComputedStyle(element).display;
+
+                if (currentDisplay !== 'none') {
+                    element.setAttribute('data-pac-orig-display', currentDisplay);
+                }
+
+                element.style.display = 'none';
+                element.setAttribute('data-pac-hidden', 'true');
+            }
+        }
+    };
+
+    /**
+     * If binding - Shows/hides element contents conditionally
+     */
+    BindingHandlers.if = function(domUpdater, element, value) {
+        const shouldShow = !!value;
+
+        // Initialize tracking properties if not already set
+        if (element._pacOriginalHTML === undefined) {
+            element._pacOriginalHTML = element.innerHTML;
+            element._pacIsRendered = true; // Initially rendered
+        }
+
+        // Show the element contents: restore original HTML
+        if (shouldShow && !element._pacIsRendered) {
+            element.innerHTML = element._pacOriginalHTML;
+            element._pacIsRendered = true;
+
+            // Re-scan and register any bindings within the restored content
+            domUpdater.context.scanAndRegisterNewElements(element);
+        }
+
+        // Hide the element contents: clear innerHTML
+        if (!shouldShow && element._pacIsRendered) {
+            // Update stored HTML before hiding in case content changed
+            element._pacOriginalHTML = element.innerHTML;
+            element.innerHTML = '';
+            element._pacIsRendered = false;
+        }
+    };
+
+    /**
+     * Class binding - Manages CSS classes (string or object syntax)
+     */
+    BindingHandlers.class = function(domUpdater, element, value) {
+        // Object syntax: { active: true, disabled: false }
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            for (const className in value) {
+                if (value[className]) {
+                    element.classList.add(className);
+                } else {
+                    element.classList.remove(className);
+                }
+            }
+            return;
+        }
+
+        // String syntax: "active disabled"
+        if (typeof value === 'string') {
+            // Remove old dynamic class if it exists and differs
+            if (element._pacDynamicClass && element._pacDynamicClass !== value) {
+                element.classList.remove(element._pacDynamicClass);
+            }
+
+            // Add new class
+            element.classList.add(value);
+            element._pacDynamicClass = value;
+        }
+    };
+
+    /**
+     * Style binding - Applies inline styles (object or string syntax)
+     */
+    BindingHandlers.style = function(domUpdater, element, value) {
+        // Object syntax: { color: 'red', fontSize: '16px' }
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            for (const prop in value) {
+                if (value[prop] != null) {
+                    if (prop.startsWith('--')) {
+                        element.style.setProperty(prop, value[prop]);
+                    } else {
+                        element.style[prop] = value[prop];
+                    }
+                }
+            }
+            return;
+        }
+
+        // String syntax: "color: red; font-size: 16px;"
+        if (typeof value === 'string') {
+            element.style.cssText = value;
+        }
+    };
+
+    // ========================================================================
     // DOM UPDATER - Handles ALL binding applications
     // ========================================================================
 
@@ -2900,41 +3047,16 @@
             // Evaluate the expression
             const value = ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
 
-            // Handle the result
-            switch (bindingType) {
-                case 'value':
-                    this.applyValueBinding(element, value);
-                    break;
+            // Use registered handler if available
+            const handler = BindingHandlers[bindingType];
 
-                case 'checked':
-                    this.applyCheckedBinding(element, value);
-                    break;
-
-                case 'visible':
-                    this.applyVisibleBinding(element, value);
-                    break;
-
-                case 'if':  // Add this case
-                    this.applyConditionalBinding(element, value);
-                    break;
-
-                case 'class':
-                    this.applyClassBinding(element, value);
-                    break;
-
-                case 'style':
-                    this.applyStyleBinding(element, value);
-                    break;
-
-                case 'click':
-                case 'foreach':
-                    // foreach bindings are handled during renderForeach, not as attributes
-                    break;
-
-                default:
-                    this.applyAttributeBinding(element, bindingType, value);
-                    break;
+            if (handler) {
+                handler(this, element, value);
+            } else if (bindingType !== 'click' && bindingType !== 'foreach') {
+                // Default: set as attribute for unrecognized binding types
+                this.applyAttributeBinding(element, bindingType, value);
             }
+            // Note: click and foreach are handled elsewhere, so we skip them
         } catch (error) {
             console.warn('Error updating binding:', bindingType, bindingData, error);
         }
@@ -2947,22 +3069,6 @@
      * @param {HTMLElement} element - The DOM element to update
      * @param {*} value - The value to bind to the element
      */
-    DomUpdater.prototype.applyValueBinding = function (element, value) {
-        // Handle radio buttons specially - they should be checked/unchecked based on value match
-        if (element.type === 'radio') {
-            element.checked = (element.value === String(value));
-            return;
-        }
-
-        // Handle all other elements with value property (input, select, textarea, etc.)
-        if ('value' in element) {
-            const stringValue = String(value || '');
-
-            if (element.value !== stringValue) {
-                element.value = stringValue;
-            }
-        }
-    };
 
     /**
      * Applies checked binding to checkbox and radio input elements.
@@ -2971,16 +3077,6 @@
      * @param {HTMLElement} element - The DOM element to update (should be checkbox or radio)
      * @param {*} value - The value to determine checked state (will be converted to boolean)
      */
-    DomUpdater.prototype.applyCheckedBinding = function (element, value) {
-        if (element.type === 'checkbox' || element.type === 'radio') {
-            const newChecked = Boolean(value);
-
-            // Only update if the value is actually different
-            if (element.checked !== newChecked) {
-                element.checked = newChecked;
-            }
-        }
-    };
 
     /**
      * Applies visibility binding to elements by managing display CSS property.
@@ -2989,28 +3085,6 @@
      * @param {HTMLElement} element - The DOM element to show or hide
      * @param {*} value - Truthy values show the element, falsy values hide it
      */
-    DomUpdater.prototype.applyVisibleBinding = function (element, value) {
-        const shouldShow = !!value;
-
-        if (shouldShow) {
-            if (element.hasAttribute('data-pac-hidden')) {
-                element.style.display = element.getAttribute('data-pac-orig-display') || 'block';
-                element.removeAttribute('data-pac-hidden');
-                element.removeAttribute('data-pac-orig-display');
-            }
-        } else {
-            if (!element.hasAttribute('data-pac-hidden')) {
-                const currentDisplay = getComputedStyle(element).display;
-
-                if (currentDisplay !== 'none') {
-                    element.setAttribute('data-pac-orig-display', currentDisplay);
-                }
-
-                element.style.display = 'none';
-                element.setAttribute('data-pac-hidden', 'true');
-            }
-        }
-    };
 
     /**
      * Applies conditional binding to show/hide DOM element contents based on a boolean value.
@@ -3018,32 +3092,6 @@
      * @param {HTMLElement} element - The DOM element whose contents to show/hide
      * @param {*} value - Truthy values show the contents, falsy values hide them
      */
-    DomUpdater.prototype.applyConditionalBinding = function(element, value) {
-        const shouldShow = !!value;
-
-        // Initialize tracking properties if not already set
-        if (element._pacOriginalHTML === undefined) {
-            element._pacOriginalHTML = element.innerHTML;
-            element._pacIsRendered = true; // Initially rendered
-        }
-
-        // Show the element contents: restore original HTML
-        if (shouldShow && !element._pacIsRendered) {
-            element.innerHTML = element._pacOriginalHTML;
-            element._pacIsRendered = true;
-
-            // Re-scan and register any bindings within the restored content
-            this.context.scanAndRegisterNewElements(element);
-        }
-
-        // Hide the element contents: clear innerHTML
-        if (!shouldShow && element._pacIsRendered) {
-            // Update stored HTML before hiding in case content changed
-            element._pacOriginalHTML = element.innerHTML;
-            element.innerHTML = '';
-            element._pacIsRendered = false;
-        }
-    };
 
 
     /**
@@ -3054,30 +3102,6 @@
      * @param {string} value - When string: replaces element.className entirely
      * @param {Object<string, boolean>} value - When object: keys are class names, values determine add/remove
      */
-    DomUpdater.prototype.applyClassBinding = function (element, value) {
-        if (typeof value === 'object' && value !== null) {
-            Object.keys(value).forEach(className => {
-                if (value[className]) {
-                    element.classList.add(className);
-                } else {
-                    element.classList.remove(className);
-                }
-            });
-
-            return;
-        }
-
-        if (typeof value === 'string') {
-            // Remove previous dynamic class if it exists
-            if (element._pacDynamicClass) {
-                element.classList.remove(element._pacDynamicClass);
-            }
-
-            // Add new dynamic class
-            element.classList.add(value);
-            element._pacDynamicClass = value;
-        }
-    };
 
     /**
      * Applies style binding to an element using either object or string syntax.
@@ -3087,29 +3111,6 @@
      * @param {Object<string, string|number|null>} value - When object: property names mapped to values, supports CSS custom properties (--prop)
      * @param {string} value - When string: sets entire cssText (less efficient, backwards compatible)
      */
-    DomUpdater.prototype.applyStyleBinding = function (element, value) {
-        // Object syntax: { color: 'red', fontSize: '16px' }
-        // Check if value is an object (preferred object syntax)
-        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-            for (const prop in value) {
-                if (value[prop] != null) {
-                    if (prop.startsWith('--')) {
-                        element.style.setProperty(prop, value[prop]);
-                    } else {
-                        element.style[prop] = value[prop];
-                    }
-                }
-            }
-
-            return;
-        }
-
-        // String syntax: "color: red; font-size: 16px;"
-        // Set the entire CSS text at once (less efficient but backwards compatible)
-        if (typeof value === 'string') {
-            element.style.cssText = value;
-        }
-    };
 
     /**
      * Applies attribute binding to an element with special handling for boolean attributes.
@@ -3186,6 +3187,10 @@
         }
     }
 
+    // =============================================================================
+    // LIFECYCLE METHODS
+    // =============================================================================
+
     Context.prototype.destroy = function() {
         // Call user's destroy hook FIRST (before any cleanup)
         if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
@@ -3257,6 +3262,10 @@
         this.children = null;
         this.config = null;
     }
+
+    // =============================================================================
+    // CONTAINER STATE TRACKING (Scroll & Visibility)
+    // =============================================================================
 
     /**
      * Sets up scroll event tracking for the container element with debounced handling.
@@ -3379,6 +3388,10 @@
         this.abstraction.containerVisible = Utils.isElementVisible(this.container);
         this.abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
     }
+
+    // =============================================================================
+    // DOM SCANNING AND BINDING REGISTRATION
+    // =============================================================================
 
     /**
      * Scans and registers newly created content within a foreach container
@@ -3611,6 +3624,10 @@
         return { updateMode, delay: cappedDelay };
     };
 
+    // =============================================================================
+    // EVENT HANDLING (User Interactions & System Events)
+    // =============================================================================
+
     /**
      * Handles incoming events by dispatching them to appropriate handler methods based on event type.
      * This is the central event routing mechanism for the Context system.
@@ -3656,7 +3673,7 @@
     /**
      * Handles PAC events based on message type
      * @param {CustomEvent} event - The PAC event with Win32-style message properties
-     * @param {Number} event.message - Message type from MSG_TYPES constants
+     * @param {Number} event.message - Message type from wakaPAC message constants (wakaPAC.MSG_*)
      * @param {Number} event.wParam - Windows-style wParam (modifier keys, button states)
      * @param {Number} event.lParam - Windows-style lParam (coordinates, key codes)
      * @param {Event} event.originalEvent - Reference to the original DOM event
@@ -3671,14 +3688,14 @@
 
             // Only certain message types can be canceled by msgProc
             const cancellableEvents = [
-                MSG_TYPES.MSG_LBUTTONUP,
-                MSG_TYPES.MSG_MBUTTONUP,
-                MSG_TYPES.MSG_RBUTTONUP,
-                MSG_TYPES.MSG_LCLICK,
-                MSG_TYPES.MSG_MCLICK,
-                MSG_TYPES.MSG_RCLICK,
-                MSG_TYPES.MSG_SUBMIT,
-                MSG_TYPES.MSG_CHANGE
+                MSG_LBUTTONUP,
+                MSG_MBUTTONUP,
+                MSG_RBUTTONUP,
+                MSG_LCLICK,
+                MSG_MCLICK,
+                MSG_RCLICK,
+                MSG_SUBMIT,
+                MSG_CHANGE
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
@@ -3694,53 +3711,53 @@
 
         // Call built in event handlers
         switch(event.message) {
-            case MSG_TYPES.MSG_MOUSEMOVE:
-            case MSG_TYPES.MSG_LBUTTONDOWN:
-            case MSG_TYPES.MSG_MBUTTONDOWN:
-            case MSG_TYPES.MSG_RBUTTONDOWN:
-            case MSG_TYPES.MSG_LBUTTONUP:
-            case MSG_TYPES.MSG_MBUTTONUP:
-            case MSG_TYPES.MSG_RBUTTONUP:
-            case MSG_TYPES.MSG_MCLICK:
-            case MSG_TYPES.MSG_RCLICK:
+            case MSG_MOUSEMOVE:
+            case MSG_LBUTTONDOWN:
+            case MSG_MBUTTONDOWN:
+            case MSG_RBUTTONDOWN:
+            case MSG_LBUTTONUP:
+            case MSG_MBUTTONUP:
+            case MSG_RBUTTONUP:
+            case MSG_MCLICK:
+            case MSG_RCLICK:
                 // Mouse movement and button events - no default action, handled by msgProc if needed
                 break;
 
-            case MSG_TYPES.MSG_KEYUP:
-            case MSG_TYPES.MSG_KEYDOWN:
+            case MSG_KEYUP:
+            case MSG_KEYDOWN:
                 // Raw key events - no action taken
                 break;
 
-            case MSG_TYPES.MSG_LBUTTONDBLCLK:
+            case MSG_LBUTTONDBLCLK:
                 // Double-click event - handled by msgProc
                 break;
 
-            case MSG_TYPES.MSG_LCLICK:
+            case MSG_LCLICK:
                 // Mouse button up events - handle DOM clicks
                 this.handleDomClicks(event);
                 break;
 
-            case MSG_TYPES.MSG_SUBMIT:
+            case MSG_SUBMIT:
                 // Form submission events
                 this.handleDomSubmit(event);
                 break;
 
-            case MSG_TYPES.MSG_CHANGE:
+            case MSG_CHANGE:
                 // DOM change event
                 this.handleDomChange(event);
                 break;
 
-            case MSG_TYPES.MSG_CHAR:
+            case MSG_CHAR:
                 // Character input
                 this.handleDomInput(event);
                 break;
 
-            case MSG_TYPES.MSG_FOCUS:
+            case MSG_FOCUS:
                 // Focus events - handle any focus-related logic
                 this.handleDomFocus(event);
                 break;
 
-            case MSG_TYPES.MSG_BLUR:
+            case MSG_BLUR:
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
                 break;
@@ -4054,6 +4071,10 @@
         this.handleWatchersForChange(event);
         this.handleForeachRebuildForChange(event);
     };
+
+    // =============================================================================
+    // DOM UPDATE METHODS (Reactive Data → DOM Sync)
+    // =============================================================================
 
     /**
      * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.)
@@ -4609,6 +4630,10 @@
         }
     };
 
+    // =============================================================================
+    // REACTIVE ABSTRACTION (Proxy Creation & System Properties)
+    // =============================================================================
+
     /**
      * Setup reactive properties for this container
      * @returns {*|object}
@@ -4754,46 +4779,6 @@
             },
 
             /**
-             * Extracts mouse coordinates from lParam value
-             * Mouse coordinates are packed into lParam as two 16-bit integers
-             * Coordinates are container-relative (relative to the container's top-left corner)
-             * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
-             * @param {number} lParam - Packed mouse coordinates from event.lParam
-             * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
-             */
-            LOWORD: {
-                value: (lParam) => Utils.LOWORD(lParam),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Extracts the high-order word (y coordinate) from lParam
-             * Equivalent to Win32 HIWORD macro - gets bits 16-31
-             * @param {number} lParam - Packed mouse coordinates from event.lParam
-             * @returns {number} Y coordinate relative to container's top edge
-             */
-            HIWORD: {
-                value: (lParam) => Utils.HIWORD(lParam),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Extracts both x and y coordinates from lParam
-             * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
-             * Coordinates are container-relative (relative to the container's top-left corner)
-             * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
-             * @param {number} lParam - Packed mouse coordinates from event.lParam
-             * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
-             */
-            MAKEPOINTS: {
-                value: (lParam) => Utils.MAKEPOINTS(lParam),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
              * Converts container-relative coordinates to viewport-absolute coordinates
              * Equivalent to Win32 ClientToScreen - converts client-area to screen coordinates
              * @param {number} x - Container-relative x coordinate
@@ -4924,6 +4909,10 @@
 
         return null;
     }
+
+    // =============================================================================
+    // FOREACH RENDERING (Array → DOM List Generation)
+    // =============================================================================
 
     /**
      * Renders a foreach loop by evaluating its array expression and generating DOM content.
@@ -5374,6 +5363,10 @@
         });
     };
 
+    // =============================================================================
+    // COMPONENT HIERARCHY (Parent-Child Communication)
+    // =============================================================================
+
     /**
      * Establishes parent-child relationships for this component
      * @param {Context|null} parent - Parent component (or null if top-level)
@@ -5536,6 +5529,10 @@
             child.receiveFromParent(cmd, data);
         }
     };
+
+    // =============================================================================
+    // ARRAY CHANGE TRACKING (Diffing & Minimal DOM Updates)
+    // =============================================================================
 
     /**
      * Creates a stable hash from content data, handling various data types
@@ -6359,25 +6356,99 @@
         });
     };
 
+    /**
+     * Register a custom binding handler
+     * Allows users to extend WakaPAC with their own binding types
+     * @param {string} name - The binding name (e.g., 'tooltip' for wp-tooltip="...")
+     * @param {Function} handler - Handler function(domUpdater, element, value)
+     * @throws {Error} If name is invalid or handler is not a function
+     */
+    wakaPAC.registerBinding = function(name, handler) {
+        if (!name || typeof name !== 'string') {
+            throw new Error('Binding name must be a non-empty string');
+        }
+
+        if (typeof handler !== 'function') {
+            throw new Error('Binding handler must be a function');
+        }
+
+        // Warn if overriding built-in binding
+        if (BindingHandlers[name]) {
+            console.warn(`WakaPAC: Overriding built-in binding type '${name}'`);
+        }
+
+        BindingHandlers[name] = handler;
+    };
+
+    /**
+     * Extracts the low-order word (x coordinate) from lParam
+     * Equivalent to Win32 LOWORD macro - gets bits 0-15
+     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * @returns {number} X coordinate relative to container's left edge
+     */
+    wakaPAC.LOWORD = function(lParam) {
+        return Utils.LOWORD(lParam);
+    };
+
+    /**
+     * Extracts the high-order word (y coordinate) from lParam
+     * Equivalent to Win32 HIWORD macro - gets bits 16-31
+     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * @returns {number} Y coordinate relative to container's top edge
+     */
+    wakaPAC.HIWORD = function(lParam) {
+        return Utils.HIWORD(lParam);
+    };
+
+    /**
+     * Extracts both x and y coordinates from lParam
+     * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
+     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
+     */
+    wakaPAC.MAKEPOINTS = function(lParam) {
+        return Utils.MAKEPOINTS(lParam);
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
 
+    // Registry file
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
 
-    // Export to global scope
+    // Export main function to global scope
     window.wakaPAC = wakaPAC;
 
-    // Export built in message types
-    window.MSG_TYPES = MSG_TYPES;
+    // Attach message type constants to wakaPAC
+    wakaPAC.MSG_UNKNOWN = MSG_UNKNOWN;
+    wakaPAC.MSG_MOUSEMOVE = MSG_MOUSEMOVE;
+    wakaPAC.MSG_LBUTTONDOWN = MSG_LBUTTONDOWN;
+    wakaPAC.MSG_LBUTTONUP = MSG_LBUTTONUP;
+    wakaPAC.MSG_LBUTTONDBLCLK = MSG_LBUTTONDBLCLK;
+    wakaPAC.MSG_RBUTTONDOWN = MSG_RBUTTONDOWN;
+    wakaPAC.MSG_RBUTTONUP = MSG_RBUTTONUP;
+    wakaPAC.MSG_MBUTTONDOWN = MSG_MBUTTONDOWN;
+    wakaPAC.MSG_MBUTTONUP = MSG_MBUTTONUP;
+    wakaPAC.MSG_LCLICK = MSG_LCLICK;
+    wakaPAC.MSG_MCLICK = MSG_MCLICK;
+    wakaPAC.MSG_RCLICK = MSG_RCLICK;
+    wakaPAC.MSG_CHAR = MSG_CHAR;
+    wakaPAC.MSG_CHANGE = MSG_CHANGE;
+    wakaPAC.MSG_SUBMIT = MSG_SUBMIT;
+    wakaPAC.MSG_FOCUS = MSG_FOCUS;
+    wakaPAC.MSG_BLUR = MSG_BLUR;
+    wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
+    wakaPAC.MSG_KEYUP = MSG_KEYUP;
+    wakaPAC.MSG_USER = MSG_USER;
 
-    // Export modifier key constants
-    window.MK_LBUTTON = MK_LBUTTON;
-    window.MK_RBUTTON = MK_RBUTTON;
-    window.MK_MBUTTON = MK_MBUTTON;
-    window.MK_SHIFT = MK_SHIFT;
-    window.MK_CONTROL = MK_CONTROL;
-    window.MK_ALT = MK_ALT;
+    // Attach modifier key constants to wakaPAC
+    wakaPAC.MK_LBUTTON = MK_LBUTTON;
+    wakaPAC.MK_RBUTTON = MK_RBUTTON;
+    wakaPAC.MK_MBUTTON = MK_MBUTTON;
+    wakaPAC.MK_SHIFT = MK_SHIFT;
+    wakaPAC.MK_CONTROL = MK_CONTROL;
+    wakaPAC.MK_ALT = MK_ALT;
 
     /**
      * Global mousemove throttling configuration
