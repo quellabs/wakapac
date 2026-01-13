@@ -3169,6 +3169,10 @@
         }
     }
 
+    // =============================================================================
+    // LIFECYCLE METHODS
+    // =============================================================================
+
     Context.prototype.destroy = function() {
         // Call user's destroy hook FIRST (before any cleanup)
         if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
@@ -3240,6 +3244,10 @@
         this.children = null;
         this.config = null;
     }
+
+    // =============================================================================
+    // CONTAINER STATE TRACKING (Scroll & Visibility)
+    // =============================================================================
 
     /**
      * Sets up scroll event tracking for the container element with debounced handling.
@@ -3362,6 +3370,10 @@
         this.abstraction.containerVisible = Utils.isElementVisible(this.container);
         this.abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
     }
+
+    // =============================================================================
+    // DOM SCANNING AND BINDING REGISTRATION
+    // =============================================================================
 
     /**
      * Scans and registers newly created content within a foreach container
@@ -3593,6 +3605,10 @@
         // Return the delay information
         return { updateMode, delay: cappedDelay };
     };
+
+    // =============================================================================
+    // EVENT HANDLING (User Interactions & System Events)
+    // =============================================================================
 
     /**
      * Handles incoming events by dispatching them to appropriate handler methods based on event type.
@@ -4037,6 +4053,10 @@
         this.handleWatchersForChange(event);
         this.handleForeachRebuildForChange(event);
     };
+
+    // =============================================================================
+    // DOM UPDATE METHODS (Reactive Data → DOM Sync)
+    // =============================================================================
 
     /**
      * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.)
@@ -4592,6 +4612,10 @@
         }
     };
 
+    // =============================================================================
+    // REACTIVE ABSTRACTION (Proxy Creation & System Properties)
+    // =============================================================================
+
     /**
      * Setup reactive properties for this container
      * @returns {*|object}
@@ -4907,6 +4931,10 @@
 
         return null;
     }
+
+    // =============================================================================
+    // FOREACH RENDERING (Array → DOM List Generation)
+    // =============================================================================
 
     /**
      * Renders a foreach loop by evaluating its array expression and generating DOM content.
@@ -5357,6 +5385,10 @@
         });
     };
 
+    // =============================================================================
+    // COMPONENT HIERARCHY (Parent-Child Communication)
+    // =============================================================================
+
     /**
      * Establishes parent-child relationships for this component
      * @param {Context|null} parent - Parent component (or null if top-level)
@@ -5519,6 +5551,10 @@
             child.receiveFromParent(cmd, data);
         }
     };
+
+    // =============================================================================
+    // ARRAY CHANGE TRACKING (Diffing & Minimal DOM Updates)
+    // =============================================================================
 
     /**
      * Creates a stable hash from content data, handling various data types
