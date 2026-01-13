@@ -206,7 +206,7 @@
             const pos = this.MAKEPOINTS(event.lParam);
 
             switch(event.message) {
-                case MSG_TYPES.MSG_LBUTTONDOWN:
+                case wakaPAC.MSG_LBUTTONDOWN:
                     // Calculate width on first drag if not set
                     if (!this._containerWidth) {
                         const wrapper = event.target.closest('.slider-wrapper');
@@ -218,7 +218,7 @@
                     this._dragOffset = 0;
                     break;
 
-                case MSG_TYPES.MSG_MOUSEMOVE:
+                case wakaPAC.MSG_MOUSEMOVE:
                     if (this._dragging) {
                         const deltaX = pos.x - this._startX;
                         // Convert pixels to percentage
@@ -227,7 +227,7 @@
 
                     break;
 
-                case MSG_TYPES.MSG_LBUTTONUP:
+                case wakaPAC.MSG_LBUTTONUP:
                     if (this._dragging) {
                         this._dragging = false;
 

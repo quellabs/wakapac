@@ -22,7 +22,7 @@
         },
 
         msgProc(message) {
-            if (message.message === MSG_TYPES.MSG_KEYUP) {
+            if (message.message === wakaPAC.MSG_KEYUP) {
                 if (message.originalEvent.key === 'ArrowUp') {
                     this.increment();
                     return true;

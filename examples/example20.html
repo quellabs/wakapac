@@ -137,7 +137,7 @@
             const canvasY = pos.y - canvasOffsetY;
 
             switch (event.message) {
-                case MSG_TYPES.MSG_LBUTTONDOWN:
+                case wakaPAC.MSG_LBUTTONDOWN:
                     // Start painting
                     this.isPainting = true;
                     this._lastX = canvasX;
@@ -150,12 +150,12 @@
 
                     return false;
 
-                case MSG_TYPES.MSG_LBUTTONUP:
+                case wakaPAC.MSG_LBUTTONUP:
                     // Stop painting
                     this.isPainting = false;
                     return false;
 
-                case MSG_TYPES.MSG_MOUSEMOVE:
+                case wakaPAC.MSG_MOUSEMOVE:
                     // Update mouse position display
                     this.mouseX = Math.round(canvasX);
                     this.mouseY = Math.round(canvasY);

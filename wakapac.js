@@ -80,43 +80,26 @@
      * Windows-style message type constants for event handling
      * Hex values match Win32 API message identifiers
      */
-    const MSG_TYPES = {
-        // Unknown message (should never occur)
-        MSG_UNKNOWN: 0x0000,
-
-        // Mouse movement
-        MSG_MOUSEMOVE: 0x0200,      // Mouse position changed
-
-        // Mouse button press/release events
-        MSG_LBUTTONDOWN: 0x0201,    // Left mouse button pressed
-        MSG_LBUTTONUP: 0x0202,      // Left mouse button released
-        MSG_LBUTTONDBLCLK: 0x0203,  // Left mouse button double-click
-        MSG_RBUTTONDOWN: 0x0204,    // Right mouse button pressed
-        MSG_RBUTTONUP: 0x0205,      // Right mouse button released
-        MSG_MBUTTONDOWN: 0x0207,    // Middle mouse button pressed
-        MSG_MBUTTONUP: 0x0208,      // Middle mouse button released
-
-        // Click event (semantic user activation)
-        MSG_LCLICK: 0x0210,          // Web-style click event
-        MSG_MCLICK: 0x0211,          // Web-style click event
-        MSG_RCLICK: 0x0212,          // Web-style click event
-
-        // Text input and form events
-        MSG_CHAR: 0x0300,           // Character input received
-        MSG_CHANGE: 0x0301,         // Input value changed
-        MSG_SUBMIT: 0x0302,         // Form submission triggered
-
-        // Element focus state changes
-        MSG_FOCUS: 0x0007,          // Element gained focus
-        MSG_BLUR: 0x0008,           // Element lost focus
-
-        // Keyboard key press/release events
-        MSG_KEYDOWN: 0x0100,        // Key pressed down
-        MSG_KEYUP: 0x0101,          // Key released
-
-        // User messages
-        MSG_USER: 0x1000            // User messages
-    };
+    const MSG_UNKNOWN = 0x0000;
+    const MSG_MOUSEMOVE = 0x0200;
+    const MSG_LBUTTONDOWN = 0x0201;
+    const MSG_LBUTTONUP = 0x0202;
+    const MSG_LBUTTONDBLCLK = 0x0203;
+    const MSG_RBUTTONDOWN = 0x0204;
+    const MSG_RBUTTONUP = 0x0205;
+    const MSG_MBUTTONDOWN = 0x0207;
+    const MSG_MBUTTONUP = 0x0208;
+    const MSG_LCLICK = 0x0210;
+    const MSG_MCLICK = 0x0211;
+    const MSG_RCLICK = 0x0212;
+    const MSG_CHAR = 0x0300;
+    const MSG_CHANGE = 0x0301;
+    const MSG_SUBMIT = 0x0302;
+    const MSG_FOCUS = 0x0007;
+    const MSG_BLUR = 0x0008;
+    const MSG_KEYDOWN = 0x0100;
+    const MSG_KEYUP = 0x0101;
+    const MSG_USER = 0x1000;
 
     /**
      * Mouse and keyboard modifier key state flags
@@ -878,11 +861,11 @@
                 let messageType;
 
                 if (event.button === 0) {
-                    messageType = MSG_TYPES.MSG_LBUTTONDOWN;
+                    messageType = MSG_LBUTTONDOWN;
                 } else if (event.button === 1) {
-                    messageType = MSG_TYPES.MSG_MBUTTONDOWN;
+                    messageType = MSG_MBUTTONDOWN;
                 } else if (event.button === 2) {
-                    messageType = MSG_TYPES.MSG_RBUTTONDOWN;
+                    messageType = MSG_RBUTTONDOWN;
                 } else {
                     return; // Unknown button
                 }
@@ -898,11 +881,11 @@
                 let messageType;
 
                 if (event.button === 0) {
-                    messageType = MSG_TYPES.MSG_LBUTTONUP;
+                    messageType = MSG_LBUTTONUP;
                 } else if (event.button === 1) {
-                    messageType = MSG_TYPES.MSG_MBUTTONUP;
+                    messageType = MSG_MBUTTONUP;
                 } else if (event.button === 2) {
-                    messageType = MSG_TYPES.MSG_RBUTTONUP;
+                    messageType = MSG_RBUTTONUP;
                 } else {
                     return; // Unknown button
                 }
@@ -915,9 +898,9 @@
                 let messageType;
 
                 if (event.button === 0) {
-                    messageType = MSG_TYPES.MSG_LCLICK;  // Left click
+                    messageType = MSG_LCLICK;  // Left click
                 } else if (event.button === 1) {
-                    messageType = MSG_TYPES.MSG_MCLICK;  // Middle click
+                    messageType = MSG_MCLICK;  // Middle click
                 } else {
                     return;  // Should never happen for click events
                 }
@@ -927,14 +910,14 @@
 
             // Handle right click
             document.addEventListener('contextmenu', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_RCLICK, event);
+                self.dispatchTrackedEvent(MSG_RCLICK, event);
             });
 
             // Handle double-click (left button only)
             document.addEventListener('dblclick', function (event) {
                 // Only handle left button double-clicks
                 if (event.button === 0) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONDBLCLK, event);
+                    self.dispatchTrackedEvent(MSG_LBUTTONDBLCLK, event);
                 }
             });
 
@@ -946,28 +929,28 @@
              * Must be set before first wakaPAC() call
              */
             self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (ev) => {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, ev);
+                self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
             });
 
             /**
              * Touch start simulates left button down
              */
             document.addEventListener('touchstart', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONDOWN, event);
+                self.dispatchTrackedEvent(MSG_LBUTTONDOWN, event);
             });
 
             /**
              * Touch end simulates left button up
              */
             document.addEventListener('touchend', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONUP, event);
+                self.dispatchTrackedEvent(MSG_LBUTTONUP, event);
             });
 
             /**
              * Touch cancel also simulates left button up
              */
             document.addEventListener('touchcancel', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_LBUTTONUP, event);
+                self.dispatchTrackedEvent(MSG_LBUTTONUP, event);
             });
 
             /**
@@ -975,7 +958,7 @@
              */
             self.setupMoveCoalescer('touchmove', wakaPAC.touchMoveThrottleFps, (ev) => {
                 if (ev.touches.length > 0) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_MOUSEMOVE, ev);
+                    self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
                 }
             });
 
@@ -984,7 +967,7 @@
              * Tracks when user releases any key
              */
             document.addEventListener('keyup', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_KEYUP, event, {
+                self.dispatchTrackedEvent(MSG_KEYUP, event, {
                     key: event.key,
                     code: event.code
                 });
@@ -995,7 +978,7 @@
              * Tracks when user presses any key down
              */
             document.addEventListener('keydown', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_KEYDOWN, event);
+                self.dispatchTrackedEvent(MSG_KEYDOWN, event);
             });
 
             /**
@@ -1007,7 +990,7 @@
                     event.target.type === 'radio' ||
                     event.target.type === 'checkbox'
                 ) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHANGE, event, {
+                    self.dispatchTrackedEvent(MSG_CHANGE, event, {
                         elementType: (event.target.tagName === 'SELECT') ? 'select' : event.target.type
                     });
                 }
@@ -1024,7 +1007,7 @@
                     (event.target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(event.target.type)) ||
                     event.target.tagName === 'TEXTAREA'
                 ) {
-                    self.dispatchTrackedEvent(MSG_TYPES.MSG_CHAR, event, {
+                    self.dispatchTrackedEvent(MSG_CHAR, event, {
                         elementType: (event.target.tagName === 'TEXTAREA') ? 'textarea' : 'input'
                     });
                 }
@@ -1035,7 +1018,7 @@
              * Tracks when user submits any form on the page
              */
             document.addEventListener('submit', function (event) {
-                self.dispatchTrackedEvent(MSG_TYPES.MSG_SUBMIT, event);
+                self.dispatchTrackedEvent(MSG_SUBMIT, event);
             });
 
             /**
@@ -1273,9 +1256,9 @@
                 // Also dispatch PAC events for form elements within this container
                 if (Utils.belongsToPacContainer(container, target) && this.isFormElement(target)) {
                     if (focusType === 'focusin') {
-                        this.dispatchTrackedEvent(MSG_TYPES.MSG_FOCUS, originalEvent);
+                        this.dispatchTrackedEvent(MSG_FOCUS, originalEvent);
                     } else if (focusType === 'focusout') {
-                        this.dispatchTrackedEvent(MSG_TYPES.MSG_BLUR, originalEvent);
+                        this.dispatchTrackedEvent(MSG_BLUR, originalEvent);
                     }
                 }
             });
@@ -1317,46 +1300,46 @@
         buildParams(messageType, event, container) {
             switch(messageType) {
                 // Mouse movement and button events - encode button states and coordinates
-                case MSG_TYPES.MSG_MOUSEMOVE:
-                case MSG_TYPES.MSG_LBUTTONDOWN:
-                case MSG_TYPES.MSG_LBUTTONUP:
-                case MSG_TYPES.MSG_LBUTTONDBLCLK:
-                case MSG_TYPES.MSG_RBUTTONDOWN:
-                case MSG_TYPES.MSG_RBUTTONUP:
-                case MSG_TYPES.MSG_MBUTTONDOWN:
-                case MSG_TYPES.MSG_MBUTTONUP:
-                case MSG_TYPES.MSG_LCLICK:
-                case MSG_TYPES.MSG_MCLICK:
-                case MSG_TYPES.MSG_RCLICK:
+                case MSG_MOUSEMOVE:
+                case MSG_LBUTTONDOWN:
+                case MSG_LBUTTONUP:
+                case MSG_LBUTTONDBLCLK:
+                case MSG_RBUTTONDOWN:
+                case MSG_RBUTTONUP:
+                case MSG_MBUTTONDOWN:
+                case MSG_MBUTTONUP:
+                case MSG_LCLICK:
+                case MSG_MCLICK:
+                case MSG_RCLICK:
                     return {
                         wParam: this.buildMouseWParam(event),  // Mouse button and modifier key flags
                         lParam: this.buildMouseLParam(event, container)   // Packed x,y coordinates (container-relative)
                     };
 
                 // Keyboard events - encode key codes and modifier states
-                case MSG_TYPES.MSG_KEYDOWN:
-                case MSG_TYPES.MSG_KEYUP:
+                case MSG_KEYDOWN:
+                case MSG_KEYUP:
                     return {
                         wParam: event.keyCode || event.which || 0,  // Virtual key code (fallback to 0 if undefined)
                         lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
                     };
 
                 // Character and input change events - encode text length
-                case MSG_TYPES.MSG_CHAR:
+                case MSG_CHAR:
                     return {
                         wParam: (event.target && event.target.value) ? event.target.value.length : 0,  // Text length
                         lParam: 0  // Not used for these message types
                     };
 
                 // Select/radio change event
-                case MSG_TYPES.MSG_CHANGE:
+                case MSG_CHANGE:
                     return {
                         wParam: this.buildChangeWParam(event),
                         lParam: 0
                     }
 
                 // Form submission events - encode form data
-                case MSG_TYPES.MSG_SUBMIT: {
+                case MSG_SUBMIT: {
                     // Safety check for form element
                     if (!event.target || typeof event.target.elements === 'undefined') {
                         return {
@@ -3656,7 +3639,7 @@
     /**
      * Handles PAC events based on message type
      * @param {CustomEvent} event - The PAC event with Win32-style message properties
-     * @param {Number} event.message - Message type from MSG_TYPES constants
+     * @param {Number} event.message - Message type from wakaPAC message constants (wakaPAC.MSG_*)
      * @param {Number} event.wParam - Windows-style wParam (modifier keys, button states)
      * @param {Number} event.lParam - Windows-style lParam (coordinates, key codes)
      * @param {Event} event.originalEvent - Reference to the original DOM event
@@ -3671,14 +3654,14 @@
 
             // Only certain message types can be canceled by msgProc
             const cancellableEvents = [
-                MSG_TYPES.MSG_LBUTTONUP,
-                MSG_TYPES.MSG_MBUTTONUP,
-                MSG_TYPES.MSG_RBUTTONUP,
-                MSG_TYPES.MSG_LCLICK,
-                MSG_TYPES.MSG_MCLICK,
-                MSG_TYPES.MSG_RCLICK,
-                MSG_TYPES.MSG_SUBMIT,
-                MSG_TYPES.MSG_CHANGE
+                MSG_LBUTTONUP,
+                MSG_MBUTTONUP,
+                MSG_RBUTTONUP,
+                MSG_LCLICK,
+                MSG_MCLICK,
+                MSG_RCLICK,
+                MSG_SUBMIT,
+                MSG_CHANGE
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
@@ -3694,53 +3677,53 @@
 
         // Call built in event handlers
         switch(event.message) {
-            case MSG_TYPES.MSG_MOUSEMOVE:
-            case MSG_TYPES.MSG_LBUTTONDOWN:
-            case MSG_TYPES.MSG_MBUTTONDOWN:
-            case MSG_TYPES.MSG_RBUTTONDOWN:
-            case MSG_TYPES.MSG_LBUTTONUP:
-            case MSG_TYPES.MSG_MBUTTONUP:
-            case MSG_TYPES.MSG_RBUTTONUP:
-            case MSG_TYPES.MSG_MCLICK:
-            case MSG_TYPES.MSG_RCLICK:
+            case MSG_MOUSEMOVE:
+            case MSG_LBUTTONDOWN:
+            case MSG_MBUTTONDOWN:
+            case MSG_RBUTTONDOWN:
+            case MSG_LBUTTONUP:
+            case MSG_MBUTTONUP:
+            case MSG_RBUTTONUP:
+            case MSG_MCLICK:
+            case MSG_RCLICK:
                 // Mouse movement and button events - no default action, handled by msgProc if needed
                 break;
 
-            case MSG_TYPES.MSG_KEYUP:
-            case MSG_TYPES.MSG_KEYDOWN:
+            case MSG_KEYUP:
+            case MSG_KEYDOWN:
                 // Raw key events - no action taken
                 break;
 
-            case MSG_TYPES.MSG_LBUTTONDBLCLK:
+            case MSG_LBUTTONDBLCLK:
                 // Double-click event - handled by msgProc
                 break;
 
-            case MSG_TYPES.MSG_LCLICK:
+            case MSG_LCLICK:
                 // Mouse button up events - handle DOM clicks
                 this.handleDomClicks(event);
                 break;
 
-            case MSG_TYPES.MSG_SUBMIT:
+            case MSG_SUBMIT:
                 // Form submission events
                 this.handleDomSubmit(event);
                 break;
 
-            case MSG_TYPES.MSG_CHANGE:
+            case MSG_CHANGE:
                 // DOM change event
                 this.handleDomChange(event);
                 break;
 
-            case MSG_TYPES.MSG_CHAR:
+            case MSG_CHAR:
                 // Character input
                 this.handleDomInput(event);
                 break;
 
-            case MSG_TYPES.MSG_FOCUS:
+            case MSG_FOCUS:
                 // Focus events - handle any focus-related logic
                 this.handleDomFocus(event);
                 break;
 
-            case MSG_TYPES.MSG_BLUR:
+            case MSG_BLUR:
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
                 break;
@@ -6365,19 +6348,38 @@
 
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
 
-    // Export to global scope
+    // Export main function to global scope
     window.wakaPAC = wakaPAC;
 
-    // Export built in message types
-    window.MSG_TYPES = MSG_TYPES;
+    // Attach message type constants to wakaPAC
+    wakaPAC.MSG_UNKNOWN = MSG_UNKNOWN;
+    wakaPAC.MSG_MOUSEMOVE = MSG_MOUSEMOVE;
+    wakaPAC.MSG_LBUTTONDOWN = MSG_LBUTTONDOWN;
+    wakaPAC.MSG_LBUTTONUP = MSG_LBUTTONUP;
+    wakaPAC.MSG_LBUTTONDBLCLK = MSG_LBUTTONDBLCLK;
+    wakaPAC.MSG_RBUTTONDOWN = MSG_RBUTTONDOWN;
+    wakaPAC.MSG_RBUTTONUP = MSG_RBUTTONUP;
+    wakaPAC.MSG_MBUTTONDOWN = MSG_MBUTTONDOWN;
+    wakaPAC.MSG_MBUTTONUP = MSG_MBUTTONUP;
+    wakaPAC.MSG_LCLICK = MSG_LCLICK;
+    wakaPAC.MSG_MCLICK = MSG_MCLICK;
+    wakaPAC.MSG_RCLICK = MSG_RCLICK;
+    wakaPAC.MSG_CHAR = MSG_CHAR;
+    wakaPAC.MSG_CHANGE = MSG_CHANGE;
+    wakaPAC.MSG_SUBMIT = MSG_SUBMIT;
+    wakaPAC.MSG_FOCUS = MSG_FOCUS;
+    wakaPAC.MSG_BLUR = MSG_BLUR;
+    wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
+    wakaPAC.MSG_KEYUP = MSG_KEYUP;
+    wakaPAC.MSG_USER = MSG_USER;
 
-    // Export modifier key constants
-    window.MK_LBUTTON = MK_LBUTTON;
-    window.MK_RBUTTON = MK_RBUTTON;
-    window.MK_MBUTTON = MK_MBUTTON;
-    window.MK_SHIFT = MK_SHIFT;
-    window.MK_CONTROL = MK_CONTROL;
-    window.MK_ALT = MK_ALT;
+    // Attach modifier key constants to wakaPAC
+    wakaPAC.MK_LBUTTON = MK_LBUTTON;
+    wakaPAC.MK_RBUTTON = MK_RBUTTON;
+    wakaPAC.MK_MBUTTON = MK_MBUTTON;
+    wakaPAC.MK_SHIFT = MK_SHIFT;
+    wakaPAC.MK_CONTROL = MK_CONTROL;
+    wakaPAC.MK_ALT = MK_ALT;
 
     /**
      * Global mousemove throttling configuration
