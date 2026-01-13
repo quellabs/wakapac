@@ -2840,7 +2840,7 @@
     /**
      * Value binding - Updates form element values
      */
-    BindingHandlers.value = function(domUpdater, element, value) {
+    BindingHandlers.value = function(context, element, value) {
         // Handle radio buttons specially - they should be checked/unchecked based on value match
         if (element.type === 'radio') {
             element.checked = (element.value === String(value));
@@ -2860,7 +2860,7 @@
     /**
      * Checked binding - Updates checkbox/radio checked state
      */
-    BindingHandlers.checked = function(domUpdater, element, value) {
+    BindingHandlers.checked = function(context, element, value) {
         if (element.type === 'checkbox' || element.type === 'radio') {
             const newChecked = Boolean(value);
 
@@ -2874,7 +2874,7 @@
     /**
      * Visible binding - Shows/hides elements by managing display CSS
      */
-    BindingHandlers.visible = function(domUpdater, element, value) {
+    BindingHandlers.visible = function(context, element, value) {
         const shouldShow = !!value;
 
         if (shouldShow) {
@@ -2900,7 +2900,7 @@
     /**
      * If binding - Shows/hides element contents conditionally
      */
-    BindingHandlers.if = function(domUpdater, element, value) {
+    BindingHandlers.if = function(context, element, value) {
         const shouldShow = !!value;
 
         // Initialize tracking properties if not already set
@@ -2915,7 +2915,7 @@
             element._pacIsRendered = true;
 
             // Re-scan and register any bindings within the restored content
-            domUpdater.context.scanAndRegisterNewElements(element);
+            context.scanAndRegisterNewElements(element);
         }
 
         // Hide the element contents: clear innerHTML
@@ -2930,7 +2930,7 @@
     /**
      * Class binding - Manages CSS classes (string or object syntax)
      */
-    BindingHandlers.class = function(domUpdater, element, value) {
+    BindingHandlers.class = function(context, element, value) {
         // Object syntax: { active: true, disabled: false }
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
             for (const className in value) {
@@ -2940,6 +2940,7 @@
                     element.classList.remove(className);
                 }
             }
+            
             return;
         }
 
@@ -2959,7 +2960,7 @@
     /**
      * Style binding - Applies inline styles (object or string syntax)
      */
-    BindingHandlers.style = function(domUpdater, element, value) {
+    BindingHandlers.style = function(context, element, value) {
         // Object syntax: { color: 'red', fontSize: '16px' }
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
             for (const prop in value) {
@@ -3050,7 +3051,7 @@
             const handler = BindingHandlers[bindingType];
 
             if (handler) {
-                handler(this, element, value);
+                handler(this.context, element, value);
                 return;
             }
 
