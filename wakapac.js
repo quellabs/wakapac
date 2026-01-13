@@ -243,9 +243,8 @@
             }
 
             // Handle Text nodes and Comment nodes by getting their parent element for containment checking
-            const targetElement = element && (element.nodeType === Node.TEXT_NODE || element.nodeType === Node.COMMENT_NODE)
-                ? element.parentElement
-                : element;
+            const isTextNode = element && (element.nodeType === Node.TEXT_NODE || element.nodeType === Node.COMMENT_NODE);
+            const targetElement = isTextNode ? element.parentElement : element;
 
             // Validate that we have a valid Element to work with
             if (!(targetElement instanceof Element)) {
@@ -3052,65 +3051,20 @@
 
             if (handler) {
                 handler(this, element, value);
-            } else if (bindingType !== 'click' && bindingType !== 'foreach') {
-                // Default: set as attribute for unrecognized binding types
-                this.applyAttributeBinding(element, bindingType, value);
+                return;
             }
-            // Note: click and foreach are handled elsewhere, so we skip them
+
+            // Click and foreach handled elsewhere
+            if (bindingType === 'click' || bindingType === 'foreach') {
+                return;
+            }
+
+            // Default: set as attribute for unrecognized binding types
+            this.applyAttributeBinding(element, bindingType, value);
         } catch (error) {
             console.warn('Error updating binding:', bindingType, bindingData, error);
         }
     };
-
-    /**
-     * Applies value binding to form elements, handling different input types appropriately.
-     * For radio buttons, sets checked state based on value match. For other elements,
-     * updates the value property if it has changed.
-     * @param {HTMLElement} element - The DOM element to update
-     * @param {*} value - The value to bind to the element
-     */
-
-    /**
-     * Applies checked binding to checkbox and radio input elements.
-     * Only updates the checked property when the value actually differs to avoid
-     * unnecessary DOM mutations.
-     * @param {HTMLElement} element - The DOM element to update (should be checkbox or radio)
-     * @param {*} value - The value to determine checked state (will be converted to boolean)
-     */
-
-    /**
-     * Applies visibility binding to elements by managing display CSS property.
-     * Preserves original display value when hiding elements and restores it when showing.
-     * Uses data attributes to track hidden state and original display value.
-     * @param {HTMLElement} element - The DOM element to show or hide
-     * @param {*} value - Truthy values show the element, falsy values hide it
-     */
-
-    /**
-     * Applies conditional binding to show/hide DOM element contents based on a boolean value.
-     * The element itself remains in the DOM; only its innerHTML is shown/hidden.
-     * @param {HTMLElement} element - The DOM element whose contents to show/hide
-     * @param {*} value - Truthy values show the contents, falsy values hide them
-     */
-
-
-    /**
-     * Applies class binding to an element using either string or object syntax.
-     * String syntax replaces all classes, object syntax toggles individual classes.
-     * @param {Element} element - The DOM element to update
-     * @param {string|Object<string, boolean>} value - Class value as string or object
-     * @param {string} value - When string: replaces element.className entirely
-     * @param {Object<string, boolean>} value - When object: keys are class names, values determine add/remove
-     */
-
-    /**
-     * Applies style binding to an element using either object or string syntax.
-     * Object syntax is preferred for performance and supports CSS custom properties.
-     * @param {Element} element - The DOM element to update
-     * @param {Object<string, string|number|null>|string} value - Style value as object or CSS string
-     * @param {Object<string, string|number|null>} value - When object: property names mapped to values, supports CSS custom properties (--prop)
-     * @param {string} value - When string: sets entire cssText (less efficient, backwards compatible)
-     */
 
     /**
      * Applies attribute binding to an element with special handling for boolean attributes.
