@@ -2624,7 +2624,7 @@
                     }
                 }
 
-                // CHANGE: Only split on commas at top level (not inside nested structures)
+                // Only split on commas at top level (not inside nested structures)
                 if (char === ',' && !inQuotes && parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
                     this.addBindingPairIfValid(current, pairs);
                     current = '';
@@ -2649,74 +2649,15 @@
                 return;
             }
 
-            const colonIndex = this.findBindingColon(trimmed);
+            const match = trimmed.match(/^\w+(?=:)/);
+            const colonIndex = match ? match[0].length : -1;
 
-            if (colonIndex === -1) {
+            if (colonIndex !== -1) {
                 pairs.push({
-                    type: trimmed,
-                    target: ''
-                });
-            } else {
-                pairs.push({
-                    type: trimmed.substring(0, colonIndex).trim(),
+                    type: trimmed.substring(0, colonIndex),
                     target: trimmed.substring(colonIndex + 1).trim()
                 });
             }
-        },
-
-        /**
-         * Finds binding colon in string
-         * @param {string} str - String to search
-         * @returns {number} Index of colon or -1
-         */
-        findBindingColon(str) {
-            // Check for known binding types first
-            for (const type of KNOWN_BINDING_TYPES) {
-                if (str.startsWith(type + ':')) {
-                    return type.length;
-                }
-            }
-
-            let inQuotes = false;
-            let quoteChar = '';
-            let parenDepth = 0;
-            let bracketDepth = 0;  // Track bracket depth for arrays
-            let braceDepth = 0;    // Track brace depth for objects
-
-            for (let i = 0; i < str.length; i++) {
-                const char = str[i];
-                const isEscaped = i > 0 && str[i - 1] === '\\';
-
-                if ((char === '"' || char === "'") && !isEscaped) {
-                    if (!inQuotes) {
-                        inQuotes = true;
-                        quoteChar = char;
-                    } else if (char === quoteChar) {
-                        inQuotes = false;
-                        quoteChar = '';
-                    }
-                }
-
-                if (!inQuotes) {
-                    if (char === '(') {
-                        parenDepth++;
-                    } else if (char === ')') {
-                        parenDepth--;
-                    } else if (char === '[') {
-                        bracketDepth++;
-                    } else if (char === ']') {
-                        bracketDepth--;
-                    } else if (char === '{') {
-                        braceDepth++;
-                    } else if (char === '}') {
-                        braceDepth--;
-                    } else if (char === ':' && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
-                        return i;
-                    }
-                }
-            }
-
-            return -1;
         }
     };
 
