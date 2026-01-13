@@ -68,15 +68,6 @@
     const BOOLEAN_ATTRIBUTES = ["readonly", "required", "selected", "checked", "hidden", "multiple", "autofocus"];
 
     /**
-     * All binding types
-     * @type {string[]}
-     */
-    const KNOWN_BINDING_TYPES = [
-        "value", "checked", "visible", "if", "foreach", "class", "style",
-        "click", "change", "input", "submit", "focus", "blur", "keyup", "keydown"
-    ];
-
-    /**
      * Windows-style message type constants for event handling
      * Hex values match Win32 API message identifiers
      */
