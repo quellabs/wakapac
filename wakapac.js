@@ -843,7 +843,7 @@
              */
             document.addEventListener('focusin', function(event) {
                 self.dispatchFocusEvent('focusin', event);
-            }, true);
+            });
 
             /**
              * Handle focus leaving any element (captures phase)
@@ -851,7 +851,7 @@
              */
             document.addEventListener('focusout', function(event) {
                 self.dispatchFocusEvent('focusout', event);
-            }, true);
+            });
 
             /**
              * Handle mouse button down events
@@ -1212,7 +1212,7 @@
          * @param {Object} stateData - State data to include in event
          */
         dispatchBrowserStateEvent(stateType, stateData) {
-            window.PACRegistry.components.forEach((context, pacId) => {
+            window.PACRegistry.components.forEach((context) => {
                 const customEvent = new CustomEvent('pac:browser-state', {
                     detail: {
                         target: context.container,
@@ -1235,7 +1235,7 @@
         dispatchFocusEvent(focusType, originalEvent) {
             const { target, relatedTarget } = originalEvent;
 
-            window.PACRegistry.components.forEach((context, pacId) => {
+            window.PACRegistry.components.forEach((context) => {
                 const container = context.container;
                 if (!this.isContainerAffected(container, target, relatedTarget)) {
                     return;
@@ -2824,149 +2824,160 @@
     /**
      * Registry of binding handlers. Each handler is a function that applies
      * a binding value to a DOM element.
+     *
+     * Handler signature: function(domUpdater, element, value)
+     * - domUpdater: Reference to DomUpdater instance for context access
+     * - element: The DOM element to update
+     * - value: The evaluated binding value
+     *
+     * Users can register custom bindings via wakaPAC.registerBinding()
      */
-    const BindingHandlers = {
-        /**
-         * Value binding - Updates form element values
-         */
-        value(domUpdater, element, value) {
-            // Handle radio buttons specially - they should be checked/unchecked based on value match
-            if (element.type === 'radio') {
-                element.checked = (element.value === String(value));
-                return;
+    const BindingHandlers = {};
+
+    // =============================================================================
+    // BUILT-IN BINDING HANDLERS
+    // =============================================================================
+
+    /**
+     * Value binding - Updates form element values
+     */
+    BindingHandlers.value = function(domUpdater, element, value) {
+        // Handle radio buttons specially - they should be checked/unchecked based on value match
+        if (element.type === 'radio') {
+            element.checked = (element.value === String(value));
+            return;
+        }
+
+        // Handle all other elements with value property (input, select, textarea, etc.)
+        if ('value' in element) {
+            const stringValue = String(value || '');
+
+            if (element.value !== stringValue) {
+                element.value = stringValue;
             }
+        }
+    };
 
-            // Handle all other elements with value property (input, select, textarea, etc.)
-            if ('value' in element) {
-                const stringValue = String(value || '');
+    /**
+     * Checked binding - Updates checkbox/radio checked state
+     */
+    BindingHandlers.checked = function(domUpdater, element, value) {
+        if (element.type === 'checkbox' || element.type === 'radio') {
+            const newChecked = Boolean(value);
 
-                if (element.value !== stringValue) {
-                    element.value = stringValue;
+            // Only update if the value is actually different
+            if (element.checked !== newChecked) {
+                element.checked = newChecked;
+            }
+        }
+    };
+
+    /**
+     * Visible binding - Shows/hides elements by managing display CSS
+     */
+    BindingHandlers.visible = function(domUpdater, element, value) {
+        const shouldShow = !!value;
+
+        if (shouldShow) {
+            if (element.hasAttribute('data-pac-hidden')) {
+                element.style.display = element.getAttribute('data-pac-orig-display') || 'block';
+                element.removeAttribute('data-pac-hidden');
+                element.removeAttribute('data-pac-orig-display');
+            }
+        } else {
+            if (!element.hasAttribute('data-pac-hidden')) {
+                const currentDisplay = getComputedStyle(element).display;
+
+                if (currentDisplay !== 'none') {
+                    element.setAttribute('data-pac-orig-display', currentDisplay);
+                }
+
+                element.style.display = 'none';
+                element.setAttribute('data-pac-hidden', 'true');
+            }
+        }
+    };
+
+    /**
+     * If binding - Shows/hides element contents conditionally
+     */
+    BindingHandlers.if = function(domUpdater, element, value) {
+        const shouldShow = !!value;
+
+        // Initialize tracking properties if not already set
+        if (element._pacOriginalHTML === undefined) {
+            element._pacOriginalHTML = element.innerHTML;
+            element._pacIsRendered = true; // Initially rendered
+        }
+
+        // Show the element contents: restore original HTML
+        if (shouldShow && !element._pacIsRendered) {
+            element.innerHTML = element._pacOriginalHTML;
+            element._pacIsRendered = true;
+
+            // Re-scan and register any bindings within the restored content
+            domUpdater.context.scanAndRegisterNewElements(element);
+        }
+
+        // Hide the element contents: clear innerHTML
+        if (!shouldShow && element._pacIsRendered) {
+            // Update stored HTML before hiding in case content changed
+            element._pacOriginalHTML = element.innerHTML;
+            element.innerHTML = '';
+            element._pacIsRendered = false;
+        }
+    };
+
+    /**
+     * Class binding - Manages CSS classes (string or object syntax)
+     */
+    BindingHandlers.class = function(domUpdater, element, value) {
+        // Object syntax: { active: true, disabled: false }
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            for (const className in value) {
+                if (value[className]) {
+                    element.classList.add(className);
+                } else {
+                    element.classList.remove(className);
                 }
             }
-        },
+            return;
+        }
 
-        /**
-         * Checked binding - Updates checkbox/radio checked state
-         */
-        checked(domUpdater, element, value) {
-            if (element.type === 'checkbox' || element.type === 'radio') {
-                const newChecked = Boolean(value);
-
-                // Only update if the value is actually different
-                if (element.checked !== newChecked) {
-                    element.checked = newChecked;
-                }
-            }
-        },
-
-        /**
-         * Visible binding - Shows/hides elements by managing display CSS
-         */
-        visible(domUpdater, element, value) {
-            const shouldShow = !!value;
-
-            if (shouldShow) {
-                if (element.hasAttribute('data-pac-hidden')) {
-                    element.style.display = element.getAttribute('data-pac-orig-display') || 'block';
-                    element.removeAttribute('data-pac-hidden');
-                    element.removeAttribute('data-pac-orig-display');
-                }
-            } else {
-                if (!element.hasAttribute('data-pac-hidden')) {
-                    const currentDisplay = getComputedStyle(element).display;
-
-                    if (currentDisplay !== 'none') {
-                        element.setAttribute('data-pac-orig-display', currentDisplay);
-                    }
-
-                    element.style.display = 'none';
-                    element.setAttribute('data-pac-hidden', 'true');
-                }
-            }
-        },
-
-        /**
-         * If binding - Shows/hides element contents conditionally
-         */
-        if(domUpdater, element, value) {
-            const shouldShow = !!value;
-
-            // Initialize tracking properties if not already set
-            if (element._pacOriginalHTML === undefined) {
-                element._pacOriginalHTML = element.innerHTML;
-                element._pacIsRendered = true; // Initially rendered
+        // String syntax: "active disabled"
+        if (typeof value === 'string') {
+            // Remove old dynamic class if it exists and differs
+            if (element._pacDynamicClass && element._pacDynamicClass !== value) {
+                element.classList.remove(element._pacDynamicClass);
             }
 
-            // Show the element contents: restore original HTML
-            if (shouldShow && !element._pacIsRendered) {
-                element.innerHTML = element._pacOriginalHTML;
-                element._pacIsRendered = true;
+            // Add new class
+            element.classList.add(value);
+            element._pacDynamicClass = value;
+        }
+    };
 
-                // Re-scan and register any bindings within the restored content
-                domUpdater.context.scanAndRegisterNewElements(element);
-            }
-
-            // Hide the element contents: clear innerHTML
-            if (!shouldShow && element._pacIsRendered) {
-                // Update stored HTML before hiding in case content changed
-                element._pacOriginalHTML = element.innerHTML;
-                element.innerHTML = '';
-                element._pacIsRendered = false;
-            }
-        },
-
-        /**
-         * Class binding - Manages CSS classes (string or object syntax)
-         */
-        class(domUpdater, element, value) {
-            // Object syntax: { active: true, disabled: false }
-            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                for (const className in value) {
-                    if (value[className]) {
-                        element.classList.add(className);
+    /**
+     * Style binding - Applies inline styles (object or string syntax)
+     */
+    BindingHandlers.style = function(domUpdater, element, value) {
+        // Object syntax: { color: 'red', fontSize: '16px' }
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+            for (const prop in value) {
+                if (value[prop] != null) {
+                    if (prop.startsWith('--')) {
+                        element.style.setProperty(prop, value[prop]);
                     } else {
-                        element.classList.remove(className);
+                        element.style[prop] = value[prop];
                     }
                 }
-                return;
             }
+            return;
+        }
 
-            // String syntax: "active disabled"
-            if (typeof value === 'string') {
-                // Remove old dynamic class if it exists and differs
-                if (element._pacDynamicClass && element._pacDynamicClass !== value) {
-                    element.classList.remove(element._pacDynamicClass);
-                }
-
-                // Add new class
-                element.classList.add(value);
-                element._pacDynamicClass = value;
-            }
-        },
-
-        /**
-         * Style binding - Applies inline styles (object or string syntax)
-         */
-        style(domUpdater, element, value) {
-            // Object syntax: { color: 'red', fontSize: '16px' }
-            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                for (const prop in value) {
-                    if (value[prop] != null) {
-                        if (prop.startsWith('--')) {
-                            element.style.setProperty(prop, value[prop]);
-                        } else {
-                            element.style[prop] = value[prop];
-                        }
-                    }
-                }
-                return;
-            }
-
-            // String syntax: "color: red; font-size: 16px;"
-            if (typeof value === 'string') {
-                element.style.cssText = value;
-            }
+        // String syntax: "color: red; font-size: 16px;"
+        if (typeof value === 'string') {
+            element.style.cssText = value;
         }
     };
 
@@ -6402,7 +6413,7 @@
         }
 
         // Warn if overriding built-in binding
-        if (BindingHandlers[name] && !name.startsWith('_')) {
+        if (BindingHandlers[name]) {
             console.warn(`WakaPAC: Overriding built-in binding type '${name}'`);
         }
 
@@ -6447,6 +6458,7 @@
     wakaPAC.MK_SHIFT = MK_SHIFT;
     wakaPAC.MK_CONTROL = MK_CONTROL;
     wakaPAC.MK_ALT = MK_ALT;
+
 
     /**
      * Global mousemove throttling configuration
