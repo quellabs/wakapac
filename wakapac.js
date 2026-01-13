@@ -4779,46 +4779,6 @@
             },
 
             /**
-             * Extracts mouse coordinates from lParam value
-             * Mouse coordinates are packed into lParam as two 16-bit integers
-             * Coordinates are container-relative (relative to the container's top-left corner)
-             * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
-             * @param {number} lParam - Packed mouse coordinates from event.lParam
-             * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
-             */
-            LOWORD: {
-                value: (lParam) => Utils.LOWORD(lParam),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Extracts the high-order word (y coordinate) from lParam
-             * Equivalent to Win32 HIWORD macro - gets bits 16-31
-             * @param {number} lParam - Packed mouse coordinates from event.lParam
-             * @returns {number} Y coordinate relative to container's top edge
-             */
-            HIWORD: {
-                value: (lParam) => Utils.HIWORD(lParam),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Extracts both x and y coordinates from lParam
-             * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
-             * Coordinates are container-relative (relative to the container's top-left corner)
-             * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
-             * @param {number} lParam - Packed mouse coordinates from event.lParam
-             * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
-             */
-            MAKEPOINTS: {
-                value: (lParam) => Utils.MAKEPOINTS(lParam),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
              * Converts container-relative coordinates to viewport-absolute coordinates
              * Equivalent to Win32 ClientToScreen - converts client-area to screen coordinates
              * @param {number} x - Container-relative x coordinate
@@ -6420,6 +6380,36 @@
         BindingHandlers[name] = handler;
     };
 
+    /**
+     * Extracts the low-order word (x coordinate) from lParam
+     * Equivalent to Win32 LOWORD macro - gets bits 0-15
+     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * @returns {number} X coordinate relative to container's left edge
+     */
+    wakaPAC.LOWORD = function(lParam) {
+        return Utils.LOWORD(lParam);
+    };
+
+    /**
+     * Extracts the high-order word (y coordinate) from lParam
+     * Equivalent to Win32 HIWORD macro - gets bits 16-31
+     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * @returns {number} Y coordinate relative to container's top edge
+     */
+    wakaPAC.HIWORD = function(lParam) {
+        return Utils.HIWORD(lParam);
+    };
+
+    /**
+     * Extracts both x and y coordinates from lParam
+     * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
+     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
+     */
+    wakaPAC.MAKEPOINTS = function(lParam) {
+        return Utils.MAKEPOINTS(lParam);
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
@@ -6458,7 +6448,6 @@
     wakaPAC.MK_SHIFT = MK_SHIFT;
     wakaPAC.MK_CONTROL = MK_CONTROL;
     wakaPAC.MK_ALT = MK_ALT;
-
 
     /**
      * Global mousemove throttling configuration
