@@ -6414,6 +6414,7 @@
     // EXPORTS
     // ========================================================================
 
+    // Registry file
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
 
     // Export main function to global scope
