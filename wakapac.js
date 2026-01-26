@@ -2432,15 +2432,8 @@
                         );
                     }
 
-                    // Handle $date methods
-                    if (object && object === context.$date) {
-                        const method = object[parsedExpr.method];
-                        const args = parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver));
-                        return method.apply(object, args);
-                    }
-
                     // Security: Only allow methods on whitelisted objects
-                    console.warn('Method calls only supported on arrays and $date');
+                    console.warn('Method calls only supported on arrays');
                     return undefined;
                 }
 
@@ -4851,70 +4844,6 @@
         abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
         abstraction.containerWidth = this.container.clientWidth;
         abstraction.containerHeight = this.container.clientHeight;
-
-        // Add date/time helper object for expressions
-        abstraction.$date = {
-            // Current date/time getters
-            get now() { return new Date(); },
-            get year() { return new Date().getFullYear(); },
-            get month() { return new Date().getMonth() + 1; }, // 1-12 (not 0-11)
-            get day() { return new Date().getDate(); },
-            get hour() { return new Date().getHours(); },
-            get minute() { return new Date().getMinutes(); },
-            get second() { return new Date().getSeconds(); },
-            get dayOfWeek() { return new Date().getDay(); }, // 0=Sunday, 6=Saturday
-            get timestamp() { return Date.now(); },
-
-            // Parse date string to Date object
-            parse(dateString) {
-                return new Date(dateString);
-            },
-
-            // Comparison helpers
-            isBefore(date) {
-                return new Date() < new Date(date);
-            },
-
-            isAfter(date) {
-                return new Date() > new Date(date);
-            },
-
-            isBetween(startDate, endDate) {
-                const now = new Date();
-                return now >= new Date(startDate) && now <= new Date(endDate);
-            },
-
-            // Exact date matching
-            isDate(year, month, day) {
-                const now = new Date();
-                return now.getFullYear() === year &&
-                    (now.getMonth() + 1) === month &&
-                    now.getDate() === day;
-            },
-
-            // Time range checking
-            isTimeAfter(hour, minute = 0) {
-                const now = new Date();
-                const nowMinutes = now.getHours() * 60 + now.getMinutes();
-                const checkMinutes = hour * 60 + minute;
-                return nowMinutes >= checkMinutes;
-            },
-
-            isTimeBefore(hour, minute = 0) {
-                const now = new Date();
-                const nowMinutes = now.getHours() * 60 + now.getMinutes();
-                const checkMinutes = hour * 60 + minute;
-                return nowMinutes < checkMinutes;
-            },
-
-            isTimeBetween(startHour, startMinute, endHour, endMinute) {
-                const now = new Date();
-                const nowMinutes = now.getHours() * 60 + now.getMinutes();
-                const startMinutes = startHour * 60 + (startMinute || 0);
-                const endMinutes = endHour * 60 + (endMinute || 0);
-                return nowMinutes >= startMinutes && nowMinutes < endMinutes;
-            }
-        };
     };
 
     /**
