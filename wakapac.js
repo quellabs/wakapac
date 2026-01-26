@@ -90,6 +90,7 @@
     const MSG_BLUR = 0x0008;
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
+    const MSG_TIMER = 0x0113;
     const MSG_USER = 0x1000;
 
     /**
@@ -2373,6 +2374,7 @@
 
                 case 'ternary': {
                     const condition = this.evaluate(parsedExpr.condition, context, scopeResolver);
+
                     return condition ?
                         this.evaluate(parsedExpr.trueValue, context, scopeResolver) :
                         this.evaluate(parsedExpr.falseValue, context, scopeResolver);
@@ -2380,6 +2382,7 @@
 
                 case 'logical': {
                     const leftLogical = this.evaluate(parsedExpr.left, context, scopeResolver);
+
                     if (parsedExpr.operator === '&&') {
                         return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : false;
                     } else if (parsedExpr.operator === '||') {
@@ -2422,15 +2425,16 @@
                 case 'methodCall': {
                     const object = this.evaluate(parsedExpr.object, context, scopeResolver);
 
-                    // Only allow method calls on arrays for security
-                    if (!Array.isArray(object)) {
-                        console.warn('Method calls only supported on arrays');
-                        return undefined;
+                    // Handle array methods
+                    if (Array.isArray(object)) {
+                        return this.evaluateArrayMethod(object, parsedExpr.method,
+                            parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver))
+                        );
                     }
 
-                    return this.evaluateArrayMethod(object, parsedExpr.method,
-                        parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver))
-                    );
+                    // Security: Only allow methods on whitelisted objects
+                    console.warn('Method calls only supported on arrays');
+                    return undefined;
                 }
 
                 default:
@@ -2872,7 +2876,7 @@
                     element.classList.remove(className);
                 }
             }
-            
+
             return;
         }
 
@@ -3061,17 +3065,9 @@
         this.container.addEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.addEventListener('pac:focus-state', this.boundHandlePacEvent);
 
-        // Call init() method if it exists after all setup is complete
-        if (
-            this.abstraction.init &&
-            typeof this.abstraction.init === 'function'
-        ) {
-            try {
-                this.abstraction.init.call(this.abstraction);
-            } catch (error) {
-                console.error('Error in init() method:', error);
-            }
-        }
+        // Add timers
+        this.timers = new Map();
+        this.nextTimerId = 1;
     }
 
     // =============================================================================
@@ -3079,22 +3075,17 @@
     // =============================================================================
 
     Context.prototype.destroy = function() {
-        // Call user's destroy hook FIRST (before any cleanup)
-        if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
-            try {
-                this.abstraction.destroy();
-            } catch (e) {
-                console.error('Error in user destroy() hook:', e);
-            }
-        }
+        // Remove event listeners
+        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:focus-state', this.boundHandlePacEvent);
 
-        // Remove this component from parent's children array
-        if (this.parent && this.parent.children) {
-            const idx = this.parent.children.indexOf(this);
-
-            if (idx !== -1) {
-                this.parent.children.splice(idx, 1);
-            }
+        // Clean up intersection observer
+        if (this.intersectionObserver) {
+            this.intersectionObserver.disconnect();
+            this.intersectionObserver = null;
         }
 
         // Clear debounce timer if exists
@@ -3107,13 +3098,6 @@
         clearInterval(this.updateQueueInterval);
         this.updateQueueCallback = null;
 
-        // Remove event listeners
-        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:focus-state', this.boundHandlePacEvent);
-
         // Clear boundHandlePacEvent callback
         this.boundHandlePacEvent = null;
 
@@ -3124,10 +3108,25 @@
             this.containerScrollHandler = null;
         }
 
-        // Clean up intersection observer
-        if (this.intersectionObserver) {
-            this.intersectionObserver.disconnect();
-            this.intersectionObserver = null;
+        // Call user's destroy hook
+        if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
+            try {
+                this.abstraction.destroy();
+            } catch (e) {
+                console.error('Error in user destroy() hook:', e);
+            }
+        }
+
+        // Kill all timers for this component
+        this.killAllTimers();
+
+        // Remove this component from parent's children array
+        if (this.parent && this.parent.children) {
+            const idx = this.parent.children.indexOf(this);
+
+            if (idx !== -1) {
+                this.parent.children.splice(idx, 1);
+            }
         }
 
         // Clean up all maps
@@ -3149,6 +3148,76 @@
         this.children = null;
         this.config = null;
     }
+
+    // =============================================================================
+    // TIMERS
+    // =============================================================================
+
+    /**
+     * Sets a timer for this component, similar to Win32 SetTimer.
+     * Sends MSG_TIMER messages to the component's msgProc at the specified interval.
+     * Timer IDs are auto-generated and unique per component instance.
+     * @param {number} elapse - Timer interval in milliseconds
+     * @returns {number} The auto-generated timer ID (use this to kill the timer later)
+     */
+    Context.prototype.setTimer = function(elapse) {
+        // Generate unique timer ID for this component
+        const timerId = this.nextTimerId++;
+
+        // Create interval that sends MSG_TIMER message to component
+        const intervalId = setInterval(() => {
+            wakaPAC.sendMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
+        }, elapse);
+
+        // Store mapping of timerId -> intervalId for later cleanup
+        this.timers.set(timerId, intervalId);
+
+        // Return the timerId
+        return timerId;
+    };
+
+    /**
+     * Kills a specific timer for this component, similar to Win32 KillTimer.
+     * Stops the timer from sending further MSG_TIMER messages.
+     * @param {number} timerId - The timer ID returned from setTimer()
+     * @returns {boolean} True if timer was found and killed, false if timer ID not found
+     */
+    Context.prototype.killTimer = function(timerId) {
+        // Look up the browser's interval ID
+        const intervalId = this.timers.get(timerId);
+
+        // Do nothing if the timer does not exist
+        if (!intervalId) {
+            return false;
+        }
+
+        // Stop the interval and remove from registry
+        clearInterval(intervalId);
+        this.timers.delete(timerId);
+        return true;
+    };
+
+    /**
+     * Kills all timers for this component.
+     * Useful for cleanup or when resetting component state.
+     * Automatically called when component is destroyed.
+     * @returns {number} Number of timers that were killed
+     */
+    Context.prototype.killAllTimers = function() {
+        let count = 0;
+
+        // Clear each interval and count them
+        this.timers.forEach((intervalId) => {
+            clearInterval(intervalId);
+            count++;
+        });
+
+        // Clear the entire timer registry
+        this.timers.clear();
+
+        // Return number of timers that were killed
+        return count;
+    };
 
     // =============================================================================
     // CONTAINER STATE TRACKING (Scroll & Visibility)
@@ -4612,7 +4681,7 @@
 
                 // Return the clean, serializable object
                 return result;
-            },
+            }
         });
 
         // Add utility methods as non-enumerable properties
@@ -6181,6 +6250,18 @@
             // Register using pac-id as key (not selector)
             window.PACRegistry.register(pacId, context);
 
+            // Call init() method if it exists after all setup is complete
+            if (
+                context.abstraction.init &&
+                typeof context.abstraction.init === 'function'
+            ) {
+                try {
+                    context.abstraction.init.call(context.abstraction);
+                } catch (error) {
+                    console.error('Error in init() method:', error);
+                }
+            }
+
             // Signal that a new component is ready
             document.dispatchEvent(new CustomEvent('pac:component-ready', {
                 detail: { component: context, selector: selector, pacId: pacId }
@@ -6241,6 +6322,54 @@
         window.PACRegistry.components.forEach((context, pacId) => {
             wakaPAC.sendMessage(pacId, messageId, wParam, lParam, extraData);
         });
+    };
+
+    /**
+     * Sets a timer for a specific component, similar to Win32 SetTimer
+     * @param {string} pacId - Target container's data-pac-id
+     * @param {number} elapse - Timer interval in milliseconds
+     * @returns {number|null} The timerId if successful, null if failed
+     */
+    wakaPAC.setTimer = function(pacId, elapse) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context) {
+            console.warn(`setTimer: Container with id "${pacId}" not found`);
+            return null;
+        }
+
+        return context.setTimer(elapse);
+    };
+
+    /**
+     * Kills a timer, similar to Win32 KillTimer
+     * @param {string} pacId - Target container's data-pac-id
+     * @param {number} timerId - Timer identifier to kill
+     * @returns {boolean} True if timer was killed, false if not found
+     */
+    wakaPAC.killTimer = function(pacId, timerId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context) {
+            return false;
+        }
+
+        return context.killTimer(timerId);
+    };
+
+    /**
+     * Kills all timers for a specific component
+     * @param {string} pacId - Target container's data-pac-id
+     * @returns {number} Number of timers killed
+     */
+    wakaPAC.killAllTimers = function(pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context) {
+            return 0;
+        }
+
+        return context.killAllTimers();
     };
 
     /**
@@ -6328,6 +6457,7 @@
     wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
     wakaPAC.MSG_KEYUP = MSG_KEYUP;
     wakaPAC.MSG_USER = MSG_USER;
+    wakaPAC.MSG_TIMER = MSG_TIMER;
 
     // Attach modifier key constants to wakaPAC
     wakaPAC.MK_LBUTTON = MK_LBUTTON;

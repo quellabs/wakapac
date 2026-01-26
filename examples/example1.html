@@ -6,14 +6,21 @@
     <p>Count * 2: {{newCount}}</p>
     <p>Focus: {{containerFocusWithin ? 'YES' : 'NO'}}</p>
     <p>Viewport: {{browserViewportWidth}} x {{browserViewportHeight}}</p>
+    <p>Timer: {{timerCounter}}</p>
     <button data-pac-bind="click: increment">+</button>
     <button data-pac-bind="click: decrement">-</button>
+
+    <br><br>
+    <button data-pac-bind="click: startTimer">Start Timer</button>
+    <button data-pac-bind="click: stopTimer">Stop Timer</button>
 </div>
 
 <script src="../wakapac.js"></script>
 <script>
     const counter = wakaPAC('#counter', {
         count: 0,
+        timerCounter: 0,
+        _timerId: null,
 
         computed: {
             newCount() {
@@ -21,7 +28,20 @@
             }
         },
 
+        startTimer() {
+            wakaPAC.killAllTimers(this.pacId);
+            this._timerId = wakaPAC.setTimer(this.pacId, 55);
+        },
+
+        stopTimer() {
+            wakaPAC.killTimer(this.pacId, this._timerId);
+        },
+
         msgProc(message) {
+            if (message.message === wakaPAC.MSG_TIMER) {
+                this.timerCounter++;
+            }
+
             if (message.message === wakaPAC.MSG_KEYUP) {
                 if (message.originalEvent.key === 'ArrowUp') {
                     this.increment();
