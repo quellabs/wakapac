@@ -3069,18 +3069,6 @@
         this.container.addEventListener('pac:array-change', this.boundHandlePacEvent);
         this.container.addEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.addEventListener('pac:focus-state', this.boundHandlePacEvent);
-
-        // Call init() method if it exists after all setup is complete
-        if (
-            this.abstraction.init &&
-            typeof this.abstraction.init === 'function'
-        ) {
-            try {
-                this.abstraction.init.call(this.abstraction);
-            } catch (error) {
-                console.error('Error in init() method:', error);
-            }
-        }
     }
 
     // =============================================================================
@@ -4624,32 +4612,6 @@
 
                 // Return the clean, serializable object
                 return result;
-            },
-
-            /**
-             * Sets a timer for this component
-             * @param {number} elapse - Timer interval in milliseconds
-             * @returns {number|null} The auto-generated timerId
-             */
-            setTimer: (elapse) => {
-                return wakaPAC.setTimer(proxiedReactive.pacId, elapse);
-            },
-
-            /**
-             * Kills a timer for this component
-             * @param {number} timerId - Timer identifier to kill
-             * @returns {boolean} True if timer was killed, false if not found
-             */
-            killTimer: (timerId) => {
-                return wakaPAC.killTimer(proxiedReactive.pacId, timerId);
-            },
-
-            /**
-             * Kills all timers for this component
-             * @returns {number} Number of timers killed
-             */
-            killAllTimers: () => {
-                return wakaPAC.killAllTimers(proxiedReactive.pacId);
             }
         });
 
@@ -6283,6 +6245,18 @@
             // Register using pac-id as key (not selector)
             window.PACRegistry.register(pacId, context);
 
+            // Call init() method if it exists after all setup is complete
+            if (
+                context.abstraction.init &&
+                typeof context.abstraction.init === 'function'
+            ) {
+                try {
+                    context.abstraction.init.call(context.abstraction);
+                } catch (error) {
+                    console.error('Error in init() method:', error);
+                }
+            }
+
             // Signal that a new component is ready
             document.dispatchEvent(new CustomEvent('pac:component-ready', {
                 detail: { component: context, selector: selector, pacId: pacId }
@@ -6510,6 +6484,7 @@
     wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
     wakaPAC.MSG_KEYUP = MSG_KEYUP;
     wakaPAC.MSG_USER = MSG_USER;
+    wakaPAC.MSG_TIMER = MSG_TIMER;
 
     // Attach modifier key constants to wakaPAC
     wakaPAC.MK_LBUTTON = MK_LBUTTON;
