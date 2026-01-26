@@ -6323,10 +6323,9 @@
      * Sets a timer for a specific component, similar to Win32 SetTimer
      * @param {string} pacId - Target container's data-pac-id
      * @param {number} elapse - Timer interval in milliseconds
-     * @param {number} [timerId] - Optional specific timer ID (auto-generated if not provided)
      * @returns {number|null} The timerId if successful, null if failed
      */
-    wakaPAC.setTimer = function(pacId, elapse, timerId) {
+    wakaPAC.setTimer = function(pacId, elapse= 55) {
         const context = window.PACRegistry.get(pacId);
 
         if (!context) {
@@ -6335,12 +6334,7 @@
         }
 
         // Auto-generate timer ID if not provided
-        if (timerId === undefined) {
-            timerId = nextTimerId++;
-        }
-
-        // Clear existing timer with same ID if it exists
-        wakaPAC.killTimer(pacId, timerId);
+        const timerId = nextTimerId++;
 
         // Create timer key for registry
         const timerKey = `${pacId}_${timerId}`;

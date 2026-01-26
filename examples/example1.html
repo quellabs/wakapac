@@ -20,7 +20,7 @@
     const counter = wakaPAC('#counter', {
         count: 0,
         timerCounter: 0,
-        _timerId: 1000,
+        _timerId: null,
 
         computed: {
             newCount() {
@@ -29,11 +29,11 @@
         },
 
         startTimer() {
-            wakaPAC.setTimer(this.pacId, 55, this._timerId);
+            this._timerId = wakaPAC.setTimer(this.pacId, 55);
         },
 
         stopTimer() {
-            wakaPAC.killTimer(this.pacId, this._timerId);
+            this._timerId = wakaPAC.killTimer(this.pacId, this._timerId);
         },
 
         msgProc(message) {
