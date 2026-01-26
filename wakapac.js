@@ -90,6 +90,7 @@
     const MSG_BLUR = 0x0008;
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
+    const MSG_TIMER = 0x0113;
     const MSG_USER = 0x1000;
 
     /**
@@ -534,6 +535,14 @@
             };
         }
     }
+
+    // ========================================================================
+    // TIMER
+    // ========================================================================
+
+    // Timer registry - maps pacId to timer data
+    const TimerRegistry = new Map();
+    let nextTimerId = 1;  // Global timer ID counter
 
     // ========================================================================
     // ENHANCED REACTIVE PROXY WITH ARRAY-SPECIFIC EVENTS
@@ -4613,6 +4622,32 @@
                 // Return the clean, serializable object
                 return result;
             },
+
+            /**
+             * Sets a timer for this component
+             * @param {number} elapse - Timer interval in milliseconds
+             * @returns {number|null} The auto-generated timerId
+             */
+            setTimer: (elapse) => {
+                return wakaPAC.setTimer(proxiedReactive.pacId, elapse);
+            },
+
+            /**
+             * Kills a timer for this component
+             * @param {number} timerId - Timer identifier to kill
+             * @returns {boolean} True if timer was killed, false if not found
+             */
+            killTimer: (timerId) => {
+                return wakaPAC.killTimer(proxiedReactive.pacId, timerId);
+            },
+
+            /**
+             * Kills all timers for this component
+             * @returns {number} Number of timers killed
+             */
+            killAllTimers: () => {
+                return wakaPAC.killAllTimers(proxiedReactive.pacId);
+            }
         });
 
         // Add utility methods as non-enumerable properties
@@ -6305,6 +6340,86 @@
         window.PACRegistry.components.forEach((context, pacId) => {
             wakaPAC.sendMessage(pacId, messageId, wParam, lParam, extraData);
         });
+    };
+
+    /**
+     * Sets a timer for a specific component, similar to Win32 SetTimer
+     * @param {string} pacId - Target container's data-pac-id
+     * @param {number} elapse - Timer interval in milliseconds
+     * @param {number} [timerId] - Optional specific timer ID (auto-generated if not provided)
+     * @returns {number|null} The timerId if successful, null if failed
+     */
+    wakaPAC.setTimer = function(pacId, elapse, timerId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context) {
+            console.warn(`setTimer: Container with id "${pacId}" not found`);
+            return null;
+        }
+
+        // Auto-generate timer ID if not provided
+        if (timerId === undefined) {
+            timerId = nextTimerId++;
+        }
+
+        // Clear existing timer with same ID if it exists
+        wakaPAC.killTimer(pacId, timerId);
+
+        // Create timer key for registry
+        const timerKey = `${pacId}_${timerId}`;
+
+        // Start interval
+        const intervalId = setInterval(() => {
+            wakaPAC.sendMessage(pacId, MSG_TIMER, timerId, 0);
+        }, elapse);
+
+        // Store timer data
+        TimerRegistry.set(timerKey, {
+            pacId,
+            timerId,
+            intervalId,
+            elapse
+        });
+
+        return timerId;
+    };
+
+    /**
+     * Kills a timer, similar to Win32 KillTimer
+     * @param {string} pacId - Target container's data-pac-id
+     * @param {number} timerId - Timer identifier to kill
+     * @returns {boolean} True if timer was killed, false if not found
+     */
+    wakaPAC.killTimer = function(pacId, timerId) {
+        const timerKey = `${pacId}_${timerId}`;
+        const timerData = TimerRegistry.get(timerKey);
+
+        if (!timerData) {
+            return false;
+        }
+
+        clearInterval(timerData.intervalId);
+        TimerRegistry.delete(timerKey);
+        return true;
+    };
+
+    /**
+     * Kills all timers for a specific component
+     * @param {string} pacId - Target container's data-pac-id
+     * @returns {number} Number of timers killed
+     */
+    wakaPAC.killAllTimers = function(pacId) {
+        let count = 0;
+
+        TimerRegistry.forEach((timerData, timerKey) => {
+            if (timerData.pacId === pacId) {
+                clearInterval(timerData.intervalId);
+                TimerRegistry.delete(timerKey);
+                count++;
+            }
+        });
+
+        return count;
     };
 
     /**
