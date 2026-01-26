@@ -3086,7 +3086,7 @@
         }
 
         // Kill all manually set timers
-        this.abstraction.killAllTimers();
+        wakaPAC.killAllTimers(this.abstraction.pacId);
 
         // Clear debounce timer if exists
         if (this.debounceTimer) {
