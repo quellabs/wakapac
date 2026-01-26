@@ -3193,6 +3193,7 @@
         // Look up the browser's interval ID
         const intervalId = this.timers.get(timerId);
 
+        // Do nothing if the timer does not exist
         if (!intervalId) {
             return false;
         }
@@ -3221,6 +3222,7 @@
         // Clear the entire timer registry
         this.timers.clear();
 
+        // Return number of timers that were killed
         return count;
     };
 
