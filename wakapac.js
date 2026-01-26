@@ -3097,14 +3097,8 @@
             }
         }
 
-        // Remove this component from parent's children array
-        if (this.parent && this.parent.children) {
-            const idx = this.parent.children.indexOf(this);
-
-            if (idx !== -1) {
-                this.parent.children.splice(idx, 1);
-            }
-        }
+        // Kill all manually set timers
+        this.abstraction.killAllTimers();
 
         // Clear debounce timer if exists
         if (this.debounceTimer) {
@@ -3137,6 +3131,15 @@
         if (this.intersectionObserver) {
             this.intersectionObserver.disconnect();
             this.intersectionObserver = null;
+        }
+
+        // Remove this component from parent's children array
+        if (this.parent && this.parent.children) {
+            const idx = this.parent.children.indexOf(this);
+
+            if (idx !== -1) {
+                this.parent.children.splice(idx, 1);
+            }
         }
 
         // Clean up all maps
@@ -6415,7 +6418,7 @@
             if (timerData.pacId === pacId) {
                 clearInterval(timerData.intervalId);
                 TimerRegistry.delete(timerKey);
-                count++;
+                ++count;
             }
         });
 
