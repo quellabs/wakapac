@@ -537,14 +537,6 @@
     }
 
     // ========================================================================
-    // TIMER
-    // ========================================================================
-
-    // Timer registry - maps pacId to timer data
-    const TimerRegistry = new Map();
-    let nextTimerId = 1;  // Global timer ID counter
-
-    // ========================================================================
     // ENHANCED REACTIVE PROXY WITH ARRAY-SPECIFIC EVENTS
     // ========================================================================
 
@@ -3079,6 +3071,10 @@
         this.container.addEventListener('pac:array-change', this.boundHandlePacEvent);
         this.container.addEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.addEventListener('pac:focus-state', this.boundHandlePacEvent);
+
+        // Add timers
+        this.timers = new Map();
+        this.nextTimerId = 1;
     }
 
     // =============================================================================
@@ -3128,8 +3124,8 @@
             }
         }
 
-        // Kill all manually set timers
-        wakaPAC.killAllTimers(this.abstraction.pacId);
+        // Kill all timers for this component
+        this.killAllTimers();
 
         // Remove this component from parent's children array
         if (this.parent && this.parent.children) {
@@ -3159,6 +3155,74 @@
         this.children = null;
         this.config = null;
     }
+
+    // =============================================================================
+    // TIMERS
+    // =============================================================================
+
+    /**
+     * Sets a timer for this component, similar to Win32 SetTimer.
+     * Sends MSG_TIMER messages to the component's msgProc at the specified interval.
+     * Timer IDs are auto-generated and unique per component instance.
+     * @param {number} elapse - Timer interval in milliseconds
+     * @returns {number} The auto-generated timer ID (use this to kill the timer later)
+     */
+    Context.prototype.setTimer = function(elapse) {
+        // Generate unique timer ID for this component
+        const timerId = this.nextTimerId++;
+
+        // Create interval that sends MSG_TIMER message to component
+        const intervalId = setInterval(() => {
+            wakaPAC.sendMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
+        }, elapse);
+
+        // Store mapping of timerId -> intervalId for later cleanup
+        this.timers.set(timerId, intervalId);
+
+        // Return the timerId
+        return timerId;
+    };
+
+    /**
+     * Kills a specific timer for this component, similar to Win32 KillTimer.
+     * Stops the timer from sending further MSG_TIMER messages.
+     * @param {number} timerId - The timer ID returned from setTimer()
+     * @returns {boolean} True if timer was found and killed, false if timer ID not found
+     */
+    Context.prototype.killTimer = function(timerId) {
+        // Look up the browser's interval ID
+        const intervalId = this.timers.get(timerId);
+
+        if (!intervalId) {
+            return false;
+        }
+
+        // Stop the interval and remove from registry
+        clearInterval(intervalId);
+        this.timers.delete(timerId);
+        return true;
+    };
+
+    /**
+     * Kills all timers for this component.
+     * Useful for cleanup or when resetting component state.
+     * Automatically called when component is destroyed.
+     * @returns {number} Number of timers that were killed
+     */
+    Context.prototype.killAllTimers = function() {
+        let count = 0;
+
+        // Clear each interval and count them
+        this.timers.forEach((intervalId) => {
+            clearInterval(intervalId);
+            count++;
+        });
+
+        // Clear the entire timer registry
+        this.timers.clear();
+
+        return count;
+    };
 
     // =============================================================================
     // CONTAINER STATE TRACKING (Scroll & Visibility)
@@ -6335,7 +6399,7 @@
      * @param {number} elapse - Timer interval in milliseconds
      * @returns {number|null} The timerId if successful, null if failed
      */
-    wakaPAC.setTimer = function(pacId, elapse= 55) {
+    wakaPAC.setTimer = function(pacId, elapse) {
         const context = window.PACRegistry.get(pacId);
 
         if (!context) {
@@ -6343,26 +6407,7 @@
             return null;
         }
 
-        // Auto-generate timer ID if not provided
-        const timerId = nextTimerId++;
-
-        // Create timer key for registry
-        const timerKey = `${pacId}_${timerId}`;
-
-        // Start interval
-        const intervalId = setInterval(() => {
-            wakaPAC.sendMessage(pacId, MSG_TIMER, timerId, 0);
-        }, elapse);
-
-        // Store timer data
-        TimerRegistry.set(timerKey, {
-            pacId,
-            timerId,
-            intervalId,
-            elapse
-        });
-
-        return timerId;
+        return context.setTimer(elapse);
     };
 
     /**
@@ -6372,16 +6417,13 @@
      * @returns {boolean} True if timer was killed, false if not found
      */
     wakaPAC.killTimer = function(pacId, timerId) {
-        const timerKey = `${pacId}_${timerId}`;
-        const timerData = TimerRegistry.get(timerKey);
+        const context = window.PACRegistry.get(pacId);
 
-        if (!timerData) {
+        if (!context) {
             return false;
         }
 
-        clearInterval(timerData.intervalId);
-        TimerRegistry.delete(timerKey);
-        return true;
+        return context.killTimer(timerId);
     };
 
     /**
@@ -6390,17 +6432,13 @@
      * @returns {number} Number of timers killed
      */
     wakaPAC.killAllTimers = function(pacId) {
-        let count = 0;
+        const context = window.PACRegistry.get(pacId);
 
-        TimerRegistry.forEach((timerData, timerKey) => {
-            if (timerData.pacId === pacId) {
-                clearInterval(timerData.intervalId);
-                TimerRegistry.delete(timerKey);
-                ++count;
-            }
-        });
+        if (!context) {
+            return 0;
+        }
 
-        return count;
+        return context.killAllTimers();
     };
 
     /**
