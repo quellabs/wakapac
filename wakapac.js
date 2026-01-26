@@ -4764,6 +4764,53 @@
         // Add container identification
         abstraction.pacId = this.container.getAttribute('data-pac-id') || this.container.id;
 
+        // Initialize online/offline state and network quality
+        abstraction.browserOnline = navigator.onLine;
+        abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
+        abstraction.browserNetworkQuality = Utils.detectNetworkQuality();
+
+        // Initialize page visibility state - tracks if the browser tab/window is currently visible
+        // Useful for pausing animations or reducing CPU usage when user switches tabs
+        abstraction.browserVisible = !document.hidden;
+
+        // Initialize current horizontal/vertical scroll position in pixels from left/top of document
+        abstraction.browserScrollX  = window.scrollX;
+        abstraction.browserScrollY = window.scrollY;
+
+        // Initialize current viewport width & height - the visible area of the browser window
+        // Updates automatically when user resizes window or rotates mobile device
+        abstraction.browserViewportHeight = window.innerHeight;
+        abstraction.browserViewportWidth = window.innerWidth;
+
+        // Initialize total document width/height including content outside the viewport
+        // Useful for calculating scroll percentages or infinite scroll triggers
+        abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
+        abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+
+        // Container scroll properties
+        abstraction.containerIsScrollable =  false;                               // Can scroll in any direction
+        abstraction.containerScrollX = this.container.scrollLeft;                 // Current horizontal scroll position
+        abstraction.containerScrollY = this.container.scrollTop;                  // Current vertical scroll position
+        abstraction.containerScrollContentWidth = this.container.scrollWidth;     // Total scrollable content width
+        abstraction.containerScrollContentHeight = this.container.scrollHeight;   // Total scrollable content height
+        abstraction.containerScrollWindow = {
+            top: 0,        // scrollTop
+            left: 0,       // scrollLeft
+            right: 0,      // scrollWidth
+            bottom: 0,     // scrollHeight
+            x: 0,          // scrollLeft (alias)
+            y: 0           // scrollTop (alias)
+        };
+
+        // Per-container viewport visibility properties
+        abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
+        abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
+        abstraction.containerVisible = Utils.isElementVisible(this.container);
+        abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
+        abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
+        abstraction.containerWidth = this.container.clientWidth;
+        abstraction.containerHeight = this.container.clientHeight;
+
         // Add date/time helper object for expressions
         abstraction.$date = {
             // Current date/time getters
@@ -4827,53 +4874,6 @@
                 return nowMinutes >= startMinutes && nowMinutes < endMinutes;
             }
         };
-
-        // Initialize online/offline state and network quality
-        abstraction.browserOnline = navigator.onLine;
-        abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
-        abstraction.browserNetworkQuality = Utils.detectNetworkQuality();
-
-        // Initialize page visibility state - tracks if the browser tab/window is currently visible
-        // Useful for pausing animations or reducing CPU usage when user switches tabs
-        abstraction.browserVisible = !document.hidden;
-
-        // Initialize current horizontal/vertical scroll position in pixels from left/top of document
-        abstraction.browserScrollX  = window.scrollX;
-        abstraction.browserScrollY = window.scrollY;
-
-        // Initialize current viewport width & height - the visible area of the browser window
-        // Updates automatically when user resizes window or rotates mobile device
-        abstraction.browserViewportHeight = window.innerHeight;
-        abstraction.browserViewportWidth = window.innerWidth;
-
-        // Initialize total document width/height including content outside the viewport
-        // Useful for calculating scroll percentages or infinite scroll triggers
-        abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
-        abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
-
-        // Container scroll properties
-        abstraction.containerIsScrollable =  false;                               // Can scroll in any direction
-        abstraction.containerScrollX = this.container.scrollLeft;                 // Current horizontal scroll position
-        abstraction.containerScrollY = this.container.scrollTop;                  // Current vertical scroll position
-        abstraction.containerScrollContentWidth = this.container.scrollWidth;     // Total scrollable content width
-        abstraction.containerScrollContentHeight = this.container.scrollHeight;   // Total scrollable content height
-        abstraction.containerScrollWindow = {
-            top: 0,        // scrollTop
-            left: 0,       // scrollLeft
-            right: 0,      // scrollWidth
-            bottom: 0,     // scrollHeight
-            x: 0,          // scrollLeft (alias)
-            y: 0           // scrollTop (alias)
-        };
-
-        // Per-container viewport visibility properties
-        abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
-        abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
-        abstraction.containerVisible = Utils.isElementVisible(this.container);
-        abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
-        abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
-        abstraction.containerWidth = this.container.clientWidth;
-        abstraction.containerHeight = this.container.clientHeight;
     };
 
     /**
