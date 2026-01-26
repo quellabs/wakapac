@@ -2382,6 +2382,7 @@
 
                 case 'ternary': {
                     const condition = this.evaluate(parsedExpr.condition, context, scopeResolver);
+
                     return condition ?
                         this.evaluate(parsedExpr.trueValue, context, scopeResolver) :
                         this.evaluate(parsedExpr.falseValue, context, scopeResolver);
@@ -2389,6 +2390,7 @@
 
                 case 'logical': {
                     const leftLogical = this.evaluate(parsedExpr.left, context, scopeResolver);
+
                     if (parsedExpr.operator === '&&') {
                         return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : false;
                     } else if (parsedExpr.operator === '||') {
@@ -2431,15 +2433,23 @@
                 case 'methodCall': {
                     const object = this.evaluate(parsedExpr.object, context, scopeResolver);
 
-                    // Only allow method calls on arrays for security
-                    if (!Array.isArray(object)) {
-                        console.warn('Method calls only supported on arrays');
-                        return undefined;
+                    // Handle array methods
+                    if (Array.isArray(object)) {
+                        return this.evaluateArrayMethod(object, parsedExpr.method,
+                            parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver))
+                        );
                     }
 
-                    return this.evaluateArrayMethod(object, parsedExpr.method,
-                        parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver))
-                    );
+                    // Handle $date methods
+                    if (object && object === context.$date) {
+                        const method = object[parsedExpr.method];
+                        const args = parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver));
+                        return method.apply(object, args);
+                    }
+
+                    // Security: Only allow methods on whitelisted objects
+                    console.warn('Method calls only supported on arrays and $date');
+                    return undefined;
                 }
 
                 default:
@@ -2881,7 +2891,7 @@
                     element.classList.remove(className);
                 }
             }
-            
+
             return;
         }
 
@@ -3076,17 +3086,18 @@
     // =============================================================================
 
     Context.prototype.destroy = function() {
-        // Call user's destroy hook FIRST (before any cleanup)
-        if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
-            try {
-                this.abstraction.destroy();
-            } catch (e) {
-                console.error('Error in user destroy() hook:', e);
-            }
-        }
+        // Remove event listeners
+        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:focus-state', this.boundHandlePacEvent);
 
-        // Kill all manually set timers
-        wakaPAC.killAllTimers(this.abstraction.pacId);
+        // Clean up intersection observer
+        if (this.intersectionObserver) {
+            this.intersectionObserver.disconnect();
+            this.intersectionObserver = null;
+        }
 
         // Clear debounce timer if exists
         if (this.debounceTimer) {
@@ -3098,13 +3109,6 @@
         clearInterval(this.updateQueueInterval);
         this.updateQueueCallback = null;
 
-        // Remove event listeners
-        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:focus-state', this.boundHandlePacEvent);
-
         // Clear boundHandlePacEvent callback
         this.boundHandlePacEvent = null;
 
@@ -3115,11 +3119,17 @@
             this.containerScrollHandler = null;
         }
 
-        // Clean up intersection observer
-        if (this.intersectionObserver) {
-            this.intersectionObserver.disconnect();
-            this.intersectionObserver = null;
+        // Call user's destroy hook
+        if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
+            try {
+                this.abstraction.destroy();
+            } catch (e) {
+                console.error('Error in user destroy() hook:', e);
+            }
         }
+
+        // Kill all manually set timers
+        wakaPAC.killAllTimers(this.abstraction.pacId);
 
         // Remove this component from parent's children array
         if (this.parent && this.parent.children) {
