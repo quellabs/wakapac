@@ -29,7 +29,7 @@
         },
 
         startTimer() {
-            wakaPAC.killTimer(this._timerId);
+            wakaPAC.killAllTimers(this.pacId);
             this._timerId = wakaPAC.setTimer(this.pacId, 55);
         },
 
