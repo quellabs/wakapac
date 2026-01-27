@@ -191,19 +191,15 @@
             switch(event.message) {
                 case wakaPAC.MSG_GESTURE:
                     // Prevent context menu from appearing after gesture
-                    event.preventDefault();
-
                     this.lastGesture = event.pattern;
 
                     // Navigate based on gesture pattern
                     switch(event.pattern) {
                         case 'left':
-                        case 'L':  // L-shape gesture might also be useful
                             this.nextSlide();
                             return false;
 
                         case 'right':
-                        case 'inverted-L':
                             this.prevSlide();
                             return false;
                     }

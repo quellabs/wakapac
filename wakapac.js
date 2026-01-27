@@ -3659,7 +3659,8 @@
                 MSG_MCLICK,
                 MSG_RCLICK,
                 MSG_SUBMIT,
-                MSG_CHANGE
+                MSG_CHANGE,
+                MSG_GESTURE
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
