@@ -862,6 +862,12 @@
                     return; // Unknown button
                 }
 
+                // Track right button specifically for gestures
+                if (event.button === 2) {
+                    MouseGestureRecognizer.startRecording(event);
+                }
+
+                // Dispatch event to container
                 self.dispatchTrackedEvent(messageType, event);
             });
 
@@ -882,6 +888,12 @@
                     return; // Unknown button
                 }
 
+                // Check for gesture completion on right button
+                if (event.button === 2 && MouseGestureRecognizer.isRecording) {
+                    MouseGestureRecognizer.stopRecording(event);
+                }
+
+                // Dispatch event to container
                 self.dispatchTrackedEvent(messageType, event);
             });
 
@@ -901,12 +913,15 @@
             document.addEventListener('contextmenu', function (event) {
                 // Check if gesture was just dispatched in the preceding mouseup
                 if (MouseGestureRecognizer.gestureJustDispatched) {
+                    // Reset gestureJustDispatched flag
                     MouseGestureRecognizer.gestureJustDispatched = false;
 
-                    if (MouseGestureRecognizer.gestureWasPrevented) {
-                        event.preventDefault();
-                        MouseGestureRecognizer.gestureWasPrevented = false;
-                    }
+                    // Clear the prevented flag if it was set
+                    MouseGestureRecognizer.gestureWasPrevented = false;
+
+                    // Always suppress context menu after any gesture motion (recognized or not)
+                    // A drag motion is not a click, regardless of whether pattern matched
+                    event.preventDefault();
                 }
 
                 self.dispatchTrackedEvent(MSG_RCLICK, event);
@@ -928,6 +943,12 @@
              * Must be set before first wakaPAC() call
              */
             self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (ev) => {
+                // Record gesture point if gesture is active
+                if (MouseGestureRecognizer.isRecording) {
+                    MouseGestureRecognizer.recordPoint(ev);
+                }
+
+                // Dispatch move event to container
                 self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
             });
 
@@ -6140,45 +6161,6 @@
         },
 
         /**
-         * Initializes the mouse gesture recognition system
-         * Sets up global event listeners for mousedown, mousemove, mouseup
-         * Should be called once during framework initialization
-         * @returns {void}
-         */
-        initialize() {
-            // Prevent double initialization
-            if (this._initialized) {
-                return;
-            }
-
-            this._initialized = true;
-            const self = this;
-
-            // Start recording gesture path when right mouse button is pressed
-            // Use capture phase to intercept before other handlers
-            document.addEventListener('mousedown', function(event) {
-                // Only track right button (button code 2)
-                if (event.button === 2) {
-                    self.startRecording(event);
-                }
-            }, true);
-
-            // Record points along the gesture path as user drags
-            document.addEventListener('mousemove', function(event) {
-                if (self.isRecording) {
-                    self.recordPoint(event);
-                }
-            }, true);
-
-            // Analyze and fire gesture event when right button is released
-            document.addEventListener('mouseup', function(event) {
-                if (event.button === 2 && self.isRecording) {
-                    self.stopRecording(event);
-                }
-            }, true);
-        },
-
-        /**
          * Begins recording a new gesture
          * Called when right mouse button is pressed
          * @param {MouseEvent} event - The mousedown event
@@ -6261,9 +6243,12 @@
             // Try to match the direction sequence against known patterns
             const pattern = this.matchPattern(directions);
 
+            // Mark that a gesture was attempted (even if unrecognized)
+            // This tells contextmenu handler to suppress the menu
+            this.gestureJustDispatched = true;
+
             // Dispatch gesture event if we have a pattern and a container
             if (pattern && this.gestureContainer) {
-                this.gestureJustDispatched = true;
                 this.dispatchGesture(event, pattern, directions);
             }
 
@@ -6365,14 +6350,18 @@
             }
 
             // Diagonal movement - pick dominant axis
-            return dxSq > dySq ? (dx > 0 ? 'R' : 'L') : (dy > 0 ? 'D' : 'U');
+            if (dx > 0) {
+                return dxSq > dySq ? 'R' : (dy > 0 ? 'D' : 'U');
+            } else {
+                return dxSq > dySq ? 'L' : (dy > 0 ? 'D' : 'U');
+            }
         },
 
         /**
          * Matches a direction sequence against known patterns
          * Tries to find a named pattern, otherwise returns raw direction string
          * @param {string[]} directions - Array of direction codes from extractDirections()
-         * @returns {string} Pattern name (e.g., "L", "inverted-L") or lowercase direction string
+         * @returns {string|null} Pattern name (e.g., "L", "inverted-L") or null if none found
          */
         matchPattern(directions) {
             // Implode directions into one string
@@ -6386,8 +6375,8 @@
                 }
             }
 
-            // No match found - return the raw direction sequence as lowercase
-            return directionString.toLowerCase();
+            // No match found - return null to indicate unrecognized gesture
+            return null;
         },
 
         /**
@@ -6716,9 +6705,6 @@
 
         // Initialize automatic cleanup observer
         CleanupObserver.initialize();
-
-        // Initialize mouse gesture recognizer
-        MouseGestureRecognizer.initialize();
 
         // Fetch all matching elements (supports both ID and class selectors)
         const containers = document.querySelectorAll(selector);
