@@ -38,6 +38,10 @@
         },
 
         msgProc(message) {
+            if (message.message === wakaPAC.MSG_GESTURE) {
+                console.log(message.pattern);
+            }
+
             if (message.message === wakaPAC.MSG_TIMER) {
                 this.timerCounter++;
             }

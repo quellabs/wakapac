@@ -6434,12 +6434,11 @@
             let minY = points[0].y, maxY = minY;
 
             for (let i = 1; i < pointCount; i++) {
-                const x = points[i].x;
-                const y = points[i].y;
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
+                const { x, y } = points[i];
+                minX = Math.min(minX, x);
+                maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
             }
 
             // Cache frequently accessed values
