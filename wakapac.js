@@ -899,6 +899,16 @@
 
             // Contextmenu event recognises right button
             document.addEventListener('contextmenu', function (event) {
+                // Check if a gesture just occurred
+                const timeSinceGesture = Date.now() - MouseGestureRecognizer.lastGestureTime;
+
+                // If gesture was just dispatched and prevented, suppress context menu
+                if (timeSinceGesture < 50 && MouseGestureRecognizer.lastGesturePrevented) {
+                    event.preventDefault();
+                    MouseGestureRecognizer.lastGesturePrevented = false;
+                }
+
+                // Always dispatch MSG_RCLICK (gesture or not)
                 self.dispatchTrackedEvent(MSG_RCLICK, event);
             });
 
@@ -6041,6 +6051,12 @@
         /** @private {HTMLElement|null} PAC container where gesture was initiated */
         gestureContainer: null,
 
+        /** @private {number} Timestamp of last dispatched gesture */
+        lastGestureTime: 0,
+
+        /** @private {boolean} Whether last gesture was prevented by msgProc */
+        lastGesturePrevented: false,
+
         // Configuration constants
 
         /** @constant {number} Minimum distance in pixels between recorded points (filters jitter) */
@@ -6159,17 +6175,6 @@
                     self.stopRecording(event);
                 }
             }, true);
-
-            // Clean up if context menu appears
-            // Note: User can call preventDefault() in msgProc to suppress context menu
-            document.addEventListener('contextmenu', function(event) {
-                if (self.isRecording) {
-                    // Gesture was already analyzed and fired in mouseup
-                    // Just clean up the recording state
-                    self.isRecording = false;
-                    self.gesturePoints = [];
-                }
-            }, true);
         },
 
         /**
@@ -6258,6 +6263,7 @@
             // Dispatch gesture event if we have a pattern and a container
             if (pattern && this.gestureContainer) {
                 this.dispatchGesture(event, pattern, directions);
+                this.lastGestureTime = Date.now();  // Mark when gesture was dispatched
             }
 
             // Clean up for next gesture
@@ -6497,6 +6503,11 @@
 
             // Dispatch to the container where gesture was initiated
             this.gestureContainer.dispatchEvent(customEvent);
+
+            // Track if gesture was prevented for context menu suppression
+            if (customEvent.defaultPrevented) {
+                this.lastGesturePrevented = true;
+            }
         }
     };
 
