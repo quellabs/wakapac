@@ -939,14 +939,14 @@
              * Set wakaPAC.mouseMoveThrottleFps = 120 for higher precision (gaming, drawing apps)
              * Must be set before first wakaPAC() call
              */
-            self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (ev) => {
+            self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (event) => {
                 // Record gesture point if gesture is active
                 if (MouseGestureRecognizer.isRecording) {
-                    MouseGestureRecognizer.recordPoint(ev);
+                    MouseGestureRecognizer.recordPoint(event);
                 }
 
                 // Dispatch move event to container
-                self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
+                self.dispatchTrackedEvent(MSG_MOUSEMOVE, event);
             });
 
             /**
@@ -973,9 +973,9 @@
             /**
              * Touch move simulates mouse move
              */
-            self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (ev) => {
-                if (ev.touches.length > 0) {
-                    self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
+            self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
+                if (event.touches.length > 0) {
+                    self.dispatchTrackedEvent(MSG_MOUSEMOVE, event);
                 }
             });
 
