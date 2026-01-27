@@ -916,9 +916,6 @@
                     // Reset gestureJustDispatched flag
                     MouseGestureRecognizer.gestureJustDispatched = false;
 
-                    // Clear the prevented flag if it was set
-                    MouseGestureRecognizer.gestureWasPrevented = false;
-
                     // Always suppress context menu after any gesture motion (recognized or not)
                     // A drag motion is not a click, regardless of whether pattern matched
                     event.preventDefault();
@@ -6493,11 +6490,6 @@
 
             // Dispatch to the container where gesture was initiated
             this.gestureContainer.dispatchEvent(customEvent);
-
-            // Track if gesture was prevented for context menu suppression
-            if (customEvent.defaultPrevented) {
-                this.gestureWasPrevented = true;
-            }
         }
     };
 
