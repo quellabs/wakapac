@@ -899,16 +899,16 @@
 
             // Contextmenu event recognises right button
             document.addEventListener('contextmenu', function (event) {
-                // Check if a gesture just occurred
-                const timeSinceGesture = Date.now() - MouseGestureRecognizer.lastGestureTime;
+                // Check if gesture was just dispatched in the preceding mouseup
+                if (MouseGestureRecognizer.gestureJustDispatched) {
+                    MouseGestureRecognizer.gestureJustDispatched = false;
 
-                // If gesture was just dispatched and prevented, suppress context menu
-                if (timeSinceGesture < 50 && MouseGestureRecognizer.lastGesturePrevented) {
-                    event.preventDefault();
-                    MouseGestureRecognizer.lastGesturePrevented = false;
+                    if (MouseGestureRecognizer.gestureWasPrevented) {
+                        event.preventDefault();
+                        MouseGestureRecognizer.gestureWasPrevented = false;
+                    }
                 }
 
-                // Always dispatch MSG_RCLICK (gesture or not)
                 self.dispatchTrackedEvent(MSG_RCLICK, event);
             });
 
@@ -6051,8 +6051,8 @@
         /** @private {HTMLElement|null} PAC container where gesture was initiated */
         gestureContainer: null,
 
-        /** @private {number} Timestamp of last dispatched gesture */
-        lastGestureTime: 0,
+        /** @private {boolean} Whether gesture was dispatched to msgProc */
+        gestureJustDispatched: false,
 
         /** @private {boolean} Whether last gesture was prevented by msgProc */
         lastGesturePrevented: false,
@@ -6262,8 +6262,8 @@
 
             // Dispatch gesture event if we have a pattern and a container
             if (pattern && this.gestureContainer) {
+                this.gestureJustDispatched = true;
                 this.dispatchGesture(event, pattern, directions);
-                this.lastGestureTime = Date.now();  // Mark when gesture was dispatched
             }
 
             // Clean up for next gesture
@@ -6506,7 +6506,7 @@
 
             // Track if gesture was prevented for context menu suppression
             if (customEvent.defaultPrevented) {
-                this.lastGesturePrevented = true;
+                this.gestureWasPrevented = true;
             }
         }
     };
