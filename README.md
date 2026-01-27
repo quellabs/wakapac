@@ -287,63 +287,6 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 </div>
 ```
 
-#### Event Bindings
-
-All standard DOM events are supported:
-
-**`click`** - Mouse click events
-```html
-<button data-pac-bind="click: handleClick">Click me</button>
-```
-
-**`change`** - Form change events
-```html
-<select data-pac-bind="change: handleChange">
-```
-
-**`input`** - Form input events (as user types)
-```html
-<input data-pac-bind="input: handleInput">
-```
-
-**`submit`** - Form submission
-```html
-<form data-pac-bind="submit: handleSubmit">
-```
-
-**`focus`** / **`blur`** - Focus events
-```html
-<input data-pac-bind="focus: handleFocus, blur: handleBlur">
-```
-
-**`keyup`** / **`keydown`** - Keyboard events
-```html
-<input data-pac-bind="keyup: handleKey" data-pac-event="enter">
-<input data-pac-bind="keydown: handleKeyDown" data-pac-event="escape">
-```
-
-#### Event Modifiers
-
-Event modifiers allow you to control how events behave by using the `data-pac-event` attribute. They can prevent default browser actions, filter events to specific keys, or control event propagation. Multiple modifiers can be combined by separating them with spaces.
-
-```html
-<!-- Prevent form submission redirect -->
-<form data-pac-bind="submit: handleSubmit" data-pac-event="prevent">
-
-<!-- Search on Enter key -->
-<input data-pac-bind="keyup: search" data-pac-event="enter">
-
-<!-- Close modal on Escape -->
-<div data-pac-bind="keyup: closeModal" data-pac-event="escape">
-
-<!-- Multiple modifiers -->
-<form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
-```
-
-**Available modifiers:**
-- **Keys**: `enter`, `escape`/`esc`, `space`, `tab`, `delete`/`del`, `up`, `down`, `left`, `right`
-- **Behavior**: `prevent`, `stop`
-
 ### Custom Bindings
 
 Register custom binding types to extend WakaPAC:
@@ -1866,41 +1809,6 @@ WakaPAC provides comprehensive data binding capabilities through the `data-pac-b
 </div>
 ```
 
-#### Event Bindings
-
-All standard DOM events are supported:
-
-**`click`** - Mouse click events
-```html
-<button data-pac-bind="click: handleClick">Click me</button>
-```
-
-**`change`** - Form change events
-```html
-<select data-pac-bind="change: handleChange">
-```
-
-**`input`** - Form input events (as user types)
-```html
-<input data-pac-bind="input: handleInput">
-```
-
-**`submit`** - Form submission
-```html
-<form data-pac-bind="submit: handleSubmit">
-```
-
-**`focus`** / **`blur`** - Focus events
-```html
-<input data-pac-bind="focus: handleFocus, blur: handleBlur">
-```
-
-**`keyup`** / **`keydown`** - Keyboard events
-```html
-<input data-pac-bind="keyup: handleKey" data-pac-event="enter">
-<input data-pac-bind="keydown: handleKeyDown" data-pac-event="escape">
-```
-
 #### Event Modifiers
 
 Event modifiers allow you to control how events behave by using the `data-pac-event` attribute. They can prevent default browser actions, filter events to specific keys, or control event propagation. Multiple modifiers can be combined by separating them with spaces.
@@ -1909,14 +1817,8 @@ Event modifiers allow you to control how events behave by using the `data-pac-ev
 <!-- Prevent form submission redirect -->
 <form data-pac-bind="submit: handleSubmit" data-pac-event="prevent">
 
-    <!-- Search on Enter key -->
-    <input data-pac-bind="keyup: search" data-pac-event="enter">
-
-    <!-- Close modal on Escape -->
-    <div data-pac-bind="keyup: closeModal" data-pac-event="escape">
-
-        <!-- Multiple modifiers -->
-        <form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
+<!-- Multiple modifiers -->
+<form data-pac-bind="submit: handleForm" data-pac-event="prevent stop">
 ```
 
 **Available modifiers:**
