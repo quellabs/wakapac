@@ -6076,22 +6076,9 @@
         /**
          * Registers a custom gesture pattern
          * Allows users to define their own gesture shortcuts
-         *
          * @param {string} name - Name for the pattern (e.g., "back", "forward", "refresh")
          * @param {string[]} directions - Array of direction codes: 'R', 'L', 'U', 'D'
          * @throws {Error} If name or directions are invalid
-         *
-         * @example
-         * // Register a "back" gesture (draw L shape)
-         * wakaPAC.registerGesture('back', ['L', 'U']);
-         *
-         * @example
-         * // Register a "Z" gesture
-         * wakaPAC.registerGesture('z-shape', ['R', 'D', 'R']);
-         *
-         * @example
-         * // Register a refresh gesture (down then up)
-         * wakaPAC.registerGesture('refresh', ['D', 'U']);
          */
         registerPattern(name, directions) {
             // Validate name
@@ -6123,26 +6110,22 @@
 
         /**
          * Removes a registered gesture pattern
-         *
          * @param {string} name - Name of the pattern to remove
          * @returns {boolean} True if pattern was removed, false if not found
-         *
-         * @example
-         * wakaPAC.unregisterGesture('back');
          */
         unregisterPattern(name) {
             if (this.patterns[name]) {
                 delete this.patterns[name];
                 return true;
+            } else {
+                return false;
             }
-            return false;
         },
 
         /**
          * Initializes the mouse gesture recognition system
          * Sets up global event listeners for mousedown, mousemove, mouseup
          * Should be called once during framework initialization
-         *
          * @returns {void}
          */
         initialize() {
@@ -6192,7 +6175,6 @@
         /**
          * Begins recording a new gesture
          * Called when right mouse button is pressed
-         *
          * @param {MouseEvent} event - The mousedown event
          * @returns {void}
          */
@@ -6217,7 +6199,6 @@
         /**
          * Records a point along the gesture path
          * Only records if moved far enough from last point to filter out jitter
-         *
          * @param {MouseEvent} event - The mousemove event
          * @returns {void}
          */
@@ -6244,7 +6225,6 @@
         /**
          * Stops recording and analyzes the gesture
          * Called when right mouse button is released
-         *
          * @param {MouseEvent} event - The mouseup event
          * @returns {void}
          */
@@ -6295,63 +6275,49 @@
                 return [];
             }
 
-            // Step 1: Determine direction between each consecutive pair of points
-            const pointDirections = [];
+            const segments = [];
+            const minLengthSq = this.MIN_SEGMENT_LENGTH * this.MIN_SEGMENT_LENGTH; // Avoid repeated sqrt
+
+            let segmentStart = this.gesturePoints[0];
+            let segmentEnd = this.gesturePoints[0];
+            let currentDir = null;
 
             for (let i = 1; i < this.gesturePoints.length; i++) {
-                const prev = this.gesturePoints[i - 1];
                 const curr = this.gesturePoints[i];
-                const dx = curr.x - prev.x;
-                const dy = curr.y - prev.y;
+                const dx = curr.x - this.gesturePoints[i - 1].x;
+                const dy = curr.y - this.gesturePoints[i - 1].y;
                 const direction = this.getDirection(dx, dy);
 
-                if (direction) {
-                    pointDirections.push({
-                        index: i,
-                        direction: direction,
-                        point: curr
-                    });
-                }
-            }
+                if (!direction) continue;
 
-            if (pointDirections.length === 0) {
-                return [];
-            }
-
-            // Step 2: Group consecutive points with same direction into segments
-            const segments = [];
-            let currentDir = pointDirections[0].direction;
-            let segmentStart = this.gesturePoints[0];
-            let segmentEnd = pointDirections[0].point;
-
-            for (let i = 1; i < pointDirections.length; i++) {
-                if (pointDirections[i].direction === currentDir) {
-                    // Same direction - extend current segment
-                    segmentEnd = pointDirections[i].point;
+                if (direction === currentDir) {
+                    segmentEnd = curr;
                 } else {
-                    // Direction changed - save current segment if long enough
-                    const dx = segmentEnd.x - segmentStart.x;
-                    const dy = segmentEnd.y - segmentStart.y;
-                    const length = Math.sqrt(dx * dx + dy * dy);
+                    // Save previous segment if long enough
+                    if (currentDir !== null) {
+                        const sdx = segmentEnd.x - segmentStart.x;
+                        const sdy = segmentEnd.y - segmentStart.y;
 
-                    if (length >= this.MIN_SEGMENT_LENGTH) {
-                        segments.push(currentDir);
+                        if (sdx * sdx + sdy * sdy >= minLengthSq) {
+                            segments.push(currentDir);
+                        }
                     }
 
                     // Start new segment
-                    currentDir = pointDirections[i].direction;
-                    segmentStart = segmentEnd; // Start from where last segment ended
-                    segmentEnd = pointDirections[i].point;
+                    currentDir = direction;
+                    segmentStart = segmentEnd;
+                    segmentEnd = curr;
                 }
             }
 
-            // Don't forget the final segment
-            const dx = segmentEnd.x - segmentStart.x;
-            const dy = segmentEnd.y - segmentStart.y;
-            const length = Math.sqrt(dx * dx + dy * dy);
+            // Handle final segment
+            if (currentDir !== null) {
+                const dx = segmentEnd.x - segmentStart.x;
+                const dy = segmentEnd.y - segmentStart.y;
 
-            if (length >= this.MIN_SEGMENT_LENGTH) {
-                segments.push(currentDir);
+                if (dx * dx + dy * dy >= minLengthSq) {
+                    segments.push(currentDir);
+                }
             }
 
             return segments;
@@ -6359,128 +6325,90 @@
 
         /**
          * Classifies a movement vector into a cardinal direction
-         * Uses normalized vector and threshold to determine R/L/U/D
-         *
+         * Uses squared magnitudes to avoid expensive sqrt/normalization
          * @param {number} dx - Horizontal movement (positive = right)
          * @param {number} dy - Vertical movement (positive = down, screen coordinates)
          * @returns {string|null} Direction code ('R', 'L', 'U', 'D') or null if invalid
-         *
-         * @example
-         * getDirection(100, 0)   // Returns 'R' (pure right)
-         * getDirection(0, 100)   // Returns 'D' (pure down)
-         * getDirection(70, 70)   // Returns 'D' (diagonal down-right, down is dominant)
-         * getDirection(-50, 30)  // Returns 'L' (diagonal up-left, left is dominant)
          */
         getDirection(dx, dy) {
-            // Calculate length of the movement vector
-            const length = Math.sqrt(dx * dx + dy * dy);
-
             // Zero-length movement has no direction
-            if (length === 0) {
+            if (dx === 0 && dy === 0) {
                 return null;
             }
 
-            // Normalize to unit vector (components between -1 and 1)
-            const nx = dx / length;
-            const ny = dy / length;
+            // Square both components to work with magnitudes without expensive sqrt
+            // Comparing x² vs y² is equivalent to comparing |x| vs |y|
+            const dxSq = dx * dx;
+            const dySq = dy * dy;
 
-            // Check for pure cardinal directions using threshold
-            // DIRECTION_THRESHOLD = 0.7 (cos 45°)
-            // If one component > 0.7 and other < 0.7, it's a pure direction
+            // For threshold 0.7: we need the dominant axis to satisfy:
+            // dominant² > (1 - 0.7²) / 0.7² * other²
+            // Which simplifies to: dominant² > 1.0408 * other²
+            // Precompute: (1 - 0.49) / 0.49 = 0.51 / 0.49 ≈ 1.0408
+            const thresholdSq = this.DIRECTION_THRESHOLD * this.DIRECTION_THRESHOLD;
+            const minRatio = (1 - thresholdSq) / thresholdSq;
 
-            // Pure right: moving right with minimal vertical component
-            if (nx > this.DIRECTION_THRESHOLD && Math.abs(ny) < this.DIRECTION_THRESHOLD) {
-                return 'R';
+            // Check for pure cardinal directions (one axis strongly dominant)
+            if (dxSq > minRatio * dySq) {
+                return dx > 0 ? 'R' : 'L';
             }
 
-            // Pure left: moving left with minimal vertical component
-            if (nx < -this.DIRECTION_THRESHOLD && Math.abs(ny) < this.DIRECTION_THRESHOLD) {
-                return 'L';
+            if (dySq > minRatio * dxSq) {
+                return dy > 0 ? 'D' : 'U';
             }
 
-            // Pure down: moving down with minimal horizontal component
-            // Note: Positive Y is down in screen coordinates
-            if (ny > this.DIRECTION_THRESHOLD && Math.abs(nx) < this.DIRECTION_THRESHOLD) {
-                return 'D';
-            }
-
-            // Pure up: moving up with minimal horizontal component
-            if (ny < -this.DIRECTION_THRESHOLD && Math.abs(nx) < this.DIRECTION_THRESHOLD) {
-                return 'U';
-            }
-
-            // For diagonal movements, pick the dominant direction
-            // Compare absolute values to see which axis has more movement
-            if (Math.abs(nx) > Math.abs(ny)) {
-                // Horizontal is dominant
-                return nx > 0 ? 'R' : 'L';
-            } else {
-                // Vertical is dominant
-                return ny > 0 ? 'D' : 'U';
-            }
+            // Diagonal movement - pick dominant axis
+            return dxSq > dySq ? (dx > 0 ? 'R' : 'L') : (dy > 0 ? 'D' : 'U');
         },
 
         /**
          * Matches a direction sequence against known patterns
          * Tries to find a named pattern, otherwise returns raw direction string
-         *
          * @param {string[]} directions - Array of direction codes from extractDirections()
          * @returns {string} Pattern name (e.g., "L", "inverted-L") or lowercase direction string
-         *
-         * @example
-         * matchPattern(['R', 'D'])       // Returns "L"
-         * matchPattern(['D', 'R'])       // Returns "inverted-L"
-         * matchPattern(['R', 'D', 'R'])  // Returns "rdr" (no match, raw string)
          */
         matchPattern(directions) {
-            // Convert direction array to string for easy comparison
-            // ['R', 'D'] becomes "RD"
+            // Implode directions into one string
             const directionString = directions.join('');
 
             // Search through all known patterns
-            for (const [patternName, patternDirs] of Object.entries(this.patterns)) {
-                const patternString = patternDirs.join('');
-
-                // Exact match found
-                if (directionString === patternString) {
+            // Using for...in avoids creating entry arrays
+            for (const patternName in this.patterns) {
+                if (this.patterns[patternName].join('') === directionString) {
                     return patternName;
                 }
             }
 
             // No match found - return the raw direction sequence as lowercase
-            // This allows users to handle custom gestures in their msgProc
-            // Example: ['R', 'D', 'R', 'U'] becomes "rdru"
             return directionString.toLowerCase();
         },
 
         /**
          * Finds the containing PAC component for an element
          * Walks up the DOM tree to find a registered PAC container
-         *
          * @param {HTMLElement} element - Starting element (typically event.target)
          * @returns {HTMLElement|null} The PAC container element or null if not found
          */
         findContainer(element) {
-            // Walk up the DOM tree
+            // Ensure we start with an actual Element node
+            if (!element || element.nodeType !== 1) {
+                element = element?.parentElement;
+            }
+
             while (element && element !== document.body) {
-                // Check if this element has a pac-id attribute
                 const pacId = element.getAttribute('data-pac-id');
 
                 if (pacId) {
-                    // Verify it's actually registered in the PAC registry
                     const context = window.PACRegistry.get(pacId);
-
+                    
                     if (context) {
-                        // Return the verified container from the registry
                         return context.container;
                     }
                 }
 
-                // Move up to parent
                 element = element.parentElement;
             }
 
-            // No PAC container found
             return null;
         },
 
@@ -6493,29 +6421,33 @@
          * @returns {void}
          */
         dispatchGesture(originalEvent, pattern, directions) {
-            // Safety check
             if (!this.gestureContainer) {
                 return;
             }
 
-            // Calculate bounding box of the gesture path
-            // This gives us the area the gesture was drawn in
-            const xs = this.gesturePoints.map(p => p.x);
-            const ys = this.gesturePoints.map(p => p.y);
-            const minX = Math.min(...xs);
-            const maxX = Math.max(...xs);
-            const minY = Math.min(...ys);
-            const maxY = Math.max(...ys);
+            const points = this.gesturePoints;
+            const pointCount = points.length;
 
-            // Create the base custom event
-            const customEvent = new CustomEvent('pac:event', {
-                bubbles: false,
-                cancelable: true,
-                detail: {}
-            });
+            // Single-pass calculation of min/max bounds
+            // Eliminates 4 array creations + 4 spread operations
+            let minX = points[0].x, maxX = minX;
+            let minY = points[0].y, maxY = minY;
+
+            for (let i = 1; i < pointCount; i++) {
+                const x = points[i].x;
+                const y = points[i].y;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+
+            // Cache frequently accessed values
+            const firstPoint = points[0];
+            const lastPoint = points[pointCount - 1];
+            const now = Date.now();
 
             // Calculate gesture center point for lParam encoding
-            // lParam contains container-relative coordinates of gesture center
             const centerX = (minX + maxX) / 2;
             const centerY = (minY + maxY) / 2;
             const rect = this.gestureContainer.getBoundingClientRect();
@@ -6524,150 +6456,39 @@
             const relativeX = Math.max(0, Math.min(65535, Math.round(centerX - rect.left)));
             const relativeY = Math.max(0, Math.min(65535, Math.round(centerY - rect.top)));
 
-            // Add all properties directly to the event object
-            // This matches the pattern of message, wParam, lParam being on the event
-            Object.defineProperties(customEvent, {
-                // Standard Win32-style message properties
-                message: {
-                    value: MSG_GESTURE,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                wParam: {
-                    value: 0,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                // lParam contains packed coordinates (Y in high word, X in low word)
-                lParam: {
-                    value: (relativeY << 16) | relativeX,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                timestamp: {
-                    value: Date.now(),
-                    enumerable: true,
-                    configurable: true
-                },
-
-                originalEvent: {
-                    value: originalEvent,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                // Gesture-specific properties
-
-                /**
-                 * Pattern name that was matched
-                 * @type {string}
-                 * @example "L", "inverted-L", "rdru"
-                 */
-                pattern: {
-                    value: pattern,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                /**
-                 * Array of direction codes that make up this gesture
-                 * @type {string[]}
-                 * @example ['R', 'D'] for an L shape
-                 */
-                directions: {
-                    value: directions,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                /**
-                 * Number of points recorded in the gesture path
-                 * @type {number}
-                 */
-                pointCount: {
-                    value: this.gesturePoints.length,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                /**
-                 * Starting X coordinate of the gesture (absolute screen coordinates)
-                 * @type {number}
-                 */
-                gestureStartX: {
-                    value: this.gesturePoints[0].x,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                /**
-                 * Starting Y coordinate of the gesture (absolute screen coordinates)
-                 * @type {number}
-                 */
-                gestureStartY: {
-                    value: this.gesturePoints[0].y,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                /**
-                 * Ending X coordinate of the gesture (absolute screen coordinates)
-                 * @type {number}
-                 */
-                gestureEndX: {
-                    value: this.gesturePoints[this.gesturePoints.length - 1].x,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                /**
-                 * Ending Y coordinate of the gesture (absolute screen coordinates)
-                 * @type {number}
-                 */
-                gestureEndY: {
-                    value: this.gesturePoints[this.gesturePoints.length - 1].y,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                /**
-                 * How long the gesture took to draw in milliseconds
-                 * @type {number}
-                 */
-                gestureDuration: {
-                    value: Date.now() - this.startTime,
-                    enumerable: true,
-                    configurable: true
-                },
-
-                /**
-                 * Bounding box of the gesture path
-                 * @type {Object}
-                 * @property {number} left - Leftmost X coordinate
-                 * @property {number} top - Topmost Y coordinate
-                 * @property {number} right - Rightmost X coordinate
-                 * @property {number} bottom - Bottommost Y coordinate
-                 * @property {number} width - Width of bounding box
-                 * @property {number} height - Height of bounding box
-                 */
-                gestureBounds: {
-                    value: {
-                        left: minX,
-                        top: minY,
-                        right: maxX,
-                        bottom: maxY,
-                        width: maxX - minX,
-                        height: maxY - minY
-                    },
-                    enumerable: true,
-                    configurable: true
-                }
+            // Create the base custom event
+            const customEvent = new CustomEvent('pac:event', {
+                bubbles: false,
+                cancelable: true,
+                detail: {}
             });
 
-            // Dispatch the event to the container
+            // Direct property assignment (much faster than Object.defineProperties)
+            // Standard Win32-style message properties
+            customEvent.message = MSG_GESTURE;
+            customEvent.wParam = 0;
+            customEvent.lParam = (relativeY << 16) | relativeX;
+            customEvent.timestamp = now;
+            customEvent.originalEvent = originalEvent;
+
+            // Gesture-specific properties
+            customEvent.pattern = pattern;
+            customEvent.directions = directions;
+            customEvent.pointCount = pointCount;
+            customEvent.gestureStartX = firstPoint.x;
+            customEvent.gestureStartY = firstPoint.y;
+            customEvent.gestureEndX = lastPoint.x;
+            customEvent.gestureEndY = lastPoint.y;
+            customEvent.gestureDuration = now - this.startTime;
+            customEvent.gestureBounds = {
+                left: minX,
+                top: minY,
+                right: maxX,
+                bottom: maxY,
+                width: maxX - minX,
+                height: maxY - minY
+            };
+
             this.gestureContainer.dispatchEvent(customEvent);
         }
     };
