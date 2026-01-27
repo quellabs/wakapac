@@ -91,6 +91,7 @@
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
     const MSG_TIMER = 0x0113;
+    const MSG_GESTURE = 0x0250;
     const MSG_USER = 0x1000;
 
     /**
@@ -5999,6 +6000,679 @@
     };
 
     // =============================================================================
+    // MOUSE GESTURE RECOGNIZER
+    // =============================================================================
+
+    /**
+     * Mouse Gesture Recognition System
+     *
+     * Recognizes mouse gesture patterns drawn while holding the right mouse button.
+     * Similar to Opera browser's mouse gestures - users can draw shapes (L, inverted-L,
+     * lines, etc.) to trigger custom actions.
+     *
+     * Recognition Process:
+     * 1. User presses right mouse button - start recording path
+     * 2. User drags mouse - record points along the path
+     * 3. User releases button - analyze path into directional segments
+     * 4. Match segments against known patterns
+     * 5. Dispatch MSG_GESTURE event to containing PAC component
+     *
+     * Built-in Patterns (minimal set):
+     * - Single directions: right, left, up, down
+     * - L-shapes: L (right-down), inverted-L (down-right)
+     *
+     * Users can register custom patterns via wakaPAC.registerGesture()
+     *
+     * @namespace MouseGestureRecognizer
+     */
+    const MouseGestureRecognizer = {
+        /** @private {boolean} Flag to prevent multiple initializations */
+        _initialized: false,
+
+        /** @private {boolean} Whether we're currently recording a gesture */
+        isRecording: false,
+
+        /** @private {Array<{x: number, y: number, time: number}>} Recorded gesture points */
+        gesturePoints: [],
+
+        /** @private {number} Timestamp when gesture recording started */
+        startTime: 0,
+
+        /** @private {HTMLElement|null} PAC container where gesture was initiated */
+        gestureContainer: null,
+
+        // Configuration constants
+
+        /** @constant {number} Minimum distance in pixels between recorded points (filters jitter) */
+        MIN_DISTANCE: 10,
+
+        /** @constant {number} Minimum length in pixels for a directional segment to be recognized */
+        MIN_SEGMENT_LENGTH: 30,
+
+        /** @constant {number} Direction classification threshold (cos 45° ≈ 0.7) */
+        DIRECTION_THRESHOLD: 0.7,
+
+        /** @constant {number} Maximum gesture duration in milliseconds */
+        MAX_GESTURE_TIME: 2000,
+
+        /**
+         * Gesture pattern registry
+         * Maps pattern names to arrays of directions: R (right), L (left), U (up), D (down)
+         * Users can add custom patterns via registerPattern()
+         * @type {Object<string, string[]>}
+         */
+        patterns: {
+            // Single directions
+            'right': ['R'],
+            'left': ['L'],
+            'up': ['U'],
+            'down': ['D'],
+
+            // Common L-shapes
+            'L': ['D', 'R'],
+            'inverted-L': ['D', 'L'],
+        },
+
+        /**
+         * Registers a custom gesture pattern
+         * Allows users to define their own gesture shortcuts
+         *
+         * @param {string} name - Name for the pattern (e.g., "back", "forward", "refresh")
+         * @param {string[]} directions - Array of direction codes: 'R', 'L', 'U', 'D'
+         * @throws {Error} If name or directions are invalid
+         *
+         * @example
+         * // Register a "back" gesture (draw L shape)
+         * wakaPAC.registerGesture('back', ['L', 'U']);
+         *
+         * @example
+         * // Register a "Z" gesture
+         * wakaPAC.registerGesture('z-shape', ['R', 'D', 'R']);
+         *
+         * @example
+         * // Register a refresh gesture (down then up)
+         * wakaPAC.registerGesture('refresh', ['D', 'U']);
+         */
+        registerPattern(name, directions) {
+            // Validate name
+            if (!name || typeof name !== 'string') {
+                throw new Error('Gesture pattern name must be a non-empty string');
+            }
+
+            // Validate directions array
+            if (!Array.isArray(directions) || directions.length === 0) {
+                throw new Error('Gesture directions must be a non-empty array');
+            }
+
+            // Validate each direction
+            const validDirections = ['R', 'L', 'U', 'D'];
+            for (let i = 0; i < directions.length; i++) {
+                if (!validDirections.includes(directions[i])) {
+                    throw new Error(`Invalid direction "${directions[i]}". Must be one of: R, L, U, D`);
+                }
+            }
+
+            // Warn if overriding existing pattern
+            if (this.patterns[name]) {
+                console.warn(`WakaPAC: Overriding existing gesture pattern '${name}'`);
+            }
+
+            // Register the pattern
+            this.patterns[name] = directions;
+        },
+
+        /**
+         * Removes a registered gesture pattern
+         *
+         * @param {string} name - Name of the pattern to remove
+         * @returns {boolean} True if pattern was removed, false if not found
+         *
+         * @example
+         * wakaPAC.unregisterGesture('back');
+         */
+        unregisterPattern(name) {
+            if (this.patterns[name]) {
+                delete this.patterns[name];
+                return true;
+            }
+            return false;
+        },
+
+        /**
+         * Initializes the mouse gesture recognition system
+         * Sets up global event listeners for mousedown, mousemove, mouseup
+         * Should be called once during framework initialization
+         *
+         * @returns {void}
+         */
+        initialize() {
+            // Prevent double initialization
+            if (this._initialized) {
+                return;
+            }
+
+            this._initialized = true;
+            const self = this;
+
+            // Start recording gesture path when right mouse button is pressed
+            // Use capture phase to intercept before other handlers
+            document.addEventListener('mousedown', function(event) {
+                // Only track right button (button code 2)
+                if (event.button === 2) {
+                    self.startRecording(event);
+                }
+            }, true);
+
+            // Record points along the gesture path as user drags
+            document.addEventListener('mousemove', function(event) {
+                if (self.isRecording) {
+                    self.recordPoint(event);
+                }
+            }, true);
+
+            // Analyze and fire gesture event when right button is released
+            document.addEventListener('mouseup', function(event) {
+                if (event.button === 2 && self.isRecording) {
+                    self.stopRecording(event);
+                }
+            }, true);
+
+            // Clean up if context menu appears
+            // Note: User can call preventDefault() in msgProc to suppress context menu
+            document.addEventListener('contextmenu', function(event) {
+                if (self.isRecording) {
+                    // Gesture was already analyzed and fired in mouseup
+                    // Just clean up the recording state
+                    self.isRecording = false;
+                    self.gesturePoints = [];
+                }
+            }, true);
+        },
+
+        /**
+         * Begins recording a new gesture
+         * Called when right mouse button is pressed
+         *
+         * @param {MouseEvent} event - The mousedown event
+         * @returns {void}
+         */
+        startRecording(event) {
+            // Find which PAC container this gesture is happening in
+            this.gestureContainer = this.findContainer(event.target);
+
+            // Enable recording mode
+            this.isRecording = true;
+
+            // Initialize points array with starting position
+            this.gesturePoints = [{
+                x: event.clientX,
+                y: event.clientY,
+                time: Date.now()
+            }];
+
+            // Record when gesture started for duration calculation
+            this.startTime = Date.now();
+        },
+
+        /**
+         * Records a point along the gesture path
+         * Only records if moved far enough from last point to filter out jitter
+         *
+         * @param {MouseEvent} event - The mousemove event
+         * @returns {void}
+         */
+        recordPoint(event) {
+            // Get the most recent recorded point
+            const lastPoint = this.gesturePoints[this.gesturePoints.length - 1];
+
+            // Calculate distance from last point
+            const dx = event.clientX - lastPoint.x;
+            const dy = event.clientY - lastPoint.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Only record if moved enough distance to avoid recording jitter
+            // This creates a cleaner path with fewer redundant points
+            if (distance >= this.MIN_DISTANCE) {
+                this.gesturePoints.push({
+                    x: event.clientX,
+                    y: event.clientY,
+                    time: Date.now()
+                });
+            }
+        },
+
+        /**
+         * Stops recording and analyzes the gesture
+         * Called when right mouse button is released
+         *
+         * @param {MouseEvent} event - The mouseup event
+         * @returns {void}
+         */
+        stopRecording(event) {
+            // Disable recording mode
+            this.isRecording = false;
+
+            // Calculate how long the gesture took
+            const duration = Date.now() - this.startTime;
+
+            // Validate gesture:
+            // - Need at least 2 points to form a direction
+            // - Duration must be reasonable (not too slow)
+            if (this.gesturePoints.length < 2 || duration > this.MAX_GESTURE_TIME) {
+                this.gesturePoints = [];
+                return;
+            }
+
+            // Convert raw point path into directional segments (R, L, U, D)
+            const directions = this.extractDirections();
+
+            // If no valid directions detected, abort
+            if (directions.length === 0) {
+                this.gesturePoints = [];
+                return;
+            }
+
+            // Try to match the direction sequence against known patterns
+            const pattern = this.matchPattern(directions);
+
+            // Dispatch gesture event if we have a pattern and a container
+            if (pattern && this.gestureContainer) {
+                this.dispatchGesture(event, pattern, directions);
+            }
+
+            // Clean up for next gesture
+            this.gesturePoints = [];
+            this.gestureContainer = null;
+        },
+
+        /**
+         * Extracts directional segments from raw gesture points
+         * Analyzes direction between consecutive points, then groups into segments
+         * @returns {string[]} Array of direction codes: 'R', 'L', 'U', 'D'
+         */
+        extractDirections() {
+            if (this.gesturePoints.length < 2) {
+                return [];
+            }
+
+            // Step 1: Determine direction between each consecutive pair of points
+            const pointDirections = [];
+
+            for (let i = 1; i < this.gesturePoints.length; i++) {
+                const prev = this.gesturePoints[i - 1];
+                const curr = this.gesturePoints[i];
+                const dx = curr.x - prev.x;
+                const dy = curr.y - prev.y;
+                const direction = this.getDirection(dx, dy);
+
+                if (direction) {
+                    pointDirections.push({
+                        index: i,
+                        direction: direction,
+                        point: curr
+                    });
+                }
+            }
+
+            if (pointDirections.length === 0) {
+                return [];
+            }
+
+            // Step 2: Group consecutive points with same direction into segments
+            const segments = [];
+            let currentDir = pointDirections[0].direction;
+            let segmentStart = this.gesturePoints[0];
+            let segmentEnd = pointDirections[0].point;
+
+            for (let i = 1; i < pointDirections.length; i++) {
+                if (pointDirections[i].direction === currentDir) {
+                    // Same direction - extend current segment
+                    segmentEnd = pointDirections[i].point;
+                } else {
+                    // Direction changed - save current segment if long enough
+                    const dx = segmentEnd.x - segmentStart.x;
+                    const dy = segmentEnd.y - segmentStart.y;
+                    const length = Math.sqrt(dx * dx + dy * dy);
+
+                    if (length >= this.MIN_SEGMENT_LENGTH) {
+                        segments.push(currentDir);
+                    }
+
+                    // Start new segment
+                    currentDir = pointDirections[i].direction;
+                    segmentStart = segmentEnd; // Start from where last segment ended
+                    segmentEnd = pointDirections[i].point;
+                }
+            }
+
+            // Don't forget the final segment
+            const dx = segmentEnd.x - segmentStart.x;
+            const dy = segmentEnd.y - segmentStart.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+
+            if (length >= this.MIN_SEGMENT_LENGTH) {
+                segments.push(currentDir);
+            }
+
+            return segments;
+        },
+
+        /**
+         * Classifies a movement vector into a cardinal direction
+         * Uses normalized vector and threshold to determine R/L/U/D
+         *
+         * @param {number} dx - Horizontal movement (positive = right)
+         * @param {number} dy - Vertical movement (positive = down, screen coordinates)
+         * @returns {string|null} Direction code ('R', 'L', 'U', 'D') or null if invalid
+         *
+         * @example
+         * getDirection(100, 0)   // Returns 'R' (pure right)
+         * getDirection(0, 100)   // Returns 'D' (pure down)
+         * getDirection(70, 70)   // Returns 'D' (diagonal down-right, down is dominant)
+         * getDirection(-50, 30)  // Returns 'L' (diagonal up-left, left is dominant)
+         */
+        getDirection(dx, dy) {
+            // Calculate length of the movement vector
+            const length = Math.sqrt(dx * dx + dy * dy);
+
+            // Zero-length movement has no direction
+            if (length === 0) {
+                return null;
+            }
+
+            // Normalize to unit vector (components between -1 and 1)
+            const nx = dx / length;
+            const ny = dy / length;
+
+            // Check for pure cardinal directions using threshold
+            // DIRECTION_THRESHOLD = 0.7 (cos 45°)
+            // If one component > 0.7 and other < 0.7, it's a pure direction
+
+            // Pure right: moving right with minimal vertical component
+            if (nx > this.DIRECTION_THRESHOLD && Math.abs(ny) < this.DIRECTION_THRESHOLD) {
+                return 'R';
+            }
+
+            // Pure left: moving left with minimal vertical component
+            if (nx < -this.DIRECTION_THRESHOLD && Math.abs(ny) < this.DIRECTION_THRESHOLD) {
+                return 'L';
+            }
+
+            // Pure down: moving down with minimal horizontal component
+            // Note: Positive Y is down in screen coordinates
+            if (ny > this.DIRECTION_THRESHOLD && Math.abs(nx) < this.DIRECTION_THRESHOLD) {
+                return 'D';
+            }
+
+            // Pure up: moving up with minimal horizontal component
+            if (ny < -this.DIRECTION_THRESHOLD && Math.abs(nx) < this.DIRECTION_THRESHOLD) {
+                return 'U';
+            }
+
+            // For diagonal movements, pick the dominant direction
+            // Compare absolute values to see which axis has more movement
+            if (Math.abs(nx) > Math.abs(ny)) {
+                // Horizontal is dominant
+                return nx > 0 ? 'R' : 'L';
+            } else {
+                // Vertical is dominant
+                return ny > 0 ? 'D' : 'U';
+            }
+        },
+
+        /**
+         * Matches a direction sequence against known patterns
+         * Tries to find a named pattern, otherwise returns raw direction string
+         *
+         * @param {string[]} directions - Array of direction codes from extractDirections()
+         * @returns {string} Pattern name (e.g., "L", "inverted-L") or lowercase direction string
+         *
+         * @example
+         * matchPattern(['R', 'D'])       // Returns "L"
+         * matchPattern(['D', 'R'])       // Returns "inverted-L"
+         * matchPattern(['R', 'D', 'R'])  // Returns "rdr" (no match, raw string)
+         */
+        matchPattern(directions) {
+            // Convert direction array to string for easy comparison
+            // ['R', 'D'] becomes "RD"
+            const directionString = directions.join('');
+
+            // Search through all known patterns
+            for (const [patternName, patternDirs] of Object.entries(this.patterns)) {
+                const patternString = patternDirs.join('');
+
+                // Exact match found
+                if (directionString === patternString) {
+                    return patternName;
+                }
+            }
+
+            // No match found - return the raw direction sequence as lowercase
+            // This allows users to handle custom gestures in their msgProc
+            // Example: ['R', 'D', 'R', 'U'] becomes "rdru"
+            return directionString.toLowerCase();
+        },
+
+        /**
+         * Finds the containing PAC component for an element
+         * Walks up the DOM tree to find a registered PAC container
+         *
+         * @param {HTMLElement} element - Starting element (typically event.target)
+         * @returns {HTMLElement|null} The PAC container element or null if not found
+         */
+        findContainer(element) {
+            // Walk up the DOM tree
+            while (element && element !== document.body) {
+                // Check if this element has a pac-id attribute
+                const pacId = element.getAttribute('data-pac-id');
+
+                if (pacId) {
+                    // Verify it's actually registered in the PAC registry
+                    const context = window.PACRegistry.get(pacId);
+
+                    if (context) {
+                        // Return the verified container from the registry
+                        return context.container;
+                    }
+                }
+
+                // Move up to parent
+                element = element.parentElement;
+            }
+
+            // No PAC container found
+            return null;
+        },
+
+        /**
+         * Dispatches a gesture event to the PAC container
+         * Creates a pac:event with MSG_GESTURE and all gesture data
+         * @param {MouseEvent} originalEvent - The original mouseup event
+         * @param {string} pattern - Matched pattern name (e.g., "L", "inverted-L")
+         * @param {string[]} directions - Array of direction codes used in matching
+         * @returns {void}
+         */
+        dispatchGesture(originalEvent, pattern, directions) {
+            // Safety check
+            if (!this.gestureContainer) {
+                return;
+            }
+
+            // Calculate bounding box of the gesture path
+            // This gives us the area the gesture was drawn in
+            const xs = this.gesturePoints.map(p => p.x);
+            const ys = this.gesturePoints.map(p => p.y);
+            const minX = Math.min(...xs);
+            const maxX = Math.max(...xs);
+            const minY = Math.min(...ys);
+            const maxY = Math.max(...ys);
+
+            // Create the base custom event
+            const customEvent = new CustomEvent('pac:event', {
+                bubbles: false,
+                cancelable: true,
+                detail: {}
+            });
+
+            // Calculate gesture center point for lParam encoding
+            // lParam contains container-relative coordinates of gesture center
+            const centerX = (minX + maxX) / 2;
+            const centerY = (minY + maxY) / 2;
+            const rect = this.gestureContainer.getBoundingClientRect();
+
+            // Convert to container-relative coordinates
+            const relativeX = Math.max(0, Math.min(65535, Math.round(centerX - rect.left)));
+            const relativeY = Math.max(0, Math.min(65535, Math.round(centerY - rect.top)));
+
+            // Add all properties directly to the event object
+            // This matches the pattern of message, wParam, lParam being on the event
+            Object.defineProperties(customEvent, {
+                // Standard Win32-style message properties
+                message: {
+                    value: MSG_GESTURE,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                wParam: {
+                    value: 0,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                // lParam contains packed coordinates (Y in high word, X in low word)
+                lParam: {
+                    value: (relativeY << 16) | relativeX,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                timestamp: {
+                    value: Date.now(),
+                    enumerable: true,
+                    configurable: true
+                },
+
+                originalEvent: {
+                    value: originalEvent,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                // Gesture-specific properties
+
+                /**
+                 * Pattern name that was matched
+                 * @type {string}
+                 * @example "L", "inverted-L", "rdru"
+                 */
+                pattern: {
+                    value: pattern,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                /**
+                 * Array of direction codes that make up this gesture
+                 * @type {string[]}
+                 * @example ['R', 'D'] for an L shape
+                 */
+                directions: {
+                    value: directions,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                /**
+                 * Number of points recorded in the gesture path
+                 * @type {number}
+                 */
+                pointCount: {
+                    value: this.gesturePoints.length,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                /**
+                 * Starting X coordinate of the gesture (absolute screen coordinates)
+                 * @type {number}
+                 */
+                gestureStartX: {
+                    value: this.gesturePoints[0].x,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                /**
+                 * Starting Y coordinate of the gesture (absolute screen coordinates)
+                 * @type {number}
+                 */
+                gestureStartY: {
+                    value: this.gesturePoints[0].y,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                /**
+                 * Ending X coordinate of the gesture (absolute screen coordinates)
+                 * @type {number}
+                 */
+                gestureEndX: {
+                    value: this.gesturePoints[this.gesturePoints.length - 1].x,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                /**
+                 * Ending Y coordinate of the gesture (absolute screen coordinates)
+                 * @type {number}
+                 */
+                gestureEndY: {
+                    value: this.gesturePoints[this.gesturePoints.length - 1].y,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                /**
+                 * How long the gesture took to draw in milliseconds
+                 * @type {number}
+                 */
+                gestureDuration: {
+                    value: Date.now() - this.startTime,
+                    enumerable: true,
+                    configurable: true
+                },
+
+                /**
+                 * Bounding box of the gesture path
+                 * @type {Object}
+                 * @property {number} left - Leftmost X coordinate
+                 * @property {number} top - Topmost Y coordinate
+                 * @property {number} right - Rightmost X coordinate
+                 * @property {number} bottom - Bottommost Y coordinate
+                 * @property {number} width - Width of bounding box
+                 * @property {number} height - Height of bounding box
+                 */
+                gestureBounds: {
+                    value: {
+                        left: minX,
+                        top: minY,
+                        right: maxX,
+                        bottom: maxY,
+                        width: maxX - minX,
+                        height: maxY - minY
+                    },
+                    enumerable: true,
+                    configurable: true
+                }
+            });
+
+            // Dispatch the event to the container
+            this.gestureContainer.dispatchEvent(customEvent);
+        }
+    };
+
+    // =============================================================================
     // COMPONENT REGISTRY
     // =============================================================================
 
@@ -6202,6 +6876,9 @@
 
         // Initialize automatic cleanup observer
         CleanupObserver.initialize();
+
+        // Initialize mouse gesture recognizer
+        MouseGestureRecognizer.initialize();
 
         // Fetch all matching elements (supports both ID and class selectors)
         const containers = document.querySelectorAll(selector);
@@ -6424,6 +7101,23 @@
         return Utils.MAKEPOINTS(lParam);
     };
 
+    /**
+     * Registers a new gesture
+     * @param name
+     * @param directions
+     */
+    wakaPAC.registerGesture = function(name, directions) {
+        return MouseGestureRecognizer.registerPattern(name, directions);
+    };
+
+    /**
+     * Removes a gesture's registration
+     * @param name
+     */
+    wakaPAC.unregisterGesture = function(name) {
+        return MouseGestureRecognizer.unregisterPattern(name);
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
@@ -6456,6 +7150,7 @@
     wakaPAC.MSG_KEYUP = MSG_KEYUP;
     wakaPAC.MSG_USER = MSG_USER;
     wakaPAC.MSG_TIMER = MSG_TIMER;
+    wakaPAC.MSG_GESTURE = MSG_GESTURE;
 
     // Attach modifier key constants to wakaPAC
     wakaPAC.MK_LBUTTON = MK_LBUTTON;
