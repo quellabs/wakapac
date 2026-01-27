@@ -4795,7 +4795,8 @@
      * @param {Object} abstraction - The abstraction to enhance
      */
     Context.prototype.injectSystemProperties = function(abstraction) {
-        // Add container identification
+        // Add container element reference and identification
+        abstraction.container = this.container;
         abstraction.pacId = this.container.getAttribute('data-pac-id') || this.container.id;
 
         // Initialize online/offline state and network quality
