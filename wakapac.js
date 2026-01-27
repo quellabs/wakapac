@@ -884,22 +884,19 @@
                 self.dispatchTrackedEvent(messageType, event);
             });
 
-            // Add click for semantic activation (form submission, etc.)
+            // Click event recognises left button
             document.addEventListener('click', function (event) {
-                let messageType;
-
-                if (event.button === 0) {
-                    messageType = MSG_LCLICK;  // Left click
-                } else if (event.button === 1) {
-                    messageType = MSG_MCLICK;  // Middle click
-                } else {
-                    return;  // Should never happen for click events
-                }
-
-                self.dispatchTrackedEvent(messageType, event);
+                self.dispatchTrackedEvent(MSG_LCLICK, event);
             });
 
-            // Handle right click
+            // Auxclick event recognises middle button
+            document.addEventListener('auxclick', function (event) {
+                if (event.button === 1) {
+                    self.dispatchTrackedEvent(MSG_MCLICK, event);
+                }
+            });
+
+            // Contextmenu event recognises right button
             document.addEventListener('contextmenu', function (event) {
                 self.dispatchTrackedEvent(MSG_RCLICK, event);
             });
@@ -947,7 +944,7 @@
             /**
              * Touch move simulates mouse move
              */
-            self.setupMoveCoalescer('touchmove', wakaPAC.touchMoveThrottleFps, (ev) => {
+            self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (ev) => {
                 if (ev.touches.length > 0) {
                     self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
                 }
