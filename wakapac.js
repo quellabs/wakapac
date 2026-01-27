@@ -6421,15 +6421,12 @@
          * @returns {void}
          */
         dispatchGesture(originalEvent, pattern, directions) {
-            if (!this.gestureContainer) {
-                return;
-            }
-
             const points = this.gesturePoints;
             const pointCount = points.length;
+            const now = Date.now();
 
-            // Single-pass calculation of min/max bounds
-            // Eliminates 4 array creations + 4 spread operations
+            // Calculate gesture bounds in viewport coordinates
+            // Single-pass min/max to avoid multiple array iterations
             let minX = points[0].x, maxX = minX;
             let minY = points[0].y, maxY = minY;
 
@@ -6441,53 +6438,64 @@
                 maxY = Math.max(maxY, y);
             }
 
-            // Cache frequently accessed values
-            const firstPoint = points[0];
-            const lastPoint = points[pointCount - 1];
-            const now = Date.now();
-
-            // Calculate gesture center point for lParam encoding
-            const centerX = (minX + maxX) / 2;
-            const centerY = (minY + maxY) / 2;
+            // Convert all coordinates from viewport-relative to container-relative
+            // This makes gesture coordinates match mouse event coordinates in msgProc
             const rect = this.gestureContainer.getBoundingClientRect();
+            const toRelativeX = x => x - rect.left;
+            const toRelativeY = y => y - rect.top;
 
-            // Convert to container-relative coordinates
-            const relativeX = Math.max(0, Math.min(65535, Math.round(centerX - rect.left)));
-            const relativeY = Math.max(0, Math.min(65535, Math.round(centerY - rect.top)));
+            // Calculate gesture center for lParam (Win32 standard packing: Y in high word, X in low word)
+            // Clamp to 16-bit range (0-65535) to prevent overflow in bitwise operations
+            const centerX = Math.max(0, Math.min(65535, Math.round((minX + maxX) / 2 - rect.left)));
+            const centerY = Math.max(0, Math.min(65535, Math.round((minY + maxY) / 2 - rect.top)));
 
-            // Create the base custom event
+            // Convert gesture start/end points to container-relative
+            const startX = toRelativeX(points[0].x);
+            const startY = toRelativeY(points[0].y);
+            const endX = toRelativeX(points[pointCount - 1].x);
+            const endY = toRelativeY(points[pointCount - 1].y);
+
+            // Convert bounds to container-relative (DOMRect-like format)
+            const left = toRelativeX(minX);
+            const top = toRelativeY(minY);
+            const width = maxX - minX;  // Width/height are same in both coordinate systems
+            const height = maxY - minY;
+
+            // Create custom event that mimics Win32 message structure
             const customEvent = new CustomEvent('pac:event', {
-                bubbles: false,
-                cancelable: true,
+                bubbles: false,      // Don't propagate to parent containers
+                cancelable: true,    // Allow msgProc to preventDefault()
                 detail: {}
             });
 
-            // Direct property assignment (much faster than Object.defineProperties)
             // Standard Win32-style message properties
-            customEvent.message = MSG_GESTURE;
-            customEvent.wParam = 0;
-            customEvent.lParam = (relativeY << 16) | relativeX;
-            customEvent.timestamp = now;
-            customEvent.originalEvent = originalEvent;
+            customEvent.message = MSG_GESTURE;                  // Message type identifier
+            customEvent.wParam = 0;                             // Not used for gestures
+            customEvent.lParam = (centerY << 16) | centerX;     // Packed center coordinates
+            customEvent.timestamp = now;                         // Event timestamp
+            customEvent.originalEvent = originalEvent;           // Access to native mouseup event
 
             // Gesture-specific properties
-            customEvent.pattern = pattern;
-            customEvent.directions = directions;
-            customEvent.pointCount = pointCount;
-            customEvent.gestureStartX = firstPoint.x;
-            customEvent.gestureStartY = firstPoint.y;
-            customEvent.gestureEndX = lastPoint.x;
-            customEvent.gestureEndY = lastPoint.y;
-            customEvent.gestureDuration = now - this.startTime;
-            customEvent.gestureBounds = {
-                left: minX,
-                top: minY,
-                right: maxX,
-                bottom: maxY,
-                width: maxX - minX,
-                height: maxY - minY
+            customEvent.pattern = pattern;                       // Matched pattern name or raw directions
+            customEvent.directions = directions;                 // Array of direction codes: ['R', 'D', 'L']
+            customEvent.pointCount = pointCount;                 // Number of recorded points
+            customEvent.gestureStartX = startX;                  // Where gesture started (container-relative)
+            customEvent.gestureStartY = startY;
+            customEvent.gestureEndX = endX;                      // Where gesture ended (container-relative)
+            customEvent.gestureEndY = endY;
+            customEvent.gestureDuration = now - this.startTime;  // Milliseconds from mousedown to mouseup
+            customEvent.gestureBounds = {                        // Bounding box (DOMRect format)
+                x: left,                                         // Alias for left
+                y: top,                                          // Alias for top
+                left,
+                top,
+                right: left + width,
+                bottom: top + height,
+                width,
+                height
             };
 
+            // Dispatch to the container where gesture was initiated
             this.gestureContainer.dispatchEvent(customEvent);
         }
     };
