@@ -540,7 +540,7 @@
     }
 
     // ========================================================================
-    // ENHANCED REACTIVE PROXY WITH ARRAY-SPECIFIC EVENTS
+    // REACTIVE PROXY
     // ========================================================================
 
     function makeDeepReactiveProxy(value, container) {
@@ -563,196 +563,253 @@
         }
 
         /**
-         * Creates a recursive proxy that intercepts property access and mutations to enable reactivity.
-         * This is the core function that transforms plain objects into reactive proxies that can trigger
-         * DOM updates when their properties change. It handles nested objects, arrays, and maintains
-         * proper path tracking for deep property changes.
-         * @param {Object|Array} obj - The object or array to make reactive
-         * @param {string[]} [currentPath=[]] - Array representing the property path from root (e.g., ['users', '0', 'name'])
-         * @returns {Object|Array} A proxy object that intercepts get/set operations for reactivity
+         * Creates a wrapped array method that handles reactivity
+         * @param {Array} target - The array being proxied
+         * @param {string} methodName - The array method name (push, pop, etc.)
+         * @param {Array} currentPath - The path to this array in the data structure
+         * @returns {Function} Wrapped array method
+         */
+        function createReactiveArrayMethod(target, methodName, currentPath) {
+            return function () {
+                // Store the old array state before modification
+                const oldArray = Array.prototype.slice.call(target);
+
+                // Apply the array method to get the result
+                const result = Array.prototype[methodName].apply(target, arguments);
+
+                // Get the new array state after modification
+                const newArray = Array.prototype.slice.call(target);
+
+                // Re-proxy all items with correct indices after the operation
+                // This ensures all objects have the proper path references
+                newArray.forEach((item, index) => {
+                    if (item && typeof item === 'object' && !item._isReactive) {
+                        const correctPath = currentPath.concat([index]);
+                        newArray[index] = createProxy(item, correctPath);
+                        newArray[index]._isReactive = true;
+                    }
+                });
+
+                // Update the target array with the newly proxied items
+                // This is necessary because forEach works on a copy
+                for (let i = 0; i < newArray.length; i++) {
+                    target[i] = newArray[i];
+                }
+
+                // Dispatch events for the array change
+                dispatchArrayChangeEvents(currentPath, oldArray, target, methodName);
+
+                // Return the result
+                return result;
+            };
+        }
+
+        /**
+         * Dispatches array change and general change events
+         * @param {Array} path - Property path where change occurred
+         * @param {*} oldValue - Previous value
+         * @param {*} newValue - New value
+         * @param {string} method - Method or operation that triggered the change
+         */
+        function dispatchArrayChangeEvents(path, oldValue, newValue, method) {
+            // Dispatch array-specific event
+            container.dispatchEvent(new CustomEvent("pac:array-change", {
+                detail: {
+                    path: path,
+                    oldValue: oldValue,
+                    newValue: newValue,
+                    method: method
+                }
+            }));
+
+            // Also trigger computed property updates
+            container.dispatchEvent(new CustomEvent("pac:change", {
+                detail: {
+                    path: path,
+                    oldValue: oldValue,
+                    newValue: newValue
+                }
+            }));
+        }
+
+        /**
+         * Handles array length property changes
+         * @param {Array} target - The array being modified
+         * @param {number} newLength - The new length value
+         * @param {Array} currentPath - The path to this array
+         * @returns {boolean} Always returns true
+         */
+        function handleArrayLengthSet(target, newLength, currentPath) {
+            const oldLength = target.length;
+
+            // Only trigger events if length actually changes
+            if (oldLength === newLength) {
+                return true;
+            }
+
+            // Store old array state before truncation
+            const oldArray = Array.prototype.slice.call(target);
+
+            // Perform the truncation
+            target.length = newLength;
+
+            // Dispatch events
+            dispatchArrayChangeEvents(
+                currentPath,
+                oldArray,
+                Array.prototype.slice.call(target),
+                'length'
+            );
+
+            return true;
+        }
+
+        /**
+         * Handles scroll property assignments
+         * @param {string} prop - Property name
+         * @param {*} newValue - New scroll value
+         * @param {Array} propertyPath - Full property path
+         */
+        function handleScrollPropertySet(prop, newValue, propertyPath) {
+            // Only handle scroll properties at root level
+            if (propertyPath.length !== 1) {
+                return;
+            }
+
+            if (prop === 'containerScrollX' && container) {
+                container.scrollLeft = newValue;
+            } else if (prop === 'containerScrollY' && container) {
+                container.scrollTop = newValue;
+            } else if (prop === 'browserScrollX') {
+                window.scrollTo(newValue, window.scrollY);
+            } else if (prop === 'browserScrollY') {
+                window.scrollTo(window.scrollX, newValue);
+            }
+        }
+
+        /**
+         * Proxy get trap handler
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being accessed
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {*} The property value (potentially wrapped in a proxy)
+         */
+        function proxyGetHandler(target, prop, currentPath) {
+            const val = target[prop];
+
+            // Handle array methods first
+            if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
+                return createReactiveArrayMethod(target, prop, currentPath);
+            }
+
+            // Check if this property is a getter-only property (computed property)
+            const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+
+            if (descriptor && descriptor.get && !descriptor.set) {
+                // This is a getter-only property (computed), return the value as-is
+                return val;
+            }
+
+            // Don't make functions reactive, just return them as-is
+            if (typeof val === 'function') {
+                return val;
+            }
+
+            // CRITICAL FIX: Lazy wrapping of nested objects and arrays
+            // If the value is an object/array and not already reactive, wrap it in a proxy
+            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+                const propertyPath = currentPath.concat([prop]);
+                const proxiedVal = createProxy(val, propertyPath);
+                proxiedVal._isReactive = true;
+
+                // Update the original object with the proxy
+                target[prop] = proxiedVal;
+
+                // Return proxiedVal
+                return proxiedVal;
+            }
+
+            return val;
+        }
+
+        /**
+         * Proxy set trap handler
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being set
+         * @param {*} newValue - New value being assigned
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {boolean} Always returns true
+         */
+        function proxySetHandler(target, prop, newValue, currentPath) {
+            // Handle array length truncation
+            if (Array.isArray(target) && prop === 'length') {
+                return handleArrayLengthSet(target, newValue, currentPath);
+            }
+
+            // Do nothing when value did not change
+            const oldValue = target[prop];
+            const propertyPath = currentPath.concat([prop]);
+
+            if (oldValue === newValue) {
+                return true;
+            }
+
+            // Special handling for scroll properties
+            handleScrollPropertySet(prop, newValue, propertyPath);
+
+            // Only make reactive and dispatch events for non-underscore properties
+            if (!shouldMakeReactive(prop)) {
+                target[prop] = newValue;
+                return true;
+            }
+
+            // Wrap objects and arrays in proxies when they're assigned
+            if (newValue && typeof newValue === 'object') {
+                target[prop] = createProxy(newValue, propertyPath);
+                target[prop]._isReactive = true;
+            } else {
+                target[prop] = newValue;
+            }
+
+            // Dispatch array-specific event if this is an array assignment
+            if (Array.isArray(newValue)) {
+                container.dispatchEvent(new CustomEvent("pac:array-change", {
+                    detail: {
+                        path: propertyPath,
+                        oldValue: oldValue,
+                        newValue: target[prop],
+                        method: 'assignment'
+                    }
+                }));
+            }
+
+            container.dispatchEvent(new CustomEvent("pac:change", {
+                detail: {
+                    path: propertyPath,
+                    oldValue: oldValue,
+                    newValue: target[prop]
+                }
+            }));
+
+            return true;
+        }
+
+        /**
+         * Creates a reactive proxy for an object or array
+         * @param {Object|Array} obj - The object to make reactive
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {Object|Array} A proxied version of the object
          */
         function createProxy(obj, currentPath) {
             currentPath = currentPath || [];
 
             return new Proxy(obj, {
                 get: function (target, prop) {
-                    const val = target[prop];
-
-                    // Handle array methods first
-                    if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
-                        return function () {
-                            // Store the old array state before modification
-                            const oldArray = Array.prototype.slice.call(target);
-
-                            // Apply the array method to get the result
-                            const result = Array.prototype[prop].apply(target, arguments);
-
-                            // Get the new array state after modification
-                            const newArray = Array.prototype.slice.call(target);
-
-                            // Re-proxy all items with correct indices after the operation
-                            // This ensures all objects have the proper path references
-                            newArray.forEach((item, index) => {
-                                if (item && typeof item === 'object' && !item._isReactive) {
-                                    const correctPath = currentPath.concat([index]);
-                                    newArray[index] = createProxy(item, correctPath);
-                                    newArray[index]._isReactive = true;
-                                }
-                            });
-
-                            // Update the target array with the newly proxied items
-                            // This is necessary because forEach works on a copy
-                            for (let i = 0; i < newArray.length; i++) {
-                                target[i] = newArray[i];
-                            }
-
-                            // Dispatch array-specific event
-                            container.dispatchEvent(new CustomEvent("pac:array-change", {
-                                detail: {
-                                    path: currentPath,
-                                    oldValue: oldArray,
-                                    newValue: target, // Use the updated target, not newArray copy
-                                    method: prop
-                                }
-                            }));
-
-                            // Also trigger computed property updates
-                            container.dispatchEvent(new CustomEvent("pac:change", {
-                                detail: {
-                                    path: currentPath,
-                                    oldValue: oldArray,
-                                    newValue: target // Use the updated target, not newArray copy
-                                }
-                            }));
-
-                            return result;
-                        };
-                    }
-
-                    // Check if this property is a getter-only property (computed property)
-                    const descriptor = Object.getOwnPropertyDescriptor(target, prop);
-
-                    if (descriptor && descriptor.get && !descriptor.set) {
-                        // This is a getter-only property (computed), return the value as-is
-                        return val;
-                    }
-
-                    // Don't make functions reactive, just return them as-is
-                    if (typeof val === 'function') {
-                        return val;
-                    }
-
-                    // CRITICAL FIX: Lazy wrapping of nested objects and arrays
-                    // If the value is an object/array and not already reactive, wrap it in a proxy
-                    if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
-                        const propertyPath = currentPath.concat([prop]);
-                        const proxiedVal = createProxy(val, propertyPath);
-                        proxiedVal._isReactive = true;
-
-                        // Update the original object with the proxy
-                        target[prop] = proxiedVal;
-
-                        return proxiedVal;
-                    }
-
-                    return val;
+                    return proxyGetHandler(target, prop, currentPath);
                 },
 
                 set: function (target, prop, newValue) {
-                    // Handle array length truncation
-                    if (Array.isArray(target) && prop === 'length') {
-                        const oldLength = target.length;
-                        const newLength = newValue;
-
-                        // Only trigger events if length actually changes
-                        if (oldLength === newLength) {
-                            return true;
-                        }
-
-                        // Store old array state before truncation
-                        const oldArray = Array.prototype.slice.call(target);
-
-                        // Perform the truncation
-                        target.length = newLength;
-
-                        // Dispatch array-specific event
-                        container.dispatchEvent(new CustomEvent("pac:array-change", {
-                            detail: {
-                                path: currentPath,
-                                oldValue: oldArray,
-                                newValue: Array.prototype.slice.call(target),
-                                method: 'length'
-                            }
-                        }));
-
-                        // Also trigger computed property updates
-                        container.dispatchEvent(new CustomEvent("pac:change", {
-                            detail: {
-                                path: currentPath,
-                                oldValue: oldArray,
-                                newValue: Array.prototype.slice.call(target)
-                            }
-                        }));
-
-                        return true;
-                    }
-
-                    // Do nothing when value did not change
-                    const oldValue = target[prop];
-                    const propertyPath = currentPath.concat([prop]);
-
-                    if (oldValue === newValue) {
-                        return true;
-                    }
-
-                    // Special handling for scroll properties
-                    if (propertyPath.length === 1) {
-                        if (prop === 'containerScrollX' && container) {
-                            container.scrollLeft = newValue;
-                        } else if (prop === 'containerScrollY' && container) {
-                            container.scrollTop = newValue;
-                        } else if (prop === 'browserScrollX') {
-                            window.scrollTo(newValue, window.scrollY);
-                        } else if (prop === 'browserScrollY') {
-                            window.scrollTo(window.scrollX, newValue);
-                        }
-                    }
-
-                    // Only make reactive and dispatch events for non-underscore properties
-                    if (!shouldMakeReactive(prop)) {
-                        target[prop] = newValue;
-                        return true;
-                    }
-
-                    // Wrap objects and arrays in proxies when they're assigned
-                    if (newValue && typeof newValue === 'object') {
-                        target[prop] = createProxy(newValue, propertyPath);
-                        target[prop]._isReactive = true;
-                    } else {
-                        target[prop] = newValue;
-                    }
-
-                    // Dispatch array-specific event if this is an array assignment
-                    if (Array.isArray(newValue)) {
-                        container.dispatchEvent(new CustomEvent("pac:array-change", {
-                            detail: {
-                                path: propertyPath,
-                                oldValue: oldValue,
-                                newValue: target[prop],
-                                method: 'assignment'
-                            }
-                        }));
-                    }
-
-                    container.dispatchEvent(new CustomEvent("pac:change", {
-                        detail: {
-                            path: propertyPath,
-                            oldValue: oldValue,
-                            newValue: target[prop]
-                        }
-                    }));
-
-                    return true;
+                    return proxySetHandler(target, prop, newValue, currentPath);
                 }
             });
         }
@@ -6396,7 +6453,7 @@
 
                 if (pacId) {
                     const context = window.PACRegistry.get(pacId);
-                    
+
                     if (context) {
                         return context.container;
                     }
