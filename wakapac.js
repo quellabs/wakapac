@@ -173,12 +173,15 @@
                 return element.id;
             }
 
-            // Otherwise, generate and assign a unique ID
-            if (!element.hasAttribute('data-pac-element-id')) {
-                element.setAttribute('data-pac-element-id', Utils.uniqid('pac-el-'));
+            // If element has a data-pac-element-id, use it
+            if (element.hasAttribute('data-pac-element-id')) {
+                return element.getAttribute('data-pac-element-id');
             }
 
-            return element.getAttribute('data-pac-element-id');
+            // Otherwise, generate and assign a unique ID
+            const uniqueId = Utils.uniqid('pac-el-');
+            element.setAttribute('data-pac-element-id', uniqueId);
+            return uniqueId;
         },
 
         /**
@@ -307,8 +310,7 @@
          * @returns {boolean} True if focus is within the element's boundaries
          */
         isElementFocusWithin(element) {
-            return element === document.activeElement ||
-                element.contains(document.activeElement);
+            return element === document.activeElement || element.contains(document.activeElement);
         },
 
         /**
@@ -1002,13 +1004,14 @@
              * Handle form element change events
              */
             document.addEventListener('change', function (event) {
-                if (
-                    event.target.tagName === 'SELECT' ||
-                    event.target.type === 'radio' ||
-                    event.target.type === 'checkbox'
-                ) {
+                const target = event.target;
+                const isSelect = target.tagName === 'SELECT';
+                const isRadio = target.type === 'radio';
+                const isCheckbox = target.type === 'checkbox';
+
+                if (isSelect || isRadio || isCheckbox) {
                     self.dispatchTrackedEvent(MSG_CHANGE, event, {
-                        elementType: (event.target.tagName === 'SELECT') ? 'select' : event.target.type
+                        elementType: isSelect ? 'select' : target.type
                     });
                 }
             });
@@ -1019,13 +1022,13 @@
              * Excludes radio buttons and checkboxes which use 'change' event instead.
              */
             document.addEventListener('input', function (event) {
-                // Handle text inputs (excluding radio/checkbox) and textareas
-                if (
-                    (event.target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(event.target.type)) ||
-                    event.target.tagName === 'TEXTAREA'
-                ) {
+                const target = event.target;
+                const isTextInput = target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(target.type);
+                const isTextarea = target.tagName === 'TEXTAREA';
+
+                if (isTextInput || isTextarea) {
                     self.dispatchTrackedEvent(MSG_CHAR, event, {
-                        elementType: (event.target.tagName === 'TEXTAREA') ? 'textarea' : 'input'
+                        elementType: target.tagName.toLowerCase()
                     });
                 }
             });
