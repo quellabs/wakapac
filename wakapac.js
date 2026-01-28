@@ -114,6 +114,15 @@
     const MK_ALT = 0x0020;          // Alt key held down
 
     /**
+     * Keyboard lParam modifier key state flags
+     * Used for extracting modifier states from keyboard event lParam
+     * These are at different bit positions than MK_* (which are for mouse wParam)
+     */
+    const KM_SHIFT = (1 << 25);     // Shift key held down (lParam bit 25)
+    const KM_CONTROL = (1 << 26);   // Ctrl key held down (lParam bit 26)
+    const KM_ALT = (1 << 29);       // Alt key held down (lParam bit 29)
+
+    /**
      * Win32 Virtual Key codes
      * Hex values match Win32 API virtual key code identifiers
      * Reference: https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
@@ -240,7 +249,7 @@
     const VK_MEDIA_PLAY_PAUSE = 0xB3;
 
     // OEM keys (punctuation - US layout)
-    const VK_OEM_1 = 0xBA;          // Semicolon (;)
+    const VK_OEM_1 = 0xBA;          // Semicolon (;:)
     const VK_OEM_PLUS = 0xBB;       // Equal (=+)
     const VK_OEM_COMMA = 0xBC;      // Comma (,<)
     const VK_OEM_MINUS = 0xBD;      // Minus (-_)
@@ -1766,13 +1775,13 @@
             // Bit 25: Shift key state (WakaPAC extension)
             // 1 if Shift is pressed, 0 otherwise
             if (event.shiftKey) {
-                lParam |= (1 << 25);
+                lParam |= KM_SHIFT;
             }
 
             // Bit 26: Ctrl key state (WakaPAC extension)
             // 1 if Ctrl is pressed, 0 otherwise
             if (event.ctrlKey) {
-                lParam |= (1 << 26);
+                lParam |= KM_CONTROL;
             }
 
             // Bit 27-28: Reserved (not used)
@@ -1780,7 +1789,7 @@
             // Bit 29: Context code (Alt key state)
             // 1 if Alt is pressed, 0 otherwise
             if (event.altKey) {
-                lParam |= (1 << 29);
+                lParam |= KM_ALT;
             }
 
             // Bit 30: Previous key state
@@ -7400,6 +7409,11 @@
     wakaPAC.MK_SHIFT = MK_SHIFT;
     wakaPAC.MK_CONTROL = MK_CONTROL;
     wakaPAC.MK_ALT = MK_ALT;
+
+    // Attach keyboard lParam modifier key constants to wakaPAC
+    wakaPAC.KM_SHIFT = KM_SHIFT;
+    wakaPAC.KM_CONTROL = KM_CONTROL;
+    wakaPAC.KM_ALT = KM_ALT;
 
     // Attach Virtual Key (VK) code constants to wakaPAC
     // Control keys
