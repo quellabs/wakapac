@@ -86,6 +86,7 @@
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
+    const MSG_INPUT = 0x0303;
     const MSG_FOCUS = 0x0007;
     const MSG_BLUR = 0x0008;
     const MSG_KEYDOWN = 0x0100;
@@ -1055,6 +1056,13 @@
              */
             document.addEventListener('keydown', function (event) {
                 self.dispatchTrackedEvent(MSG_KEYDOWN, event);
+
+                // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
+                // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
+                if (event.key && event.key.length === 1) {
+                    // Single character key press - send as MSG_CHAR with char code in wParam
+                    self.dispatchTrackedEvent(MSG_CHAR, event);
+                }
             });
 
             /**
@@ -1077,6 +1085,7 @@
              * Handle real-time input events for text fields
              * Tracks continuous user typing in text inputs and textareas.
              * Excludes radio buttons and checkboxes which use 'change' event instead.
+             * This catches paste, cut, drag-drop, autocomplete, and IME input.
              */
             document.addEventListener('input', function (event) {
                 const target = event.target;
@@ -1084,7 +1093,7 @@
                 const isTextarea = target.tagName === 'TEXTAREA';
 
                 if (isTextInput || isTextarea) {
-                    self.dispatchTrackedEvent(MSG_CHAR, event, {
+                    self.dispatchTrackedEvent(MSG_INPUT, event, {
                         elementType: target.tagName.toLowerCase()
                     });
                 }
@@ -1397,15 +1406,23 @@
                 case MSG_KEYDOWN:
                 case MSG_KEYUP:
                     return {
-                        wParam: event.keyCode || event.which || 0,  // Virtual key code (fallback to 0 if undefined)
+                        wParam: this.buildKeyboardWParam(event),    // Win32 virtual key code
                         lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
                     };
 
-                // Character and input change events - encode text length
+                // Character input events - Win32 WM_CHAR style
+                // Only fires for keyboard-generated printable characters
                 case MSG_CHAR:
                     return {
-                        wParam: (event.target && event.target.value) ? event.target.value.length : 0,  // Text length
-                        lParam: 0  // Not used for these message types
+                        wParam: event.key.charCodeAt(0),            // UTF-16 character code (Win32 style)
+                        lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
+                    };
+
+                // Text field input events - captures paste, autocomplete, IME, etc.
+                case MSG_INPUT:
+                    return {
+                        wParam: event.target.value.length,          // Current text length
+                        lParam: 0                                   // Not used
                     };
 
                 // Select/radio change event
@@ -1528,22 +1545,42 @@
         },
 
         /**
-         * Builds lParam for keyboard messages - simplified for web use
-         * Only includes meaningful data available from JavaScript events
+         * Builds lParam for keyboard messages following Win32 WM_KEYDOWN/WM_KEYUP format
+         * Encodes keyboard state information in various bit fields
+         * Note: Bits 16-23 (scan code) are not available in JavaScript and remain 0
+         * Note: Bit 30 (previous key state) would require manual tracking and is not implemented
          * @param {KeyboardEvent} event - The keyboard event
-         * @returns {number} lParam value with basic keyboard information
+         * @returns {number} lParam value with keyboard state information
          */
         buildKeyboardLParam(event) {
             let lParam = 0;
 
-            // Bits 0-15: Repeat count (1 for single press, higher for held keys)
+            // Bits 0-15: Repeat count (1 for single press, 2+ for held keys)
+            // Win32 increments this for each WM_KEYDOWN while key is held
             const repeatCount = event.repeat ? 2 : 1;
             lParam |= (repeatCount & 0xFFFF);
 
-            // Bit 24: Extended key flag (arrow keys, function keys, etc.)
+            // Bits 16-23: Scan code (hardware scan code)
+            // Not available in JavaScript - would require platform-specific mapping
+            // Left as 0
+
+            // Bit 24: Extended key flag (arrow keys, function keys, numpad, etc.)
             if (this.isExtendedKey(event.code)) {
                 lParam |= (1 << 24);
             }
+
+            // Bit 25-28: Reserved (not used)
+
+            // Bit 29: Context code (Alt key state)
+            // 1 if Alt is pressed, 0 otherwise
+            if (event.altKey) {
+                lParam |= (1 << 29);
+            }
+
+            // Bit 30: Previous key state
+            // 1 if key was down before this message, 0 if key was up
+            // Would require tracking key states manually - not implemented
+            // Left as 0
 
             // Bit 31: Transition state (0 for keydown, 1 for keyup)
             if (event.type === 'keyup') {
@@ -1614,6 +1651,138 @@
             ];
 
             return extendedKeys.includes(code);
+        },
+
+        /**
+         * Maps JavaScript KeyboardEvent.code to Win32 Virtual Key codes
+         * Provides more accurate Win32 compatibility than deprecated keyCode
+         * @param {string} code - The KeyboardEvent.code value
+         * @returns {number|null} The Win32 VK_ code, or null if no mapping exists
+         */
+        getVirtualKeyCode(code) {
+            // Win32 Virtual Key Code mapping
+            // Reference: https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+            const VK_MAP = {
+                // Mouse buttons (for completeness, though not keyboard)
+                'MouseLeft': 0x01,      // VK_LBUTTON
+                'MouseRight': 0x02,     // VK_RBUTTON
+                'MouseMiddle': 0x04,    // VK_MBUTTON
+
+                // Control keys
+                'Backspace': 0x08,      // VK_BACK
+                'Tab': 0x09,            // VK_TAB
+                'Enter': 0x0D,          // VK_RETURN
+                'ShiftLeft': 0x10,      // VK_SHIFT
+                'ShiftRight': 0x10,     // VK_SHIFT (same code)
+                'ControlLeft': 0x11,    // VK_CONTROL
+                'ControlRight': 0x11,   // VK_CONTROL (same code)
+                'AltLeft': 0x12,        // VK_MENU
+                'AltRight': 0x12,       // VK_MENU (same code)
+                'Pause': 0x13,          // VK_PAUSE
+                'CapsLock': 0x14,       // VK_CAPITAL
+                'Escape': 0x1B,         // VK_ESCAPE
+                'Space': 0x20,          // VK_SPACE
+
+                // Navigation keys
+                'PageUp': 0x21,         // VK_PRIOR
+                'PageDown': 0x22,       // VK_NEXT
+                'End': 0x23,            // VK_END
+                'Home': 0x24,           // VK_HOME
+                'ArrowLeft': 0x25,      // VK_LEFT
+                'ArrowUp': 0x26,        // VK_UP
+                'ArrowRight': 0x27,     // VK_RIGHT
+                'ArrowDown': 0x28,      // VK_DOWN
+                'PrintScreen': 0x2C,    // VK_SNAPSHOT
+                'Insert': 0x2D,         // VK_INSERT
+                'Delete': 0x2E,         // VK_DELETE
+
+                // Number keys (top row)
+                'Digit0': 0x30, 'Digit1': 0x31, 'Digit2': 0x32, 'Digit3': 0x33, 'Digit4': 0x34,
+                'Digit5': 0x35, 'Digit6': 0x36, 'Digit7': 0x37, 'Digit8': 0x38, 'Digit9': 0x39,
+
+                // Letter keys
+                'KeyA': 0x41, 'KeyB': 0x42, 'KeyC': 0x43, 'KeyD': 0x44, 'KeyE': 0x45, 'KeyF': 0x46,
+                'KeyG': 0x47, 'KeyH': 0x48, 'KeyI': 0x49, 'KeyJ': 0x4A, 'KeyK': 0x4B, 'KeyL': 0x4C,
+                'KeyM': 0x4D, 'KeyN': 0x4E, 'KeyO': 0x4F, 'KeyP': 0x50, 'KeyQ': 0x51, 'KeyR': 0x52,
+                'KeyS': 0x53, 'KeyT': 0x54, 'KeyU': 0x55, 'KeyV': 0x56, 'KeyW': 0x57, 'KeyX': 0x58,
+                'KeyY': 0x59, 'KeyZ': 0x5A,
+
+                // Windows/Meta keys
+                'MetaLeft': 0x5B,       // VK_LWIN
+                'MetaRight': 0x5C,      // VK_RWIN
+                'ContextMenu': 0x5D,    // VK_APPS
+
+                // Numpad keys
+                'Numpad0': 0x60, 'Numpad1': 0x61, 'Numpad2': 0x62, 'Numpad3': 0x63, 'Numpad4': 0x64,
+                'Numpad5': 0x65, 'Numpad6': 0x66, 'Numpad7': 0x67, 'Numpad8': 0x68, 'Numpad9': 0x69,
+                'NumpadMultiply': 0x6A, // VK_MULTIPLY
+                'NumpadAdd': 0x6B,      // VK_ADD
+                'NumpadSubtract': 0x6D, // VK_SUBTRACT
+                'NumpadDecimal': 0x6E,  // VK_DECIMAL
+                'NumpadDivide': 0x6F,   // VK_DIVIDE
+
+                // Function keys
+                'F1': 0x70, 'F2': 0x71, 'F3': 0x72, 'F4': 0x73, 'F5': 0x74, 'F6': 0x75,
+                'F7': 0x76, 'F8': 0x77, 'F9': 0x78, 'F10': 0x79, 'F11': 0x7A, 'F12': 0x7B,
+                'F13': 0x7C, 'F14': 0x7D, 'F15': 0x7E, 'F16': 0x7F, 'F17': 0x80, 'F18': 0x81,
+                'F19': 0x82, 'F20': 0x83, 'F21': 0x84, 'F22': 0x85, 'F23': 0x86, 'F24': 0x87,
+
+                // Lock keys
+                'NumLock': 0x90,        // VK_NUMLOCK
+                'ScrollLock': 0x91,     // VK_SCROLL
+
+                // Browser/Media keys (extended)
+                'BrowserBack': 0xA6,    // VK_BROWSER_BACK
+                'BrowserForward': 0xA7, // VK_BROWSER_FORWARD
+                'BrowserRefresh': 0xA8, // VK_BROWSER_REFRESH
+                'BrowserStop': 0xA9,    // VK_BROWSER_STOP
+                'BrowserSearch': 0xAA,  // VK_BROWSER_SEARCH
+                'BrowserFavorites': 0xAB, // VK_BROWSER_FAVORITES
+                'BrowserHome': 0xAC,    // VK_BROWSER_HOME
+
+                'AudioVolumeMute': 0xAD,    // VK_VOLUME_MUTE
+                'AudioVolumeDown': 0xAE,    // VK_VOLUME_DOWN
+                'AudioVolumeUp': 0xAF,      // VK_VOLUME_UP
+                'MediaTrackNext': 0xB0,     // VK_MEDIA_NEXT_TRACK
+                'MediaTrackPrevious': 0xB1, // VK_MEDIA_PREV_TRACK
+                'MediaStop': 0xB2,          // VK_MEDIA_STOP
+                'MediaPlayPause': 0xB3,     // VK_MEDIA_PLAY_PAUSE
+
+                // OEM keys (punctuation - US layout)
+                'Semicolon': 0xBA,      // VK_OEM_1 (;:)
+                'Equal': 0xBB,          // VK_OEM_PLUS (=+)
+                'Comma': 0xBC,          // VK_OEM_COMMA (,<)
+                'Minus': 0xBD,          // VK_OEM_MINUS (-_)
+                'Period': 0xBE,         // VK_OEM_PERIOD (.>)
+                'Slash': 0xBF,          // VK_OEM_2 (/?)
+                'Backquote': 0xC0,      // VK_OEM_3 (`~)
+                'BracketLeft': 0xDB,    // VK_OEM_4 ([{)
+                'Backslash': 0xDC,      // VK_OEM_5 (\|)
+                'BracketRight': 0xDD,   // VK_OEM_6 (]})
+                'Quote': 0xDE,          // VK_OEM_7 ('")
+                'IntlBackslash': 0xE2   // VK_OEM_102 (Non-US backslash)
+            };
+
+            return VK_MAP[code] || null;
+        },
+
+        /**
+         * Builds wParam for keyboard messages using Win32 Virtual Key codes
+         * More accurate than deprecated keyCode property
+         * @param {KeyboardEvent} event - The keyboard event
+         * @returns {number} Win32-compatible virtual key code
+         */
+        buildKeyboardWParam(event) {
+            // Try to map event.code to Win32 VK code first
+            const vkCode = this.getVirtualKeyCode(event.code);
+
+            if (vkCode !== null) {
+                return vkCode;
+            }
+
+            // Fallback to keyCode for compatibility (deprecated but still works)
+            // Note: keyCode is usually close to VK codes for common keys
+            return event.keyCode || event.which || 0;
         },
 
         /**
@@ -7022,6 +7191,7 @@
     wakaPAC.MSG_CHAR = MSG_CHAR;
     wakaPAC.MSG_CHANGE = MSG_CHANGE;
     wakaPAC.MSG_SUBMIT = MSG_SUBMIT;
+    wakaPAC.MSG_INPUT = MSG_INPUT;
     wakaPAC.MSG_FOCUS = MSG_FOCUS;
     wakaPAC.MSG_BLUR = MSG_BLUR;
     wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
