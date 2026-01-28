@@ -1613,14 +1613,11 @@
                     };
 
                 // Text field input events - captures paste, autocomplete, IME, etc.
-                case MSG_INPUT: {
-                    const text = event.data || event.target.value || '';
-
+                case MSG_INPUT:
                     return {
-                        wParam: text.length,
+                        wParam: event.data ? event.data.length : 0,
                         lParam: 0
                     };
-                }
 
                 // Select/radio change event
                 case MSG_CHANGE:
