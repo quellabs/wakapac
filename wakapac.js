@@ -677,6 +677,37 @@
                 x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
                 y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
             };
+        },
+
+        /**
+         * Retrieves a string that represents the name of a key.
+         * @param keyCode
+         * @returns {string|null}
+         */
+        getKeyName(keyCode) {
+            // Build reverse mapping from wakaPAC VK constants to names
+            const keyNames = {};
+
+            // Add all exported VK constants
+            for (const key in wakaPAC) {
+                if (key.startsWith('VK_')) {
+                    keyNames[wakaPAC[key]] = key.substring(3);  // Remove 'VK_' prefix
+                }
+            }
+
+            // Try to get a friendly name
+            if (keyNames[keyCode]) {
+                return keyNames[keyCode];
+            }
+
+            // Show hex VK code like Win32 docs
+            if (keyCode >= 0x30 && keyCode <= 0x39) {
+                return String.fromCharCode(keyCode); // Numbers 0-9
+            } else if (keyCode >= 0x41 && keyCode <= 0x5A) {
+                return String.fromCharCode(keyCode); // Letters A-Z
+            } else {
+                return null;
+            }
         }
     }
 
@@ -7282,6 +7313,15 @@
      */
     wakaPAC.MAKEPOINTS = function(lParam) {
         return Utils.MAKEPOINTS(lParam);
+    };
+
+    /**
+     * Retrieves a string that represents the name of a key.
+     * @param keyCode
+     * @returns {string|null}
+     */
+    wakaPAC.getKeyName = function(keyCode) {
+        return Utils.getKeyName(keyCode);
     };
 
     /**
