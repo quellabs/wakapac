@@ -3974,38 +3974,6 @@
     };
 
     /**
-     * Processes queued updates that should trigger on blur for a specific element
-     * @param {HTMLElement} targetElement - The element that just lost focus
-     * @returns {void}
-     */
-    Context.prototype.processBlurQueueUpdates = function(targetElement) {
-        const elementId = Utils.getElementIdentifier(targetElement);
-        const updatesToProcess = [];
-
-        // Find all queued updates for this element that should trigger on blur
-        this.updateQueue.forEach((queueEntry, resolvedPath) => {
-            if (queueEntry.trigger === 'blur' && queueEntry.elementId === elementId) {
-                updatesToProcess.push({
-                    path: resolvedPath,
-                    value: queueEntry.value
-                });
-            }
-        });
-
-        // Apply all blur-triggered updates for this element
-        updatesToProcess.forEach(update => {
-            try {
-                Utils.setNestedProperty(update.path, update.value, this.abstraction);
-                this.updateQueue.delete(update.path);
-            } catch (error) {
-                console.warn('Error applying blur-triggered update for path:', update.path, error);
-                // Remove failed update to prevent infinite retries
-                this.updateQueue.delete(update.path);
-            }
-        });
-    };
-
-    /**
      * Retrieves the update configuration for a specific element, combining element-specific
      * attributes with context-wide configuration defaults.
      * @param {HTMLElement} element - The DOM element to get update configuration for
@@ -4444,16 +4412,30 @@
             return;
         }
 
-        // Process any queued "change" mode updates for this element
-        this.processBlurQueueUpdates(targetElement);
+        // Find all queued updates for this element that should trigger on blur
+        const elementId = Utils.getElementIdentifier(targetElement);
+        const updatesToProcess = [];
 
-        // Future: Could execute blur binding if implemented
-        // if (mappingData.bindings.blur) {
-        //     const method = this.abstraction[mappingData.bindings.blur.target];
-        //     if (typeof method === 'function') {
-        //         method.call(this.abstraction, event);
-        //     }
-        // }
+        this.updateQueue.forEach((queueEntry, resolvedPath) => {
+            if (queueEntry.trigger === 'blur' && queueEntry.elementId === elementId) {
+                updatesToProcess.push({
+                    path: resolvedPath,
+                    value: queueEntry.value
+                });
+            }
+        });
+
+        // Apply all blur-triggered updates for this element
+        updatesToProcess.forEach(update => {
+            try {
+                Utils.setNestedProperty(update.path, update.value, this.abstraction);
+                this.updateQueue.delete(update.path);
+            } catch (error) {
+                console.warn('Error applying blur-triggered update for path:', update.path, error);
+                // Remove failed update to prevent infinite retries
+                this.updateQueue.delete(update.path);
+            }
+        });
     };
 
     /**
