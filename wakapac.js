@@ -1763,7 +1763,19 @@
                 lParam |= (1 << 24);
             }
 
-            // Bit 25-28: Reserved (not used)
+            // Bit 25: Shift key state (WakaPAC extension)
+            // 1 if Shift is pressed, 0 otherwise
+            if (event.shiftKey) {
+                lParam |= (1 << 25);
+            }
+
+            // Bit 26: Ctrl key state (WakaPAC extension)
+            // 1 if Ctrl is pressed, 0 otherwise
+            if (event.ctrlKey) {
+                lParam |= (1 << 26);
+            }
+
+            // Bit 27-28: Reserved (not used)
 
             // Bit 29: Context code (Alt key state)
             // 1 if Alt is pressed, 0 otherwise
