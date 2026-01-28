@@ -7402,7 +7402,7 @@
     wakaPAC.MSG_TIMER = MSG_TIMER;
     wakaPAC.MSG_GESTURE = MSG_GESTURE;
 
-    // Attach modifier key constants to wakaPAC
+    // Attach mouse event modifier key constants to wakaPAC (for use with mouse wParam)
     wakaPAC.MK_LBUTTON = MK_LBUTTON;
     wakaPAC.MK_RBUTTON = MK_RBUTTON;
     wakaPAC.MK_MBUTTON = MK_MBUTTON;
@@ -7410,7 +7410,7 @@
     wakaPAC.MK_CONTROL = MK_CONTROL;
     wakaPAC.MK_ALT = MK_ALT;
 
-    // Attach keyboard lParam modifier key constants to wakaPAC
+    // Attach keyboard event modifier key constants to wakaPAC (for use with keyboard lParam)
     wakaPAC.KM_SHIFT = KM_SHIFT;
     wakaPAC.KM_CONTROL = KM_CONTROL;
     wakaPAC.KM_ALT = KM_ALT;
