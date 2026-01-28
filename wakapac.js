@@ -1273,16 +1273,6 @@
                 }
             });
 
-            // Fired when the IME composition sequence ends and the text is finalized.
-            // event.data contains the committed text produced by the IME (may contain multiple code points).
-            document.addEventListener('compositionend', (event) => {
-                if (event.data) {
-                    // Emit MSG_INPUT to indicate committed text inserted into an editable control.
-                    // This path handles IME output specifically (not raw key events).
-                    self.dispatchTrackedEvent(MSG_INPUT, event, { text: event.data });
-                }
-            });
-
             /**
              * Handle real-time input events for text fields
              * Tracks continuous user typing in text inputs and textareas.
@@ -1293,11 +1283,12 @@
                 const target = event.target;
                 const isTextInput = target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(target.type);
                 const isTextarea = target.tagName === 'TEXTAREA';
+                const isContentEditable = target.isContentEditable === true;
 
-                if (isTextInput || isTextarea) {
+                if (isTextInput || isTextarea || isContentEditable) {
                     self.dispatchTrackedEvent(MSG_INPUT, event, {
                         elementType: target.tagName.toLowerCase(),
-                        text: event.data || ''
+                        text: event.data
                     });
                 }
             });
