@@ -40,12 +40,7 @@
 
         .slider-track-wrapper {
             display: flex;
-            cursor: grab;
-            user-select: none;
-        }
-
-        .slider-track-wrapper:active {
-            cursor: grabbing;
+            transition: transform 0.3s ease-out;
         }
 
         .slider-track {
@@ -98,18 +93,10 @@
             transform: translateY(-50%);
             width: 100%;
             display: flex;
-            justify-content: space-between;
+            justify-content: space-between;  /* This is fine */
             padding: 0 20px;
             pointer-events: none;
             z-index: 10;
-        }
-
-        .slider-buttons button:first-child {
-            margin-right: auto;
-        }
-
-        .slider-buttons button:last-child {
-            margin-left: auto;
         }
 
         .slider-buttons button {
@@ -127,6 +114,11 @@
             transition: background 0.3s;
         }
 
+        /* Force right button to stay on the right */
+        .slider-buttons button:last-child {
+            margin-left: auto;
+        }
+
         .slider-buttons button:hover {
             background: white;
         }
@@ -138,10 +130,16 @@
             background: white;
             border-radius: 0 0 12px 12px;
         }
+
+        .gesture-hint {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #999;
+        }
     </style>
 </head>
 <body>
-<h1>WakaPAC Slider Demo</h1>
+<h1>WakaPAC Slider Demo - Gesture Navigation</h1>
 
 <div id="slider" class="slider-container">
     <div class="slider-wrapper">
@@ -156,14 +154,17 @@
         </div>
 
         <div class="slider-buttons">
-            <button data-pac-bind="click: prevSlide, visible: currentSlide > 0" style="display: none;">←</button>
+            <button data-pac-bind="click: prevSlide, visible: currentSlide > 0">←</button>
             <button data-pac-bind="click: nextSlide, visible: currentSlide < totalSlides - 1">→</button>
         </div>
     </div>
 
     <div class="info">
         Current slide: {{currentSlide + 1}} / {{totalSlides}}<br>
-        Drag or use buttons/dots to navigate
+        Last gesture: {{lastGesture}}<br>
+        <div class="gesture-hint">
+            Right-click + drag left/right to navigate between slides
+        </div>
     </div>
 </div>
 
@@ -171,73 +172,36 @@
     wakaPAC('#slider', {
         currentSlide: 0,
         slides: ['Slide 1', 'Slide 2', 'Slide 3', 'Slide 4', 'Slide 5'],
-
-        // Private state (underscore prefix prevents DOM updates)
-        _dragging: false,
-        _startX: 0,
-        _dragOffset: 0,
-        _containerWidth: 0,
+        lastGesture: 'none',
 
         computed: {
-		    totalSlides() {
-				return this.slides.length;
-			},
-			
+            totalSlides() {
+                return this.slides.length;
+            },
+
             sliderStyle() {
-                let translateX;
-
-                if (this._dragging) {
-                    // While dragging: base position + drag offset
-                    const basePosition = -(this.currentSlide * 100);
-                    translateX = basePosition + this._dragOffset;
-                } else {
-                    // Not dragging: snap to current slide
-                    translateX = -(this.currentSlide * 100);
-                }
-
+                const translateX = -(this.currentSlide * 100);
                 return {
-                    transform: `translateX(${translateX}%)`,
-                    transition: this._dragging ? 'none' : 'transform 0.3s ease-out'
+                    transform: `translateX(${translateX}%)`
                 };
             }
         },
 
         msgProc(event) {
-            const pos = wakaPAC.MAKEPOINTS(event.lParam);
-
             switch(event.message) {
-                case wakaPAC.MSG_LBUTTONDOWN:
-                    // Calculate width on first drag if not set
-                    if (!this._containerWidth) {
-                        const wrapper = event.target.closest('.slider-wrapper');
-                        this._containerWidth = wrapper ? wrapper.offsetWidth : 800;
-                    }
+                case wakaPAC.MSG_GESTURE:
+                    // Prevent context menu from appearing after gesture
+                    this.lastGesture = event.pattern;
 
-                    this._dragging = true;
-                    this._startX = pos.x;
-                    this._dragOffset = 0;
-                    break;
+                    // Navigate based on gesture pattern
+                    switch(event.pattern) {
+                        case 'left':
+                            this.nextSlide();
+                            return false;
 
-                case wakaPAC.MSG_MOUSEMOVE:
-                    if (this._dragging) {
-                        const deltaX = pos.x - this._startX;
-                        // Convert pixels to percentage
-                        this._dragOffset = (deltaX / this._containerWidth) * 100;
-                    }
-
-                    break;
-
-                case wakaPAC.MSG_LBUTTONUP:
-                    if (this._dragging) {
-                        this._dragging = false;
-
-                        // Calculate which slide we're closest to
-                        const currentPosition = -(this.currentSlide * 100) + this._dragOffset;
-                        const targetSlide = Math.round(-currentPosition / 100);
-
-                        // Clamp to valid range
-                        this.currentSlide = Math.max(0, Math.min(targetSlide, this.totalSlides - 1));
-                        this._dragOffset = 0;
+                        case 'right':
+                            this.prevSlide();
+                            return false;
                     }
 
                     break;

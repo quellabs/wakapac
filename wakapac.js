@@ -68,6 +68,13 @@
     const BOOLEAN_ATTRIBUTES = ["readonly", "required", "selected", "checked", "hidden", "multiple", "autofocus"];
 
     /**
+     * Reverse mapping cache from virtual-key codes to human-readable names.
+     * Populated on first use to avoid repeated reflection on wakaPAC.
+     * @type {Object<number, string>|null}
+     */
+    let cachedKeyNames = null;
+
+    /**
      * Windows-style message type constants for event handling
      * Hex values match Win32 API message identifiers
      */
@@ -86,11 +93,13 @@
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
+    const MSG_INPUT = 0x0303;
     const MSG_FOCUS = 0x0007;
     const MSG_BLUR = 0x0008;
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
     const MSG_TIMER = 0x0113;
+    const MSG_GESTURE = 0x0250;
     const MSG_USER = 0x1000;
 
     /**
@@ -103,6 +112,155 @@
     const MK_SHIFT = 0x0008;        // Shift key held down
     const MK_CONTROL = 0x0010;      // Ctrl key held down
     const MK_ALT = 0x0020;          // Alt key held down
+
+    /**
+     * Keyboard lParam modifier key state flags
+     * Used for extracting modifier states from keyboard event lParam
+     * These are at different bit positions than MK_* (which are for mouse wParam)
+     */
+    const KM_SHIFT = (1 << 25);     // Shift key held down (lParam bit 25)
+    const KM_CONTROL = (1 << 26);   // Ctrl key held down (lParam bit 26)
+    const KM_ALT = (1 << 29);       // Alt key held down (lParam bit 29)
+
+    /**
+     * Win32 Virtual Key codes
+     * Hex values match Win32 API virtual key code identifiers
+     * Reference: https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+     */
+    // Control keys
+    const VK_BACK = 0x08;           // Backspace
+    const VK_TAB = 0x09;            // Tab
+    const VK_RETURN = 0x0D;         // Enter
+    const VK_SHIFT = 0x10;          // Shift
+    const VK_CONTROL = 0x11;        // Ctrl
+    const VK_MENU = 0x12;           // Alt
+    const VK_PAUSE = 0x13;          // Pause
+    const VK_CAPITAL = 0x14;        // CapsLock
+    const VK_ESCAPE = 0x1B;         // Escape
+    const VK_SPACE = 0x20;          // Space
+    const VK_PRIOR = 0x21;          // Page Up
+    const VK_NEXT = 0x22;           // Page Down
+    const VK_END = 0x23;            // End
+    const VK_HOME = 0x24;           // Home
+    const VK_LEFT = 0x25;           // Left Arrow
+    const VK_UP = 0x26;             // Up Arrow
+    const VK_RIGHT = 0x27;          // Right Arrow
+    const VK_DOWN = 0x28;           // Down Arrow
+    const VK_SNAPSHOT = 0x2C;       // PrintScreen
+    const VK_INSERT = 0x2D;         // Insert
+    const VK_DELETE = 0x2E;         // Delete
+
+    // Number keys (0-9)
+    const VK_0 = 0x30;
+    const VK_1 = 0x31;
+    const VK_2 = 0x32;
+    const VK_3 = 0x33;
+    const VK_4 = 0x34;
+    const VK_5 = 0x35;
+    const VK_6 = 0x36;
+    const VK_7 = 0x37;
+    const VK_8 = 0x38;
+    const VK_9 = 0x39;
+
+    // Letter keys (A-Z)
+    const VK_A = 0x41;
+    const VK_B = 0x42;
+    const VK_C = 0x43;
+    const VK_D = 0x44;
+    const VK_E = 0x45;
+    const VK_F = 0x46;
+    const VK_G = 0x47;
+    const VK_H = 0x48;
+    const VK_I = 0x49;
+    const VK_J = 0x4A;
+    const VK_K = 0x4B;
+    const VK_L = 0x4C;
+    const VK_M = 0x4D;
+    const VK_N = 0x4E;
+    const VK_O = 0x4F;
+    const VK_P = 0x50;
+    const VK_Q = 0x51;
+    const VK_R = 0x52;
+    const VK_S = 0x53;
+    const VK_T = 0x54;
+    const VK_U = 0x55;
+    const VK_V = 0x56;
+    const VK_W = 0x57;
+    const VK_X = 0x58;
+    const VK_Y = 0x59;
+    const VK_Z = 0x5A;
+
+    // Windows keys
+    const VK_LWIN = 0x5B;           // Left Windows key
+    const VK_RWIN = 0x5C;           // Right Windows key
+    const VK_APPS = 0x5D;           // Context Menu key
+
+    // Numpad keys
+    const VK_NUMPAD0 = 0x60;
+    const VK_NUMPAD1 = 0x61;
+    const VK_NUMPAD2 = 0x62;
+    const VK_NUMPAD3 = 0x63;
+    const VK_NUMPAD4 = 0x64;
+    const VK_NUMPAD5 = 0x65;
+    const VK_NUMPAD6 = 0x66;
+    const VK_NUMPAD7 = 0x67;
+    const VK_NUMPAD8 = 0x68;
+    const VK_NUMPAD9 = 0x69;
+    const VK_MULTIPLY = 0x6A;       // Numpad *
+    const VK_ADD = 0x6B;            // Numpad +
+    const VK_SUBTRACT = 0x6D;       // Numpad -
+    const VK_DECIMAL = 0x6E;        // Numpad .
+    const VK_DIVIDE = 0x6F;         // Numpad /
+
+    // Function keys
+    const VK_F1 = 0x70;
+    const VK_F2 = 0x71;
+    const VK_F3 = 0x72;
+    const VK_F4 = 0x73;
+    const VK_F5 = 0x74;
+    const VK_F6 = 0x75;
+    const VK_F7 = 0x76;
+    const VK_F8 = 0x77;
+    const VK_F9 = 0x78;
+    const VK_F10 = 0x79;
+    const VK_F11 = 0x7A;
+    const VK_F12 = 0x7B;
+
+    // Lock keys
+    const VK_NUMLOCK = 0x90;        // NumLock
+    const VK_SCROLL = 0x91;         // ScrollLock
+
+    // Browser keys
+    const VK_BROWSER_BACK = 0xA6;
+    const VK_BROWSER_FORWARD = 0xA7;
+    const VK_BROWSER_REFRESH = 0xA8;
+    const VK_BROWSER_STOP = 0xA9;
+    const VK_BROWSER_SEARCH = 0xAA;
+    const VK_BROWSER_FAVORITES = 0xAB;
+    const VK_BROWSER_HOME = 0xAC;
+
+    // Media keys
+    const VK_VOLUME_MUTE = 0xB5;
+    const VK_VOLUME_DOWN = 0xB6;
+    const VK_VOLUME_UP = 0xB7;
+    const VK_MEDIA_NEXT_TRACK = 0xB0;
+    const VK_MEDIA_PREV_TRACK = 0xB1;
+    const VK_MEDIA_STOP = 0xB2;
+    const VK_MEDIA_PLAY_PAUSE = 0xB3;
+
+    // OEM keys (punctuation - US layout)
+    const VK_OEM_1 = 0xBA;          // Semicolon (;:)
+    const VK_OEM_PLUS = 0xBB;       // Equal (=+)
+    const VK_OEM_COMMA = 0xBC;      // Comma (,<)
+    const VK_OEM_MINUS = 0xBD;      // Minus (-_)
+    const VK_OEM_PERIOD = 0xBE;     // Period (.>)
+    const VK_OEM_2 = 0xBF;          // Slash (/?)
+    const VK_OEM_3 = 0xC0;          // Backquote (`~)
+    const VK_OEM_4 = 0xDB;          // Left bracket ([{)
+    const VK_OEM_5 = 0xDC;          // Backslash (\|)
+    const VK_OEM_6 = 0xDD;          // Right bracket (]})
+    const VK_OEM_7 = 0xDE;          // Quote ('")
+    const VK_OEM_102 = 0xE2;        // Non-US backslash
 
     // =============================================================================
     // UTILITY FUNCTIONS
@@ -172,12 +330,15 @@
                 return element.id;
             }
 
-            // Otherwise, generate and assign a unique ID
-            if (!element.hasAttribute('data-pac-element-id')) {
-                element.setAttribute('data-pac-element-id', Utils.uniqid('pac-el-'));
+            // If element has a data-pac-element-id, use it
+            if (element.hasAttribute('data-pac-element-id')) {
+                return element.getAttribute('data-pac-element-id');
             }
 
-            return element.getAttribute('data-pac-element-id');
+            // Otherwise, generate and assign a unique ID
+            const uniqueId = Utils.uniqid('pac-el-');
+            element.setAttribute('data-pac-element-id', uniqueId);
+            return uniqueId;
         },
 
         /**
@@ -306,8 +467,7 @@
          * @returns {boolean} True if focus is within the element's boundaries
          */
         isElementFocusWithin(element) {
-            return element === document.activeElement ||
-                element.contains(document.activeElement);
+            return element === document.activeElement || element.contains(document.activeElement);
         },
 
         /**
@@ -533,11 +693,54 @@
                 x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
                 y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
             };
-        }
+        },
+
+        /**
+         * Builds the reverse key name mapping once for caching.
+         * @returns {Object<number, string>}
+         */
+        buildCachedKeyNames() {
+            // Build reverse mapping from wakaPAC VK constants to names
+            const keyNames = {};
+
+            // Add all exported VK constants
+            for (const key in wakaPAC) {
+                if (key.startsWith('VK_')) {
+                    keyNames[wakaPAC[key]] = key;
+                }
+            }
+
+            return keyNames;
+        },
+
+        /**
+         * Retrieves a string that represents the name of a key.
+         * @param {number} keyCode
+         * @returns {string}
+         */
+        getKeyName(keyCode) {
+            if (cachedKeyNames === null) {
+                cachedKeyNames = this.buildCachedKeyNames();
+            }
+
+            if (Object.prototype.hasOwnProperty.call(cachedKeyNames, keyCode)) {
+                return cachedKeyNames[keyCode];
+            }
+
+            if (keyCode >= 0x30 && keyCode <= 0x39) {
+                return String.fromCharCode(keyCode);
+            }
+
+            if (keyCode >= 0x41 && keyCode <= 0x5A) {
+                return String.fromCharCode(keyCode);
+            }
+
+            return '0x' + keyCode.toString(16).toUpperCase().padStart(2, '0');
+        },
     }
 
     // ========================================================================
-    // ENHANCED REACTIVE PROXY WITH ARRAY-SPECIFIC EVENTS
+    // REACTIVE PROXY
     // ========================================================================
 
     function makeDeepReactiveProxy(value, container) {
@@ -560,196 +763,253 @@
         }
 
         /**
-         * Creates a recursive proxy that intercepts property access and mutations to enable reactivity.
-         * This is the core function that transforms plain objects into reactive proxies that can trigger
-         * DOM updates when their properties change. It handles nested objects, arrays, and maintains
-         * proper path tracking for deep property changes.
-         * @param {Object|Array} obj - The object or array to make reactive
-         * @param {string[]} [currentPath=[]] - Array representing the property path from root (e.g., ['users', '0', 'name'])
-         * @returns {Object|Array} A proxy object that intercepts get/set operations for reactivity
+         * Creates a wrapped array method that handles reactivity
+         * @param {Array} target - The array being proxied
+         * @param {string} methodName - The array method name (push, pop, etc.)
+         * @param {Array} currentPath - The path to this array in the data structure
+         * @returns {Function} Wrapped array method
+         */
+        function createReactiveArrayMethod(target, methodName, currentPath) {
+            return function () {
+                // Store the old array state before modification
+                const oldArray = Array.prototype.slice.call(target);
+
+                // Apply the array method to get the result
+                const result = Array.prototype[methodName].apply(target, arguments);
+
+                // Get the new array state after modification
+                const newArray = Array.prototype.slice.call(target);
+
+                // Re-proxy all items with correct indices after the operation
+                // This ensures all objects have the proper path references
+                newArray.forEach((item, index) => {
+                    if (item && typeof item === 'object' && !item._isReactive) {
+                        const correctPath = currentPath.concat([index]);
+                        newArray[index] = createProxy(item, correctPath);
+                        newArray[index]._isReactive = true;
+                    }
+                });
+
+                // Update the target array with the newly proxied items
+                // This is necessary because forEach works on a copy
+                for (let i = 0; i < newArray.length; i++) {
+                    target[i] = newArray[i];
+                }
+
+                // Dispatch events for the array change
+                dispatchArrayChangeEvents(currentPath, oldArray, target, methodName);
+
+                // Return the result
+                return result;
+            };
+        }
+
+        /**
+         * Dispatches array change and general change events
+         * @param {Array} path - Property path where change occurred
+         * @param {*} oldValue - Previous value
+         * @param {*} newValue - New value
+         * @param {string} method - Method or operation that triggered the change
+         */
+        function dispatchArrayChangeEvents(path, oldValue, newValue, method) {
+            // Dispatch array-specific event
+            container.dispatchEvent(new CustomEvent("pac:array-change", {
+                detail: {
+                    path: path,
+                    oldValue: oldValue,
+                    newValue: newValue,
+                    method: method
+                }
+            }));
+
+            // Also trigger computed property updates
+            container.dispatchEvent(new CustomEvent("pac:change", {
+                detail: {
+                    path: path,
+                    oldValue: oldValue,
+                    newValue: newValue
+                }
+            }));
+        }
+
+        /**
+         * Handles array length property changes
+         * @param {Array} target - The array being modified
+         * @param {number} newLength - The new length value
+         * @param {Array} currentPath - The path to this array
+         * @returns {boolean} Always returns true
+         */
+        function handleArrayLengthSet(target, newLength, currentPath) {
+            const oldLength = target.length;
+
+            // Only trigger events if length actually changes
+            if (oldLength === newLength) {
+                return true;
+            }
+
+            // Store old array state before truncation
+            const oldArray = Array.prototype.slice.call(target);
+
+            // Perform the truncation
+            target.length = newLength;
+
+            // Dispatch events
+            dispatchArrayChangeEvents(
+                currentPath,
+                oldArray,
+                Array.prototype.slice.call(target),
+                'length'
+            );
+
+            return true;
+        }
+
+        /**
+         * Handles scroll property assignments
+         * @param {string} prop - Property name
+         * @param {*} newValue - New scroll value
+         * @param {Array} propertyPath - Full property path
+         */
+        function handleScrollPropertySet(prop, newValue, propertyPath) {
+            // Only handle scroll properties at root level
+            if (propertyPath.length !== 1) {
+                return;
+            }
+
+            if (prop === 'containerScrollX' && container) {
+                container.scrollLeft = newValue;
+            } else if (prop === 'containerScrollY' && container) {
+                container.scrollTop = newValue;
+            } else if (prop === 'browserScrollX') {
+                window.scrollTo(newValue, window.scrollY);
+            } else if (prop === 'browserScrollY') {
+                window.scrollTo(window.scrollX, newValue);
+            }
+        }
+
+        /**
+         * Proxy get trap handler
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being accessed
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {*} The property value (potentially wrapped in a proxy)
+         */
+        function proxyGetHandler(target, prop, currentPath) {
+            const val = target[prop];
+
+            // Handle array methods first
+            if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
+                return createReactiveArrayMethod(target, prop, currentPath);
+            }
+
+            // Check if this property is a getter-only property (computed property)
+            const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+
+            if (descriptor && descriptor.get && !descriptor.set) {
+                // This is a getter-only property (computed), return the value as-is
+                return val;
+            }
+
+            // Don't make functions reactive, just return them as-is
+            if (typeof val === 'function') {
+                return val;
+            }
+
+            // CRITICAL FIX: Lazy wrapping of nested objects and arrays
+            // If the value is an object/array and not already reactive, wrap it in a proxy
+            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+                const propertyPath = currentPath.concat([prop]);
+                const proxiedVal = createProxy(val, propertyPath);
+                proxiedVal._isReactive = true;
+
+                // Update the original object with the proxy
+                target[prop] = proxiedVal;
+
+                // Return proxiedVal
+                return proxiedVal;
+            }
+
+            return val;
+        }
+
+        /**
+         * Proxy set trap handler
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being set
+         * @param {*} newValue - New value being assigned
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {boolean} Always returns true
+         */
+        function proxySetHandler(target, prop, newValue, currentPath) {
+            // Handle array length truncation
+            if (Array.isArray(target) && prop === 'length') {
+                return handleArrayLengthSet(target, newValue, currentPath);
+            }
+
+            // Do nothing when value did not change
+            const oldValue = target[prop];
+            const propertyPath = currentPath.concat([prop]);
+
+            if (oldValue === newValue) {
+                return true;
+            }
+
+            // Special handling for scroll properties
+            handleScrollPropertySet(prop, newValue, propertyPath);
+
+            // Only make reactive and dispatch events for non-underscore properties
+            if (!shouldMakeReactive(prop)) {
+                target[prop] = newValue;
+                return true;
+            }
+
+            // Wrap objects and arrays in proxies when they're assigned
+            if (newValue && typeof newValue === 'object') {
+                target[prop] = createProxy(newValue, propertyPath);
+                target[prop]._isReactive = true;
+            } else {
+                target[prop] = newValue;
+            }
+
+            // Dispatch array-specific event if this is an array assignment
+            if (Array.isArray(newValue)) {
+                container.dispatchEvent(new CustomEvent("pac:array-change", {
+                    detail: {
+                        path: propertyPath,
+                        oldValue: oldValue,
+                        newValue: target[prop],
+                        method: 'assignment'
+                    }
+                }));
+            }
+
+            container.dispatchEvent(new CustomEvent("pac:change", {
+                detail: {
+                    path: propertyPath,
+                    oldValue: oldValue,
+                    newValue: target[prop]
+                }
+            }));
+
+            return true;
+        }
+
+        /**
+         * Creates a reactive proxy for an object or array
+         * @param {Object|Array} obj - The object to make reactive
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {Object|Array} A proxied version of the object
          */
         function createProxy(obj, currentPath) {
             currentPath = currentPath || [];
 
             return new Proxy(obj, {
                 get: function (target, prop) {
-                    const val = target[prop];
-
-                    // Handle array methods first
-                    if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
-                        return function () {
-                            // Store the old array state before modification
-                            const oldArray = Array.prototype.slice.call(target);
-
-                            // Apply the array method to get the result
-                            const result = Array.prototype[prop].apply(target, arguments);
-
-                            // Get the new array state after modification
-                            const newArray = Array.prototype.slice.call(target);
-
-                            // Re-proxy all items with correct indices after the operation
-                            // This ensures all objects have the proper path references
-                            newArray.forEach((item, index) => {
-                                if (item && typeof item === 'object' && !item._isReactive) {
-                                    const correctPath = currentPath.concat([index]);
-                                    newArray[index] = createProxy(item, correctPath);
-                                    newArray[index]._isReactive = true;
-                                }
-                            });
-
-                            // Update the target array with the newly proxied items
-                            // This is necessary because forEach works on a copy
-                            for (let i = 0; i < newArray.length; i++) {
-                                target[i] = newArray[i];
-                            }
-
-                            // Dispatch array-specific event
-                            container.dispatchEvent(new CustomEvent("pac:array-change", {
-                                detail: {
-                                    path: currentPath,
-                                    oldValue: oldArray,
-                                    newValue: target, // Use the updated target, not newArray copy
-                                    method: prop
-                                }
-                            }));
-
-                            // Also trigger computed property updates
-                            container.dispatchEvent(new CustomEvent("pac:change", {
-                                detail: {
-                                    path: currentPath,
-                                    oldValue: oldArray,
-                                    newValue: target // Use the updated target, not newArray copy
-                                }
-                            }));
-
-                            return result;
-                        };
-                    }
-
-                    // Check if this property is a getter-only property (computed property)
-                    const descriptor = Object.getOwnPropertyDescriptor(target, prop);
-
-                    if (descriptor && descriptor.get && !descriptor.set) {
-                        // This is a getter-only property (computed), return the value as-is
-                        return val;
-                    }
-
-                    // Don't make functions reactive, just return them as-is
-                    if (typeof val === 'function') {
-                        return val;
-                    }
-
-                    // CRITICAL FIX: Lazy wrapping of nested objects and arrays
-                    // If the value is an object/array and not already reactive, wrap it in a proxy
-                    if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
-                        const propertyPath = currentPath.concat([prop]);
-                        const proxiedVal = createProxy(val, propertyPath);
-                        proxiedVal._isReactive = true;
-
-                        // Update the original object with the proxy
-                        target[prop] = proxiedVal;
-
-                        return proxiedVal;
-                    }
-
-                    return val;
+                    return proxyGetHandler(target, prop, currentPath);
                 },
 
                 set: function (target, prop, newValue) {
-                    // Handle array length truncation
-                    if (Array.isArray(target) && prop === 'length') {
-                        const oldLength = target.length;
-                        const newLength = newValue;
-
-                        // Only trigger events if length actually changes
-                        if (oldLength === newLength) {
-                            return true;
-                        }
-
-                        // Store old array state before truncation
-                        const oldArray = Array.prototype.slice.call(target);
-
-                        // Perform the truncation
-                        target.length = newLength;
-
-                        // Dispatch array-specific event
-                        container.dispatchEvent(new CustomEvent("pac:array-change", {
-                            detail: {
-                                path: currentPath,
-                                oldValue: oldArray,
-                                newValue: Array.prototype.slice.call(target),
-                                method: 'length'
-                            }
-                        }));
-
-                        // Also trigger computed property updates
-                        container.dispatchEvent(new CustomEvent("pac:change", {
-                            detail: {
-                                path: currentPath,
-                                oldValue: oldArray,
-                                newValue: Array.prototype.slice.call(target)
-                            }
-                        }));
-
-                        return true;
-                    }
-
-                    // Do nothing when value did not change
-                    const oldValue = target[prop];
-                    const propertyPath = currentPath.concat([prop]);
-
-                    if (oldValue === newValue) {
-                        return true;
-                    }
-
-                    // Special handling for scroll properties
-                    if (propertyPath.length === 1) {
-                        if (prop === 'containerScrollX' && container) {
-                            container.scrollLeft = newValue;
-                        } else if (prop === 'containerScrollY' && container) {
-                            container.scrollTop = newValue;
-                        } else if (prop === 'browserScrollX') {
-                            window.scrollTo(newValue, window.scrollY);
-                        } else if (prop === 'browserScrollY') {
-                            window.scrollTo(window.scrollX, newValue);
-                        }
-                    }
-
-                    // Only make reactive and dispatch events for non-underscore properties
-                    if (!shouldMakeReactive(prop)) {
-                        target[prop] = newValue;
-                        return true;
-                    }
-
-                    // Wrap objects and arrays in proxies when they're assigned
-                    if (newValue && typeof newValue === 'object') {
-                        target[prop] = createProxy(newValue, propertyPath);
-                        target[prop]._isReactive = true;
-                    } else {
-                        target[prop] = newValue;
-                    }
-
-                    // Dispatch array-specific event if this is an array assignment
-                    if (Array.isArray(newValue)) {
-                        container.dispatchEvent(new CustomEvent("pac:array-change", {
-                            detail: {
-                                path: propertyPath,
-                                oldValue: oldValue,
-                                newValue: target[prop],
-                                method: 'assignment'
-                            }
-                        }));
-                    }
-
-                    container.dispatchEvent(new CustomEvent("pac:change", {
-                        detail: {
-                            path: propertyPath,
-                            oldValue: oldValue,
-                            newValue: target[prop]
-                        }
-                    }));
-
-                    return true;
+                    return proxySetHandler(target, prop, newValue, currentPath);
                 }
             });
         }
@@ -778,6 +1038,7 @@
                 return;
             }
 
+            // Set initialized flag
             this._initialized = true;
 
             /**
@@ -861,6 +1122,12 @@
                     return; // Unknown button
                 }
 
+                // Track right button specifically for gestures
+                if (event.button === 2) {
+                    MouseGestureRecognizer.startRecording(event);
+                }
+
+                // Dispatch event to container
                 self.dispatchTrackedEvent(messageType, event);
             });
 
@@ -881,6 +1148,12 @@
                     return; // Unknown button
                 }
 
+                // Check for gesture completion on right button
+                if (event.button === 2 && MouseGestureRecognizer.isRecording) {
+                    MouseGestureRecognizer.stopRecording(event);
+                }
+
+                // Dispatch event to container
                 self.dispatchTrackedEvent(messageType, event);
             });
 
@@ -898,6 +1171,16 @@
 
             // Contextmenu event recognises right button
             document.addEventListener('contextmenu', function (event) {
+                // Check if gesture was just dispatched in the preceding mouseup
+                if (MouseGestureRecognizer.gestureJustDispatched) {
+                    // Reset gestureJustDispatched flag
+                    MouseGestureRecognizer.gestureJustDispatched = false;
+
+                    // Always suppress context menu after any gesture motion (recognized or not)
+                    // A drag motion is not a click, regardless of whether pattern matched
+                    event.preventDefault();
+                }
+
                 self.dispatchTrackedEvent(MSG_RCLICK, event);
             });
 
@@ -916,8 +1199,14 @@
              * Set wakaPAC.mouseMoveThrottleFps = 120 for higher precision (gaming, drawing apps)
              * Must be set before first wakaPAC() call
              */
-            self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (ev) => {
-                self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
+            self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (event) => {
+                // Record gesture point if gesture is active
+                if (MouseGestureRecognizer.isRecording) {
+                    MouseGestureRecognizer.recordPoint(event);
+                }
+
+                // Dispatch move event to container
+                self.dispatchTrackedEvent(MSG_MOUSEMOVE, event);
             });
 
             /**
@@ -944,9 +1233,9 @@
             /**
              * Touch move simulates mouse move
              */
-            self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (ev) => {
-                if (ev.touches.length > 0) {
-                    self.dispatchTrackedEvent(MSG_MOUSEMOVE, ev);
+            self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
+                if (event.touches.length > 0) {
+                    self.dispatchTrackedEvent(MSG_MOUSEMOVE, event);
                 }
             });
 
@@ -966,20 +1255,29 @@
              * Tracks when user presses any key down
              */
             document.addEventListener('keydown', function (event) {
+                // Dispatch keydown
                 self.dispatchTrackedEvent(MSG_KEYDOWN, event);
+
+                // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
+                // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
+                if (event.key && event.key.length === 1) {
+                    // Single character key press - send as MSG_CHAR with char code in wParam
+                    self.dispatchTrackedEvent(MSG_CHAR, event);
+                }
             });
 
             /**
              * Handle form element change events
              */
             document.addEventListener('change', function (event) {
-                if (
-                    event.target.tagName === 'SELECT' ||
-                    event.target.type === 'radio' ||
-                    event.target.type === 'checkbox'
-                ) {
+                const target = event.target;
+                const isSelect = target.tagName === 'SELECT';
+                const isRadio = target.type === 'radio';
+                const isCheckbox = target.type === 'checkbox';
+
+                if (isSelect || isRadio || isCheckbox) {
                     self.dispatchTrackedEvent(MSG_CHANGE, event, {
-                        elementType: (event.target.tagName === 'SELECT') ? 'select' : event.target.type
+                        elementType: isSelect ? 'select' : target.type
                     });
                 }
             });
@@ -988,15 +1286,18 @@
              * Handle real-time input events for text fields
              * Tracks continuous user typing in text inputs and textareas.
              * Excludes radio buttons and checkboxes which use 'change' event instead.
+             * This catches paste, cut, drag-drop, autocomplete, and IME input.
              */
             document.addEventListener('input', function (event) {
-                // Handle text inputs (excluding radio/checkbox) and textareas
-                if (
-                    (event.target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(event.target.type)) ||
-                    event.target.tagName === 'TEXTAREA'
-                ) {
-                    self.dispatchTrackedEvent(MSG_CHAR, event, {
-                        elementType: (event.target.tagName === 'TEXTAREA') ? 'textarea' : 'input'
+                const target = event.target;
+                const isTextInput = target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(target.type);
+                const isTextarea = target.tagName === 'TEXTAREA';
+                const isContentEditable = target.isContentEditable === true;
+
+                if (isTextInput || isTextarea || isContentEditable) {
+                    self.dispatchTrackedEvent(MSG_INPUT, event, {
+                        elementType: target.tagName.toLowerCase(),
+                        text: event.data
                     });
                 }
             });
@@ -1308,15 +1609,23 @@
                 case MSG_KEYDOWN:
                 case MSG_KEYUP:
                     return {
-                        wParam: event.keyCode || event.which || 0,  // Virtual key code (fallback to 0 if undefined)
+                        wParam: this.buildKeyboardWParam(event),    // Win32 virtual key code
                         lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
                     };
 
-                // Character and input change events - encode text length
+                // Character input events - Win32 WM_CHAR style
+                // Only fires for keyboard-generated printable characters
                 case MSG_CHAR:
                     return {
-                        wParam: (event.target && event.target.value) ? event.target.value.length : 0,  // Text length
-                        lParam: 0  // Not used for these message types
+                        wParam: event.key.charCodeAt(0),            // UTF-16 character code (Win32 style)
+                        lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
+                    };
+
+                // Text field input events - captures paste, autocomplete, IME, etc.
+                case MSG_INPUT:
+                    return {
+                        wParam: event.data ? event.data.length : 0,
+                        lParam: 0
                     };
 
                 // Select/radio change event
@@ -1439,22 +1748,54 @@
         },
 
         /**
-         * Builds lParam for keyboard messages - simplified for web use
-         * Only includes meaningful data available from JavaScript events
+         * Builds lParam for keyboard messages following Win32 WM_KEYDOWN/WM_KEYUP format
+         * Encodes keyboard state information in various bit fields
+         * Note: Bits 16-23 (scan code) are not available in JavaScript and remain 0
+         * Note: Bit 30 (previous key state) would require manual tracking and is not implemented
          * @param {KeyboardEvent} event - The keyboard event
-         * @returns {number} lParam value with basic keyboard information
+         * @returns {number} lParam value with keyboard state information
          */
         buildKeyboardLParam(event) {
             let lParam = 0;
 
-            // Bits 0-15: Repeat count (1 for single press, higher for held keys)
+            // Bits 0-15: Repeat count (1 for single press, 2+ for held keys)
+            // Win32 increments this for each WM_KEYDOWN while key is held
             const repeatCount = event.repeat ? 2 : 1;
             lParam |= (repeatCount & 0xFFFF);
 
-            // Bit 24: Extended key flag (arrow keys, function keys, etc.)
+            // Bits 16-23: Scan code (hardware scan code)
+            // Not available in JavaScript - would require platform-specific mapping
+            // Left as 0
+
+            // Bit 24: Extended key flag (arrow keys, function keys, numpad, etc.)
             if (this.isExtendedKey(event.code)) {
                 lParam |= (1 << 24);
             }
+
+            // Bit 25: Shift key state (WakaPAC extension)
+            // 1 if Shift is pressed, 0 otherwise
+            if (event.shiftKey) {
+                lParam |= KM_SHIFT;
+            }
+
+            // Bit 26: Ctrl key state (WakaPAC extension)
+            // 1 if Ctrl is pressed, 0 otherwise
+            if (event.ctrlKey) {
+                lParam |= KM_CONTROL;
+            }
+
+            // Bit 27-28: Reserved (not used)
+
+            // Bit 29: Context code (Alt key state)
+            // 1 if Alt is pressed, 0 otherwise
+            if (event.altKey) {
+                lParam |= KM_ALT;
+            }
+
+            // Bit 30: Previous key state
+            // 1 if key was down before this message, 0 if key was up
+            // Would require tracking key states manually - not implemented
+            // Left as 0
 
             // Bit 31: Transition state (0 for keydown, 1 for keyup)
             if (event.type === 'keyup') {
@@ -1462,6 +1803,25 @@
             }
 
             return lParam;
+        },
+
+        /**
+         * Builds wParam for keyboard messages using Win32 Virtual Key codes
+         * More accurate than deprecated keyCode property
+         * @param {KeyboardEvent} event - The keyboard event
+         * @returns {number} Win32-compatible virtual key code
+         */
+        buildKeyboardWParam(event) {
+            // Try to map event.code to Win32 VK code first
+            const vkCode = this.getVirtualKeyCode(event.code);
+
+            if (vkCode !== null) {
+                return vkCode;
+            }
+
+            // Fallback to keyCode for compatibility (deprecated but still works)
+            // Note: keyCode is usually close to VK codes for common keys
+            return event.keyCode || event.which || 0;
         },
 
         /**
@@ -1525,6 +1885,115 @@
             ];
 
             return extendedKeys.includes(code);
+        },
+
+        /**
+         * Maps JavaScript KeyboardEvent.code to Win32 Virtual Key codes
+         * Provides more accurate Win32 compatibility than deprecated keyCode
+         * @param {string} code - The KeyboardEvent.code value
+         * @returns {number|null} The Win32 VK_ code, or null if no mapping exists
+         */
+        getVirtualKeyCode(code) {
+            // Win32 Virtual Key Code mapping
+            // Maps KeyboardEvent.code values to VK constants
+            const VK_MAP = {
+                // Control keys
+                'Backspace': VK_BACK,
+                'Tab': VK_TAB,
+                'Enter': VK_RETURN,
+                'ShiftLeft': VK_SHIFT,
+                'ShiftRight': VK_SHIFT,
+                'ControlLeft': VK_CONTROL,
+                'ControlRight': VK_CONTROL,
+                'AltLeft': VK_MENU,
+                'AltRight': VK_MENU,
+                'Pause': VK_PAUSE,
+                'CapsLock': VK_CAPITAL,
+                'Escape': VK_ESCAPE,
+                'Space': VK_SPACE,
+
+                // Navigation keys
+                'PageUp': VK_PRIOR,
+                'PageDown': VK_NEXT,
+                'End': VK_END,
+                'Home': VK_HOME,
+                'ArrowLeft': VK_LEFT,
+                'ArrowUp': VK_UP,
+                'ArrowRight': VK_RIGHT,
+                'ArrowDown': VK_DOWN,
+                'PrintScreen': VK_SNAPSHOT,
+                'Insert': VK_INSERT,
+                'Delete': VK_DELETE,
+
+                // Number keys (top row)
+                'Digit0': VK_0, 'Digit1': VK_1, 'Digit2': VK_2, 'Digit3': VK_3, 'Digit4': VK_4,
+                'Digit5': VK_5, 'Digit6': VK_6, 'Digit7': VK_7, 'Digit8': VK_8, 'Digit9': VK_9,
+
+                // Letter keys
+                'KeyA': VK_A, 'KeyB': VK_B, 'KeyC': VK_C, 'KeyD': VK_D, 'KeyE': VK_E, 'KeyF': VK_F,
+                'KeyG': VK_G, 'KeyH': VK_H, 'KeyI': VK_I, 'KeyJ': VK_J, 'KeyK': VK_K, 'KeyL': VK_L,
+                'KeyM': VK_M, 'KeyN': VK_N, 'KeyO': VK_O, 'KeyP': VK_P, 'KeyQ': VK_Q, 'KeyR': VK_R,
+                'KeyS': VK_S, 'KeyT': VK_T, 'KeyU': VK_U, 'KeyV': VK_V, 'KeyW': VK_W, 'KeyX': VK_X,
+                'KeyY': VK_Y, 'KeyZ': VK_Z,
+
+                // Windows/Meta keys
+                'MetaLeft': VK_LWIN,
+                'MetaRight': VK_RWIN,
+                'ContextMenu': VK_APPS,
+
+                // Numpad keys
+                'Numpad0': VK_NUMPAD0, 'Numpad1': VK_NUMPAD1, 'Numpad2': VK_NUMPAD2,
+                'Numpad3': VK_NUMPAD3, 'Numpad4': VK_NUMPAD4, 'Numpad5': VK_NUMPAD5,
+                'Numpad6': VK_NUMPAD6, 'Numpad7': VK_NUMPAD7, 'Numpad8': VK_NUMPAD8,
+                'Numpad9': VK_NUMPAD9,
+                'NumpadMultiply': VK_MULTIPLY,
+                'NumpadAdd': VK_ADD,
+                'NumpadSubtract': VK_SUBTRACT,
+                'NumpadDecimal': VK_DECIMAL,
+                'NumpadDivide': VK_DIVIDE,
+
+                // Function keys
+                'F1': VK_F1, 'F2': VK_F2, 'F3': VK_F3, 'F4': VK_F4, 'F5': VK_F5, 'F6': VK_F6,
+                'F7': VK_F7, 'F8': VK_F8, 'F9': VK_F9, 'F10': VK_F10, 'F11': VK_F11, 'F12': VK_F12,
+
+                // Lock keys
+                'NumLock': VK_NUMLOCK,
+                'ScrollLock': VK_SCROLL,
+
+                // Browser keys
+                'BrowserBack': VK_BROWSER_BACK,
+                'BrowserForward': VK_BROWSER_FORWARD,
+                'BrowserRefresh': VK_BROWSER_REFRESH,
+                'BrowserStop': VK_BROWSER_STOP,
+                'BrowserSearch': VK_BROWSER_SEARCH,
+                'BrowserFavorites': VK_BROWSER_FAVORITES,
+                'BrowserHome': VK_BROWSER_HOME,
+
+                // Media keys
+                'AudioVolumeMute': VK_VOLUME_MUTE,
+                'AudioVolumeDown': VK_VOLUME_DOWN,
+                'AudioVolumeUp': VK_VOLUME_UP,
+                'MediaTrackNext': VK_MEDIA_NEXT_TRACK,
+                'MediaTrackPrevious': VK_MEDIA_PREV_TRACK,
+                'MediaStop': VK_MEDIA_STOP,
+                'MediaPlayPause': VK_MEDIA_PLAY_PAUSE,
+
+                // OEM keys (punctuation - US layout)
+                'Semicolon': VK_OEM_1,
+                'Equal': VK_OEM_PLUS,
+                'Comma': VK_OEM_COMMA,
+                'Minus': VK_OEM_MINUS,
+                'Period': VK_OEM_PERIOD,
+                'Slash': VK_OEM_2,
+                'Backquote': VK_OEM_3,
+                'BracketLeft': VK_OEM_4,
+                'Backslash': VK_OEM_5,
+                'BracketRight': VK_OEM_6,
+                'Quote': VK_OEM_7,
+                'IntlBackslash': VK_OEM_102
+            };
+
+            return VK_MAP[code] || null;
         },
 
         /**
@@ -3526,38 +3995,6 @@
     };
 
     /**
-     * Processes queued updates that should trigger on blur for a specific element
-     * @param {HTMLElement} targetElement - The element that just lost focus
-     * @returns {void}
-     */
-    Context.prototype.processBlurQueueUpdates = function(targetElement) {
-        const elementId = Utils.getElementIdentifier(targetElement);
-        const updatesToProcess = [];
-
-        // Find all queued updates for this element that should trigger on blur
-        this.updateQueue.forEach((queueEntry, resolvedPath) => {
-            if (queueEntry.trigger === 'blur' && queueEntry.elementId === elementId) {
-                updatesToProcess.push({
-                    path: resolvedPath,
-                    value: queueEntry.value
-                });
-            }
-        });
-
-        // Apply all blur-triggered updates for this element
-        updatesToProcess.forEach(update => {
-            try {
-                Utils.setNestedProperty(update.path, update.value, this.abstraction);
-                this.updateQueue.delete(update.path);
-            } catch (error) {
-                console.warn('Error applying blur-triggered update for path:', update.path, error);
-                // Remove failed update to prevent infinite retries
-                this.updateQueue.delete(update.path);
-            }
-        });
-    };
-
-    /**
      * Retrieves the update configuration for a specific element, combining element-specific
      * attributes with context-wide configuration defaults.
      * @param {HTMLElement} element - The DOM element to get update configuration for
@@ -3648,7 +4085,8 @@
                 MSG_MCLICK,
                 MSG_RCLICK,
                 MSG_SUBMIT,
-                MSG_CHANGE
+                MSG_CHANGE,
+                MSG_GESTURE
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
@@ -3700,7 +4138,7 @@
                 this.handleDomChange(event);
                 break;
 
-            case MSG_CHAR:
+            case MSG_INPUT:
                 // Character input
                 this.handleDomInput(event);
                 break;
@@ -3995,16 +4433,30 @@
             return;
         }
 
-        // Process any queued "change" mode updates for this element
-        this.processBlurQueueUpdates(targetElement);
+        // Find all queued updates for this element that should trigger on blur
+        const elementId = Utils.getElementIdentifier(targetElement);
+        const updatesToProcess = [];
 
-        // Future: Could execute blur binding if implemented
-        // if (mappingData.bindings.blur) {
-        //     const method = this.abstraction[mappingData.bindings.blur.target];
-        //     if (typeof method === 'function') {
-        //         method.call(this.abstraction, event);
-        //     }
-        // }
+        this.updateQueue.forEach((queueEntry, resolvedPath) => {
+            if (queueEntry.trigger === 'blur' && queueEntry.elementId === elementId) {
+                updatesToProcess.push({
+                    path: resolvedPath,
+                    value: queueEntry.value
+                });
+            }
+        });
+
+        // Apply all blur-triggered updates for this element
+        updatesToProcess.forEach(update => {
+            try {
+                Utils.setNestedProperty(update.path, update.value, this.abstraction);
+                this.updateQueue.delete(update.path);
+            } catch (error) {
+                console.warn('Error applying blur-triggered update for path:', update.path, error);
+                // Remove failed update to prevent infinite retries
+                this.updateQueue.delete(update.path);
+            }
+        });
     };
 
     /**
@@ -5999,6 +6451,471 @@
     };
 
     // =============================================================================
+    // MOUSE GESTURE RECOGNIZER
+    // =============================================================================
+
+    /**
+     * Mouse Gesture Recognition System
+     *
+     * Recognizes mouse gesture patterns drawn while holding the right mouse button.
+     * Similar to Opera browser's mouse gestures - users can draw shapes (L, inverted-L,
+     * lines, etc.) to trigger custom actions.
+     *
+     * Recognition Process:
+     * 1. User presses right mouse button - start recording path
+     * 2. User drags mouse - record points along the path
+     * 3. User releases button - analyze path into directional segments
+     * 4. Match segments against known patterns
+     * 5. Dispatch MSG_GESTURE event to containing PAC component
+     *
+     * Built-in Patterns (minimal set):
+     * - Single directions: right, left, up, down
+     * - L-shapes: L (right-down), inverted-L (down-right)
+     *
+     * Users can register custom patterns via wakaPAC.registerGesture()
+     *
+     * @namespace MouseGestureRecognizer
+     */
+    const MouseGestureRecognizer = {
+        /** @private {boolean} Flag to prevent multiple initializations */
+        _initialized: false,
+
+        /** @private {boolean} Whether we're currently recording a gesture */
+        isRecording: false,
+
+        /** @private {Array<{x: number, y: number, time: number}>} Recorded gesture points */
+        gesturePoints: [],
+
+        /** @private {number} Timestamp when gesture recording started */
+        startTime: 0,
+
+        /** @private {HTMLElement|null} PAC container where gesture was initiated */
+        gestureContainer: null,
+
+        /** @private {boolean} Whether gesture was dispatched to msgProc */
+        gestureJustDispatched: false,
+
+        /** @private {boolean} Whether last gesture was prevented by msgProc */
+        lastGesturePrevented: false,
+
+        // Configuration constants
+
+        /** @constant {number} Minimum distance in pixels between recorded points (filters jitter) */
+        MIN_DISTANCE: 10,
+
+        /** @constant {number} Minimum length in pixels for a directional segment to be recognized */
+        MIN_SEGMENT_LENGTH: 30,
+
+        /** @constant {number} Direction classification threshold (cos 45° ≈ 0.7) */
+        DIRECTION_THRESHOLD: 0.7,
+
+        /** @constant {number} Maximum gesture duration in milliseconds */
+        MAX_GESTURE_TIME: 2000,
+
+        /**
+         * Gesture pattern registry
+         * Maps pattern names to arrays of directions: R (right), L (left), U (up), D (down)
+         * Users can add custom patterns via registerPattern()
+         * @type {Object<string, string[]>}
+         */
+        patterns: {
+            // Single directions
+            'right': ['R'],
+            'left': ['L'],
+            'up': ['U'],
+            'down': ['D'],
+
+            // Common L-shapes
+            'L': ['D', 'R'],
+            'inverted-L': ['D', 'L'],
+        },
+
+        /**
+         * Registers a custom gesture pattern
+         * Allows users to define their own gesture shortcuts
+         * @param {string} name - Name for the pattern (e.g., "back", "forward", "refresh")
+         * @param {string[]} directions - Array of direction codes: 'R', 'L', 'U', 'D'
+         * @throws {Error} If name or directions are invalid
+         */
+        registerPattern(name, directions) {
+            // Validate name
+            if (!name || typeof name !== 'string') {
+                throw new Error('Gesture pattern name must be a non-empty string');
+            }
+
+            // Validate directions array
+            if (!Array.isArray(directions) || directions.length === 0) {
+                throw new Error('Gesture directions must be a non-empty array');
+            }
+
+            // Validate each direction
+            const validDirections = ['R', 'L', 'U', 'D'];
+            for (let i = 0; i < directions.length; i++) {
+                if (!validDirections.includes(directions[i])) {
+                    throw new Error(`Invalid direction "${directions[i]}". Must be one of: R, L, U, D`);
+                }
+            }
+
+            // Warn if overriding existing pattern
+            if (this.patterns[name]) {
+                console.warn(`WakaPAC: Overriding existing gesture pattern '${name}'`);
+            }
+
+            // Register the pattern
+            this.patterns[name] = directions;
+        },
+
+        /**
+         * Removes a registered gesture pattern
+         * @param {string} name - Name of the pattern to remove
+         * @returns {boolean} True if pattern was removed, false if not found
+         */
+        unregisterPattern(name) {
+            if (this.patterns[name]) {
+                delete this.patterns[name];
+                return true;
+            } else {
+                return false;
+            }
+        },
+
+        /**
+         * Begins recording a new gesture
+         * Called when right mouse button is pressed
+         * @param {MouseEvent} event - The mousedown event
+         * @returns {void}
+         */
+        startRecording(event) {
+            // Find which PAC container this gesture is happening in
+            this.gestureContainer = this.findContainer(event.target);
+
+            // Enable recording mode
+            this.isRecording = true;
+
+            // Initialize points array with starting position
+            this.gesturePoints = [{
+                x: event.clientX,
+                y: event.clientY,
+                time: Date.now()
+            }];
+
+            // Record when gesture started for duration calculation
+            this.startTime = Date.now();
+        },
+
+        /**
+         * Records a point along the gesture path
+         * Only records if moved far enough from last point to filter out jitter
+         * @param {MouseEvent} event - The mousemove event
+         * @returns {void}
+         */
+        recordPoint(event) {
+            // Get the most recent recorded point
+            const lastPoint = this.gesturePoints[this.gesturePoints.length - 1];
+
+            // Calculate distance from last point
+            const dx = event.clientX - lastPoint.x;
+            const dy = event.clientY - lastPoint.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Only record if moved enough distance to avoid recording jitter
+            // This creates a cleaner path with fewer redundant points
+            if (distance >= this.MIN_DISTANCE) {
+                this.gesturePoints.push({
+                    x: event.clientX,
+                    y: event.clientY,
+                    time: Date.now()
+                });
+            }
+        },
+
+        /**
+         * Stops recording and analyzes the gesture
+         * Called when right mouse button is released
+         * @param {MouseEvent} event - The mouseup event
+         * @returns {void}
+         */
+        stopRecording(event) {
+            // Disable recording mode
+            this.isRecording = false;
+
+            // Calculate how long the gesture took
+            const duration = Date.now() - this.startTime;
+
+            // Validate gesture:
+            // - Need at least 2 points to form a direction
+            // - Duration must be reasonable (not too slow)
+            if (this.gesturePoints.length < 2 || duration > this.MAX_GESTURE_TIME) {
+                this.gesturePoints = [];
+                return;
+            }
+
+            // Convert raw point path into directional segments (R, L, U, D)
+            const directions = this.extractDirections();
+
+            // If no valid directions detected, abort
+            if (directions.length === 0) {
+                this.gesturePoints = [];
+                return;
+            }
+
+            // Try to match the direction sequence against known patterns
+            const pattern = this.matchPattern(directions);
+
+            // Mark that a gesture was attempted (even if unrecognized)
+            // This tells contextmenu handler to suppress the menu
+            this.gestureJustDispatched = true;
+
+            // Dispatch gesture event if we have a pattern and a container
+            if (pattern && this.gestureContainer) {
+                this.dispatchGesture(event, pattern, directions);
+            }
+
+            // Clean up for next gesture
+            this.gesturePoints = [];
+            this.gestureContainer = null;
+        },
+
+        /**
+         * Extracts directional segments from raw gesture points
+         * Analyzes direction between consecutive points, then groups into segments
+         * @returns {string[]} Array of direction codes: 'R', 'L', 'U', 'D'
+         */
+        extractDirections() {
+            if (this.gesturePoints.length < 2) {
+                return [];
+            }
+
+            const segments = [];
+            const minLengthSq = this.MIN_SEGMENT_LENGTH * this.MIN_SEGMENT_LENGTH; // Avoid repeated sqrt
+
+            let segmentStart = this.gesturePoints[0];
+            let segmentEnd = this.gesturePoints[0];
+            let currentDir = null;
+
+            for (let i = 1; i < this.gesturePoints.length; i++) {
+                const curr = this.gesturePoints[i];
+                const dx = curr.x - this.gesturePoints[i - 1].x;
+                const dy = curr.y - this.gesturePoints[i - 1].y;
+                const direction = this.getDirection(dx, dy);
+
+                if (!direction) continue;
+
+                if (direction === currentDir) {
+                    segmentEnd = curr;
+                } else {
+                    // Save previous segment if long enough
+                    if (currentDir !== null) {
+                        const sdx = segmentEnd.x - segmentStart.x;
+                        const sdy = segmentEnd.y - segmentStart.y;
+
+                        if (sdx * sdx + sdy * sdy >= minLengthSq) {
+                            segments.push(currentDir);
+                        }
+                    }
+
+                    // Start new segment
+                    currentDir = direction;
+                    segmentStart = segmentEnd;
+                    segmentEnd = curr;
+                }
+            }
+
+            // Handle final segment
+            if (currentDir !== null) {
+                const dx = segmentEnd.x - segmentStart.x;
+                const dy = segmentEnd.y - segmentStart.y;
+
+                if (dx * dx + dy * dy >= minLengthSq) {
+                    segments.push(currentDir);
+                }
+            }
+
+            return segments;
+        },
+
+        /**
+         * Classifies a movement vector into a cardinal direction
+         * Uses squared magnitudes to avoid expensive sqrt/normalization
+         * @param {number} dx - Horizontal movement (positive = right)
+         * @param {number} dy - Vertical movement (positive = down, screen coordinates)
+         * @returns {string|null} Direction code ('R', 'L', 'U', 'D') or null if invalid
+         */
+        getDirection(dx, dy) {
+            // Zero-length movement has no direction
+            if (dx === 0 && dy === 0) {
+                return null;
+            }
+
+            // Square both components to work with magnitudes without expensive sqrt
+            // Comparing x² vs y² is equivalent to comparing |x| vs |y|
+            const dxSq = dx * dx;
+            const dySq = dy * dy;
+
+            // For threshold 0.7: we need the dominant axis to satisfy:
+            // dominant² > (1 - 0.7²) / 0.7² * other²
+            // Which simplifies to: dominant² > 1.0408 * other²
+            // Precompute: (1 - 0.49) / 0.49 = 0.51 / 0.49 ≈ 1.0408
+            const thresholdSq = this.DIRECTION_THRESHOLD * this.DIRECTION_THRESHOLD;
+            const minRatio = (1 - thresholdSq) / thresholdSq;
+
+            // Check for pure cardinal directions (one axis strongly dominant)
+            if (dxSq > minRatio * dySq) {
+                return dx > 0 ? 'R' : 'L';
+            }
+
+            if (dySq > minRatio * dxSq) {
+                return dy > 0 ? 'D' : 'U';
+            }
+
+            // Diagonal movement - pick dominant axis
+            if (dx > 0) {
+                return dxSq > dySq ? 'R' : (dy > 0 ? 'D' : 'U');
+            } else {
+                return dxSq > dySq ? 'L' : (dy > 0 ? 'D' : 'U');
+            }
+        },
+
+        /**
+         * Matches a direction sequence against known patterns
+         * Tries to find a named pattern, otherwise returns raw direction string
+         * @param {string[]} directions - Array of direction codes from extractDirections()
+         * @returns {string|null} Pattern name (e.g., "L", "inverted-L") or null if none found
+         */
+        matchPattern(directions) {
+            // Implode directions into one string
+            const directionString = directions.join('');
+
+            // Search through all known patterns
+            // Using for...in avoids creating entry arrays
+            for (const patternName in this.patterns) {
+                if (this.patterns[patternName].join('') === directionString) {
+                    return patternName;
+                }
+            }
+
+            // No match found - return null to indicate unrecognized gesture
+            return null;
+        },
+
+        /**
+         * Finds the containing PAC component for an element
+         * Walks up the DOM tree to find a registered PAC container
+         * @param {HTMLElement} element - Starting element (typically event.target)
+         * @returns {HTMLElement|null} The PAC container element or null if not found
+         */
+        findContainer(element) {
+            // Ensure we start with an actual Element node
+            if (!element || element.nodeType !== 1) {
+                element = element?.parentElement;
+            }
+
+            while (element && element !== document.body) {
+                const pacId = element.getAttribute('data-pac-id');
+
+                if (pacId) {
+                    const context = window.PACRegistry.get(pacId);
+
+                    if (context) {
+                        return context.container;
+                    }
+                }
+
+                element = element.parentElement;
+            }
+
+            return null;
+        },
+
+        /**
+         * Dispatches a gesture event to the PAC container
+         * Creates a pac:event with MSG_GESTURE and all gesture data
+         * @param {MouseEvent} originalEvent - The original mouseup event
+         * @param {string} pattern - Matched pattern name (e.g., "L", "inverted-L")
+         * @param {string[]} directions - Array of direction codes used in matching
+         * @returns {void}
+         */
+        dispatchGesture(originalEvent, pattern, directions) {
+            const points = this.gesturePoints;
+            const pointCount = points.length;
+            const now = Date.now();
+
+            // Calculate gesture bounds in viewport coordinates
+            // Single-pass min/max to avoid multiple array iterations
+            let minX = points[0].x, maxX = minX;
+            let minY = points[0].y, maxY = minY;
+
+            for (let i = 1; i < pointCount; i++) {
+                const { x, y } = points[i];
+                minX = Math.min(minX, x);
+                maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
+            }
+
+            // Convert all coordinates from viewport-relative to container-relative
+            // This makes gesture coordinates match mouse event coordinates in msgProc
+            const rect = this.gestureContainer.getBoundingClientRect();
+            const toRelativeX = x => x - rect.left;
+            const toRelativeY = y => y - rect.top;
+
+            // Calculate gesture center for lParam (Win32 standard packing: Y in high word, X in low word)
+            // Clamp to 16-bit range (0-65535) to prevent overflow in bitwise operations
+            const centerX = Math.max(0, Math.min(65535, Math.round((minX + maxX) / 2 - rect.left)));
+            const centerY = Math.max(0, Math.min(65535, Math.round((minY + maxY) / 2 - rect.top)));
+
+            // Convert gesture start/end points to container-relative
+            const startX = toRelativeX(points[0].x);
+            const startY = toRelativeY(points[0].y);
+            const endX = toRelativeX(points[pointCount - 1].x);
+            const endY = toRelativeY(points[pointCount - 1].y);
+
+            // Convert bounds to container-relative (DOMRect-like format)
+            const left = toRelativeX(minX);
+            const top = toRelativeY(minY);
+            const width = maxX - minX;  // Width/height are same in both coordinate systems
+            const height = maxY - minY;
+
+            // Create custom event that mimics Win32 message structure
+            const customEvent = new CustomEvent('pac:event', {
+                bubbles: false,      // Don't propagate to parent containers
+                cancelable: true,    // Allow msgProc to preventDefault()
+                detail: {}
+            });
+
+            // Standard Win32-style message properties
+            customEvent.message = MSG_GESTURE;                  // Message type identifier
+            customEvent.wParam = 0;                             // Not used for gestures
+            customEvent.lParam = (centerY << 16) | centerX;     // Packed center coordinates
+            customEvent.timestamp = now;                         // Event timestamp
+            customEvent.originalEvent = originalEvent;           // Access to native mouseup event
+
+            // Gesture-specific properties
+            customEvent.pattern = pattern;                       // Matched pattern name or raw directions
+            customEvent.directions = directions;                 // Array of direction codes: ['R', 'D', 'L']
+            customEvent.pointCount = pointCount;                 // Number of recorded points
+            customEvent.gestureStartX = startX;                  // Where gesture started (container-relative)
+            customEvent.gestureStartY = startY;
+            customEvent.gestureEndX = endX;                      // Where gesture ended (container-relative)
+            customEvent.gestureEndY = endY;
+            customEvent.gestureDuration = now - this.startTime;  // Milliseconds from mousedown to mouseup
+            customEvent.gestureBounds = {                        // Bounding box (DOMRect format)
+                x: left,                                         // Alias for left
+                y: top,                                          // Alias for top
+                left,
+                top,
+                right: left + width,
+                bottom: top + height,
+                width,
+                height
+            };
+
+            // Dispatch to the container where gesture was initiated
+            this.gestureContainer.dispatchEvent(customEvent);
+        }
+    };
+
+    // =============================================================================
     // COMPONENT REGISTRY
     // =============================================================================
 
@@ -6424,6 +7341,32 @@
         return Utils.MAKEPOINTS(lParam);
     };
 
+    /**
+     * Retrieves a string that represents the name of a key.
+     * @param keyCode
+     * @returns {string|null}
+     */
+    wakaPAC.getKeyName = function(keyCode) {
+        return Utils.getKeyName(keyCode);
+    };
+
+    /**
+     * Registers a new gesture
+     * @param name
+     * @param directions
+     */
+    wakaPAC.registerGesture = function(name, directions) {
+        return MouseGestureRecognizer.registerPattern(name, directions);
+    };
+
+    /**
+     * Removes a gesture's registration
+     * @param name
+     */
+    wakaPAC.unregisterGesture = function(name) {
+        return MouseGestureRecognizer.unregisterPattern(name);
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
@@ -6450,20 +7393,163 @@
     wakaPAC.MSG_CHAR = MSG_CHAR;
     wakaPAC.MSG_CHANGE = MSG_CHANGE;
     wakaPAC.MSG_SUBMIT = MSG_SUBMIT;
+    wakaPAC.MSG_INPUT = MSG_INPUT;
     wakaPAC.MSG_FOCUS = MSG_FOCUS;
     wakaPAC.MSG_BLUR = MSG_BLUR;
     wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
     wakaPAC.MSG_KEYUP = MSG_KEYUP;
     wakaPAC.MSG_USER = MSG_USER;
     wakaPAC.MSG_TIMER = MSG_TIMER;
+    wakaPAC.MSG_GESTURE = MSG_GESTURE;
 
-    // Attach modifier key constants to wakaPAC
+    // Attach mouse event modifier key constants to wakaPAC (for use with mouse wParam)
     wakaPAC.MK_LBUTTON = MK_LBUTTON;
     wakaPAC.MK_RBUTTON = MK_RBUTTON;
     wakaPAC.MK_MBUTTON = MK_MBUTTON;
     wakaPAC.MK_SHIFT = MK_SHIFT;
     wakaPAC.MK_CONTROL = MK_CONTROL;
     wakaPAC.MK_ALT = MK_ALT;
+
+    // Attach keyboard event modifier key constants to wakaPAC (for use with keyboard lParam)
+    wakaPAC.KM_SHIFT = KM_SHIFT;
+    wakaPAC.KM_CONTROL = KM_CONTROL;
+    wakaPAC.KM_ALT = KM_ALT;
+
+    // Attach Virtual Key (VK) code constants to wakaPAC
+    // Control keys
+    wakaPAC.VK_BACK = VK_BACK;
+    wakaPAC.VK_TAB = VK_TAB;
+    wakaPAC.VK_RETURN = VK_RETURN;
+    wakaPAC.VK_SHIFT = VK_SHIFT;
+    wakaPAC.VK_CONTROL = VK_CONTROL;
+    wakaPAC.VK_MENU = VK_MENU;
+    wakaPAC.VK_PAUSE = VK_PAUSE;
+    wakaPAC.VK_CAPITAL = VK_CAPITAL;
+    wakaPAC.VK_ESCAPE = VK_ESCAPE;
+    wakaPAC.VK_SPACE = VK_SPACE;
+    wakaPAC.VK_PRIOR = VK_PRIOR;
+    wakaPAC.VK_NEXT = VK_NEXT;
+    wakaPAC.VK_END = VK_END;
+    wakaPAC.VK_HOME = VK_HOME;
+    wakaPAC.VK_LEFT = VK_LEFT;
+    wakaPAC.VK_UP = VK_UP;
+    wakaPAC.VK_RIGHT = VK_RIGHT;
+    wakaPAC.VK_DOWN = VK_DOWN;
+    wakaPAC.VK_SNAPSHOT = VK_SNAPSHOT;
+    wakaPAC.VK_INSERT = VK_INSERT;
+    wakaPAC.VK_DELETE = VK_DELETE;
+
+    // Number keys (0-9)
+    wakaPAC.VK_0 = VK_0;
+    wakaPAC.VK_1 = VK_1;
+    wakaPAC.VK_2 = VK_2;
+    wakaPAC.VK_3 = VK_3;
+    wakaPAC.VK_4 = VK_4;
+    wakaPAC.VK_5 = VK_5;
+    wakaPAC.VK_6 = VK_6;
+    wakaPAC.VK_7 = VK_7;
+    wakaPAC.VK_8 = VK_8;
+    wakaPAC.VK_9 = VK_9;
+
+    // Letter keys (A-Z)
+    wakaPAC.VK_A = VK_A;
+    wakaPAC.VK_B = VK_B;
+    wakaPAC.VK_C = VK_C;
+    wakaPAC.VK_D = VK_D;
+    wakaPAC.VK_E = VK_E;
+    wakaPAC.VK_F = VK_F;
+    wakaPAC.VK_G = VK_G;
+    wakaPAC.VK_H = VK_H;
+    wakaPAC.VK_I = VK_I;
+    wakaPAC.VK_J = VK_J;
+    wakaPAC.VK_K = VK_K;
+    wakaPAC.VK_L = VK_L;
+    wakaPAC.VK_M = VK_M;
+    wakaPAC.VK_N = VK_N;
+    wakaPAC.VK_O = VK_O;
+    wakaPAC.VK_P = VK_P;
+    wakaPAC.VK_Q = VK_Q;
+    wakaPAC.VK_R = VK_R;
+    wakaPAC.VK_S = VK_S;
+    wakaPAC.VK_T = VK_T;
+    wakaPAC.VK_U = VK_U;
+    wakaPAC.VK_V = VK_V;
+    wakaPAC.VK_W = VK_W;
+    wakaPAC.VK_X = VK_X;
+    wakaPAC.VK_Y = VK_Y;
+    wakaPAC.VK_Z = VK_Z;
+
+    // Windows keys
+    wakaPAC.VK_LWIN = VK_LWIN;
+    wakaPAC.VK_RWIN = VK_RWIN;
+    wakaPAC.VK_APPS = VK_APPS;
+
+    // Numpad keys
+    wakaPAC.VK_NUMPAD0 = VK_NUMPAD0;
+    wakaPAC.VK_NUMPAD1 = VK_NUMPAD1;
+    wakaPAC.VK_NUMPAD2 = VK_NUMPAD2;
+    wakaPAC.VK_NUMPAD3 = VK_NUMPAD3;
+    wakaPAC.VK_NUMPAD4 = VK_NUMPAD4;
+    wakaPAC.VK_NUMPAD5 = VK_NUMPAD5;
+    wakaPAC.VK_NUMPAD6 = VK_NUMPAD6;
+    wakaPAC.VK_NUMPAD7 = VK_NUMPAD7;
+    wakaPAC.VK_NUMPAD8 = VK_NUMPAD8;
+    wakaPAC.VK_NUMPAD9 = VK_NUMPAD9;
+    wakaPAC.VK_MULTIPLY = VK_MULTIPLY;
+    wakaPAC.VK_ADD = VK_ADD;
+    wakaPAC.VK_SUBTRACT = VK_SUBTRACT;
+    wakaPAC.VK_DECIMAL = VK_DECIMAL;
+    wakaPAC.VK_DIVIDE = VK_DIVIDE;
+
+    // Function keys
+    wakaPAC.VK_F1 = VK_F1;
+    wakaPAC.VK_F2 = VK_F2;
+    wakaPAC.VK_F3 = VK_F3;
+    wakaPAC.VK_F4 = VK_F4;
+    wakaPAC.VK_F5 = VK_F5;
+    wakaPAC.VK_F6 = VK_F6;
+    wakaPAC.VK_F7 = VK_F7;
+    wakaPAC.VK_F8 = VK_F8;
+    wakaPAC.VK_F9 = VK_F9;
+    wakaPAC.VK_F10 = VK_F10;
+    wakaPAC.VK_F11 = VK_F11;
+    wakaPAC.VK_F12 = VK_F12;
+
+    // Lock keys
+    wakaPAC.VK_NUMLOCK = VK_NUMLOCK;
+    wakaPAC.VK_SCROLL = VK_SCROLL;
+
+    // Browser keys
+    wakaPAC.VK_BROWSER_BACK = VK_BROWSER_BACK;
+    wakaPAC.VK_BROWSER_FORWARD = VK_BROWSER_FORWARD;
+    wakaPAC.VK_BROWSER_REFRESH = VK_BROWSER_REFRESH;
+    wakaPAC.VK_BROWSER_STOP = VK_BROWSER_STOP;
+    wakaPAC.VK_BROWSER_SEARCH = VK_BROWSER_SEARCH;
+    wakaPAC.VK_BROWSER_FAVORITES = VK_BROWSER_FAVORITES;
+    wakaPAC.VK_BROWSER_HOME = VK_BROWSER_HOME;
+
+    // Media keys
+    wakaPAC.VK_VOLUME_MUTE = VK_VOLUME_MUTE;
+    wakaPAC.VK_VOLUME_DOWN = VK_VOLUME_DOWN;
+    wakaPAC.VK_VOLUME_UP = VK_VOLUME_UP;
+    wakaPAC.VK_MEDIA_NEXT_TRACK = VK_MEDIA_NEXT_TRACK;
+    wakaPAC.VK_MEDIA_PREV_TRACK = VK_MEDIA_PREV_TRACK;
+    wakaPAC.VK_MEDIA_STOP = VK_MEDIA_STOP;
+    wakaPAC.VK_MEDIA_PLAY_PAUSE = VK_MEDIA_PLAY_PAUSE;
+
+    // OEM keys (punctuation - US layout)
+    wakaPAC.VK_OEM_1 = VK_OEM_1;            // Semicolon
+    wakaPAC.VK_OEM_PLUS = VK_OEM_PLUS;      // Equal
+    wakaPAC.VK_OEM_COMMA = VK_OEM_COMMA;    // Comma
+    wakaPAC.VK_OEM_MINUS = VK_OEM_MINUS;    // Minus
+    wakaPAC.VK_OEM_PERIOD = VK_OEM_PERIOD;  // Period
+    wakaPAC.VK_OEM_2 = VK_OEM_2;            // Slash
+    wakaPAC.VK_OEM_3 = VK_OEM_3;            // Backquote
+    wakaPAC.VK_OEM_4 = VK_OEM_4;            // BracketLeft
+    wakaPAC.VK_OEM_5 = VK_OEM_5;            // Backslash
+    wakaPAC.VK_OEM_6 = VK_OEM_6;            // BracketRight
+    wakaPAC.VK_OEM_7 = VK_OEM_7;            // Quote
+    wakaPAC.VK_OEM_102 = VK_OEM_102;        // IntlBackslash
 
     /**
      * Global mousemove throttling configuration
