@@ -224,16 +224,16 @@
     const VK_BROWSER_HOME = 0xAC;
 
     // Media keys
-    const VK_VOLUME_MUTE = 0xAD;
-    const VK_VOLUME_DOWN = 0xAE;
-    const VK_VOLUME_UP = 0xAF;
+    const VK_VOLUME_MUTE = 0xB5;
+    const VK_VOLUME_DOWN = 0xB6;
+    const VK_VOLUME_UP = 0xB7;
     const VK_MEDIA_NEXT_TRACK = 0xB0;
     const VK_MEDIA_PREV_TRACK = 0xB1;
     const VK_MEDIA_STOP = 0xB2;
     const VK_MEDIA_PLAY_PAUSE = 0xB3;
 
     // OEM keys (punctuation - US layout)
-    const VK_OEM_1 = 0xBA;          // Semicolon (;:)
+    const VK_OEM_1 = 0xBA;          // Semicolon (;)
     const VK_OEM_PLUS = 0xBB;       // Equal (=+)
     const VK_OEM_COMMA = 0xBC;      // Comma (,<)
     const VK_OEM_MINUS = 0xBD;      // Minus (-_)
