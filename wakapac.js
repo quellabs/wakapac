@@ -1020,9 +1020,6 @@
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
-        /** @private {boolean} Currently in composition mode */
-        _inComposition: false,
-
         initialize() {
             // Store reference to this object for use in closures
             const self = this;
@@ -1254,7 +1251,7 @@
 
                 // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
                 // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
-                if (!this._inComposition && event.key && event.key.length === 1) {
+                if (event.key && event.key.length === 1) {
                     // Single character key press - send as MSG_CHAR with char code in wParam
                     self.dispatchTrackedEvent(MSG_CHAR, event);
                 }
@@ -1276,24 +1273,14 @@
                 }
             });
 
-            // Fired when the user begins an IME composition sequence (pre-edit text stage).
-            // During composition, keyboard events should not be treated as committed characters.
-            document.addEventListener('compositionstart', () => {
-                this._inComposition = true;
-            });
-
             // Fired when the IME composition sequence ends and the text is finalized.
             // event.data contains the committed text produced by the IME (may contain multiple code points).
             document.addEventListener('compositionend', (event) => {
-                // Composition is finished; subsequent key events may produce normal MSG_CHAR again.
-                this._inComposition = false;
-
-                // Final committed text from IME; empty string if nothing committed.
-                const text = event.data || '';
-
-                // Emit MSG_INPUT to indicate committed text inserted into an editable control.
-                // This path handles IME output specifically (not raw key events).
-                self.dispatchTrackedEvent(MSG_INPUT, event, { text });
+                if (event.data) {
+                    // Emit MSG_INPUT to indicate committed text inserted into an editable control.
+                    // This path handles IME output specifically (not raw key events).
+                    self.dispatchTrackedEvent(MSG_INPUT, event, { text: event.data });
+                }
             });
 
             /**
@@ -1307,7 +1294,7 @@
                 const isTextInput = target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(target.type);
                 const isTextarea = target.tagName === 'TEXTAREA';
 
-                if (!this._inComposition && (isTextInput || isTextarea)) {
+                if (isTextInput || isTextarea) {
                     self.dispatchTrackedEvent(MSG_INPUT, event, {
                         elementType: target.tagName.toLowerCase(),
                         text: event.data || ''
