@@ -106,6 +106,146 @@
     const MK_CONTROL = 0x0010;      // Ctrl key held down
     const MK_ALT = 0x0020;          // Alt key held down
 
+    /**
+     * Win32 Virtual Key codes
+     * Hex values match Win32 API virtual key code identifiers
+     * Reference: https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+     */
+    // Control keys
+    const VK_BACK = 0x08;           // Backspace
+    const VK_TAB = 0x09;            // Tab
+    const VK_RETURN = 0x0D;         // Enter
+    const VK_SHIFT = 0x10;          // Shift
+    const VK_CONTROL = 0x11;        // Ctrl
+    const VK_MENU = 0x12;           // Alt
+    const VK_PAUSE = 0x13;          // Pause
+    const VK_CAPITAL = 0x14;        // CapsLock
+    const VK_ESCAPE = 0x1B;         // Escape
+    const VK_SPACE = 0x20;          // Space
+    const VK_PRIOR = 0x21;          // Page Up
+    const VK_NEXT = 0x22;           // Page Down
+    const VK_END = 0x23;            // End
+    const VK_HOME = 0x24;           // Home
+    const VK_LEFT = 0x25;           // Left Arrow
+    const VK_UP = 0x26;             // Up Arrow
+    const VK_RIGHT = 0x27;          // Right Arrow
+    const VK_DOWN = 0x28;           // Down Arrow
+    const VK_SNAPSHOT = 0x2C;       // PrintScreen
+    const VK_INSERT = 0x2D;         // Insert
+    const VK_DELETE = 0x2E;         // Delete
+
+    // Number keys (0-9)
+    const VK_0 = 0x30;
+    const VK_1 = 0x31;
+    const VK_2 = 0x32;
+    const VK_3 = 0x33;
+    const VK_4 = 0x34;
+    const VK_5 = 0x35;
+    const VK_6 = 0x36;
+    const VK_7 = 0x37;
+    const VK_8 = 0x38;
+    const VK_9 = 0x39;
+
+    // Letter keys (A-Z)
+    const VK_A = 0x41;
+    const VK_B = 0x42;
+    const VK_C = 0x43;
+    const VK_D = 0x44;
+    const VK_E = 0x45;
+    const VK_F = 0x46;
+    const VK_G = 0x47;
+    const VK_H = 0x48;
+    const VK_I = 0x49;
+    const VK_J = 0x4A;
+    const VK_K = 0x4B;
+    const VK_L = 0x4C;
+    const VK_M = 0x4D;
+    const VK_N = 0x4E;
+    const VK_O = 0x4F;
+    const VK_P = 0x50;
+    const VK_Q = 0x51;
+    const VK_R = 0x52;
+    const VK_S = 0x53;
+    const VK_T = 0x54;
+    const VK_U = 0x55;
+    const VK_V = 0x56;
+    const VK_W = 0x57;
+    const VK_X = 0x58;
+    const VK_Y = 0x59;
+    const VK_Z = 0x5A;
+
+    // Windows keys
+    const VK_LWIN = 0x5B;           // Left Windows key
+    const VK_RWIN = 0x5C;           // Right Windows key
+    const VK_APPS = 0x5D;           // Context Menu key
+
+    // Numpad keys
+    const VK_NUMPAD0 = 0x60;
+    const VK_NUMPAD1 = 0x61;
+    const VK_NUMPAD2 = 0x62;
+    const VK_NUMPAD3 = 0x63;
+    const VK_NUMPAD4 = 0x64;
+    const VK_NUMPAD5 = 0x65;
+    const VK_NUMPAD6 = 0x66;
+    const VK_NUMPAD7 = 0x67;
+    const VK_NUMPAD8 = 0x68;
+    const VK_NUMPAD9 = 0x69;
+    const VK_MULTIPLY = 0x6A;       // Numpad *
+    const VK_ADD = 0x6B;            // Numpad +
+    const VK_SUBTRACT = 0x6D;       // Numpad -
+    const VK_DECIMAL = 0x6E;        // Numpad .
+    const VK_DIVIDE = 0x6F;         // Numpad /
+
+    // Function keys
+    const VK_F1 = 0x70;
+    const VK_F2 = 0x71;
+    const VK_F3 = 0x72;
+    const VK_F4 = 0x73;
+    const VK_F5 = 0x74;
+    const VK_F6 = 0x75;
+    const VK_F7 = 0x76;
+    const VK_F8 = 0x77;
+    const VK_F9 = 0x78;
+    const VK_F10 = 0x79;
+    const VK_F11 = 0x7A;
+    const VK_F12 = 0x7B;
+
+    // Lock keys
+    const VK_NUMLOCK = 0x90;        // NumLock
+    const VK_SCROLL = 0x91;         // ScrollLock
+
+    // Browser keys
+    const VK_BROWSER_BACK = 0xA6;
+    const VK_BROWSER_FORWARD = 0xA7;
+    const VK_BROWSER_REFRESH = 0xA8;
+    const VK_BROWSER_STOP = 0xA9;
+    const VK_BROWSER_SEARCH = 0xAA;
+    const VK_BROWSER_FAVORITES = 0xAB;
+    const VK_BROWSER_HOME = 0xAC;
+
+    // Media keys
+    const VK_VOLUME_MUTE = 0xAD;
+    const VK_VOLUME_DOWN = 0xAE;
+    const VK_VOLUME_UP = 0xAF;
+    const VK_MEDIA_NEXT_TRACK = 0xB0;
+    const VK_MEDIA_PREV_TRACK = 0xB1;
+    const VK_MEDIA_STOP = 0xB2;
+    const VK_MEDIA_PLAY_PAUSE = 0xB3;
+
+    // OEM keys (punctuation - US layout)
+    const VK_OEM_1 = 0xBA;          // Semicolon (;:)
+    const VK_OEM_PLUS = 0xBB;       // Equal (=+)
+    const VK_OEM_COMMA = 0xBC;      // Comma (,<)
+    const VK_OEM_MINUS = 0xBD;      // Minus (-_)
+    const VK_OEM_PERIOD = 0xBE;     // Period (.>)
+    const VK_OEM_2 = 0xBF;          // Slash (/?)
+    const VK_OEM_3 = 0xC0;          // Backquote (`~)
+    const VK_OEM_4 = 0xDB;          // Left bracket ([{)
+    const VK_OEM_5 = 0xDC;          // Backslash (\|)
+    const VK_OEM_6 = 0xDD;          // Right bracket (]})
+    const VK_OEM_7 = 0xDE;          // Quote ('")
+    const VK_OEM_102 = 0xE2;        // Non-US backslash
+
     // =============================================================================
     // UTILITY FUNCTIONS
     // =============================================================================
@@ -1661,106 +1801,102 @@
          */
         getVirtualKeyCode(code) {
             // Win32 Virtual Key Code mapping
-            // Reference: https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+            // Maps KeyboardEvent.code values to VK constants
             const VK_MAP = {
-                // Mouse buttons (for completeness, though not keyboard)
-                'MouseLeft': 0x01,      // VK_LBUTTON
-                'MouseRight': 0x02,     // VK_RBUTTON
-                'MouseMiddle': 0x04,    // VK_MBUTTON
-
                 // Control keys
-                'Backspace': 0x08,      // VK_BACK
-                'Tab': 0x09,            // VK_TAB
-                'Enter': 0x0D,          // VK_RETURN
-                'ShiftLeft': 0x10,      // VK_SHIFT
-                'ShiftRight': 0x10,     // VK_SHIFT (same code)
-                'ControlLeft': 0x11,    // VK_CONTROL
-                'ControlRight': 0x11,   // VK_CONTROL (same code)
-                'AltLeft': 0x12,        // VK_MENU
-                'AltRight': 0x12,       // VK_MENU (same code)
-                'Pause': 0x13,          // VK_PAUSE
-                'CapsLock': 0x14,       // VK_CAPITAL
-                'Escape': 0x1B,         // VK_ESCAPE
-                'Space': 0x20,          // VK_SPACE
+                'Backspace': VK_BACK,
+                'Tab': VK_TAB,
+                'Enter': VK_RETURN,
+                'ShiftLeft': VK_SHIFT,
+                'ShiftRight': VK_SHIFT,
+                'ControlLeft': VK_CONTROL,
+                'ControlRight': VK_CONTROL,
+                'AltLeft': VK_MENU,
+                'AltRight': VK_MENU,
+                'Pause': VK_PAUSE,
+                'CapsLock': VK_CAPITAL,
+                'Escape': VK_ESCAPE,
+                'Space': VK_SPACE,
 
                 // Navigation keys
-                'PageUp': 0x21,         // VK_PRIOR
-                'PageDown': 0x22,       // VK_NEXT
-                'End': 0x23,            // VK_END
-                'Home': 0x24,           // VK_HOME
-                'ArrowLeft': 0x25,      // VK_LEFT
-                'ArrowUp': 0x26,        // VK_UP
-                'ArrowRight': 0x27,     // VK_RIGHT
-                'ArrowDown': 0x28,      // VK_DOWN
-                'PrintScreen': 0x2C,    // VK_SNAPSHOT
-                'Insert': 0x2D,         // VK_INSERT
-                'Delete': 0x2E,         // VK_DELETE
+                'PageUp': VK_PRIOR,
+                'PageDown': VK_NEXT,
+                'End': VK_END,
+                'Home': VK_HOME,
+                'ArrowLeft': VK_LEFT,
+                'ArrowUp': VK_UP,
+                'ArrowRight': VK_RIGHT,
+                'ArrowDown': VK_DOWN,
+                'PrintScreen': VK_SNAPSHOT,
+                'Insert': VK_INSERT,
+                'Delete': VK_DELETE,
 
                 // Number keys (top row)
-                'Digit0': 0x30, 'Digit1': 0x31, 'Digit2': 0x32, 'Digit3': 0x33, 'Digit4': 0x34,
-                'Digit5': 0x35, 'Digit6': 0x36, 'Digit7': 0x37, 'Digit8': 0x38, 'Digit9': 0x39,
+                'Digit0': VK_0, 'Digit1': VK_1, 'Digit2': VK_2, 'Digit3': VK_3, 'Digit4': VK_4,
+                'Digit5': VK_5, 'Digit6': VK_6, 'Digit7': VK_7, 'Digit8': VK_8, 'Digit9': VK_9,
 
                 // Letter keys
-                'KeyA': 0x41, 'KeyB': 0x42, 'KeyC': 0x43, 'KeyD': 0x44, 'KeyE': 0x45, 'KeyF': 0x46,
-                'KeyG': 0x47, 'KeyH': 0x48, 'KeyI': 0x49, 'KeyJ': 0x4A, 'KeyK': 0x4B, 'KeyL': 0x4C,
-                'KeyM': 0x4D, 'KeyN': 0x4E, 'KeyO': 0x4F, 'KeyP': 0x50, 'KeyQ': 0x51, 'KeyR': 0x52,
-                'KeyS': 0x53, 'KeyT': 0x54, 'KeyU': 0x55, 'KeyV': 0x56, 'KeyW': 0x57, 'KeyX': 0x58,
-                'KeyY': 0x59, 'KeyZ': 0x5A,
+                'KeyA': VK_A, 'KeyB': VK_B, 'KeyC': VK_C, 'KeyD': VK_D, 'KeyE': VK_E, 'KeyF': VK_F,
+                'KeyG': VK_G, 'KeyH': VK_H, 'KeyI': VK_I, 'KeyJ': VK_J, 'KeyK': VK_K, 'KeyL': VK_L,
+                'KeyM': VK_M, 'KeyN': VK_N, 'KeyO': VK_O, 'KeyP': VK_P, 'KeyQ': VK_Q, 'KeyR': VK_R,
+                'KeyS': VK_S, 'KeyT': VK_T, 'KeyU': VK_U, 'KeyV': VK_V, 'KeyW': VK_W, 'KeyX': VK_X,
+                'KeyY': VK_Y, 'KeyZ': VK_Z,
 
                 // Windows/Meta keys
-                'MetaLeft': 0x5B,       // VK_LWIN
-                'MetaRight': 0x5C,      // VK_RWIN
-                'ContextMenu': 0x5D,    // VK_APPS
+                'MetaLeft': VK_LWIN,
+                'MetaRight': VK_RWIN,
+                'ContextMenu': VK_APPS,
 
                 // Numpad keys
-                'Numpad0': 0x60, 'Numpad1': 0x61, 'Numpad2': 0x62, 'Numpad3': 0x63, 'Numpad4': 0x64,
-                'Numpad5': 0x65, 'Numpad6': 0x66, 'Numpad7': 0x67, 'Numpad8': 0x68, 'Numpad9': 0x69,
-                'NumpadMultiply': 0x6A, // VK_MULTIPLY
-                'NumpadAdd': 0x6B,      // VK_ADD
-                'NumpadSubtract': 0x6D, // VK_SUBTRACT
-                'NumpadDecimal': 0x6E,  // VK_DECIMAL
-                'NumpadDivide': 0x6F,   // VK_DIVIDE
+                'Numpad0': VK_NUMPAD0, 'Numpad1': VK_NUMPAD1, 'Numpad2': VK_NUMPAD2,
+                'Numpad3': VK_NUMPAD3, 'Numpad4': VK_NUMPAD4, 'Numpad5': VK_NUMPAD5,
+                'Numpad6': VK_NUMPAD6, 'Numpad7': VK_NUMPAD7, 'Numpad8': VK_NUMPAD8,
+                'Numpad9': VK_NUMPAD9,
+                'NumpadMultiply': VK_MULTIPLY,
+                'NumpadAdd': VK_ADD,
+                'NumpadSubtract': VK_SUBTRACT,
+                'NumpadDecimal': VK_DECIMAL,
+                'NumpadDivide': VK_DIVIDE,
 
                 // Function keys
-                'F1': 0x70, 'F2': 0x71, 'F3': 0x72, 'F4': 0x73, 'F5': 0x74, 'F6': 0x75,
-                'F7': 0x76, 'F8': 0x77, 'F9': 0x78, 'F10': 0x79, 'F11': 0x7A, 'F12': 0x7B,
-                'F13': 0x7C, 'F14': 0x7D, 'F15': 0x7E, 'F16': 0x7F, 'F17': 0x80, 'F18': 0x81,
-                'F19': 0x82, 'F20': 0x83, 'F21': 0x84, 'F22': 0x85, 'F23': 0x86, 'F24': 0x87,
+                'F1': VK_F1, 'F2': VK_F2, 'F3': VK_F3, 'F4': VK_F4, 'F5': VK_F5, 'F6': VK_F6,
+                'F7': VK_F7, 'F8': VK_F8, 'F9': VK_F9, 'F10': VK_F10, 'F11': VK_F11, 'F12': VK_F12,
 
                 // Lock keys
-                'NumLock': 0x90,        // VK_NUMLOCK
-                'ScrollLock': 0x91,     // VK_SCROLL
+                'NumLock': VK_NUMLOCK,
+                'ScrollLock': VK_SCROLL,
 
-                // Browser/Media keys (extended)
-                'BrowserBack': 0xA6,    // VK_BROWSER_BACK
-                'BrowserForward': 0xA7, // VK_BROWSER_FORWARD
-                'BrowserRefresh': 0xA8, // VK_BROWSER_REFRESH
-                'BrowserStop': 0xA9,    // VK_BROWSER_STOP
-                'BrowserSearch': 0xAA,  // VK_BROWSER_SEARCH
-                'BrowserFavorites': 0xAB, // VK_BROWSER_FAVORITES
-                'BrowserHome': 0xAC,    // VK_BROWSER_HOME
+                // Browser keys
+                'BrowserBack': VK_BROWSER_BACK,
+                'BrowserForward': VK_BROWSER_FORWARD,
+                'BrowserRefresh': VK_BROWSER_REFRESH,
+                'BrowserStop': VK_BROWSER_STOP,
+                'BrowserSearch': VK_BROWSER_SEARCH,
+                'BrowserFavorites': VK_BROWSER_FAVORITES,
+                'BrowserHome': VK_BROWSER_HOME,
 
-                'AudioVolumeMute': 0xAD,    // VK_VOLUME_MUTE
-                'AudioVolumeDown': 0xAE,    // VK_VOLUME_DOWN
-                'AudioVolumeUp': 0xAF,      // VK_VOLUME_UP
-                'MediaTrackNext': 0xB0,     // VK_MEDIA_NEXT_TRACK
-                'MediaTrackPrevious': 0xB1, // VK_MEDIA_PREV_TRACK
-                'MediaStop': 0xB2,          // VK_MEDIA_STOP
-                'MediaPlayPause': 0xB3,     // VK_MEDIA_PLAY_PAUSE
+                // Media keys
+                'AudioVolumeMute': VK_VOLUME_MUTE,
+                'AudioVolumeDown': VK_VOLUME_DOWN,
+                'AudioVolumeUp': VK_VOLUME_UP,
+                'MediaTrackNext': VK_MEDIA_NEXT_TRACK,
+                'MediaTrackPrevious': VK_MEDIA_PREV_TRACK,
+                'MediaStop': VK_MEDIA_STOP,
+                'MediaPlayPause': VK_MEDIA_PLAY_PAUSE,
 
                 // OEM keys (punctuation - US layout)
-                'Semicolon': 0xBA,      // VK_OEM_1 (;:)
-                'Equal': 0xBB,          // VK_OEM_PLUS (=+)
-                'Comma': 0xBC,          // VK_OEM_COMMA (,<)
-                'Minus': 0xBD,          // VK_OEM_MINUS (-_)
-                'Period': 0xBE,         // VK_OEM_PERIOD (.>)
-                'Slash': 0xBF,          // VK_OEM_2 (/?)
-                'Backquote': 0xC0,      // VK_OEM_3 (`~)
-                'BracketLeft': 0xDB,    // VK_OEM_4 ([{)
-                'Backslash': 0xDC,      // VK_OEM_5 (\|)
-                'BracketRight': 0xDD,   // VK_OEM_6 (]})
-                'Quote': 0xDE,          // VK_OEM_7 ('")
-                'IntlBackslash': 0xE2   // VK_OEM_102 (Non-US backslash)
+                'Semicolon': VK_OEM_1,
+                'Equal': VK_OEM_PLUS,
+                'Comma': VK_OEM_COMMA,
+                'Minus': VK_OEM_MINUS,
+                'Period': VK_OEM_PERIOD,
+                'Slash': VK_OEM_2,
+                'Backquote': VK_OEM_3,
+                'BracketLeft': VK_OEM_4,
+                'Backslash': VK_OEM_5,
+                'BracketRight': VK_OEM_6,
+                'Quote': VK_OEM_7,
+                'IntlBackslash': VK_OEM_102
             };
 
             return VK_MAP[code] || null;
@@ -7207,6 +7343,142 @@
     wakaPAC.MK_SHIFT = MK_SHIFT;
     wakaPAC.MK_CONTROL = MK_CONTROL;
     wakaPAC.MK_ALT = MK_ALT;
+
+    // Attach Virtual Key (VK) code constants to wakaPAC
+    // Control keys
+    wakaPAC.VK_BACK = VK_BACK;
+    wakaPAC.VK_TAB = VK_TAB;
+    wakaPAC.VK_RETURN = VK_RETURN;
+    wakaPAC.VK_SHIFT = VK_SHIFT;
+    wakaPAC.VK_CONTROL = VK_CONTROL;
+    wakaPAC.VK_MENU = VK_MENU;
+    wakaPAC.VK_PAUSE = VK_PAUSE;
+    wakaPAC.VK_CAPITAL = VK_CAPITAL;
+    wakaPAC.VK_ESCAPE = VK_ESCAPE;
+    wakaPAC.VK_SPACE = VK_SPACE;
+    wakaPAC.VK_PRIOR = VK_PRIOR;
+    wakaPAC.VK_NEXT = VK_NEXT;
+    wakaPAC.VK_END = VK_END;
+    wakaPAC.VK_HOME = VK_HOME;
+    wakaPAC.VK_LEFT = VK_LEFT;
+    wakaPAC.VK_UP = VK_UP;
+    wakaPAC.VK_RIGHT = VK_RIGHT;
+    wakaPAC.VK_DOWN = VK_DOWN;
+    wakaPAC.VK_SNAPSHOT = VK_SNAPSHOT;
+    wakaPAC.VK_INSERT = VK_INSERT;
+    wakaPAC.VK_DELETE = VK_DELETE;
+
+    // Number keys (0-9)
+    wakaPAC.VK_0 = VK_0;
+    wakaPAC.VK_1 = VK_1;
+    wakaPAC.VK_2 = VK_2;
+    wakaPAC.VK_3 = VK_3;
+    wakaPAC.VK_4 = VK_4;
+    wakaPAC.VK_5 = VK_5;
+    wakaPAC.VK_6 = VK_6;
+    wakaPAC.VK_7 = VK_7;
+    wakaPAC.VK_8 = VK_8;
+    wakaPAC.VK_9 = VK_9;
+
+    // Letter keys (A-Z)
+    wakaPAC.VK_A = VK_A;
+    wakaPAC.VK_B = VK_B;
+    wakaPAC.VK_C = VK_C;
+    wakaPAC.VK_D = VK_D;
+    wakaPAC.VK_E = VK_E;
+    wakaPAC.VK_F = VK_F;
+    wakaPAC.VK_G = VK_G;
+    wakaPAC.VK_H = VK_H;
+    wakaPAC.VK_I = VK_I;
+    wakaPAC.VK_J = VK_J;
+    wakaPAC.VK_K = VK_K;
+    wakaPAC.VK_L = VK_L;
+    wakaPAC.VK_M = VK_M;
+    wakaPAC.VK_N = VK_N;
+    wakaPAC.VK_O = VK_O;
+    wakaPAC.VK_P = VK_P;
+    wakaPAC.VK_Q = VK_Q;
+    wakaPAC.VK_R = VK_R;
+    wakaPAC.VK_S = VK_S;
+    wakaPAC.VK_T = VK_T;
+    wakaPAC.VK_U = VK_U;
+    wakaPAC.VK_V = VK_V;
+    wakaPAC.VK_W = VK_W;
+    wakaPAC.VK_X = VK_X;
+    wakaPAC.VK_Y = VK_Y;
+    wakaPAC.VK_Z = VK_Z;
+
+    // Windows keys
+    wakaPAC.VK_LWIN = VK_LWIN;
+    wakaPAC.VK_RWIN = VK_RWIN;
+    wakaPAC.VK_APPS = VK_APPS;
+
+    // Numpad keys
+    wakaPAC.VK_NUMPAD0 = VK_NUMPAD0;
+    wakaPAC.VK_NUMPAD1 = VK_NUMPAD1;
+    wakaPAC.VK_NUMPAD2 = VK_NUMPAD2;
+    wakaPAC.VK_NUMPAD3 = VK_NUMPAD3;
+    wakaPAC.VK_NUMPAD4 = VK_NUMPAD4;
+    wakaPAC.VK_NUMPAD5 = VK_NUMPAD5;
+    wakaPAC.VK_NUMPAD6 = VK_NUMPAD6;
+    wakaPAC.VK_NUMPAD7 = VK_NUMPAD7;
+    wakaPAC.VK_NUMPAD8 = VK_NUMPAD8;
+    wakaPAC.VK_NUMPAD9 = VK_NUMPAD9;
+    wakaPAC.VK_MULTIPLY = VK_MULTIPLY;
+    wakaPAC.VK_ADD = VK_ADD;
+    wakaPAC.VK_SUBTRACT = VK_SUBTRACT;
+    wakaPAC.VK_DECIMAL = VK_DECIMAL;
+    wakaPAC.VK_DIVIDE = VK_DIVIDE;
+
+    // Function keys
+    wakaPAC.VK_F1 = VK_F1;
+    wakaPAC.VK_F2 = VK_F2;
+    wakaPAC.VK_F3 = VK_F3;
+    wakaPAC.VK_F4 = VK_F4;
+    wakaPAC.VK_F5 = VK_F5;
+    wakaPAC.VK_F6 = VK_F6;
+    wakaPAC.VK_F7 = VK_F7;
+    wakaPAC.VK_F8 = VK_F8;
+    wakaPAC.VK_F9 = VK_F9;
+    wakaPAC.VK_F10 = VK_F10;
+    wakaPAC.VK_F11 = VK_F11;
+    wakaPAC.VK_F12 = VK_F12;
+
+    // Lock keys
+    wakaPAC.VK_NUMLOCK = VK_NUMLOCK;
+    wakaPAC.VK_SCROLL = VK_SCROLL;
+
+    // Browser keys
+    wakaPAC.VK_BROWSER_BACK = VK_BROWSER_BACK;
+    wakaPAC.VK_BROWSER_FORWARD = VK_BROWSER_FORWARD;
+    wakaPAC.VK_BROWSER_REFRESH = VK_BROWSER_REFRESH;
+    wakaPAC.VK_BROWSER_STOP = VK_BROWSER_STOP;
+    wakaPAC.VK_BROWSER_SEARCH = VK_BROWSER_SEARCH;
+    wakaPAC.VK_BROWSER_FAVORITES = VK_BROWSER_FAVORITES;
+    wakaPAC.VK_BROWSER_HOME = VK_BROWSER_HOME;
+
+    // Media keys
+    wakaPAC.VK_VOLUME_MUTE = VK_VOLUME_MUTE;
+    wakaPAC.VK_VOLUME_DOWN = VK_VOLUME_DOWN;
+    wakaPAC.VK_VOLUME_UP = VK_VOLUME_UP;
+    wakaPAC.VK_MEDIA_NEXT_TRACK = VK_MEDIA_NEXT_TRACK;
+    wakaPAC.VK_MEDIA_PREV_TRACK = VK_MEDIA_PREV_TRACK;
+    wakaPAC.VK_MEDIA_STOP = VK_MEDIA_STOP;
+    wakaPAC.VK_MEDIA_PLAY_PAUSE = VK_MEDIA_PLAY_PAUSE;
+
+    // OEM keys (punctuation - US layout)
+    wakaPAC.VK_OEM_1 = VK_OEM_1;            // Semicolon
+    wakaPAC.VK_OEM_PLUS = VK_OEM_PLUS;      // Equal
+    wakaPAC.VK_OEM_COMMA = VK_OEM_COMMA;    // Comma
+    wakaPAC.VK_OEM_MINUS = VK_OEM_MINUS;    // Minus
+    wakaPAC.VK_OEM_PERIOD = VK_OEM_PERIOD;  // Period
+    wakaPAC.VK_OEM_2 = VK_OEM_2;            // Slash
+    wakaPAC.VK_OEM_3 = VK_OEM_3;            // Backquote
+    wakaPAC.VK_OEM_4 = VK_OEM_4;            // BracketLeft
+    wakaPAC.VK_OEM_5 = VK_OEM_5;            // Backslash
+    wakaPAC.VK_OEM_6 = VK_OEM_6;            // BracketRight
+    wakaPAC.VK_OEM_7 = VK_OEM_7;            // Quote
+    wakaPAC.VK_OEM_102 = VK_OEM_102;        // IntlBackslash
 
     /**
      * Global mousemove throttling configuration
