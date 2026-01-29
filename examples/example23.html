@@ -274,7 +274,10 @@
 
             if (event.message === wakaPAC.MSG_LBUTTONUP) {
                 if (this.dragItem) {
-                    if (wakaPAC.ptInElement(event.originalEvent.clientX, event.originalEvent.clientY, document.querySelector('#targetBroken .box'))) {
+                    const pt = wakaPAC.MAKEPOINTS(event.lParam);
+                    const viewportPt = this.containerToViewport(pt.x, pt.y);
+
+                    if (wakaPAC.ptInElement(viewportPt.x, viewportPt.y, document.querySelector('#targetBroken .box'))) {
                         wakaPAC.sendMessage(
                             'targetBroken',
                             MSG_DROP_ITEM,
@@ -338,7 +341,10 @@
             if (event.message === wakaPAC.MSG_LBUTTONUP) {
                 if (this.dragItem) {
                     // Check if over target
-                    if (wakaPAC.ptInElement(event.originalEvent.clientX, event.originalEvent.clientY, document.querySelector('#targetWorking .box'))) {
+                    const pt = wakaPAC.MAKEPOINTS(event.lParam);
+                    const viewportPt = this.containerToViewport(pt.x, pt.y);
+
+                    if (wakaPAC.ptInElement(viewportPt.x, viewportPt.y, document.querySelector('#targetWorking .box'))) {
                         wakaPAC.sendMessage(
                             'targetWorking',
                             MSG_DROP_ITEM,
