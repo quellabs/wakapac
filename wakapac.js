@@ -1029,6 +1029,15 @@
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
+        /** @private {boolean} Flag indicating if mouse capture is currently active */
+        _captureActive: false,
+
+        /** @private {HTMLElement|null} The container element that has captured mouse input */
+        _capturedContainer: null,
+
+        /** @private {HTMLElement|null} The container that received the last mousedown event (for click routing) */
+        _downContainer: null,
+
         initialize() {
             // Store reference to this object for use in closures
             const self = this;
@@ -1428,8 +1437,40 @@
                 return;
             }
 
-            // Find the nearest container element that should receive the event
-            const container = originalEvent.target.closest('[data-pac-id]');
+            // Resolve container - check capture first for mouse events, then handle click routing
+            let container;
+
+            // Check if this is a click event that should be routed to the down container
+            if (messageType === MSG_LCLICK || messageType === MSG_RCLICK || messageType === MSG_MCLICK) {
+                // Route click to the same container that received the corresponding button down
+                if (this._downContainer && this._downContainer.isConnected) {
+                    container = this._downContainer;
+                } else {
+                    container = originalEvent.target.closest('[data-pac-id]');
+                }
+                // Reset downContainer for next click sequence
+                this._downContainer = null;
+            }
+            // Check if capture is active and applies to this message type
+            else if (this._captureActive && this.isCaptureAffected(messageType)) {
+                // Verify captured container still exists in DOM
+                if (this._capturedContainer && this._capturedContainer.isConnected) {
+                    container = this._capturedContainer;
+                } else {
+                    // Container was removed - auto-release capture
+                    this.releaseCapture();
+                    container = originalEvent.target.closest('[data-pac-id]');
+                }
+            }
+            // Normal hit-test routing
+            else {
+                container = originalEvent.target.closest('[data-pac-id]');
+            }
+
+            // Track which container received button down events for click routing
+            if (messageType === MSG_LBUTTONDOWN || messageType === MSG_RBUTTONDOWN || messageType === MSG_MBUTTONDOWN) {
+                this._downContainer = container;
+            }
 
             // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
@@ -2051,7 +2092,66 @@
             }
 
             return true; // Process the event
-        }
+        },
+
+        /**
+         * Determines if a message type is affected by mouse capture
+         * @param {number} messageType - The message type to check
+         * @returns {boolean} True if this message type should use capture routing
+         */
+        isCaptureAffected(messageType) {
+            return messageType === MSG_MOUSEMOVE ||
+                   messageType === MSG_LBUTTONDOWN ||
+                   messageType === MSG_LBUTTONUP ||
+                   messageType === MSG_LBUTTONDBLCLK ||
+                   messageType === MSG_RBUTTONDOWN ||
+                   messageType === MSG_RBUTTONUP ||
+                   messageType === MSG_MBUTTONDOWN ||
+                   messageType === MSG_MBUTTONUP ||
+                   messageType === MSG_LCLICK ||
+                   messageType === MSG_MCLICK ||
+                   messageType === MSG_RCLICK;
+        },
+
+        /**
+         * Sets mouse capture to the specified container or its nearest PAC container ancestor.
+         * While capture is active, mouse events will be routed to this container
+         * regardless of which element is under the cursor.
+         * @param {HTMLElement} element - The element or container to capture mouse input
+         * @throws {Error} If element is invalid or not within a PAC container
+         */
+        setCapture(element) {
+            if (!element || typeof element.closest !== 'function') {
+                throw new Error('setCapture requires a valid DOM element');
+            }
+
+            // Find the PAC container
+            const container = element.closest('[data-pac-id]');
+
+            if (!container) {
+                throw new Error('setCapture requires an element within a PAC container');
+            }
+
+            // Set capture state
+            this._captureActive = true;
+            this._capturedContainer = container;
+        },
+
+        /**
+         * Releases mouse capture, returning to normal hit-test based event routing
+         */
+        releaseCapture() {
+            this._captureActive = false;
+            this._capturedContainer = null;
+        },
+
+        /**
+         * Checks if mouse capture is currently active
+         * @returns {boolean} True if capture is active
+         */
+        hasCapture() {
+            return this._captureActive;
+        },
     }
 
     // ============================================================================
@@ -7244,6 +7344,31 @@
      */
     wakaPAC.unregisterGesture = function(name) {
         return MouseGestureRecognizer.unregisterPattern(name);
+    };
+
+    /**
+     * Sets mouse capture to the specified element or its PAC container.
+     * While capture is active, mouse events are routed to this container
+     * regardless of cursor position.
+     * @param {HTMLElement} element - Element or container to capture mouse input
+     */
+    wakaPAC.setCapture = function(element) {
+        return DomUpdateTracker.setCapture(element);
+    };
+
+    /**
+     * Releases mouse capture, returning to normal event routing
+     */
+    wakaPAC.releaseCapture = function() {
+        return DomUpdateTracker.releaseCapture();
+    };
+
+    /**
+     * Checks if mouse capture is currently active
+     * @returns {boolean} True if capture is active
+     */
+    wakaPAC.hasCapture = function() {
+        return DomUpdateTracker.hasCapture();
     };
 
     // ========================================================================
