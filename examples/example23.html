@@ -189,7 +189,7 @@
                         </div>
                     </div>
 
-                    <div class="status" data-pac-bind="class: { idle: !dragItem }, class: { broken-drag: dragItem }">
+                    <div class="status" data-pac-bind="class: { idle: !dragItem }, class: { 'broken-drag': dragItem }">
                         <span data-pac-bind="if: !dragItem">⚪ Ready</span>
                         <span data-pac-bind="if: dragItem">🔴 Dragging - will snap back!</span>
                     </div>
@@ -218,7 +218,7 @@
                     <div class="box">
                         <div class="box-title">SOURCE</div>
                         <div data-pac-bind="foreach: sourceItems">
-                            <div class="circle" data-pac-bind="style: { background: item.color }, class: { dragging: dragItem ===item }">
+                            <div class="circle" data-pac-bind="style: { background: item.color }, class: { dragging: dragItem === item }">
                                 {{item.id}}
                             </div>
                         </div>
@@ -278,7 +278,7 @@
 
                     if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
                         // Send to target
-                        wakaPAC.sendMessage('targetBroken', wakaPAC.MSG_USER + 1, 0, 0, { item: this.dragItem });
+                        wakaPAC.sendMessage('targetBroken', wakaPAC.MSG_USER + 1, 0, 0, { dragItem: this.dragItem });
                         const index = this.sourceItems.indexOf(this.dragItem);
                         this.sourceItems.splice(index, 1);
                     }
@@ -297,7 +297,8 @@
 
         msgProc(event) {
             if (event.message === wakaPAC.MSG_USER + 1) {
-                this.items.push(event.detail.item);
+                console.log({ id: event.detail.dragItem.id, color: event.detail.dragItem.color });
+                this.items.push({ id: event.detail.dragItem.id, color: event.detail.dragItem.color });
                 return false;
             }
         }
@@ -337,8 +338,8 @@
 
                     if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
                         // Send to target
-                        wakaPAC.sendMessage('targetWorking', wakaPAC.MSG_USER + 1, 0, 0, { item: this.dragItem });
-                        const index = this.sourceItems.indexOf(this.dragItem);
+                        wakaPAC.sendMessage('targetWorking', wakaPAC.MSG_USER + 1, 0, 0, { dragItem: this.dragItem });
+                        const index = this.sourceItems.findIndex(item => item.id === this.dragItem.id);
                         this.sourceItems.splice(index, 1);
                     }
 
@@ -358,7 +359,8 @@
 
         msgProc(event) {
             if (event.message === wakaPAC.MSG_USER + 1) {
-                this.items.push(event.detail.item);
+                console.log({ id: event.detail.dragItem.id, color: event.detail.dragItem.color });
+                this.items.push({ id: event.detail.dragItem.id, color: event.detail.dragItem.color });
                 return false;
             }
         }
