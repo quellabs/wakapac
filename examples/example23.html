@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakaPAC Mouse Capture Demo</title>
+    <script src="../wakapac.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #2d3748;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #cbd5e0;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 18px;
+        }
+
+        .instructions {
+            background: #fef5e7;
+            border-left: 4px solid #f39c12;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 4px;
+        }
+
+        .instructions h3 {
+            color: #e67e22;
+            margin-bottom: 10px;
+        }
+
+        .instructions p {
+            color: #555;
+            line-height: 1.8;
+            margin-bottom: 8px;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+        }
+
+        .demo-section {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .demo-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            text-align: center;
+        }
+
+        .demo-section.broken .demo-title {
+            color: #e74c3c;
+        }
+
+        .demo-section.working .demo-title {
+            color: #27ae60;
+        }
+
+        .demo-subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 25px;
+            font-size: 14px;
+        }
+
+        .boxes-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .box {
+            border: 3px dashed #bdc3c7;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 250px;
+            background: #ecf0f1;
+        }
+
+        .box-title {
+            text-align: center;
+            font-weight: bold;
+            color: #34495e;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .circle {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin: 10px auto;
+            cursor: move;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: transform 0.2s;
+        }
+
+        .circle:hover {
+            transform: scale(1.05);
+        }
+
+        .circle.dragging {
+            opacity: 0.5;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #ecf0f1;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .status.idle {
+            color: #7f8c8d;
+        }
+
+        .status.active {
+            background: #e8f8f5;
+            color: #27ae60;
+        }
+
+        .status.broken-drag {
+            background: #fadbd8;
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Mouse Capture: Drag Between Containers</h1>
+    <p class="subtitle">Drag circles from SOURCE to TARGET on both sides</p>
+
+    <div class="instructions">
+        <h3>🎯 Try This:</h3>
+        <p><strong>LEFT (Broken):</strong> Try dragging the red circle to TARGET. As soon as you leave the SOURCE box, it snaps back!</p>
+        <p><strong>RIGHT (Works):</strong> Drag the red circle to TARGET. It works! <code>setCapture()</code> keeps tracking even outside SOURCE.</p>
+    </div>
+
+    <div class="demo-grid">
+        <!-- WITHOUT CAPTURE -->
+        <div class="demo-section broken">
+            <div class="demo-title">❌ Without Capture</div>
+            <div class="demo-subtitle">Drag breaks when leaving SOURCE</div>
+
+            <div class="boxes-container">
+                <div id="demoBroken">
+                    <div class="box">
+                        <div class="box-title">SOURCE</div>
+                        <div data-pac-bind="foreach: sourceItems">
+                            <div class="circle" data-pac-bind="style.background:item.color;class.dragging:dragItem===item">
+                                {{item.id}}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="status"
+                         data-pac-bind="class.idle:!dragItem;class.broken-drag:dragItem">
+                        <span data-pac-bind="if: !dragItem">⚪ Ready</span>
+                        <span data-pac-bind="if: dragItem">🔴 Dragging - will snap back!</span>
+                    </div>
+                </div>
+
+                <div id="targetBroken">
+                    <div class="box">
+                        <div class="box-title">TARGET</div>
+                        <div data-pac-bind="foreach: items">
+                            <div class="circle" data-pac-bind="style.background:item.color">
+                                {{item.id}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WITH CAPTURE -->
+        <div class="demo-section working">
+            <div class="demo-title">✅ With Capture</div>
+            <div class="demo-subtitle">Drag works perfectly</div>
+
+            <div class="boxes-container">
+                <div id="demoWorking">
+                    <div class="box">
+                        <div class="box-title">SOURCE</div>
+                        <div data-pac-bind="foreach:sourceItems">
+                            <div class="circle" data-pac-bind="style.background:item.color;class.dragging:dragItem===item">
+                                {{item.id}}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="status"
+                         data-pac-bind="class.idle:!dragItem;class.active:dragItem">
+                        <span data-pac-bind="if:!dragItem">⚪ Ready</span>
+                        <span data-pac-bind="if:dragItem">🟢 Dragging - tracking!</span>
+                    </div>
+                </div>
+
+                <div id="targetWorking">
+                    <div class="box">
+                        <div class="box-title">TARGET</div>
+                        <div data-pac-bind="foreach:items">
+                            <div class="circle" data-pac-bind="style.background:item.color">
+                                {{item.id}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // SOURCE component WITHOUT capture (broken)
+    wakaPAC('#demoBroken', {
+        sourceItems: [
+            { id: 1, color: '#e74c3c' },
+            { id: 2, color: '#3498db' },
+            { id: 3, color: '#f39c12' }
+        ],
+        dragItem: null,
+
+        msgProc(event) {
+            if (event.message === wakaPAC.MSG_LBUTTONDOWN) {
+                const circle = event.target.closest('.circle');
+
+                if (circle) {
+                    const id = parseInt(circle.textContent.trim());
+                    this.dragItem = this.sourceItems.find(item => item.id === id);
+                }
+
+                return false;
+            }
+
+            if (event.message === wakaPAC.MSG_LBUTTONUP) {
+                if (this.dragItem) {
+                    // Check if over target
+                    const targetBox = document.querySelector('#targetBroken .box');
+                    const rect = targetBox.getBoundingClientRect();
+                    const x = event.originalEvent.clientX;
+                    const y = event.originalEvent.clientY;
+
+                    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                        // Send to target
+                        wakaPAC.sendMessage('targetBroken', wakaPAC.MSG_USER + 1, 0, 0, { item: this.dragItem });
+                        const index = this.sourceItems.indexOf(this.dragItem);
+                        this.sourceItems.splice(index, 1);
+                    }
+
+                    this.dragItem = null;
+                }
+                return false;
+            }
+        }
+    });
+
+    // TARGET component (broken side)
+    wakaPAC('#targetBroken', {
+        items: [],
+
+        msgProc(event) {
+            if (event.message === wakaPAC.MSG_USER + 1) {
+                this.items.push(event.detail.item);
+                return false;
+            }
+        }
+    });
+
+    // SOURCE component WITH capture (working)
+    wakaPAC('#demoWorking', {
+        sourceItems: [
+            { id: 1, color: '#e74c3c' },
+            { id: 2, color: '#3498db' },
+            { id: 3, color: '#f39c12' }
+        ],
+        dragItem: null,
+
+        msgProc(event) {
+            if (event.message === wakaPAC.MSG_LBUTTONDOWN) {
+                const circle = event.target.closest('.circle');
+
+                if (circle) {
+                    const id = parseInt(circle.textContent.trim());
+                    this.dragItem = this.sourceItems.find(item => item.id === id);
+
+                    // CRITICAL: Capture mouse
+                    wakaPAC.setCapture(this.pacId);
+                }
+
+                return false;
+            }
+
+            if (event.message === wakaPAC.MSG_LBUTTONUP) {
+                if (this.dragItem) {
+                    // Check if over target
+                    const targetBox = document.querySelector('#targetWorking .box');
+                    const rect = targetBox.getBoundingClientRect();
+                    const x = event.originalEvent.clientX;
+                    const y = event.originalEvent.clientY;
+
+                    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                        // Send to target
+                        wakaPAC.sendMessage('targetWorking', wakaPAC.MSG_USER + 1, 0, 0, { item: this.dragItem });
+                        const index = this.sourceItems.indexOf(this.dragItem);
+                        this.sourceItems.splice(index, 1);
+                    }
+
+                    // CRITICAL: Release capture
+                    wakaPAC.releaseCapture();
+                    this.dragItem = null;
+                }
+
+                return false;
+            }
+        }
+    });
+
+    // TARGET component (working side)
+    wakaPAC('#targetWorking', {
+        items: [],
+
+        msgProc(event) {
+            if (event.message === wakaPAC.MSG_USER + 1) {
+                this.items.push(event.detail.item);
+                return false;
+            }
+        }
+    });
+
+    console.log('Drag demo loaded!');
+</script>
+</body>
+</html>
