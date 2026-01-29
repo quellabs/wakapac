@@ -1094,7 +1094,7 @@
              * Updates container focus states when focus moves into PAC containers
              */
             document.addEventListener('focusin', function(event) {
-                self.dispatchFocusEvent('focusin', event);
+                self.dispatchTrackedEvent(MSG_FOCUS, event);
             });
 
             /**
@@ -1102,7 +1102,7 @@
              * Updates container focus states when focus moves out of PAC containers
              */
             document.addEventListener('focusout', function(event) {
-                self.dispatchFocusEvent('focusout', event);
+                self.dispatchTrackedEvent(MSG_BLUR, event);
             });
 
             /**
@@ -1516,66 +1516,6 @@
         },
 
         /**
-         * Dispatches focus state changes to relevant PAC containers
-         * Also dispatches PAC events for form elements that can have data bindings
-         * @param focusType
-         * @param originalEvent
-         */
-        dispatchFocusEvent(focusType, originalEvent) {
-            const { target, relatedTarget } = originalEvent;
-
-            window.PACRegistry.components.forEach((context) => {
-                const container = context.container;
-                if (!this.isContainerAffected(container, target, relatedTarget)) {
-                    return;
-                }
-
-                // Dispatch focus state event
-                container.dispatchEvent(new CustomEvent('pac:focus-state', {
-                    detail: {
-                        focusType: focusType,
-                        target: target,
-                        relatedTarget: relatedTarget,
-                        containerFocus: Utils.isElementDirectlyFocused(container),
-                        containerFocusWithin: Utils.isElementFocusWithin(container),
-                        timestamp: Date.now()
-                    }
-                }));
-
-                // Also dispatch PAC events for form elements within this container
-                if (Utils.belongsToPacContainer(container, target) && this.isFormElement(target)) {
-                    if (focusType === 'focusin') {
-                        this.dispatchTrackedEvent(MSG_FOCUS, originalEvent);
-                    } else if (focusType === 'focusout') {
-                        this.dispatchTrackedEvent(MSG_BLUR, originalEvent);
-                    }
-                }
-            });
-        },
-
-        /**
-         * Checks if focus change affects the container
-         * @param container
-         * @param target
-         * @param relatedTarget
-         * @returns {*|boolean}
-         */
-        isContainerAffected(container, target, relatedTarget) {
-            const containsTarget = container.contains(target) || container === target;
-            const containsRelated = relatedTarget && (container.contains(relatedTarget) || container === relatedTarget);
-            return containsTarget || containsRelated;
-        },
-
-        /**
-         * Checks if an element is a form element that can have data bindings
-         * @param {Element} element - The element to check
-         * @returns {boolean} True if element is a bindable form element
-         */
-        isFormElement(element) {
-            return element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT';
-        },
-
-        /**
          * Converts DOM event data into Win32 message format for consistent handling
          * across different event types. Each message type has specific parameter
          * encoding rules that match Win32 conventions.
@@ -1677,7 +1617,7 @@
         /**
          * Builds wParam for mouse messages following Win32 WM_LBUTTONDOWN format
          * Contains key state flags indicating which modifier keys and mouse buttons are pressed
-         * @param {Event} event - The mouse event
+         * @param {MouseEvent} event - The mouse event
          * @returns {number} wParam value with packed key state flags
          */
         buildMouseWParam(event) {
@@ -3529,7 +3469,6 @@
         this.container.addEventListener('pac:change', this.boundHandlePacEvent);
         this.container.addEventListener('pac:array-change', this.boundHandlePacEvent);
         this.container.addEventListener('pac:browser-state', this.boundHandlePacEvent);
-        this.container.addEventListener('pac:focus-state', this.boundHandlePacEvent);
 
         // Add timers
         this.timers = new Map();
@@ -3542,11 +3481,10 @@
 
     Context.prototype.destroy = function() {
         // Remove event listeners
-        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:focus-state', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
+        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
 
         // Clean up intersection observer
         if (this.intersectionObserver) {
@@ -4046,12 +3984,7 @@
 
             // Handle browser state changes (navigation, history, URL changes)
             case 'pac:browser-state':
-                this.handleBrowserState(event);
-                break;
-
-            // Handle focus management events (element focus)
-            case 'pac:focus-state':
-                this.handleFocusState(event);
+                this.handleBrowserStateEvent(event);
                 break;
 
             default:
@@ -4070,13 +4003,15 @@
      * @returns {void}
      */
     Context.prototype.handlePacEvent = function(event) {
-        // Call msgProc if it exists
-        let allowDefault = true;
+        // Call user's message handler (msgProc) before framework processes the event
+        // This allows user code to intercept and handle messages first, Win32-style
+        let preventDefault = false;
 
         if (this.originalAbstraction.msgProc && typeof this.originalAbstraction.msgProc === 'function') {
             const msgProcResult = this.originalAbstraction.msgProc.call(this.abstraction, event);
 
-            // Only certain message types can be canceled by msgProc
+            // Certain message types can prevent framework's default behavior by returning false
+            // Similar to Win32: returning 0 from WndProc means "I handled this, skip default processing"
             const cancellableEvents = [
                 MSG_LBUTTONUP,
                 MSG_MBUTTONUP,
@@ -4090,39 +4025,23 @@
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
-                allowDefault = false;
+                preventDefault = true;
             }
         }
 
-        // Prevent default if msgProc returned false for cancellable events
-        if (!allowDefault) {
+        // Stop processing if msgProc handled the event
+        if (preventDefault) {
             event.preventDefault();
             return;
         }
 
+        // Update reactive focus properties
+        if (event.message === MSG_FOCUS || event.message === MSG_BLUR) {
+            this.updateFocusProperties();
+        }
+
         // Call built in event handlers
         switch(event.message) {
-            case MSG_MOUSEMOVE:
-            case MSG_LBUTTONDOWN:
-            case MSG_MBUTTONDOWN:
-            case MSG_RBUTTONDOWN:
-            case MSG_LBUTTONUP:
-            case MSG_MBUTTONUP:
-            case MSG_RBUTTONUP:
-            case MSG_MCLICK:
-            case MSG_RCLICK:
-                // Mouse movement and button events - no default action, handled by msgProc if needed
-                break;
-
-            case MSG_KEYUP:
-            case MSG_KEYDOWN:
-                // Raw key events - no action taken
-                break;
-
-            case MSG_LBUTTONDBLCLK:
-                // Double-click event - handled by msgProc
-                break;
-
             case MSG_LCLICK:
                 // Mouse button up events - handle DOM clicks
                 this.handleDomClicks(event);
@@ -4143,16 +4062,20 @@
                 this.handleDomInput(event);
                 break;
 
-            case MSG_FOCUS:
-                // Focus events - handle any focus-related logic
-                this.handleDomFocus(event);
-                break;
-
             case MSG_BLUR:
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
                 break;
         }
+    }
+
+    /**
+     * Updates container focus reactive properties
+     * Called automatically after MSG_FOCUS/MSG_BLUR events
+     */
+    Context.prototype.updateFocusProperties = function() {
+        this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
+        this.abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
     }
 
     /**
@@ -4381,40 +4304,6 @@
     };
 
     /**
-     * Handles DOM focus events for data-bound elements
-     * @param {CustomEvent} event - The focus event containing target element details
-     * @param {Object} event.detail - Event detail object
-     * @param {HTMLElement} event.target - The DOM element that gained focus
-     * @returns {void}
-     */
-    Context.prototype.handleDomFocus = function(event) {
-        const targetElement = event.target;
-
-        // Get the mapping data for this element
-        const mappingData = this.interpolationMap.get(targetElement);
-
-        // If no mapping data, this element isn't data-bound
-        if (!mappingData) {
-            return;
-        }
-
-        // For now, focus events don't trigger immediate actions
-        // but this is where you could add focus-related behaviors like:
-        // - Clearing validation messages
-        // - Highlighting related fields
-        // - Loading autocomplete data
-        // - Analytics tracking
-
-        // Future: Could execute focus binding if implemented
-        // if (mappingData.bindings.focus) {
-        //     const method = this.abstraction[mappingData.bindings.focus.target];
-        //     if (typeof method === 'function') {
-        //         method.call(this.abstraction, event);
-        //     }
-        // }
-    };
-
-    /**
      * Handles DOM blur events for data-bound elements
      * Processes any pending "change" mode updates that should trigger on blur
      * @param {CustomEvent} event - The blur event containing target element details
@@ -4637,7 +4526,7 @@
      * @param {string} event.detail.stateType - Type of state change ('visibility'|'online'|'scroll'|'resize')
      * @param {Object} event.detail.stateData - State-specific data object
      */
-    Context.prototype.handleBrowserState = function(event) {
+    Context.prototype.handleBrowserStateEvent = function(event) {
         const { stateType, stateData } = event.detail;
 
         switch(stateType) {
@@ -4678,16 +4567,6 @@
                 console.warn('Unknown browser state message ' + stateType);
                 break;
         }
-    };
-
-    /**
-     * Update focus properties directly from the event detail
-     * These are pre-calculated in DomUpdateTracker to avoid redundant computations
-     * @param event
-     */
-    Context.prototype.handleFocusState = function(event) {
-        this.abstraction.containerFocus = event.detail.containerFocus;
-        this.abstraction.containerFocusWithin = event.detail.containerFocusWithin;
     };
 
     /**
