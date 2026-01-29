@@ -297,7 +297,6 @@
 
         msgProc(event) {
             if (event.message === wakaPAC.MSG_USER + 1) {
-                console.log({ id: event.detail.dragItem.id, color: event.detail.dragItem.color });
                 this.items.push({ id: event.detail.dragItem.id, color: event.detail.dragItem.color });
                 return false;
             }
@@ -359,14 +358,11 @@
 
         msgProc(event) {
             if (event.message === wakaPAC.MSG_USER + 1) {
-                console.log({ id: event.detail.dragItem.id, color: event.detail.dragItem.color });
                 this.items.push({ id: event.detail.dragItem.id, color: event.detail.dragItem.color });
                 return false;
             }
         }
     });
-
-    console.log('Drag demo loaded!');
 </script>
 </body>
 </html>
