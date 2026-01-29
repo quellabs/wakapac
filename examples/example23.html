@@ -168,8 +168,8 @@
 
     <div class="instructions">
         <h3>🎯 Try This:</h3>
-        <p><strong>LEFT (Broken):</strong> Drag the red circle toward TARGET. As soon as your cursor leaves the SOURCE box, dragging stops and the circle snaps back. This happens because the SOURCE component only receives mouse events while the pointer is inside its bounds — once you leave, it no longer gets the mouse-up event and the drag is effectively canceled.</p>
-        <p><strong>RIGHT (Works):</strong> Drag the red circle toward TARGET. Dragging continues even when your cursor leaves SOURCE. This version calls <code>setCapture()</code>, which forces all mouse events to keep going to the SOURCE component until release, so the drop completes correctly.</p>
+        <p><strong>LEFT (Broken):</strong> Drag the circles toward TARGET. As soon as your cursor leaves the SOURCE box, dragging stops and the circle snaps back. This happens because the SOURCE component only receives mouse events while the pointer is inside its bounds — once you leave, it no longer gets the mouse-up event and the drag is effectively canceled.</p>
+        <p><strong>RIGHT (Works):</strong> Drag the circles toward TARGET. Dragging continues even when your cursor leaves SOURCE. This version calls <code>setCapture()</code>, which forces all mouse events to keep going to the SOURCE component until release, so the drop completes correctly.</p>
     </div>
 
     <div class="demo-grid">
