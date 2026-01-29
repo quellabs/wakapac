@@ -183,14 +183,13 @@
                     <div class="box">
                         <div class="box-title">SOURCE</div>
                         <div data-pac-bind="foreach: sourceItems">
-                            <div class="circle" data-pac-bind="style.background:item.color;class.dragging:dragItem===item">
+                            <div class="circle" data-pac-bind="style: { background: item.color }, class: { dragging: dragItem === item }">
                                 {{item.id}}
                             </div>
                         </div>
                     </div>
 
-                    <div class="status"
-                         data-pac-bind="class.idle:!dragItem;class.broken-drag:dragItem">
+                    <div class="status" data-pac-bind="class: { idle: !dragItem }, class: { broken-drag: dragItem }">
                         <span data-pac-bind="if: !dragItem">⚪ Ready</span>
                         <span data-pac-bind="if: dragItem">🔴 Dragging - will snap back!</span>
                     </div>
@@ -200,7 +199,7 @@
                     <div class="box">
                         <div class="box-title">TARGET</div>
                         <div data-pac-bind="foreach: items">
-                            <div class="circle" data-pac-bind="style.background:item.color">
+                            <div class="circle" data-pac-bind="style: { background: item.color }">
                                 {{item.id}}
                             </div>
                         </div>
@@ -218,25 +217,25 @@
                 <div id="demoWorking">
                     <div class="box">
                         <div class="box-title">SOURCE</div>
-                        <div data-pac-bind="foreach:sourceItems">
-                            <div class="circle" data-pac-bind="style.background:item.color;class.dragging:dragItem===item">
+                        <div data-pac-bind="foreach: sourceItems">
+                            <div class="circle" data-pac-bind="style: { background: item.color }, class: { dragging: dragItem ===item }">
                                 {{item.id}}
                             </div>
                         </div>
                     </div>
 
                     <div class="status"
-                         data-pac-bind="class.idle:!dragItem;class.active:dragItem">
-                        <span data-pac-bind="if:!dragItem">⚪ Ready</span>
-                        <span data-pac-bind="if:dragItem">🟢 Dragging - tracking!</span>
+                         data-pac-bind="class: { idle: !dragItem }, class: { active: dragItem }">
+                        <span data-pac-bind="if: !dragItem">⚪ Ready</span>
+                        <span data-pac-bind="if: dragItem">🟢 Dragging - tracking!</span>
                     </div>
                 </div>
 
                 <div id="targetWorking">
                     <div class="box">
                         <div class="box-title">TARGET</div>
-                        <div data-pac-bind="foreach:items">
-                            <div class="circle" data-pac-bind="style.background:item.color">
+                        <div data-pac-bind="foreach: items">
+                            <div class="circle" data-pac-bind="style: { background: item.color }">
                                 {{item.id}}
                             </div>
                         </div>
@@ -286,6 +285,7 @@
 
                     this.dragItem = null;
                 }
+
                 return false;
             }
         }
