@@ -1141,10 +1141,19 @@
             });
 
             /**
+             * Disable native drag/drop when capture is activated
+             */
+            document.addEventListener('dragstart', event => {
+                if (wakaPAC.hasCapture()) {
+                    event.preventDefault();
+                }
+            });
+
+            /**
              * Handle mouse button up events
              * Maps browser mouse button codes to application message types
              */
-            document.addEventListener('mouseup', function (event) {
+            window.addEventListener('mouseup', function (event) {
                 let messageType;
 
                 if (event.button === 0) {
@@ -2109,6 +2118,12 @@
          * @param {HTMLElement} container - The PAC container element
          */
         setCapture(container) {
+            if (this._captureActive) {
+                this.releaseCapture();
+            }
+
+            document.body.classList.add('pac-capture-active');
+
             this._captureActive = true;
             this._capturedContainer = container;
         },
@@ -2117,6 +2132,12 @@
          * Releases mouse capture, returning to normal hit-test based event routing
          */
         releaseCapture() {
+            if (!this._captureActive) {
+                return;
+            }
+
+            document.body.classList.remove('pac-capture-active');
+
             this._captureActive = false;
             this._capturedContainer = null;
         },
