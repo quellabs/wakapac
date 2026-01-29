@@ -1437,44 +1437,33 @@
                 return;
             }
 
-            // Resolve container - check capture first for mouse events, then handle click routing
-            let container;
+            // Calculate hit-test result as fallback
+            let container = originalEvent.target.closest('[data-pac-id]');
 
-            // Check if this is a click event that should be routed to the down container
+            // Click routing - ensure click goes to same container as button down
             if (messageType === MSG_LCLICK || messageType === MSG_RCLICK || messageType === MSG_MCLICK) {
-                // Route click to the same container that received the corresponding button down
-                if (this._downContainer && this._downContainer.isConnected) {
+                if (this._downContainer?.isConnected) {
                     container = this._downContainer;
-                } else {
-                    container = originalEvent.target.closest('[data-pac-id]');
                 }
-                // Reset downContainer for next click sequence
+
                 this._downContainer = null;
-            }
-            // Check if capture is active and applies to this message type
-            else if (this._captureActive && this.isCaptureAffected(messageType)) {
-                // Verify captured container still exists in DOM
-                if (this._capturedContainer && this._capturedContainer.isConnected) {
+            } else if (this._captureActive && this.isCaptureAffected(messageType)) {
+                // Capture routing - send mouse events to captured container
+                if (this._capturedContainer?.isConnected) {
                     container = this._capturedContainer;
                 } else {
-                    // Container was removed - auto-release capture
                     this.releaseCapture();
-                    container = originalEvent.target.closest('[data-pac-id]');
                 }
-            }
-            // Normal hit-test routing
-            else {
-                container = originalEvent.target.closest('[data-pac-id]');
-            }
-
-            // Track which container received button down events for click routing
-            if (messageType === MSG_LBUTTONDOWN || messageType === MSG_RBUTTONDOWN || messageType === MSG_MBUTTONDOWN) {
-                this._downContainer = container;
             }
 
             // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
                 return;
+            }
+
+            // Track which container received button down events for click routing
+            if (messageType === MSG_LBUTTONDOWN || messageType === MSG_RBUTTONDOWN || messageType === MSG_MBUTTONDOWN) {
+                this._downContainer = container;
             }
 
             // Process event modifiers - return early if event should be filtered
@@ -2114,25 +2103,12 @@
         },
 
         /**
-         * Sets mouse capture to the specified container or its nearest PAC container ancestor.
+         * Sets mouse capture to the specified PAC container.
          * While capture is active, mouse events will be routed to this container
          * regardless of which element is under the cursor.
-         * @param {HTMLElement} element - The element or container to capture mouse input
-         * @throws {Error} If element is invalid or not within a PAC container
+         * @param {HTMLElement} container - The PAC container element
          */
-        setCapture(element) {
-            if (!element || typeof element.closest !== 'function') {
-                throw new Error('setCapture requires a valid DOM element');
-            }
-
-            // Find the PAC container
-            const container = element.closest('[data-pac-id]');
-
-            if (!container) {
-                throw new Error('setCapture requires an element within a PAC container');
-            }
-
-            // Set capture state
+        setCapture(container) {
             this._captureActive = true;
             this._capturedContainer = container;
         },
@@ -7228,7 +7204,7 @@
         const context = window.PACRegistry.get(pacId);
 
         if (!context) {
-            console.warn(`setTimer: Container with id "${pacId}" not found`);
+            console.warn(`No PAC container found with id: ${pacId}`);
             return null;
         }
 
@@ -7347,13 +7323,20 @@
     };
 
     /**
-     * Sets mouse capture to the specified element or its PAC container.
+     * Sets mouse capture to the specified PAC container.
      * While capture is active, mouse events are routed to this container
      * regardless of cursor position.
-     * @param {HTMLElement} element - Element or container to capture mouse input
+     * @param {string} pacId - The pac-id of the container to capture mouse input
      */
-    wakaPAC.setCapture = function(element) {
-        return DomUpdateTracker.setCapture(element);
+    wakaPAC.setCapture = function(pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context) {
+            console.warn(`No PAC container found with id: ${pacId}`);
+            return;
+        }
+
+        return DomUpdateTracker.setCapture(context.container);
     };
 
     /**
