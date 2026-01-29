@@ -251,35 +251,6 @@
     // Built on top of wakaPAC.MSG_USER to avoid collisions with system messages.
     const MSG_DROP_ITEM = wakaPAC.MSG_USER + 1;
 
-    /**
-     * Returns true if the given screen-space point lies within the element's
-     * bounding rectangle.
-     * @param {number} x - Mouse X position (client coordinates)
-     * @param {number} y - Mouse Y position (client coordinates)
-     * @param {HTMLElement} element - Element to test against
-     */
-    function isPointInsideElement(x, y, element) {
-        const rect = element.getBoundingClientRect();
-
-        return x >= rect.left &&
-            x <= rect.right &&
-            y >= rect.top &&
-            y <= rect.bottom;
-    }
-
-    /**
-     * Determines whether the mouse is currently over a specific drop target
-     * at the time of a mouse event.
-     * @param {Object} event - wakaPAC mouse event wrapper
-     * @param {string} targetSelector - CSS selector for the drop target element
-     */
-    function isDropOnTarget(event, targetSelector) {
-        const targetBox = document.querySelector(targetSelector);
-        const { clientX, clientY } = event.originalEvent;
-
-        return isPointInsideElement(clientX, clientY, targetBox);
-    }
-
     // SOURCE component WITHOUT capture (broken)
     wakaPAC('#demoBroken', {
         sourceItems: [
@@ -303,7 +274,7 @@
 
             if (event.message === wakaPAC.MSG_LBUTTONUP) {
                 if (this.dragItem) {
-                    if (isDropOnTarget(event, '#targetBroken .box')) {
+                    if (wakaPAC.ptInElement(event.originalEvent.clientX, event.originalEvent.clientY, document.querySelector('#targetBroken .box'))) {
                         wakaPAC.sendMessage(
                             'targetBroken',
                             MSG_DROP_ITEM,
@@ -367,7 +338,7 @@
             if (event.message === wakaPAC.MSG_LBUTTONUP) {
                 if (this.dragItem) {
                     // Check if over target
-                    if (isDropOnTarget(event, '#targetWorking .box')) {
+                    if (wakaPAC.ptInElement(event.originalEvent.clientX, event.originalEvent.clientY, document.querySelector('#targetWorking .box'))) {
                         wakaPAC.sendMessage(
                             'targetWorking',
                             MSG_DROP_ITEM,

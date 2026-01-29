@@ -7398,6 +7398,27 @@
         return DomUpdateTracker.hasCapture();
     };
 
+    /**
+     * Tests whether a point lies within an element's bounding rectangle
+     * Equivalent to Win32 PtInRect - basic hit testing
+     * @param {number} x - X coordinate in client space
+     * @param {number} y - Y coordinate in client space
+     * @param {HTMLElement} element - Element to test against
+     * @returns {boolean} True if point is inside element's bounds
+     */
+    wakaPAC.ptInElement = function(x, y, element) {
+        if (!element) {
+            return false;
+        }
+
+        const rect = element.getBoundingClientRect();
+
+        return x >= rect.left &&
+            x <= rect.right &&
+            y >= rect.top &&
+            y <= rect.bottom;
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
