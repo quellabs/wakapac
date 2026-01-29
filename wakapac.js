@@ -3136,26 +3136,49 @@
         },
 
         /**
-         * Adds a binding pair if valid
-         * @param {string} pairString - Pair string
-         * @param {Array} pairs - Pairs array
+         * Parses a single "key: value" binding fragment and appends it to the result list
+         * if it is structurally valid.
+         * @param {string} pairString - Raw binding fragment (no top-level commas)
+         * @param {Array} pairs - Accumulator array for parsed bindings
          */
         addBindingPairIfValid(pairString, pairs) {
-            const trimmed = pairString.trim();
+            // Remove leading/trailing whitespace so empty fragments can be ignored early
+            const trimmedPair = pairString.trim();
 
-            if (!trimmed) {
+            if (!trimmedPair) {
                 return;
             }
 
-            const match = trimmed.match(/^\w+(?=:)/);
-            const colonIndex = match ? match[0].length : -1;
+            // Locate the first colon.
+            const colonIndex = trimmedPair.indexOf(':');
 
-            if (colonIndex !== -1) {
-                pairs.push({
-                    type: trimmed.substring(0, colonIndex),
-                    target: trimmed.substring(colonIndex + 1).trim()
-                });
+            // No colon means this fragment cannot be a key-value binding
+            if (colonIndex === -1) {
+                return;
             }
+
+            // Extract the raw key portion (everything before the colon)
+            const rawKey = trimmedPair.slice(0, colonIndex).trim();
+
+            // Normalize the key by stripping surrounding quotes if present.
+            // Only outer quotes are removed; inner quotes are preserved.
+            const key = rawKey.replace(/^['"]|['"]$/g, '');
+
+            // Guard against cases like ": value" or "'': value"
+            if (!key) {
+                return;
+            }
+
+            // Extract the value portion (everything after the first colon).
+            // The value is kept intact because it may contain nested structures
+            // such as objects, arrays, function calls, or ternaries.
+            const value = trimmedPair.slice(colonIndex + 1).trim();
+
+            // Store the parsed binding pair in a normalized structure
+            pairs.push({
+                type: key,
+                target: value
+            });
         }
     };
 

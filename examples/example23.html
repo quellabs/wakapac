@@ -183,7 +183,7 @@
                     <div class="box">
                         <div class="box-title">SOURCE</div>
                         <div data-pac-bind="foreach: sourceItems">
-                            <div class="circle" data-pac-bind="style: { background: item.color }, class: { dragging: dragItem === item }">
+                            <div class="circle" data-pac-bind="style: { background: item.color }, class: { dragging: dragItem === item }, 'data-id': item.id">
                                 {{item.id}}
                             </div>
                         </div>
@@ -199,7 +199,7 @@
                     <div class="box">
                         <div class="box-title">TARGET</div>
                         <div data-pac-bind="foreach: items">
-                            <div class="circle" data-pac-bind="style: { background: item.color }">
+                            <div class="circle" data-pac-bind="style: { background: item.color }, 'data-id': item.id">
                                 {{item.id}}
                             </div>
                         </div>
@@ -218,7 +218,7 @@
                     <div class="box">
                         <div class="box-title">SOURCE</div>
                         <div data-pac-bind="foreach: sourceItems">
-                            <div class="circle" data-pac-bind="style: { background: item.color }, class: { dragging: dragItem === item }">
+                            <div class="circle" data-pac-bind="style: { background: item.color }, class: { dragging: dragItem === item }, 'data-id': item.id">
                                 {{item.id}}
                             </div>
                         </div>
@@ -235,7 +235,7 @@
                     <div class="box">
                         <div class="box-title">TARGET</div>
                         <div data-pac-bind="foreach: items">
-                            <div class="circle" data-pac-bind="style: { background: item.color }">
+                            <div class="circle" data-pac-bind="style: { background: item.color }, 'data-id': item.id">
                                 {{item.id}}
                             </div>
                         </div>
@@ -294,7 +294,7 @@
                 const circle = event.target.closest('.circle');
 
                 if (circle) {
-                    const id = parseInt(circle.textContent.trim());
+                    const id = Number(circle.dataset.id);
                     this.dragItem = this.sourceItems.find(item => item.id === id);
                 }
 
@@ -351,7 +351,7 @@
 
                 if (circle) {
                     // Fetch id
-                    const id = parseInt(circle.textContent.trim());
+                    const id = Number(circle.dataset.id);
 
                     // Find correct item in sourceItems and store it
                     this.dragItem = this.sourceItems.find(item => item.id === id);
