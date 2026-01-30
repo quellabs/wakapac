@@ -1,6 +1,6 @@
 # WakaPAC
 
-A reactive UI library with a centralized desktop-style event engine — in a single ~60KB drop-in script. WakaPAC combines declarative data binding with a message-based event system. You get automatic DOM updates and full low-level input control without a framework stack or build step. No bundler. No dependencies. Include and run.
+A reactive UI library with a centralized desktop-style event engine — in a single ~60KB drop-in script. WakaPAC combines declarative data binding with a message-based event system.
 
 ## Installation
 
@@ -27,7 +27,7 @@ When a component is created, WakaPAC wraps your object in an internal context an
 
 ## Binding Types
 
-Bindings are declared with `data-pac-bind` attributes. Multiple bindings can be combined with commas.
+Bindings are declared with `data-pac-bind` attributes. Multiple bindings can be combined with commas. Text nodes support mustache-style interpolation using `{{ expression }}`. 
 
 ### Value and Checked
 
@@ -94,11 +94,57 @@ Style properties map to expressions.
 </ul>
 ```
 
+`data-pac-item` defines the loop variable name inside the template. The default value is `item`.
+
 ### Multiple Bindings
 
 ```html
 <input data-pac-bind="value: name, class: { invalid: hasError }">
 ```
+
+## Built-in Reactive Properties
+
+Each component instance exposes a small set of runtime-provided properties that update automatically and can be used in bindings, computed properties, and msgProc logic.
+
+### pacId
+
+Every component receives a unique `pacId`. It is used with static helper APIs such as timers, capture, and cross-component messaging.
+
+```javascript
+this._timerId = wakaPAC.setTimer(this.pacId, 1000);
+wakaPAC.sendMessage(this.pacId, ...);
+```
+
+### Browser State
+
+Browser state flags are reactive and update automatically:
+
+```javascript
+this.browserOnline
+this.browserVisible
+this.browserFocused
+```
+
+Example:
+
+```html
+<div data-pac-bind="visible: browserOnline">
+  Online
+</div>
+```
+
+### Container State
+
+Container-level state is also exposed reactively:
+
+```javascript
+this.containerVisible
+this.containerFocused
+this.containerWidth
+this.containerHeight
+```
+
+These values update when visibility, focus, or layout changes.
 
 ## Message Processing (msgProc)
 
@@ -144,11 +190,28 @@ Message constants identify the source category:
 
 Bindings update the DOM from state changes. `msgProc` updates state and behavior from messages. This keeps DOM synchronization and interaction logic separate while operating on the same component state.
 
+## Lifecycle Hooks
+
+Components can define optional lifecycle methods. These are called automatically by the runtime at specific stages. Only methods that are defined are invoked.
+
+```javascript
+init()     // runs once after the component context is created, before bindings are applied
+ready()    // runs after bindings are active and the container is connected
+destroy()  // runs when the component container is removed from the DOM
+```
+
+Typical usage:
+- `init` — start timers, initialize internal state, register gestures
+- `ready` — perform DOM-dependent work or measurements
+- `destroy` — stop timers and release external resources
+
 ## Quick Examples
 
 The following examples show the core execution model in practice.
 
 ### Reactive State + Two-Way Binding
+
+State updates the DOM. Input updates state. No listeners required.
 
 ```html
 <div id="app">
@@ -163,9 +226,9 @@ wakaPAC('#app', {
 </script>
 ```
 
-State updates the DOM. Input updates state. No listeners required.
-
 ### Computed Property
+
+Computed values recalculate automatically.
 
 ```html
 <div id="app">
@@ -186,7 +249,21 @@ State updates the DOM. Input updates state. No listeners required.
 </script>
 ```
 
-Computed values recalculate automatically.
+### Watchers
+
+Watchers run a function when a reactive property changes. Use watchers for side effects such as logging, persistence, or triggering external actions. They run after the property value has been updated.
+
+```javascript
+wakaPAC('#app', {
+    count: 0,
+
+    watchers: {
+        count(newValue, oldValue) {
+            console.log('count changed:', oldValue, '→', newValue);
+        }
+    }
+});
+```
 
 ### Centralized Event Handling
 
@@ -209,17 +286,19 @@ Computed values recalculate automatically.
                 this.ticks++;
             }
 
+            // Return `true` from msgProc to allow default processing
+            // Return `false` to stop further handling.
             return true;
         }
     });
 </script>
 ```
 
-Input, timers, and system events are handled in one place.
+> Note: Properties starting with `_`, like _timerId, are not made reactive and are ignored by the binding engine.
 
 ## Mouse Gesture Recognition
 
-WakaPAC includes built-in mouse gesture recognition. While holding the right mouse button, pointer movement is recorded and matched against direction patterns. When a pattern matches, `msgProc` receives a `MSG_GESTURE` message. Gesture tracking and pattern matching are built in and delivered as MSG_GESTURE messages.
+WakaPAC includes built-in mouse gesture recognition. While holding the right mouse button, pointer movement is recorded and matched against direction patterns. When a pattern matches, `msgProc` receives a `MSG_GESTURE` message. Gesture tracking and pattern matching are built in and delivered as `MSG_GESTURE` messages.
 
 ### Example — Gesture Commands
 
@@ -240,18 +319,10 @@ WakaPAC includes built-in mouse gesture recognition. While holding the right mou
                     case 'right':
                         history.forward();
                         break;
-
-                    case 'L': // down → right
-                        this.closeTab();
-                        break;
                 }
             }
 
             return true;
-        },
-
-        closeTab() {
-            console.log('Close action');
         }
     });
 </script>
