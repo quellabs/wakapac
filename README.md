@@ -334,7 +334,7 @@ While capture is active, mouse move and button events are delivered to the captu
 
 ## Mouse Gesture Recognition
 
-WakaPAC includes built-in mouse gesture recognition. While holding the right mouse button, pointer movement is recorded and matched against direction patterns. When a pattern matches, `msgProc` receives a `MSG_GESTURE` message. Gesture tracking and pattern matching are built in and delivered as `MSG_GESTURE` messages.
+WakaPAC includes built-in mouse gesture recognition. While holding the right mouse button, pointer movement is recorded and matched against direction patterns. When a pattern matches, `msgProc` receives a `MSG_GESTURE` message.
 
 ### Example — Gesture Commands
 
