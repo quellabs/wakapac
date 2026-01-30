@@ -63,8 +63,9 @@ Message constants identify the source category:
 | Focus    | `MSG_FOCUS`, `MSG_BLUR`                                                  |
 | System   | `MSG_TIMER`, `MSG_GESTURE`                                               |
 
-Bindings update the DOM from state changes. `msgProc` updates state and behavior from messages. This keeps DOM synchronization and interaction logic separate while operating on the same component state.
+> Note: This is not a complete list. See the full message constant reference in the documentation.
 
+Bindings update the DOM from state changes. `msgProc` updates state and behavior from messages. This keeps DOM synchronization and interaction logic separate while operating on the same component state.
 
 ## Quick Examples
 
@@ -141,7 +142,7 @@ Input, timers, and system events are handled in one place.
 
 ## Mouse Gesture Recognition
 
-WakaPAC includes built-in mouse gesture recognition. While holding the right mouse button, pointer movement is recorded and matched against direction patterns. When a pattern matches, `msgProc` receives a `MSG_GESTURE` message. Gesture tracking and pattern matching are built in and delivered through msgProc.
+WakaPAC includes built-in mouse gesture recognition. While holding the right mouse button, pointer movement is recorded and matched against direction patterns. When a pattern matches, `msgProc` receives a `MSG_GESTURE` message. Gesture tracking and pattern matching are built in and delivered as MSG_GESTURE messages.
 
 ### Example — Gesture Commands
 
@@ -153,7 +154,6 @@ WakaPAC includes built-in mouse gesture recognition. While holding the right mou
 <script>
     wakaPAC('#app', {
         msgProc(event) {
-
             if (event.message === wakaPAC.MSG_GESTURE) {
                 switch (event.pattern) {
                     case 'left':
@@ -182,14 +182,20 @@ WakaPAC includes built-in mouse gesture recognition. While holding the right mou
 
 ### Built-in Patterns
 
-- `left`, `right`, `up`, `down`
-- `L` (down → right)
-- `inverted-L` (down → left)
+| Pattern      | Directions | Description     |
+|--------------|------------|-----------------|
+| `right`      | R          | Swipe right     |
+| `left`       | L          | Swipe left      |
+| `up`         | U          | Swipe up        |
+| `down`       | D          | Swipe down      |
+| `L`          | D, R       | Down then right |
+| `inverted-L` | D, L       | Down then left  |
 
 Register custom patterns:
 
 ```javascript
 wakaPAC.registerGesture('refresh', ['U','D']);
+wakaPAC.unregisterGesture('refresh');
 ```
 
 ## Core Features
