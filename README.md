@@ -198,6 +198,28 @@ wakaPAC.registerGesture('refresh', ['U','D']);
 wakaPAC.unregisterGesture('refresh');
 ```
 
+## Component Communication
+
+Components can communicate without DOM event wiring using built-in messaging helpers. Parent/child relationships are determined automatically from the DOM structure. If a WakaPAC container is nested inside another WakaPAC container, it is treated as a child component of that parent. No manual registration or wiring is required.
+
+### Parent–Child
+
+```javascript
+// Child notifies parent
+this.notifyParent('itemSelected', { id: 42 });
+
+// Parent receives
+receiveFromChild(eventType, data, childPAC) {
+    if (eventType === 'itemSelected') {
+        this.loadItem(data.id);
+    }
+}
+
+// Parent commands child
+this.notifyChild('item-list', 'refresh');
+this.notifyChildren('themeChanged', { theme: 'dark' });
+```
+
 ## Core Features
 
 - Central `msgProc` message pipeline for all input and system events
