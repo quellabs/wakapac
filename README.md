@@ -217,9 +217,9 @@ Message constants identify the source category:
 | Focus    | `MSG_FOCUS`, `MSG_BLUR`                                                  |
 | System   | `MSG_TIMER`, `MSG_GESTURE`                                               |
 
-> Note: This is not a complete list. See the full message constant reference in the documentation.
-
 Bindings update the DOM from state changes. `msgProc` updates state and behavior from messages. This keeps DOM synchronization and interaction logic separate while operating on the same component state.
+
+> Note: This is not a complete list. See the full message constant reference in the documentation.
 
 ## Quick Examples
 
