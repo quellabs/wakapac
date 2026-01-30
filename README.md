@@ -110,7 +110,7 @@ WakaPAC automatically provides reactive browser state properties that update whe
 ### Available Properties
 
 **Component Identity:**
-- **`pacId`**: The unique identifier for this component (same as the `data-pac-id` attribute value)
+- **`pacId`**: The unique identifier for this component. Taken from `id` attribute, `data-pac-id` attribute or auto-generated when absent.
 
 **Network Status:**
 - **`browserOnline`**: `true` when the browser is online, `false` when offline
