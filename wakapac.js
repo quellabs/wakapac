@@ -471,42 +471,6 @@
         },
 
         /**
-         * Gets the global position of an element within the document
-         * @param {string|Element} elementOrId - Element ID (with or without #) or DOM element
-         * @returns {Object|null} Object with x, y properties, or null if not found
-         */
-        getElementPosition(elementOrId) {
-            let element;
-
-            // Handle different input types
-            if (typeof elementOrId === 'string') {
-                // Remove # prefix if present
-                const id = elementOrId.startsWith('#') ? elementOrId.slice(1) : elementOrId;
-                element = document.getElementById(id);
-            } else if (elementOrId && elementOrId.nodeType === Node.ELEMENT_NODE) {
-                element = elementOrId;
-            } else {
-                return null;
-            }
-
-            if (!element) {
-                return null;
-            }
-
-            // Get bounding rect relative to viewport
-            const rect = element.getBoundingClientRect();
-
-            // Add current scroll position to get global document coordinates
-            const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
-            const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
-
-            return {
-                x: rect.left + scrollX,
-                y: rect.top + scrollY
-            };
-        },
-
-        /**
          * Converts a DOMRect object to a plain JavaScript object
          * @param {DOMRect|DOMRectReadOnly} domRect - The DOMRect object to convert
          * @returns {Object} Plain object containing all DOMRect properties
@@ -5167,17 +5131,6 @@
              */
             sanitizeUserInput: {
                 value: (html) => Utils.sanitizeUserInput(html),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Gets the global position of an element within the document
-             * @param {string|Element} elementOrId - Element ID or DOM element
-             * @returns {Object|null} Position object with x, y properties or null if not found
-             */
-            getElementPosition: {
-                value: (elementOrId) => Utils.getElementPosition(elementOrId),
                 writable: false,
                 enumerable: false
             },
