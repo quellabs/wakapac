@@ -10,10 +10,6 @@ A reactive UI library with a centralized desktop-style event engine — in a sin
 
 <!-- Optional: Add WakaSync for HTTP functionality -->
 <script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakasync.min.js"></script>
-
-<!-- Or download files -->
-<script src="wakapac.min.js"></script>
-<script src="wakasync.min.js"></script>
 ```
 
 ## Introduction
