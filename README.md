@@ -1,16 +1,74 @@
-
 # WakaPAC
 
 A reactive UI library with a centralized desktop-style event engine — in a single ~60KB drop-in script. WakaPAC combines declarative data binding with a message-based event system. You get automatic DOM updates and full low-level input control without a framework stack or build step. No bundler. No dependencies. Include and run.
 
+## Installation
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.min.js"></script>
+
+<!-- Optional HTTP client -->
+<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakasync.min.js"></script>
+```
+
 ## Introduction
 
-WakaPAC provides two capabilities that are normally split across separate libraries:
+WakaPAC is a small runtime that attaches a reactive, message-driven execution model to a DOM container.
 
-1. **Reactive data binding** — declare your state, bind it to HTML, and the DOM updates automatically. Supports two-way binding, computed properties, watchers, and deep reactivity for nested objects and arrays.
-2. **Desktop-style event system** — a centralized `msgProc` receives normalized messages for mouse, keyboard, timers, and gestures.
+```js
+wakaPAC('#app', { ... })
+```
+
+When a component is created, WakaPAC wraps your object in an internal context and wires three pipelines:
+
+- **State pipeline** — property writes are observed and propagate to bound DOM nodes
+- **Binding pipeline** — templates and `data-pac-bind` attributes are compiled into live DOM bindings
+- **Event pipeline** — browser events, timers, and gestures are normalized and dispatched as messages
+
+Your code does not receive raw DOM events. Input flows through the event pipeline and arrives as structured messages:
+
+```js
+msgProc(event) {
+    if (event.message === wakaPAC.MSG_LCLICK) {
+        const {x, y} = wakaPAC.MAKEPOINTS(event.lParam);
+        console.log('click at', x, y);
+    }
+
+    return true;
+}
+```
+
+WakaPAC messages are plain objects with a normalized structure. A typical event looks like:
+
+```javascript
+{
+    type: 'pac:event',             // Always 'pac:event' for msgProc
+    message: 0x0201,               // Message type from MSG_TYPES constants
+    wParam: 0x0001,                // Primary parameter (varies by message type)
+    lParam: 0x00640032,            // Secondary parameter (varies by message type)
+    target: HTMLElement,           // The DOM element that triggered the event
+    originalEvent: Event,          // Original browser DOM event object
+    timestamp: 1640995200000       // Timestamp when event was dispatched
+}
+```
+
+Message constants identify the source category:
+
+| Category | Messages                                                                 |
+|----------|--------------------------------------------------------------------------|
+| Mouse    | `MSG_LBUTTONDOWN`, `MSG_LBUTTONUP`, `MSG_MOUSEMOVE`, `MSG_LBUTTONDBLCLK` |
+| Click    | `MSG_LCLICK`, `MSG_MCLICK`, `MSG_RCLICK`                                 |
+| Keyboard | `MSG_KEYDOWN`, `MSG_KEYUP`                                               |
+| Form     | `MSG_CHAR`, `MSG_CHANGE`, `MSG_SUBMIT`                                   |
+| Focus    | `MSG_FOCUS`, `MSG_BLUR`                                                  |
+| System   | `MSG_TIMER`, `MSG_GESTURE`                                               |
+
+Bindings update the DOM from state changes. `msgProc` updates state and behavior from messages. This keeps DOM synchronization and interaction logic separate while operating on the same component state.
+
 
 ## Quick Examples
+
+The following examples show the core execution model in practice.
 
 ### Reactive State + Two-Way Binding
 
@@ -81,11 +139,9 @@ Computed values recalculate automatically.
 
 Input, timers, and system events are handled in one place.
 
-## Mouse Gesture Recognition (Why `msgProc` Exists)
+## Mouse Gesture Recognition
 
-WakaPAC includes built-in mouse gesture recognition. While holding the right mouse button, pointer movement is recorded and matched against direction patterns. When a pattern matches, `msgProc` receives a `MSG_GESTURE` message.
-
-No per-element listeners. No custom tracking logic. No gesture state machines.
+WakaPAC includes built-in mouse gesture recognition. While holding the right mouse button, pointer movement is recorded and matched against direction patterns. When a pattern matches, `msgProc` receives a `MSG_GESTURE` message. Gesture tracking and pattern matching are built in and delivered through msgProc.
 
 ### Example — Gesture Commands
 
@@ -95,44 +151,34 @@ No per-element listeners. No custom tracking logic. No gesture state machines.
 </div>
 
 <script>
-wakaPAC('#app', {
-  msgProc(event) {
+    wakaPAC('#app', {
+        msgProc(event) {
 
-    if (event.message === wakaPAC.MSG_GESTURE) {
-      switch (event.pattern) {
-        case 'left':
-          history.back();
-          break;
+            if (event.message === wakaPAC.MSG_GESTURE) {
+                switch (event.pattern) {
+                    case 'left':
+                        history.back();
+                        break;
 
-        case 'right':
-          history.forward();
-          break;
+                    case 'right':
+                        history.forward();
+                        break;
 
-        case 'L': // down → right
-          this.closeTab();
-          break;
-      }
-    }
+                    case 'L': // down → right
+                        this.closeTab();
+                        break;
+                }
+            }
 
-    return true;
-  },
+            return true;
+        },
 
-  closeTab() {
-    console.log('Close action');
-  }
-});
+        closeTab() {
+            console.log('Close action');
+        }
+    });
 </script>
 ```
-
-What you get automatically:
-
-- Direction detection
-- Pattern matching
-- Start/end coordinates
-- Gesture duration
-- Direction sequence
-
-All delivered through the same message pipeline as clicks, keys, and timers.
 
 ### Built-in Patterns
 
@@ -146,19 +192,10 @@ Register custom patterns:
 wakaPAC.registerGesture('refresh', ['U','D']);
 ```
 
-
-## Installation
-
-```html
-<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.min.js"></script>
-
-<!-- Optional HTTP client -->
-<script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakasync.min.js"></script>
-```
-
 ## Core Features
 
 - Central `msgProc` message pipeline for all input and system events
+- Normalized event objects with message constants (wParam/lParam model)
 - Built-in mouse gesture recognition (pattern detection + matching)
 - Integrated timer system with message delivery
 - Mustache-style interpolation
