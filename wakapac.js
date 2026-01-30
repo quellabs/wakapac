@@ -3815,24 +3815,6 @@
         this.intersectionObserver.observe(this.container);
     };
 
-    /**
-     * Manual visibility calculation using getBoundingClientRect().
-     * This is the fallback method used when IntersectionObserver isn't available
-     */
-    Context.prototype.updateContainerVisibility = function() {
-        // Get current state using Utils
-        const rect = Utils.domRectToSimpleObject(this.container.getBoundingClientRect());
-
-        // Set dimensions
-        this.abstraction.containerClientRect = rect;
-        this.abstraction.containerWidth = rect.width;
-        this.abstraction.containerHeight = rect.height;
-
-        // Use Utils for consistent visibility calculation
-        this.abstraction.containerVisible = Utils.isElementVisible(this.container);
-        this.abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
-    }
-
     // =============================================================================
     // DOM SCANNING AND BINDING REGISTRATION
     // =============================================================================
@@ -4632,7 +4614,7 @@
                 this.abstraction.browserScrollY = stateData.scrollY;
                 break;
 
-            case 'resize':
+            case 'resize': {
                 // Update viewport dimensions and document size
                 this.abstraction.browserViewportWidth = stateData.viewportWidth;
                 this.abstraction.browserViewportHeight = stateData.viewportHeight;
@@ -4643,9 +4625,19 @@
                 this.abstraction.browserScrollX = stateData.scrollX;
                 this.abstraction.browserScrollY = stateData.scrollY;
 
-                // Recalculate container visibility after dimension changes
-                this.updateContainerVisibility();
+                // Get bounding rect
+                const rect = this.container.getBoundingClientRect();
+
+                // Set dimensions
+                this.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
+                this.abstraction.containerWidth = rect.width;
+                this.abstraction.containerHeight = rect.height;
+
+                // Use Utils for consistent visibility calculation
+                this.abstraction.containerVisible = Utils.isElementVisible(this.container);
+                this.abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
                 break;
+            }
 
             default:
                 console.warn('Unknown browser state message ' + stateType);
