@@ -25,7 +25,71 @@ When a component is created, WakaPAC wraps your object in an internal context an
 - **Binding pipeline** — templates and `data-pac-bind` attributes are compiled into live DOM bindings
 - **Event pipeline** — browser events, timers, and gestures are normalized and dispatched as messages
 
-Your code does not receive raw DOM events. Input flows through the event pipeline and arrives as structured messages:
+## Binding Types
+
+Bindings are declared with `data-pac-bind` attributes. Multiple bindings can be combined with commas.
+
+### Value and Checked
+
+Two-way form bindings:
+
+```html
+<input data-pac-bind="value: name">
+<input type="checkbox" data-pac-bind="checked: isActive">
+```
+
+### Click and Event Handlers
+
+Call component methods directly:
+
+```html
+<button data-pac-bind="click: save">Save</button>
+<button data-pac-bind="click: removeItem">Delete</button>
+```
+
+### Visibility and Conditional Rendering
+
+```html
+<div data-pac-bind="visible: showPanel">
+<div data-pac-bind="if: isAdmin">
+```
+
+- `visible` toggles display
+- `if` adds or removes the node
+
+### Class Binding
+
+```html
+<div data-pac-bind="class: { active: isSelected, disabled: !enabled }">
+```
+
+Object keys are class names, values are expressions.
+
+### Style Binding
+
+```html
+<div data-pac-bind="style: { color: textColor, fontSize: size + 'px' }">
+```
+
+Style properties map to expressions.
+
+### List Rendering
+
+```html
+<ul data-pac-bind="foreach: items" data-pac-item="item">
+  <li>{{ item.label }}</li>
+</ul>
+```
+
+### Multiple Bindings
+
+```html
+<input data-pac-bind="value: name, class: { invalid: hasError }">
+```
+
+## Message Processing (msgProc)
+
+Bindings define how state connects to the DOM. Interaction and system input are handled separately through the message pipeline, which delivers normalized events to your component via `msgProc`.
 
 ```js
 msgProc(event) {
