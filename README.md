@@ -162,6 +162,21 @@ WakaPAC automatically provides reactive browser state properties that update whe
 <p>Container is {{ containerVisible ? 'visible' : 'hidden' }} in viewport</p>
 ```
 
+## Lifecycle Hooks
+
+Components can define optional lifecycle methods. These are called automatically by the runtime at specific stages. Only methods that are defined are invoked.
+
+```javascript
+init()     // runs once after the component context is created, before bindings are applied
+ready()    // runs after bindings are active and the container is connected
+destroy()  // runs when the component container is removed from the DOM
+```
+
+Typical usage:
+- `init` — start timers, initialize internal state, register gestures
+- `ready` — perform DOM-dependent work or measurements
+- `destroy` — stop timers and release external resources
+
 ## Message Processing (msgProc)
 
 Bindings define how state connects to the DOM. Interaction and system input are handled separately through the message pipeline, which delivers normalized events to your component via `msgProc`.
@@ -205,21 +220,6 @@ Message constants identify the source category:
 > Note: This is not a complete list. See the full message constant reference in the documentation.
 
 Bindings update the DOM from state changes. `msgProc` updates state and behavior from messages. This keeps DOM synchronization and interaction logic separate while operating on the same component state.
-
-## Lifecycle Hooks
-
-Components can define optional lifecycle methods. These are called automatically by the runtime at specific stages. Only methods that are defined are invoked.
-
-```javascript
-init()     // runs once after the component context is created, before bindings are applied
-ready()    // runs after bindings are active and the container is connected
-destroy()  // runs when the component container is removed from the DOM
-```
-
-Typical usage:
-- `init` — start timers, initialize internal state, register gestures
-- `ready` — perform DOM-dependent work or measurements
-- `destroy` — stop timers and release external resources
 
 ## Quick Examples
 
