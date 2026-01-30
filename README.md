@@ -197,7 +197,7 @@ WakaPAC messages are plain objects with a normalized structure. A typical event 
 ```javascript
 {
     type: 'pac:event',             // Always 'pac:event' for msgProc
-    message: wakaPAC.MSG_*,        // Message type from MSG_TYPES constants
+    message: wakaPAC.MSG_*,        // Message constant
     wParam: 0x0001,                // Primary parameter (varies by message type)
     lParam: 0x00640032,            // Secondary parameter (varies by message type)
     target: HTMLElement,           // The DOM element that triggered the event
@@ -444,6 +444,7 @@ wakaPAC('#app', {
 - Central `msgProc` message pipeline for all input and system events
 - Normalized event objects with message constants (wParam/lParam model)
 - Built-in mouse gesture recognition (pattern detection + matching)
+- Mouse capture support for drag-style interactions
 - Integrated timer system with message delivery
 - Mustache-style interpolation
 - Declarative attribute bindings
