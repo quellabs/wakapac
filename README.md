@@ -133,6 +133,8 @@ Example:
 </div>
 ```
 
+> Not a complete list — see the full runtime property reference in the documentation.
+
 ### Container State
 
 Container-level state is also exposed reactively:
@@ -145,6 +147,8 @@ this.containerHeight
 ```
 
 These values update when visibility, focus, or layout changes.
+
+> Not a complete list — see the full runtime property reference in the documentation.
 
 ## Message Processing (msgProc)
 
@@ -166,7 +170,7 @@ WakaPAC messages are plain objects with a normalized structure. A typical event 
 ```javascript
 {
     type: 'pac:event',             // Always 'pac:event' for msgProc
-    message: 0x0201,               // Message type from MSG_TYPES constants
+    message: wakaPAC.MSG_*,        // Message type from MSG_TYPES constants
     wParam: 0x0001,                // Primary parameter (varies by message type)
     lParam: 0x00640032,            // Secondary parameter (varies by message type)
     target: HTMLElement,           // The DOM element that triggered the event
@@ -295,6 +299,26 @@ wakaPAC('#app', {
 ```
 
 > Note: Properties starting with `_`, like _timerId, are not made reactive and are ignored by the binding engine.
+
+## Mouse Capture
+
+Mouse capture routes all mouse events to a specific component, even when the pointer leaves its container. This is useful for drag operations, drawing tools, and resize interactions.
+
+```javascript
+msgProc(event) {
+    if (event.message === wakaPAC.MSG_LBUTTONDOWN) {
+        wakaPAC.setCapture(this.pacId);
+    }
+
+    if (event.message === wakaPAC.MSG_LBUTTONUP) {
+        wakaPAC.releaseCapture();
+    }
+
+    return true;
+}
+```
+
+While capture is active, mouse move and button events are delivered to the captured component.
 
 ## Mouse Gesture Recognition
 
