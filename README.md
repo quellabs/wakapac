@@ -57,6 +57,19 @@ Call component methods directly:
 - `visible` toggles display
 - `if` adds or removes the node
 
+### Comment Block Conditionals (`wp-if`)
+
+For conditional rendering of multiple sibling nodes or larger fragments, WakaPAC supports comment-based conditional blocks.
+
+```html
+<!-- wp-if: isAdmin -->
+<div class="admin-panel">
+  <h2>Admin</h2>
+  <button data-pac-bind="click: resetSystem">Reset</button>
+</div>
+<!-- /wp-if -->
+```
+
 ### Class Binding
 
 ```html
