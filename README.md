@@ -85,7 +85,7 @@ No build tools. No dependency management. Just include the script and go.
 <input type="checkbox" data-pac-bind="checked: isActive">
 <div data-pac-bind="visible: showPanel">
 <div data-pac-bind="if: user.isAdmin">Admin Panel</div>
-<div data-pac-bind="class: {active: isSelected, disabled: !enabled}">
+<div data-pac-bind="class: { active: isSelected, disabled: !enabled }">
 <button data-pac-bind="click: handleClick">
 ```
 
@@ -152,6 +152,7 @@ wakaPAC('#app', {
                 if (event.wParam === wakaPAC.VK_ESCAPE) {
                     this.closeModal();
                 }
+                
                 break;
                 
             case wakaPAC.MSG_LCLICK:
@@ -174,14 +175,14 @@ wakaPAC('#app', {
 
 ### Message Types
 
-| Category | Messages |
-|----------|----------|
-| Mouse | `MSG_LBUTTONDOWN`, `MSG_LBUTTONUP`, `MSG_RBUTTONDOWN`, `MSG_RBUTTONUP`, `MSG_MOUSEMOVE`, `MSG_LBUTTONDBLCLK` |
-| Click | `MSG_LCLICK`, `MSG_MCLICK`, `MSG_RCLICK` |
-| Keyboard | `MSG_KEYDOWN`, `MSG_KEYUP` |
-| Form | `MSG_CHAR`, `MSG_CHANGE`, `MSG_SUBMIT` |
-| Focus | `MSG_FOCUS`, `MSG_BLUR` |
-| System | `MSG_TIMER`, `MSG_GESTURE` |
+| Category | Messages                                                                 |
+|----------|--------------------------------------------------------------------------|
+| Mouse    | `MSG_LBUTTONDOWN`, `MSG_LBUTTONUP`, `MSG_MOUSEMOVE`, `MSG_LBUTTONDBLCLK` |
+| Click    | `MSG_LCLICK`, `MSG_MCLICK`, `MSG_RCLICK`                                 |
+| Keyboard | `MSG_KEYDOWN`, `MSG_KEYUP`                                               |
+| Form     | `MSG_CHAR`, `MSG_CHANGE`, `MSG_SUBMIT`                                   |
+| Focus    | `MSG_FOCUS`, `MSG_BLUR`                                                  |
+| System   | `MSG_TIMER`, `MSG_GESTURE`                                               |
 
 ### Modifier Key Constants
 
@@ -260,11 +261,11 @@ wakaPAC('#game', {
 
 ### Timer Methods
 
-| Method | Description |
-|--------|-------------|
-| `this.setTimer(ms)` | Start timer, returns timer ID |
-| `this.killTimer(id)` | Stop specific timer |
-| `this.killAllTimers()` | Stop all component timers |
+| Method                 | Description                   |
+|------------------------|-------------------------------|
+| `this.setTimer(ms)`    | Start timer, returns timer ID |
+| `this.killTimer(id)`   | Stop specific timer           |
+| `this.killAllTimers()` | Stop all component timers     |
 
 Timers are automatically cleaned up when a component is destroyed.
 
@@ -280,17 +281,21 @@ wakaPAC('#browser', {
                 case 'left':
                     history.back();
                     break;
+                    
                 case 'right':
                     history.forward();
                     break;
+                    
                 case 'down':
                     this.openNewTab();
                     break;
+                    
                 case 'L':  // Down then right
                     this.closeTab();
                     break;
             }
         }
+        
         return true;
     }
 });
@@ -298,20 +303,20 @@ wakaPAC('#browser', {
 
 ### Built-in Patterns
 
-| Pattern | Directions | Description |
-|---------|------------|-------------|
-| `right` | R | Swipe right |
-| `left` | L | Swipe left |
-| `up` | U | Swipe up |
-| `down` | D | Swipe down |
-| `L` | D, R | Down then right |
-| `inverted-L` | D, L | Down then left |
+| Pattern      | Directions | Description     |
+|--------------|------------|-----------------|
+| `right`      | R          | Swipe right     |
+| `left`       | L          | Swipe left      |
+| `up`         | U          | Swipe up        |
+| `down`       | D          | Swipe down      |
+| `L`          | D, R       | Down then right |
+| `inverted-L` | D, L       | Down then left  |
 
 ### Custom Patterns
 
 ```javascript
 // Register custom gesture
-wakaPAC.registerGesture('refresh', ['U', 'D']);    // Up-down
+wakaPAC.registerGesture('refresh', ['U', 'D']);     // Up-down
 wakaPAC.registerGesture('zigzag', ['R', 'D', 'R']); // Right-down-right
 
 // Remove a pattern
