@@ -1029,6 +1029,15 @@
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
+        /** @private {boolean} Flag indicating if mouse capture is currently active */
+        _captureActive: false,
+
+        /** @private {HTMLElement|null} The container element that has captured mouse input */
+        _capturedContainer: null,
+
+        /** @private {HTMLElement|null} The container that received the last mousedown event (for click routing) */
+        _downContainer: null,
+
         initialize() {
             // Store reference to this object for use in closures
             const self = this;
@@ -1132,10 +1141,19 @@
             });
 
             /**
+             * Disable native drag/drop when capture is activated
+             */
+            document.addEventListener('dragstart', event => {
+                if (wakaPAC.hasCapture()) {
+                    event.preventDefault();
+                }
+            });
+
+            /**
              * Handle mouse button up events
              * Maps browser mouse button codes to application message types
              */
-            document.addEventListener('mouseup', function (event) {
+            window.addEventListener('mouseup', function (event) {
                 let messageType;
 
                 if (event.button === 0) {
@@ -1428,12 +1446,33 @@
                 return;
             }
 
-            // Find the nearest container element that should receive the event
-            const container = originalEvent.target.closest('[data-pac-id]');
+            // Calculate hit-test result as fallback
+            let container = originalEvent.target.closest('[data-pac-id]');
+
+            // Click routing - ensure click goes to same container as button down
+            if (messageType === MSG_LCLICK || messageType === MSG_RCLICK || messageType === MSG_MCLICK) {
+                if (this._downContainer?.isConnected) {
+                    container = this._downContainer;
+                }
+
+                this._downContainer = null;
+            } else if (this._captureActive && this.isCaptureAffected(messageType)) {
+                // Capture routing - send mouse events to captured container
+                if (this._capturedContainer?.isConnected) {
+                    container = this._capturedContainer;
+                } else {
+                    this.releaseCapture();
+                }
+            }
 
             // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
                 return;
+            }
+
+            // Track which container received button down events for click routing
+            if (messageType === MSG_LBUTTONDOWN || messageType === MSG_RBUTTONDOWN || messageType === MSG_MBUTTONDOWN) {
+                this._downContainer = container;
             }
 
             // Process event modifiers - return early if event should be filtered
@@ -2051,7 +2090,65 @@
             }
 
             return true; // Process the event
-        }
+        },
+
+        /**
+         * Determines if a message type is affected by mouse capture
+         * @param {number} messageType - The message type to check
+         * @returns {boolean} True if this message type should use capture routing
+         */
+        isCaptureAffected(messageType) {
+            return messageType === MSG_MOUSEMOVE ||
+                   messageType === MSG_LBUTTONDOWN ||
+                   messageType === MSG_LBUTTONUP ||
+                   messageType === MSG_LBUTTONDBLCLK ||
+                   messageType === MSG_RBUTTONDOWN ||
+                   messageType === MSG_RBUTTONUP ||
+                   messageType === MSG_MBUTTONDOWN ||
+                   messageType === MSG_MBUTTONUP ||
+                   messageType === MSG_LCLICK ||
+                   messageType === MSG_MCLICK ||
+                   messageType === MSG_RCLICK;
+        },
+
+        /**
+         * Sets mouse capture to the specified PAC container.
+         * While capture is active, mouse events will be routed to this container
+         * regardless of which element is under the cursor.
+         * @param {HTMLElement} container - The PAC container element
+         */
+        setCapture(container) {
+            if (this._captureActive) {
+                this.releaseCapture();
+            }
+
+            document.body.classList.add('pac-capture-active');
+
+            this._captureActive = true;
+            this._capturedContainer = container;
+        },
+
+        /**
+         * Releases mouse capture, returning to normal hit-test based event routing
+         */
+        releaseCapture() {
+            if (!this._captureActive) {
+                return;
+            }
+
+            document.body.classList.remove('pac-capture-active');
+
+            this._captureActive = false;
+            this._capturedContainer = null;
+        },
+
+        /**
+         * Checks if mouse capture is currently active
+         * @returns {boolean} True if capture is active
+         */
+        hasCapture() {
+            return this._captureActive;
+        },
     }
 
     // ============================================================================
@@ -3039,26 +3136,49 @@
         },
 
         /**
-         * Adds a binding pair if valid
-         * @param {string} pairString - Pair string
-         * @param {Array} pairs - Pairs array
+         * Parses a single "key: value" binding fragment and appends it to the result list
+         * if it is structurally valid.
+         * @param {string} pairString - Raw binding fragment (no top-level commas)
+         * @param {Array} pairs - Accumulator array for parsed bindings
          */
         addBindingPairIfValid(pairString, pairs) {
-            const trimmed = pairString.trim();
+            // Remove leading/trailing whitespace so empty fragments can be ignored early
+            const trimmedPair = pairString.trim();
 
-            if (!trimmed) {
+            if (!trimmedPair) {
                 return;
             }
 
-            const match = trimmed.match(/^\w+(?=:)/);
-            const colonIndex = match ? match[0].length : -1;
+            // Locate the first colon.
+            const colonIndex = trimmedPair.indexOf(':');
 
-            if (colonIndex !== -1) {
-                pairs.push({
-                    type: trimmed.substring(0, colonIndex),
-                    target: trimmed.substring(colonIndex + 1).trim()
-                });
+            // No colon means this fragment cannot be a key-value binding
+            if (colonIndex === -1) {
+                return;
             }
+
+            // Extract the raw key portion (everything before the colon)
+            const rawKey = trimmedPair.slice(0, colonIndex).trim();
+
+            // Normalize the key by stripping surrounding quotes if present.
+            // Only outer quotes are removed; inner quotes are preserved.
+            const key = rawKey.replace(/^['"]|['"]$/g, '');
+
+            // Guard against cases like ": value" or "'': value"
+            if (!key) {
+                return;
+            }
+
+            // Extract the value portion (everything after the first colon).
+            // The value is kept intact because it may contain nested structures
+            // such as objects, arrays, function calls, or ternaries.
+            const value = trimmedPair.slice(colonIndex + 1).trim();
+
+            // Store the parsed binding pair in a normalized structure
+            pairs.push({
+                type: key,
+                target: value
+            });
         }
     };
 
@@ -7128,7 +7248,7 @@
         const context = window.PACRegistry.get(pacId);
 
         if (!context) {
-            console.warn(`setTimer: Container with id "${pacId}" not found`);
+            console.warn(`No PAC container found with id: ${pacId}`);
             return null;
         }
 
@@ -7244,6 +7364,59 @@
      */
     wakaPAC.unregisterGesture = function(name) {
         return MouseGestureRecognizer.unregisterPattern(name);
+    };
+
+    /**
+     * Sets mouse capture to the specified PAC container.
+     * While capture is active, mouse events are routed to this container
+     * regardless of cursor position.
+     * @param {string} pacId - The pac-id of the container to capture mouse input
+     */
+    wakaPAC.setCapture = function(pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context) {
+            console.warn(`No PAC container found with id: ${pacId}`);
+            return;
+        }
+
+        return DomUpdateTracker.setCapture(context.container);
+    };
+
+    /**
+     * Releases mouse capture, returning to normal event routing
+     */
+    wakaPAC.releaseCapture = function() {
+        return DomUpdateTracker.releaseCapture();
+    };
+
+    /**
+     * Checks if mouse capture is currently active
+     * @returns {boolean} True if capture is active
+     */
+    wakaPAC.hasCapture = function() {
+        return DomUpdateTracker.hasCapture();
+    };
+
+    /**
+     * Tests whether a point lies within an element's bounding rectangle
+     * Equivalent to Win32 PtInRect - basic hit testing
+     * @param {number} x - X coordinate in client space
+     * @param {number} y - Y coordinate in client space
+     * @param {HTMLElement} element - Element to test against
+     * @returns {boolean} True if point is inside element's bounds
+     */
+    wakaPAC.ptInElement = function(x, y, element) {
+        if (!element) {
+            return false;
+        }
+
+        const rect = element.getBoundingClientRect();
+
+        return x >= rect.left &&
+            x <= rect.right &&
+            y >= rect.top &&
+            y <= rect.bottom;
     };
 
     // ========================================================================
