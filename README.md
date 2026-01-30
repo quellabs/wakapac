@@ -5,10 +5,15 @@ A reactive UI library with a centralized desktop-style event engine — in a sin
 ## Installation
 
 ```html
+<!-- CDN -->
 <script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.min.js"></script>
 
-<!-- Optional HTTP client -->
+<!-- Optional: Add WakaSync for HTTP functionality -->
 <script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakasync.min.js"></script>
+
+<!-- Or download files -->
+<script src="wakapac.min.js"></script>
+<script src="wakasync.min.js"></script>
 ```
 
 ## Introduction
@@ -102,53 +107,64 @@ Style properties map to expressions.
 <input data-pac-bind="value: name, class: { invalid: hasError }">
 ```
 
-## Built-in Reactive Properties
+## Browser Reactive Properties
 
-Each component instance exposes a small set of runtime-provided properties that update automatically and can be used in bindings, computed properties, and msgProc logic.
+WakaPAC automatically provides reactive browser state properties that update when the browser environment changes. These are available in all components without any setup:
 
-### pacId
+### Available Properties
 
-Every component receives a unique `pacId`. It is used with static helper APIs such as timers, capture, and cross-component messaging.
+**Component Identity:**
+- **`pacId`**: The unique identifier for this component (same as the `data-pac-id` attribute value)
 
-```javascript
-this._timerId = wakaPAC.setTimer(this.pacId, 1000);
-wakaPAC.sendMessage(this.pacId, ...);
-```
+**Network Status:**
+- **`browserOnline`**: `true` when the browser is online, `false` when offline
+- **`browserNetworkQuality`**: Network performance insights: `'fast'`, `'slow'` or `'offline'`
 
-### Browser State
+**Page Visibility:**
+- **`browserVisible`**: `true` when the browser tab is active/visible, `false` when hidden
 
-Browser state flags are reactive and update automatically:
+**Scroll Position:**
+- **`browserScrollX`**: Horizontal scroll position in pixels (can be set programmatically)
+- **`browserScrollY`**: Vertical scroll position in pixels (can be set programmatically)
 
-```javascript
-this.browserOnline
-this.browserVisible
-this.browserFocused
-```
+**Page Dimensions:**
+- **`browserViewportWidth`**: Browser viewport width in pixels
+- **`browserViewportHeight`**: Browser viewport height in pixels
+- **`browserDocumentWidth`**: Total document width in pixels
+- **`browserDocumentHeight`**: Total document height in pixels
 
-Example:
+**Container Viewport Visibility:**
+- **`containerVisible`**: `true` when any part of the container is visible in viewport
+- **`containerFullyVisible`**: `true` when container is completely visible in viewport
+- **`containerClientRect`**: Position and dimensions object relative to viewport (DOMRect)
+- **`containerWidth`**: Container width in pixels
+- **`containerHeight`**: Container height in pixels
+
+**Container Scroll Properties:**
+- **`containerIsScrollable`**: `true` if container can scroll in any direction
+- **`containerScrollX`**: Current horizontal scroll position in pixels (can be set programmatically)
+- **`containerScrollY`**: Current vertical scroll position in pixels (can be set programmatically)
+- **`containerScrollContentWidth`**: Total scrollable content width (scrollWidth)
+- **`containerScrollContentHeight`**: Total scrollable content height (scrollHeight)
+- **`containerScrollWindow`**: Object containing scroll measurements (DOMRect)
+
+**Container Focus State:**
+- **`containerFocus`**: `true` when container has direct focus (`:focus`)
+- **`containerFocusWithin`**: `true` when container or child has focus (`:focus-within`)
+
+**Component Hierarchy Properties:**
+- **`childrenCount`**: Number of direct child PAC components (read-only, reactive)
+- **`hasParent`**: `true` if this component has a parent PAC component, `false` if it's a root component
+
+
+### Usage Examples
 
 ```html
-<div data-pac-bind="visible: browserOnline">
-  Online
-</div>
+<!-- Browser properties in templates -->
+<p>Viewport: {{ browserViewportWidth }} x {{ browserViewportHeight }}</p>
+<p data-pac-bind="visible: !browserVisible">Tab is hidden - updates paused</p>
+<p>Container is {{ containerVisible ? 'visible' : 'hidden' }} in viewport</p>
 ```
-
-> Not a complete list — see the full runtime property reference in the documentation.
-
-### Container State
-
-Container-level state is also exposed reactively:
-
-```javascript
-this.containerVisible
-this.containerFocused
-this.containerWidth
-this.containerHeight
-```
-
-These values update when visibility, focus, or layout changes.
-
-> Not a complete list — see the full runtime property reference in the documentation.
 
 ## Message Processing (msgProc)
 
@@ -390,6 +406,41 @@ receiveFromChild(eventType, data, childPAC) {
 // Parent commands child
 this.notifyChild('item-list', 'refresh');
 this.notifyChildren('themeChanged', { theme: 'dark' });
+```
+
+## HTTP Client Usage (WakaSync)
+
+WakaPAC works well with WakaSync for HTTP requests. Simply instantiate WakaSync in your components where needed.
+
+### Basic Usage
+
+```javascript
+wakaPAC('#app', {
+    user: null,
+    loading: false,
+    error: null,
+
+    init() {
+        // Create HTTP client instance
+        this.http = new WakaSync({
+            timeout: 10000,
+            retries: 1
+        });
+    },
+
+    async loadUser() {
+        this.loading = true;
+        this.error = null;
+
+        try {
+            this.user = await this.http.get('/api/user');
+        } catch (error) {
+            this.error = error.message;
+        } finally {
+            this.loading = false;
+        }
+    }
+});
 ```
 
 ## Core Features
