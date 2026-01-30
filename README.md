@@ -7,7 +7,6 @@ A complete application library combining KnockoutJS-style reactivity with deskto
 WakaPAC provides two things that usually require separate libraries:
 
 1. **Reactive data binding** — declare your data, bind it to HTML, and the DOM updates automatically. Two-way binding, computed properties, watchers, deep reactivity for nested objects and arrays.
-
 2. **Desktop-style event system** — a centralized `msgProc` handles all events in one place, plus timer management and mouse gesture recognition.
 
 No build tools. No dependency management. Just include the script and go.
@@ -125,13 +124,13 @@ wakaPAC('#app', {
 wakaPAC('#app', {
     firstName: 'John',
     lastName: 'Doe',
-    
+
     computed: {
         fullName() {
             return `${this.firstName} ${this.lastName}`;
         }
     },
-    
+
     watch: {
         firstName(newVal, oldVal) {
             console.log(`Name changed from ${oldVal} to ${newVal}`);
@@ -152,18 +151,18 @@ wakaPAC('#app', {
                 if (event.wParam === wakaPAC.VK_ESCAPE) {
                     this.closeModal();
                 }
-                
+
                 break;
-                
+
             case wakaPAC.MSG_LCLICK:
                 const pos = wakaPAC.MAKEPOINTS(event.lParam);
                 console.log(`Click at (${pos.x}, ${pos.y})`);
                 break;
-                
+
             case wakaPAC.MSG_TIMER:
                 this.onTimer(event.wParam); // wParam = timer ID
                 break;
-                
+
             case wakaPAC.MSG_GESTURE:
                 this.handleGesture(event.pattern);
                 break;
@@ -183,6 +182,8 @@ wakaPAC('#app', {
 | Form     | `MSG_CHAR`, `MSG_CHANGE`, `MSG_SUBMIT`                                   |
 | Focus    | `MSG_FOCUS`, `MSG_BLUR`                                                  |
 | System   | `MSG_TIMER`, `MSG_GESTURE`                                               |
+
+For a complete list of message types, see [wakapac.com/docs](https://www.wakapac.com/docs).
 
 ### Modifier Key Constants
 
@@ -216,6 +217,8 @@ wakaPAC.VK_NEXT     // Page Down
 wakaPAC.VK_F1       // F1 (through VK_F12)
 ```
 
+For a complete list of virtual key constants, see [wakapac.com/docs](https://www.wakapac.com/docs).
+
 ### Coordinate Utilities
 
 ```javascript
@@ -226,6 +229,46 @@ wakaPAC.MAKEPOINTS(lParam)   // Extract {x, y} object
 this.containerToViewport(x, y)  // Container-relative → viewport
 this.viewportToContainer(x, y)  // Viewport → container-relative
 ```
+
+### Mouse Capture
+
+Capture routes all mouse events to your component, even when the cursor leaves it. Essential for drag operations:
+
+```javascript
+wakaPAC('#slider', {
+    _dragging: false,
+    value: 50,
+    
+    msgProc(event) {
+        switch (event.message) {
+            case wakaPAC.MSG_LBUTTONDOWN:
+                this._dragging = true;
+                wakaPAC.setCapture(this.pacId);  // All mouse events now come here
+                break;
+                
+            case wakaPAC.MSG_MOUSEMOVE:
+                if (this._dragging) {
+                    const pos = wakaPAC.MAKEPOINTS(event.lParam);
+                    this.value = this.positionToValue(pos.x);
+                }
+                break;
+                
+            case wakaPAC.MSG_LBUTTONUP:
+                if (this._dragging) {
+                    this._dragging = false;
+                    wakaPAC.releaseCapture();  // Return to normal
+                }
+                break;
+        }
+        return true;
+    }
+});
+```
+
+| Method                        | Description                                     |
+|-------------------------------|-------------------------------------------------|
+| `wakaPAC.setCapture(pacId)`   | Capture all mouse events to this component      |
+| `wakaPAC.releaseCapture()`    | Release capture, return to normal event routing |
 
 ## Timer API
 
@@ -432,6 +475,8 @@ this.viewportToContainer(x, y)       // Coordinate conversion
 ```javascript
 wakaPAC.sendMessage(id, msg, wParam, lParam, data)
 wakaPAC.broadcastMessage(msg, wParam, lParam, data)
+wakaPAC.setCapture(pacId)            // Capture mouse events to component
+wakaPAC.releaseCapture()             // Release mouse capture
 wakaPAC.registerGesture(name, directions)
 wakaPAC.unregisterGesture(name)
 wakaPAC.LOWORD(value)
