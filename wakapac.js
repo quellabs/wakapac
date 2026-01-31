@@ -94,6 +94,7 @@
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
     const MSG_INPUT = 0x0303;
+    const MSG_APP_ACTIVATE = 0x0304;
     const MSG_FOCUS = 0x0007;
     const MSG_BLUR = 0x0008;
     const MSG_KEYDOWN = 0x0100;
@@ -1018,10 +1019,9 @@
              * Handle document visibility changes (tab switches, window minimize, etc.)
              * Updates browserVisible property for all PAC containers
              */
-            document.addEventListener('visibilitychange', function() {
-                self.dispatchBrowserStateEvent('visibility', {
-                    visible: !document.hidden
-                });
+            document.addEventListener('visibilitychange', function(event) {
+                const customEvent = self.wrapEvent(MSG_APP_ACTIVATE, event, Number(!document.hidden), 0);
+                self.broadcastEvent(customEvent);
             });
 
             /**
@@ -1495,14 +1495,6 @@
          * @returns {CustomEvent<{}>}
          */
         wrapEvent(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}) {
-            // Ensure we have a valid DOM element with closest() method
-            if (
-                !originalEvent || !originalEvent.target ||
-                typeof originalEvent.target.closest !== 'function'
-            ) {
-                return;
-            }
-
             // Create custom event with extended data in detail (optional)
             const customEvent = new CustomEvent('pac:event', {
                 bubbles: true,
@@ -1584,16 +1576,11 @@
         },
 
         /**
-         *
+         * Dispatch event to the correct container
          * @param {HTMLElement} container
          * @param {CustomEvent} event
          */
         dispatchEvent(container, event) {
-            // Ensure we have a valid DOM element with closest() method
-            if (!event.target || typeof event.target.closest !== 'function') {
-                return;
-            }
-
             // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
                 return;
@@ -1609,22 +1596,12 @@
         },
 
         /**
-         * Dispatches browser state events (visibility, online/offline, etc.) to all PAC containers
-         * @param {string} stateType - Type of state change ('visibility', 'online', etc.)
-         * @param {Object} stateData - State data to include in event
+         * Broadcast event to each container
+         * @param {CustomEvent} event
          */
-        broadcastEvent(stateType, stateData) {
+        broadcastEvent(event) {
             window.PACRegistry.components.forEach((context) => {
-                const customEvent = new CustomEvent('pac:event', {
-                    detail: {
-                        target: context.container,
-                        stateType: stateType,
-                        stateData: stateData,
-                        timestamp: Date.now()
-                    }
-                });
-
-                context.container.dispatchEvent(customEvent);
+                this.dispatchEvent(context.container, event);
             });
         },
 
@@ -1976,120 +1953,78 @@
         },
 
         /**
-         * Processes event modifiers from the data-pac-event attribute to control event behavior.
-         * Handles both behavioral modifiers (prevent, stop) and key filtering for keyboard events.
-         * Returns false if the event should be filtered out (not dispatched), true otherwise.
-         * @param {HTMLElement} element - The DOM element that has the data-pac-event attribute
-         * @param {Event} event - The original DOM event being processed
-         * @returns {boolean} True if the event should be dispatched, false if it should be filtered out
+         * Processes event modifiers defined on an element via the `data-pac-event` attribute.
+         * @param {Element|null|undefined} element - DOM element that may contain modifier attribute.
+         * @param {Event & { originalEvent?: Event }} event - Event wrapper or native event.
+         * @returns {boolean} True if the event should continue to be dispatched, false if blocked.
          */
         processEventModifiers(element, event) {
-            const originalEvent = event.detail?.originalEvent || event;
-            const modifiers = element.getAttribute('data-pac-event');
-
-            // No modifiers, process normally
-            if (!modifiers) {
+            // Guard: invalid element or missing attribute API → allow event
+            if (!element || typeof element.getAttribute !== 'function') {
                 return true;
             }
 
-            const modifierList = modifiers.split(/\s+/);
+            // Read modifier string from attribute
+            const attr = element.getAttribute('data-pac-event');
 
-            for (const modifier of modifierList) {
-                switch (modifier.toLowerCase()) {
-                    case 'prevent':
-                        originalEvent.preventDefault();
-                        break;
+            if (!attr) {
+                return true;
+            }
 
-                    case 'stop':
-                        originalEvent.stopPropagation();
-                        break;
+            // Support wrapped events
+            const originalEvent = event.originalEvent || event;
 
-                    case 'enter':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== 'Enter') {
-                                return false; // Don't dispatch event
-                            }
-                        }
+            // Split modifiers on whitespace
+            const modifiers = attr.split(/\s+/);
 
-                        break;
+            // Precompute keyboard-event check once
+            const isKeyboard = originalEvent.type === 'keyup' || originalEvent.type === 'keydown';
 
-                    case 'escape':
-                    case 'esc':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== 'Escape') {
-                                return false;
-                            }
-                        }
+            // Map modifier names to required KeyboardEvent.key values
+            const keyMap = {
+                enter: 'Enter',
+                escape: 'Escape',
+                esc: 'Escape',
+                space: ' ',
+                tab: 'Tab',
+                delete: 'Delete',
+                del: 'Delete',
+                up: 'ArrowUp',
+                down: 'ArrowDown',
+                left: 'ArrowLeft',
+                right: 'ArrowRight'
+            };
 
-                        break;
+            for (const raw of modifiers) {
+                // transform modifier to lowercase
+                const modifier = raw.toLowerCase();
 
-                    case 'space':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== ' ') {
-                                return false;
-                            }
-                        }
+                // Flow-control modifiers with side effects
+                if (modifier === 'prevent') {
+                    originalEvent.preventDefault();
+                    continue;
+                }
 
-                        break;
+                if (modifier === 'stop') {
+                    originalEvent.stopPropagation();
+                    continue;
+                }
 
-                    case 'tab':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== 'Tab') {
-                                return false;
-                            }
-                        }
+                // Key filter modifiers
+                const requiredKey = keyMap[modifier];
 
-                        break;
+                if (!requiredKey) {
+                    continue; // Unknown modifier → ignore
+                }
 
-                    case 'delete':
-                    case 'del':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== 'Delete') {
-                                return false;
-                            }
-                        }
-
-                        break;
-
-                    case 'up':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== 'ArrowUp') {
-                                return false;
-                            }
-                        }
-
-                        break;
-
-                    case 'down':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== 'ArrowDown') {
-                                return false;
-                            }
-                        }
-
-                        break;
-
-                    case 'left':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== 'ArrowLeft') {
-                                return false;
-                            }
-                        }
-
-                        break;
-
-                    case 'right':
-                        if (originalEvent.type === 'keyup' || originalEvent.type === 'keydown') {
-                            if (originalEvent.key !== 'ArrowRight') {
-                                return false;
-                            }
-                        }
-
-                        break;
+                // If keyboard event and key does not match → block dispatch
+                if (isKeyboard && originalEvent.key !== requiredKey) {
+                    return false;
                 }
             }
 
-            return true; // Process the event
+            // All modifiers satisfied → allow event
+            return true;
         },
 
         /**
@@ -4105,6 +4040,11 @@
      * @returns {void}
      */
     Context.prototype.handlePacEvent = function(event) {
+        // Update browser visibility state
+        if (event.message === MSG_APP_ACTIVATE) {
+            this.abstraction.browserVisible = event.wParam === 1;
+        }
+
         // Call user's message handler (msgProc) before framework processes the event
         // This allows user code to intercept and handle messages first, Win32-style
         let preventDefault = false;
@@ -4632,11 +4572,6 @@
         const { stateType, stateData } = event.detail;
 
         switch(stateType) {
-            case 'visibility':
-                // Update browser visibility state
-                this.abstraction.browserVisible = stateData.visible;
-                break;
-
             case 'online':
                 // Update network connectivity and connection type
                 this.abstraction.browserOnline = stateData.online;
@@ -7177,9 +7112,9 @@
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
      * @param {number} lParam - Second message parameter (integer)
-     * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
+     * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extraData = {}) {
+    wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
         const context = window.PACRegistry.get(pacId);
 
         if (!context) {
@@ -7187,12 +7122,15 @@
             return;
         }
 
+        // Create custom event with extended data in detail (optional)
         const customEvent = new CustomEvent('pac:event', {
             bubbles: false,
             cancelable: true,
-            detail: extraData
+            detail: extended
         });
 
+        // Add Win32-style message properties directly to the event object
+        // This avoids the event.detail.property nesting and keeps Win32 semantics clean
         Object.defineProperties(customEvent, {
             message: { value: messageId, enumerable: true, configurable: true },
             wParam: { value: wParam, enumerable: true, configurable: true },
@@ -7200,6 +7138,7 @@
             timestamp: { value: Date.now(), enumerable: true, configurable: true }
         });
 
+        // Send the event
         context.container.dispatchEvent(customEvent);
     };
 
@@ -7212,10 +7151,26 @@
      * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extraData = {}) {
+        // Create custom event with extended data in detail (optional)
+        const customEvent = new CustomEvent('pac:event', {
+            bubbles: false,
+            cancelable: true,
+            detail: extraData
+        });
+
+        // Add Win32-style message properties directly to the event object
+        // This avoids the event.detail.property nesting and keeps Win32 semantics clean
+        Object.defineProperties(customEvent, {
+            message: { value: messageId, enumerable: true, configurable: true },
+            wParam: { value: wParam, enumerable: true, configurable: true },
+            lParam: { value: lParam, enumerable: true, configurable: true },
+            timestamp: { value: Date.now(), enumerable: true, configurable: true }
+        });
+
         // Broadcast the message to each registered container
         // Uses the registry instead of DOM queries for better performance
-        window.PACRegistry.components.forEach((context, pacId) => {
-            wakaPAC.sendMessage(pacId, messageId, wParam, lParam, extraData);
+        window.PACRegistry.components.forEach((context) => {
+            context.container.dispatchEvent(customEvent);
         });
     };
 
@@ -7427,6 +7382,7 @@
     wakaPAC.MSG_CHANGE = MSG_CHANGE;
     wakaPAC.MSG_SUBMIT = MSG_SUBMIT;
     wakaPAC.MSG_INPUT = MSG_INPUT;
+    wakaPAC.MSG_APP_ACTIVATE = MSG_APP_ACTIVATE;
     wakaPAC.MSG_FOCUS = MSG_FOCUS;
     wakaPAC.MSG_BLUR = MSG_BLUR;
     wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
