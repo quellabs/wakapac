@@ -1067,8 +1067,8 @@
              * Updates container focus states when focus moves into PAC containers
              */
             document.addEventListener('focusin', function(event) {
-                const container = this.getContainerForEvent(MSG_FOCUS, event);
-                const customEvent = this.wrapEvent(MSG_FOCUS, event);
+                const container = self.getContainerForEvent(MSG_FOCUS, event);
+                const customEvent = self.wrapEvent(MSG_FOCUS, event);
                 self.dispatchEvent(container, customEvent);
             });
 
@@ -1077,8 +1077,8 @@
              * Updates container focus states when focus moves out of PAC containers
              */
             document.addEventListener('focusout', function(event) {
-                const container = this.getContainerForEvent(MSG_BLUR, event);
-                const customEvent = this.wrapEvent(MSG_BLUR, event);
+                const container = self.getContainerForEvent(MSG_BLUR, event);
+                const customEvent = self.wrapEvent(MSG_BLUR, event);
                 self.dispatchEvent(container, customEvent);
             });
 
@@ -1105,10 +1105,10 @@
                 }
 
                 // Dispatch event to container
-                const container = this.getContainerForEvent(messageType, event);
-                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = this.wrapEvent(messageType, event, wParam, lParam);
+                const container = self.getContainerForEvent(messageType, event);
+                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapEvent(messageType, event, wParam, lParam);
 
                 self.dispatchEvent(container, customEvent);
             });
@@ -1145,20 +1145,20 @@
                 }
 
                 // Dispatch event to container
-                const container = this.getContainerForEvent(messageType, event);
-                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = this.wrapEvent(messageType, event, wParam, lParam);
+                const container = self.getContainerForEvent(messageType, event);
+                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapEvent(messageType, event, wParam, lParam);
 
                 self.dispatchEvent(container, customEvent);
             });
 
             // Click event recognises left button
             document.addEventListener('click', function (event) {
-                const container = this.getContainerForEvent(MSG_LCLICK, event);
-                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = this.wrapEvent(MSG_LCLICK, event, wParam, lParam);
+                const container = self.getContainerForEvent(MSG_LCLICK, event);
+                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapEvent(MSG_LCLICK, event, wParam, lParam);
 
                 self.dispatchEvent(container, customEvent);
             });
@@ -1166,10 +1166,10 @@
             // Auxclick event recognises middle button
             document.addEventListener('auxclick', function (event) {
                 if (event.button === 1) {
-                    const container = this.getContainerForEvent(MSG_MCLICK, event);
-                    const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                    const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                    const customEvent = this.wrapEvent(MSG_MCLICK, event, wParam, lParam);
+                    const container = self.getContainerForEvent(MSG_MCLICK, event);
+                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                    const customEvent = self.wrapEvent(MSG_MCLICK, event, wParam, lParam);
 
                     self.dispatchEvent(container, customEvent);
                 }
@@ -1188,10 +1188,10 @@
                 }
 
                 // Dispatch the event
-                const container = this.getContainerForEvent(MSG_RCLICK, event);
-                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = this.wrapEvent(MSG_RCLICK, event, wParam, lParam);
+                const container = self.getContainerForEvent(MSG_RCLICK, event);
+                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapEvent(MSG_RCLICK, event, wParam, lParam);
 
                 self.dispatchEvent(container, customEvent);
             });
@@ -1200,10 +1200,10 @@
             document.addEventListener('dblclick', function (event) {
                 // Only handle left button double-clicks
                 if (event.button === 0) {
-                    const container = this.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                    const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                    const customEvent = this.wrapEvent(MSG_LBUTTONDBLCLK, event, wParam, lParam);
+                    const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
+                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                    const customEvent = self.wrapEvent(MSG_LBUTTONDBLCLK, event, wParam, lParam);
 
                     self.dispatchEvent(container, customEvent);
                 }
@@ -1223,22 +1223,22 @@
                 }
 
                 // Dispatch move event to container
-                const container = this.getContainerForEvent(MSG_MOUSEMOVE, event);
-                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = this.wrapEvent(MSG_MOUSEMOVE, event, wParam, lParam);
+                const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
+                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapEvent(MSG_MOUSEMOVE, event, wParam, lParam);
 
-                self.dispatchEvent(MSG_MOUSEMOVE, customEvent, wParam, lParam);
+                self.dispatchEvent(container, customEvent);
             });
 
             /**
              * Touch start simulates left button down
              */
             document.addEventListener('touchstart', function (event) {
-                const container = this.getContainerForEvent(MSG_LBUTTONDOWN, event);
-                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = this.wrapEvent(MSG_LBUTTONDOWN, event, wParam, lParam);
+                const container = self.getContainerForEvent(MSG_LBUTTONDOWN, event);
+                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapEvent(MSG_LBUTTONDOWN, event, wParam, lParam);
 
                 self.dispatchEvent(container, customEvent);
             });
@@ -1247,10 +1247,10 @@
              * Touch end simulates left button up
              */
             document.addEventListener('touchend', function (event) {
-                const container = this.getContainerForEvent(MSG_LBUTTONUP, event);
-                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = this.wrapEvent(MSG_LBUTTONUP, event, wParam, lParam);
+                const container = self.getContainerForEvent(MSG_LBUTTONUP, event);
+                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapEvent(MSG_LBUTTONUP, event, wParam, lParam);
 
                 self.dispatchEvent(container, customEvent);
             });
@@ -1259,10 +1259,10 @@
              * Touch cancel also simulates left button up
              */
             document.addEventListener('touchcancel', function (event) {
-                const container = this.getContainerForEvent(MSG_LBUTTONUP, event);
-                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = this.wrapEvent(MSG_LBUTTONUP, event, wParam, lParam);
+                const container = self.getContainerForEvent(MSG_LBUTTONUP, event);
+                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapEvent(MSG_LBUTTONUP, event, wParam, lParam);
 
                 self.dispatchEvent(container, customEvent);
             });
@@ -1272,10 +1272,10 @@
              */
             self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
                 if (event.touches.length > 0) {
-                    const container = this.getContainerForEvent(MSG_MOUSEMOVE, event);
-                    const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
-                    const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                    const customEvent = this.wrapEvent(MSG_MOUSEMOVE, event, wParam, lParam);
+                    const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
+                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                    const customEvent = self.wrapEvent(MSG_MOUSEMOVE, event, wParam, lParam);
 
                     self.dispatchEvent(container, customEvent);
                 }
@@ -1286,10 +1286,10 @@
              * Tracks when user releases any key
              */
             document.addEventListener('keyup', function (event) {
-                const container = this.getContainerForEvent(MSG_KEYUP, event);
-                const wParam = this.buildKeyboardWParam(event); // Win32 virtual key code
-                const lParam = this.buildKeyboardLParam(event) // Keyboard state flags and repeat count
-                const customEvent = this.wrapEvent(MSG_KEYUP, event, wParam, lParam);
+                const container = self.getContainerForEvent(MSG_KEYUP, event);
+                const wParam = self.buildKeyboardWParam(event); // Win32 virtual key code
+                const lParam = self.buildKeyboardLParam(event) // Keyboard state flags and repeat count
+                const customEvent = self.wrapEvent(MSG_KEYUP, event, wParam, lParam);
 
                 self.dispatchEvent(container, customEvent, {
                     key: event.key,
@@ -1303,20 +1303,21 @@
              */
             document.addEventListener('keydown', function (event) {
                 // Dispatch keydown
-                const container = this.getContainerForEvent(MSG_KEYDOWN, event);
-                const keyDownWparam = this.buildKeyboardWParam(event);
-                const keyDownLparam = this.buildKeyboardLParam(event);
-                const keyDownEvent = this.wrapEvent(MSG_KEYDOWN, event, keyDownWparam, keyDownLparam);
+                const container = self.getContainerForEvent(MSG_KEYDOWN, event);
+                const keyDownWparam = self.buildKeyboardWParam(event);
+                const keyDownLparam = self.buildKeyboardLParam(event);
+                const keyDownEvent = self.wrapEvent(MSG_KEYDOWN, event, keyDownWparam, keyDownLparam);
                 self.dispatchEvent(container, keyDownEvent);
 
                 // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
                 // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
                 if (event.key && event.key.length === 1) {
                     // Single character key press - send as MSG_CHAR with char code in wParam
-                    const container = this.getContainerForEvent(MSG_CHAR, event);
+                    const container = self.getContainerForEvent(MSG_CHAR, event);
                     const msgCharWparam = event.key.charCodeAt(0);
-                    const keyDownEvent = this.wrapEvent(MSG_CHAR, event, msgCharWparam, keyDownLparam);
-                    self.dispatchEvent(container, keyDownEvent);
+                    const msgCharLparam = keyDownLparam;
+                    const msgCharEvent = self.wrapEvent(MSG_CHAR, event, msgCharWparam, msgCharLparam);
+                    self.dispatchEvent(container, msgCharEvent);
                 }
             });
 
@@ -1330,10 +1331,10 @@
                 const isCheckbox = target.type === 'checkbox';
 
                 if (isSelect || isRadio || isCheckbox) {
-                    const container = this.getContainerForEvent(MSG_CHANGE, event);
-                    const wParam = this.buildChangeWParam(event);
+                    const container = self.getContainerForEvent(MSG_CHANGE, event);
+                    const wParam = self.buildChangeWParam(event);
                     const lParam = 0;
-                    const customEvent = this.wrapEvent(MSG_CHANGE, event, wParam, lParam, {
+                    const customEvent = self.wrapEvent(MSG_CHANGE, event, wParam, lParam, {
                         elementType: isSelect ? 'select' : target.type
                     });
 
@@ -1354,10 +1355,10 @@
                 const isContentEditable = target.isContentEditable === true;
 
                 if (isTextInput || isTextarea || isContentEditable) {
-                    const container = this.getContainerForEvent(MSG_INPUT, event);
+                    const container = self.getContainerForEvent(MSG_INPUT, event);
                     const wParam = event.data ? event.data.length : 0;
                     const lParam = 0;
-                    const customEvent = this.wrapEvent(MSG_INPUT, event, wParam, lParam, {
+                    const customEvent = self.wrapEvent(MSG_INPUT, event, wParam, lParam, {
                         elementType: target.tagName.toLowerCase(),
                         text: event.data
                     });
@@ -1372,10 +1373,10 @@
              */
             document.addEventListener('submit', function (event) {
                 const formData = new FormData(event.target);
-                const container = this.getContainerForEvent(MSG_SUBMIT, event);
+                const container = self.getContainerForEvent(MSG_SUBMIT, event);
                 const wParam = event.target.id || 0;
                 const lParam = 0;
-                const customEvent = this.wrapEvent(MSG_SUBMIT, event, wParam, lParam, {
+                const customEvent = self.wrapEvent(MSG_SUBMIT, event, wParam, lParam, {
                     entries: Object.fromEntries(formData.entries()),
                 });
 
@@ -1578,6 +1579,7 @@
                 }
             }
 
+            // Return container
             return container;
         },
 
@@ -1587,6 +1589,11 @@
          * @param {CustomEvent} event
          */
         dispatchEvent(container, event) {
+            // Ensure we have a valid DOM element with closest() method
+            if (!event.target || typeof event.target.closest !== 'function') {
+                return;
+            }
+
             // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
                 return;
@@ -1693,6 +1700,11 @@
          * @returns {number} lParam value with packed container-relative coordinates
          */
         buildMouseLParam(event, container) {
+            // Skip lParam if container not set
+            if (!container) {
+                return 0;
+            }
+
             // Fetch clientX and Y from event
             const touch = event.touches?.[0] || event.changedTouches?.[0];
             const clientX = touch ? touch.clientX : event.clientX;
