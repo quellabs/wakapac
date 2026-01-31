@@ -2045,41 +2045,51 @@
                    messageType === MSG_MCLICK ||
                    messageType === MSG_RCLICK;
         },
-
         /**
-         * Sets mouse capture to the specified PAC container.
-         * While capture is active, mouse events will be routed to this container
-         * regardless of which element is under the cursor.
-         * @param {HTMLElement} container - The PAC container element
+         * Enable mouse capture for a specific PAC container.
+         * When active, all mouse events are treated as if they target this container,
+         * even if the cursor is over a different element.
+         * @param {HTMLElement} container - Target PAC container that should receive captured mouse events
          */
         setCapture(container) {
+            // If capture is already active, clean up previous capture state first
             if (this._captureActive) {
                 this.releaseCapture();
             }
 
+            // Add a global CSS flag so styles/behavior can react to capture mode
             document.body.classList.add('pac-capture-active');
 
+            // Mark capture as active in internal state
             this._captureActive = true;
+
+            // Store reference to the container that will receive captured events
             this._capturedContainer = container;
         },
 
         /**
-         * Releases mouse capture, returning to normal hit-test based event routing
+         * Disable mouse capture and restore normal mouse event routing.
+         * After this call, events are dispatched based on standard hit-testing again.
          */
         releaseCapture() {
+            // If capture is not active, there is nothing to release
             if (!this._captureActive) {
                 return;
             }
 
+            // Remove the global CSS flag that indicates capture mode
             document.body.classList.remove('pac-capture-active');
 
+            // Reset internal capture state
             this._captureActive = false;
+
+            // Clear the stored reference to the previously captured container
             this._capturedContainer = null;
         },
 
         /**
-         * Checks if mouse capture is currently active
-         * @returns {boolean} True if capture is active
+         * Determine whether mouse capture mode is currently enabled.
+         * @returns {boolean} True when a container is actively capturing mouse events, otherwise false.
          */
         hasCapture() {
             return this._captureActive;
