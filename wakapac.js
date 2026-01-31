@@ -1067,7 +1067,9 @@
              * Updates container focus states when focus moves into PAC containers
              */
             document.addEventListener('focusin', function(event) {
-                self.dispatchTrackedEvent(MSG_FOCUS, event);
+                const container = this.getContainerForEvent(MSG_FOCUS, event);
+                const customEvent = this.wrapEvent(MSG_FOCUS, event);
+                self.dispatchEvent(container, customEvent);
             });
 
             /**
@@ -1075,7 +1077,9 @@
              * Updates container focus states when focus moves out of PAC containers
              */
             document.addEventListener('focusout', function(event) {
-                self.dispatchTrackedEvent(MSG_BLUR, event);
+                const container = this.getContainerForEvent(MSG_BLUR, event);
+                const customEvent = this.wrapEvent(MSG_BLUR, event);
+                self.dispatchEvent(container, customEvent);
             });
 
             /**
@@ -1101,14 +1105,19 @@
                 }
 
                 // Dispatch event to container
-                self.dispatchTrackedEvent(messageType, event);
+                const container = this.getContainerForEvent(messageType, event);
+                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = this.wrapEvent(messageType, event, wParam, lParam);
+
+                self.dispatchEvent(container, customEvent);
             });
 
             /**
              * Disable native drag/drop when capture is activated
              */
             document.addEventListener('dragstart', event => {
-                if (wakaPAC.hasCapture()) {
+                if (this.hasCapture()) {
                     event.preventDefault();
                 }
             });
@@ -1136,18 +1145,33 @@
                 }
 
                 // Dispatch event to container
-                self.dispatchTrackedEvent(messageType, event);
+                const container = this.getContainerForEvent(messageType, event);
+                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = this.wrapEvent(messageType, event, wParam, lParam);
+
+                self.dispatchEvent(container, customEvent);
             });
 
             // Click event recognises left button
             document.addEventListener('click', function (event) {
-                self.dispatchTrackedEvent(MSG_LCLICK, event);
+                const container = this.getContainerForEvent(MSG_LCLICK, event);
+                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = this.wrapEvent(MSG_LCLICK, event, wParam, lParam);
+
+                self.dispatchEvent(container, customEvent);
             });
 
             // Auxclick event recognises middle button
             document.addEventListener('auxclick', function (event) {
                 if (event.button === 1) {
-                    self.dispatchTrackedEvent(MSG_MCLICK, event);
+                    const container = this.getContainerForEvent(MSG_MCLICK, event);
+                    const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                    const customEvent = this.wrapEvent(MSG_MCLICK, event, wParam, lParam);
+
+                    self.dispatchEvent(container, customEvent);
                 }
             });
 
@@ -1163,14 +1187,25 @@
                     event.preventDefault();
                 }
 
-                self.dispatchTrackedEvent(MSG_RCLICK, event);
+                // Dispatch the event
+                const container = this.getContainerForEvent(MSG_RCLICK, event);
+                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = this.wrapEvent(MSG_RCLICK, event, wParam, lParam);
+
+                self.dispatchEvent(container, customEvent);
             });
 
             // Handle double-click (left button only)
             document.addEventListener('dblclick', function (event) {
                 // Only handle left button double-clicks
                 if (event.button === 0) {
-                    self.dispatchTrackedEvent(MSG_LBUTTONDBLCLK, event);
+                    const container = this.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
+                    const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                    const customEvent = this.wrapEvent(MSG_LBUTTONDBLCLK, event, wParam, lParam);
+
+                    self.dispatchEvent(container, customEvent);
                 }
             });
 
@@ -1188,28 +1223,48 @@
                 }
 
                 // Dispatch move event to container
-                self.dispatchTrackedEvent(MSG_MOUSEMOVE, event);
+                const container = this.getContainerForEvent(MSG_MOUSEMOVE, event);
+                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = this.wrapEvent(MSG_MOUSEMOVE, event, wParam, lParam);
+
+                self.dispatchEvent(MSG_MOUSEMOVE, customEvent, wParam, lParam);
             });
 
             /**
              * Touch start simulates left button down
              */
             document.addEventListener('touchstart', function (event) {
-                self.dispatchTrackedEvent(MSG_LBUTTONDOWN, event);
+                const container = this.getContainerForEvent(MSG_LBUTTONDOWN, event);
+                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = this.wrapEvent(MSG_LBUTTONDOWN, event, wParam, lParam);
+
+                self.dispatchEvent(container, customEvent);
             });
 
             /**
              * Touch end simulates left button up
              */
             document.addEventListener('touchend', function (event) {
-                self.dispatchTrackedEvent(MSG_LBUTTONUP, event);
+                const container = this.getContainerForEvent(MSG_LBUTTONUP, event);
+                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = this.wrapEvent(MSG_LBUTTONUP, event, wParam, lParam);
+
+                self.dispatchEvent(container, customEvent);
             });
 
             /**
              * Touch cancel also simulates left button up
              */
             document.addEventListener('touchcancel', function (event) {
-                self.dispatchTrackedEvent(MSG_LBUTTONUP, event);
+                const container = this.getContainerForEvent(MSG_LBUTTONUP, event);
+                const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                const customEvent = this.wrapEvent(MSG_LBUTTONUP, event, wParam, lParam);
+
+                self.dispatchEvent(container, customEvent);
             });
 
             /**
@@ -1217,7 +1272,12 @@
              */
             self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
                 if (event.touches.length > 0) {
-                    self.dispatchTrackedEvent(MSG_MOUSEMOVE, event);
+                    const container = this.getContainerForEvent(MSG_MOUSEMOVE, event);
+                    const wParam = this.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const lParam = this.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
+                    const customEvent = this.wrapEvent(MSG_MOUSEMOVE, event, wParam, lParam);
+
+                    self.dispatchEvent(container, customEvent);
                 }
             });
 
@@ -1226,7 +1286,12 @@
              * Tracks when user releases any key
              */
             document.addEventListener('keyup', function (event) {
-                self.dispatchTrackedEvent(MSG_KEYUP, event, {
+                const container = this.getContainerForEvent(MSG_KEYUP, event);
+                const wParam = this.buildKeyboardWParam(event); // Win32 virtual key code
+                const lParam = this.buildKeyboardLParam(event) // Keyboard state flags and repeat count
+                const customEvent = this.wrapEvent(MSG_KEYUP, event, wParam, lParam);
+
+                self.dispatchEvent(container, customEvent, {
                     key: event.key,
                     code: event.code
                 });
@@ -1238,13 +1303,20 @@
              */
             document.addEventListener('keydown', function (event) {
                 // Dispatch keydown
-                self.dispatchTrackedEvent(MSG_KEYDOWN, event);
+                const container = this.getContainerForEvent(MSG_KEYDOWN, event);
+                const keyDownWparam = this.buildKeyboardWParam(event);
+                const keyDownLparam = this.buildKeyboardLParam(event);
+                const keyDownEvent = this.wrapEvent(MSG_KEYDOWN, event, keyDownWparam, keyDownLparam);
+                self.dispatchEvent(container, keyDownEvent);
 
                 // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
                 // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
                 if (event.key && event.key.length === 1) {
                     // Single character key press - send as MSG_CHAR with char code in wParam
-                    self.dispatchTrackedEvent(MSG_CHAR, event);
+                    const container = this.getContainerForEvent(MSG_CHAR, event);
+                    const msgCharWparam = event.key.charCodeAt(0);
+                    const keyDownEvent = this.wrapEvent(MSG_CHAR, event, msgCharWparam, keyDownLparam);
+                    self.dispatchEvent(container, keyDownEvent);
                 }
             });
 
@@ -1258,9 +1330,14 @@
                 const isCheckbox = target.type === 'checkbox';
 
                 if (isSelect || isRadio || isCheckbox) {
-                    self.dispatchTrackedEvent(MSG_CHANGE, event, {
+                    const container = this.getContainerForEvent(MSG_CHANGE, event);
+                    const wParam = this.buildChangeWParam(event);
+                    const lParam = 0;
+                    const customEvent = this.wrapEvent(MSG_CHANGE, event, wParam, lParam, {
                         elementType: isSelect ? 'select' : target.type
                     });
+
+                    self.dispatchEvent(container, customEvent);
                 }
             });
 
@@ -1277,10 +1354,15 @@
                 const isContentEditable = target.isContentEditable === true;
 
                 if (isTextInput || isTextarea || isContentEditable) {
-                    self.dispatchTrackedEvent(MSG_INPUT, event, {
+                    const container = this.getContainerForEvent(MSG_INPUT, event);
+                    const wParam = event.data ? event.data.length : 0;
+                    const lParam = 0;
+                    const customEvent = this.wrapEvent(MSG_INPUT, event, wParam, lParam, {
                         elementType: target.tagName.toLowerCase(),
                         text: event.data
                     });
+
+                    self.dispatchEvent(container, customEvent);
                 }
             });
 
@@ -1289,7 +1371,15 @@
              * Tracks when user submits any form on the page
              */
             document.addEventListener('submit', function (event) {
-                self.dispatchTrackedEvent(MSG_SUBMIT, event);
+                const formData = new FormData(event.target);
+                const container = this.getContainerForEvent(MSG_SUBMIT, event);
+                const wParam = event.target.id || 0;
+                const lParam = 0;
+                const customEvent = this.wrapEvent(MSG_SUBMIT, event, wParam, lParam, {
+                    entries: Object.fromEntries(formData.entries()),
+                });
+
+                self.dispatchEvent(container, customEvent);
             });
 
             /**
@@ -1398,10 +1488,12 @@
          * The event is dispatched to the nearest container element with a [data-pac-id] attribute.
          * @param {number} messageType - The Win32 message type (e.g., MSG_LBUTTONDOWN, MSG_KEYUP)
          * @param {Event} originalEvent - The original DOM event to wrap
+         * @param {number} wParam - The wParam value (typically flags or primary data)
+         * @param {number} lParam - The lParam value (typically coordinates or secondary data)
          * @param {Object} [extended={}] - Additional extended data to include in event.detail
-         * @returns {void}
+         * @returns {CustomEvent<{}>}
          */
-        dispatchTrackedEvent(messageType, originalEvent, extended = {}) {
+        wrapEvent(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}) {
             // Ensure we have a valid DOM element with closest() method
             if (
                 !originalEvent || !originalEvent.target ||
@@ -1409,43 +1501,6 @@
             ) {
                 return;
             }
-
-            // Calculate hit-test result as fallback
-            let container = originalEvent.target.closest('[data-pac-id]');
-
-            // Click routing - ensure click goes to same container as button down
-            if (messageType === MSG_LCLICK || messageType === MSG_RCLICK || messageType === MSG_MCLICK) {
-                if (this._downContainer?.isConnected) {
-                    container = this._downContainer;
-                }
-
-                this._downContainer = null;
-            } else if (this._captureActive && this.isCaptureAffected(messageType)) {
-                // Capture routing - send mouse events to captured container
-                if (this._capturedContainer?.isConnected) {
-                    container = this._capturedContainer;
-                } else {
-                    this.releaseCapture();
-                }
-            }
-
-            // Exit early if no container is found - event cannot be properly tracked
-            if (!container) {
-                return;
-            }
-
-            // Track which container received button down events for click routing
-            if (messageType === MSG_LBUTTONDOWN || messageType === MSG_RBUTTONDOWN || messageType === MSG_MBUTTONDOWN) {
-                this._downContainer = container;
-            }
-
-            // Process event modifiers - return early if event should be filtered
-            if (!this.processEventModifiers(originalEvent.target, originalEvent)) {
-                return;
-            }
-
-            // Build Win32-style parameters based on the message type and original event
-            const params = this.buildParams(messageType, originalEvent, container);
 
             // Create custom event with extended data in detail (optional)
             const customEvent = new CustomEvent('pac:event', {
@@ -1459,13 +1514,12 @@
             Object.defineProperties(customEvent, {
                 // Core Win32-style message data
                 message: { value: messageType, enumerable: true, configurable: true },
-                wParam: { value: params.wParam, enumerable: true, configurable: true },
-                lParam: { value: params.lParam, enumerable: true, configurable: true },
+                wParam: { value: wParam, enumerable: true, configurable: true },
+                lParam: { value: lParam, enumerable: true, configurable: true },
 
                 // Standard tracking fields
                 timestamp: { value: Date.now(), enumerable: true, configurable: true },
                 target: { value: originalEvent.target, enumerable: true, configurable: true },
-                id: { value: originalEvent.target.id || null, enumerable: true, configurable: true },
 
                 // Reference to the original DOM event for debugging/advanced usage
                 originalEvent: { value: originalEvent, enumerable: true, configurable: true }
@@ -1494,8 +1548,77 @@
                 };
             });
 
+            // Return the event
+            return customEvent;
+        },
+
+        /**
+         * Returns the container the event will be dispatched to
+         * @param {number} msgType
+         * @param {Event} originalEvent
+         * @returns {HTMLElement|*}
+         */
+        getContainerForEvent(msgType, originalEvent) {
+            // Calculate hit-test result as fallback
+            let container = originalEvent.target.closest('[data-pac-id]');
+
+            // Click routing - ensure click goes to same container as button down
+            if (msgType === MSG_LCLICK || msgType === MSG_RCLICK || msgType === MSG_MCLICK) {
+                if (this._downContainer?.isConnected) {
+                    container = this._downContainer;
+                }
+
+                this._downContainer = null;
+            } else if (this._captureActive && this.isCaptureAffected(msgType)) {
+                // Capture routing - send mouse events to captured container
+                if (this._capturedContainer?.isConnected) {
+                    container = this._capturedContainer;
+                } else {
+                    this.releaseCapture();
+                }
+            }
+
+            return container;
+        },
+
+        /**
+         *
+         * @param {HTMLElement} container
+         * @param {CustomEvent} event
+         */
+        dispatchEvent(container, event) {
+            // Exit early if no container is found - event cannot be properly tracked
+            if (!container) {
+                return;
+            }
+
+            // Process event modifiers - return early if event should be filtered
+            if (!this.processEventModifiers(event.target, event)) {
+                return;
+            }
+
             // Dispatch the custom event to the container
-            container.dispatchEvent(customEvent);
+            container.dispatchEvent(event);
+        },
+
+        /**
+         * Dispatches browser state events (visibility, online/offline, etc.) to all PAC containers
+         * @param {string} stateType - Type of state change ('visibility', 'online', etc.)
+         * @param {Object} stateData - State data to include in event
+         */
+        broadcastEvent(stateType, stateData) {
+            window.PACRegistry.components.forEach((context) => {
+                const customEvent = new CustomEvent('pac:event', {
+                    detail: {
+                        target: context.container,
+                        stateType: stateType,
+                        stateData: stateData,
+                        timestamp: Date.now()
+                    }
+                });
+
+                context.container.dispatchEvent(customEvent);
+            });
         },
 
         /**
@@ -1516,105 +1639,6 @@
 
                 context.container.dispatchEvent(customEvent);
             });
-        },
-
-        /**
-         * Converts DOM event data into Win32 message format for consistent handling
-         * across different event types. Each message type has specific parameter
-         * encoding rules that match Win32 conventions.
-         * @param {number} messageType - The Win32 message type constant
-         * @param {Event} event - The original DOM event containing the raw data
-         * @param {Element} container - The PAC container element with data-pac-id
-         * @returns {Object} Object containing wParam and lParam values
-         * @returns {number} returns.wParam - The wParam value (typically flags or primary data)
-         * @returns {number|Object} returns.lParam - The lParam value (typically coordinates or secondary data)
-         */
-        buildParams(messageType, event, container) {
-            switch(messageType) {
-                // Mouse movement and button events - encode button states and coordinates
-                case MSG_MOUSEMOVE:
-                case MSG_LBUTTONDOWN:
-                case MSG_LBUTTONUP:
-                case MSG_LBUTTONDBLCLK:
-                case MSG_RBUTTONDOWN:
-                case MSG_RBUTTONUP:
-                case MSG_MBUTTONDOWN:
-                case MSG_MBUTTONUP:
-                case MSG_LCLICK:
-                case MSG_MCLICK:
-                case MSG_RCLICK:
-                    return {
-                        wParam: this.buildMouseWParam(event),  // Mouse button and modifier key flags
-                        lParam: this.buildMouseLParam(event, container)   // Packed x,y coordinates (container-relative)
-                    };
-
-                // Keyboard events - encode key codes and modifier states
-                case MSG_KEYDOWN:
-                case MSG_KEYUP:
-                    return {
-                        wParam: this.buildKeyboardWParam(event),    // Win32 virtual key code
-                        lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
-                    };
-
-                // Character input events - Win32 WM_CHAR style
-                // Only fires for keyboard-generated printable characters
-                case MSG_CHAR:
-                    return {
-                        wParam: event.key.charCodeAt(0),            // UTF-16 character code (Win32 style)
-                        lParam: this.buildKeyboardLParam(event)     // Keyboard state flags and repeat count
-                    };
-
-                // Text field input events - captures paste, autocomplete, IME, etc.
-                case MSG_INPUT:
-                    return {
-                        wParam: event.data ? event.data.length : 0,
-                        lParam: 0
-                    };
-
-                // Select/radio change event
-                case MSG_CHANGE:
-                    return {
-                        wParam: this.buildChangeWParam(event),
-                        lParam: 0
-                    }
-
-                // Form submission events - encode form data
-                case MSG_SUBMIT: {
-                    // Safety check for form element
-                    if (!event.target || typeof event.target.elements === 'undefined') {
-                        return {
-                            wParam: null,
-                            lParam: {}
-                        };
-                    }
-
-                    try {
-                        // Extract form data into a plain object
-                        const formData = new FormData(event.target);
-                        const formObject = Object.fromEntries(formData.entries());
-
-                        return {
-                            wParam: event.target.id || null,   // Form ID for identification
-                            lParam: formObject                 // Serialized form data
-                        };
-                    } catch (error) {
-                        // Handle FormData creation failures gracefully
-                        console.warn('Failed to extract form data:', error);
-
-                        return {
-                            wParam: event.target.id || null,
-                            lParam: {}
-                        };
-                    }
-                }
-
-                // Default case for unhandled message types
-                default:
-                    return {
-                        wParam: 0,
-                        lParam: 0
-                    };
-            }
         },
 
         /**
