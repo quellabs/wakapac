@@ -1068,8 +1068,8 @@
              */
             document.addEventListener('focusin', function(event) {
                 const container = self.getContainerForEvent(MSG_FOCUS, event);
-                const customEvent = self.wrapEvent(MSG_FOCUS, event);
-                self.dispatchEvent(container, customEvent);
+                const customEvent = self.wrapDomEventAsMessage(MSG_FOCUS, event);
+                self.postMessage(container, customEvent);
             });
 
             /**
@@ -1078,8 +1078,8 @@
              */
             document.addEventListener('focusout', function(event) {
                 const container = self.getContainerForEvent(MSG_BLUR, event);
-                const customEvent = self.wrapEvent(MSG_BLUR, event);
-                self.dispatchEvent(container, customEvent);
+                const customEvent = self.wrapDomEventAsMessage(MSG_BLUR, event);
+                self.postMessage(container, customEvent);
             });
 
             /**
@@ -1087,16 +1087,18 @@
              * Maps browser mouse button codes to application message types
              */
             document.addEventListener('mousedown', function (event) {
-                let messageType;
+                // Define button map
+                const buttonMap = {
+                    0: MSG_LBUTTONDOWN,
+                    1: MSG_MBUTTONDOWN,
+                    2: MSG_RBUTTONDOWN,
+                };
 
-                if (event.button === 0) {
-                    messageType = MSG_LBUTTONDOWN;
-                } else if (event.button === 1) {
-                    messageType = MSG_MBUTTONDOWN;
-                } else if (event.button === 2) {
-                    messageType = MSG_RBUTTONDOWN;
-                } else {
-                    return; // Unknown button
+                // Track right button specifically for gestures
+                const messageType = buttonMap[event.button];
+
+                if (!messageType) {
+                    return;
                 }
 
                 // Track right button specifically for gestures
@@ -1107,10 +1109,10 @@
                 // Dispatch event to container
                 const container = self.getContainerForEvent(messageType, event);
                 const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapEvent(messageType, event, wParam, lParam);
+                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             /**
@@ -1127,16 +1129,18 @@
              * Maps browser mouse button codes to application message types
              */
             window.addEventListener('mouseup', function (event) {
-                let messageType;
+                // Define button map
+                const buttonMap = {
+                    0: MSG_LBUTTONUP,
+                    1: MSG_MBUTTONUP,
+                    2: MSG_RBUTTONUP,
+                };
 
-                if (event.button === 0) {
-                    messageType = MSG_LBUTTONUP;
-                } else if (event.button === 1) {
-                    messageType = MSG_MBUTTONUP;
-                } else if (event.button === 2) {
-                    messageType = MSG_RBUTTONUP;
-                } else {
-                    return; // Unknown button
+                // Track right button specifically for gestures
+                const messageType = buttonMap[event.button];
+
+                if (!messageType) {
+                    return;
                 }
 
                 // Check for gesture completion on right button
@@ -1147,10 +1151,10 @@
                 // Dispatch event to container
                 const container = self.getContainerForEvent(messageType, event);
                 const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapEvent(messageType, event, wParam, lParam);
+                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             // Click event recognises left button
@@ -1158,9 +1162,9 @@
                 const container = self.getContainerForEvent(MSG_LCLICK, event);
                 const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapEvent(MSG_LCLICK, event, wParam, lParam);
+                const customEvent = self.wrapDomEventAsMessage(MSG_LCLICK, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             // Auxclick event recognises middle button
@@ -1168,10 +1172,10 @@
                 if (event.button === 1) {
                     const container = self.getContainerForEvent(MSG_MCLICK, event);
                     const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                    const customEvent = self.wrapEvent(MSG_MCLICK, event, wParam, lParam);
+                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                    const customEvent = self.wrapDomEventAsMessage(MSG_MCLICK, event, wParam, lParam);
 
-                    self.dispatchEvent(container, customEvent);
+                    self.postMessage(container, customEvent);
                 }
             });
 
@@ -1190,10 +1194,10 @@
                 // Dispatch the event
                 const container = self.getContainerForEvent(MSG_RCLICK, event);
                 const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapEvent(MSG_RCLICK, event, wParam, lParam);
+                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapDomEventAsMessage(MSG_RCLICK, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             // Handle double-click (left button only)
@@ -1202,10 +1206,10 @@
                 if (event.button === 0) {
                     const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
                     const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                    const customEvent = self.wrapEvent(MSG_LBUTTONDBLCLK, event, wParam, lParam);
+                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                    const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDBLCLK, event, wParam, lParam);
 
-                    self.dispatchEvent(container, customEvent);
+                    self.postMessage(container, customEvent);
                 }
             });
 
@@ -1225,10 +1229,10 @@
                 // Dispatch move event to container
                 const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
                 const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapEvent(MSG_MOUSEMOVE, event, wParam, lParam);
+                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             /**
@@ -1237,10 +1241,10 @@
             document.addEventListener('touchstart', function (event) {
                 const container = self.getContainerForEvent(MSG_LBUTTONDOWN, event);
                 const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapEvent(MSG_LBUTTONDOWN, event, wParam, lParam);
+                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDOWN, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             /**
@@ -1249,10 +1253,10 @@
             document.addEventListener('touchend', function (event) {
                 const container = self.getContainerForEvent(MSG_LBUTTONUP, event);
                 const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapEvent(MSG_LBUTTONUP, event, wParam, lParam);
+                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONUP, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             /**
@@ -1261,10 +1265,10 @@
             document.addEventListener('touchcancel', function (event) {
                 const container = self.getContainerForEvent(MSG_LBUTTONUP, event);
                 const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapEvent(MSG_LBUTTONUP, event, wParam, lParam);
+                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONUP, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             /**
@@ -1274,10 +1278,10 @@
                 if (event.touches.length > 0) {
                     const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
                     const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                    const customEvent = self.wrapEvent(MSG_MOUSEMOVE, event, wParam, lParam);
+                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                    const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
-                    self.dispatchEvent(container, customEvent);
+                    self.postMessage(container, customEvent);
                 }
             });
 
@@ -1288,10 +1292,10 @@
             document.addEventListener('keyup', function (event) {
                 const container = self.getContainerForEvent(MSG_KEYUP, event);
                 const wParam = self.buildKeyboardWParam(event); // Win32 virtual key code
-                const lParam = self.buildKeyboardLParam(event) // Keyboard state flags and repeat count
-                const customEvent = self.wrapEvent(MSG_KEYUP, event, wParam, lParam);
+                const lParam = self.buildKeyboardLParam(event); // Keyboard state flags and repeat count
+                const customEvent = self.wrapDomEventAsMessage(MSG_KEYUP, event, wParam, lParam);
 
-                self.dispatchEvent(container, customEvent, {
+                self.postMessage(container, customEvent, {
                     key: event.key,
                     code: event.code
                 });
@@ -1306,8 +1310,8 @@
                 const container = self.getContainerForEvent(MSG_KEYDOWN, event);
                 const keyDownWparam = self.buildKeyboardWParam(event);
                 const keyDownLparam = self.buildKeyboardLParam(event);
-                const keyDownEvent = self.wrapEvent(MSG_KEYDOWN, event, keyDownWparam, keyDownLparam);
-                self.dispatchEvent(container, keyDownEvent);
+                const keyDownEvent = self.wrapDomEventAsMessage(MSG_KEYDOWN, event, keyDownWparam, keyDownLparam);
+                self.postMessage(container, keyDownEvent);
 
                 // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
                 // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
@@ -1316,8 +1320,8 @@
                     const container = self.getContainerForEvent(MSG_CHAR, event);
                     const msgCharWparam = event.key.charCodeAt(0);
                     const msgCharLparam = keyDownLparam;
-                    const msgCharEvent = self.wrapEvent(MSG_CHAR, event, msgCharWparam, msgCharLparam);
-                    self.dispatchEvent(container, msgCharEvent);
+                    const msgCharEvent = self.wrapDomEventAsMessage(MSG_CHAR, event, msgCharWparam, msgCharLparam);
+                    self.postMessage(container, msgCharEvent);
                 }
             });
 
@@ -1334,11 +1338,11 @@
                     const container = self.getContainerForEvent(MSG_CHANGE, event);
                     const wParam = self.buildChangeWParam(event);
                     const lParam = 0;
-                    const customEvent = self.wrapEvent(MSG_CHANGE, event, wParam, lParam, {
+                    const customEvent = self.wrapDomEventAsMessage(MSG_CHANGE, event, wParam, lParam, {
                         elementType: isSelect ? 'select' : target.type
                     });
 
-                    self.dispatchEvent(container, customEvent);
+                    self.postMessage(container, customEvent);
                 }
             });
 
@@ -1358,12 +1362,12 @@
                     const container = self.getContainerForEvent(MSG_INPUT, event);
                     const wParam = event.data ? event.data.length : 0;
                     const lParam = 0;
-                    const customEvent = self.wrapEvent(MSG_INPUT, event, wParam, lParam, {
+                    const customEvent = self.wrapDomEventAsMessage(MSG_INPUT, event, wParam, lParam, {
                         elementType: target.tagName.toLowerCase(),
                         text: event.data
                     });
 
-                    self.dispatchEvent(container, customEvent);
+                    self.postMessage(container, customEvent);
                 }
             });
 
@@ -1376,11 +1380,11 @@
                 const container = self.getContainerForEvent(MSG_SUBMIT, event);
                 const wParam = event.target.id || 0;
                 const lParam = 0;
-                const customEvent = self.wrapEvent(MSG_SUBMIT, event, wParam, lParam, {
+                const customEvent = self.wrapDomEventAsMessage(MSG_SUBMIT, event, wParam, lParam, {
                     entries: Object.fromEntries(formData.entries()),
                 });
 
-                self.dispatchEvent(container, customEvent);
+                self.postMessage(container, customEvent);
             });
 
             /**
@@ -1494,7 +1498,7 @@
          * @param {Object} [extended={}] - Additional extended data to include in event.detail
          * @returns {CustomEvent<{}>}
          */
-        wrapEvent(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}) {
+        wrapDomEventAsMessage(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}) {
             // Create custom event with extended data in detail (optional)
             const customEvent = new CustomEvent('pac:event', {
                 bubbles: true,
@@ -1580,7 +1584,7 @@
          * @param {HTMLElement} container
          * @param {CustomEvent} event
          */
-        dispatchEvent(container, event) {
+        postMessage(container, event) {
             // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
                 return;
@@ -1596,13 +1600,33 @@
         },
 
         /**
-         * Broadcast event to each container
-         * @param {CustomEvent} event
+         * Synchronously deliver a wakapac message directly to a container's message procedure.
+         * This is the equivalent of Win32 SendMessage:
+         * - Bypasses DOM event dispatch and bubbling
+         * - Does NOT go through the message queue
+         * - Invokes the container's msgProc immediately
+         *
+         * This is intended for framework-internal notifications (e.g. state changes),
+         * not for general user input or DOM-originated events.
          */
-        broadcastEvent(event) {
-            window.PACRegistry.components.forEach((context) => {
-                this.dispatchEvent(context.container, event);
-            });
+        sendMessage(container, event) {
+            // No target container: nothing to deliver
+            if (!container) {
+                return;
+            }
+
+            // Each container may optionally expose a Win32-style message procedure.
+            // If none is present, the message is ignored.
+            const msgProc = container.msgProc;
+
+            if (typeof msgProc !== "function") {
+                return;
+            }
+
+            // Invoke the message procedure synchronously.
+            // No DOM dispatch, no bubbling, no cancellation semantics.
+            // This is a direct call into container behavior.
+            msgProc.call(container, event);
         },
 
         /**
@@ -3635,7 +3659,7 @@
 
         // Create interval that sends MSG_TIMER message to component
         const intervalId = setInterval(() => {
-            wakaPAC.sendMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
+            wakaPAC.postMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
         }, elapse);
 
         // Store mapping of timerId -> intervalId for later cleanup
@@ -7116,6 +7140,52 @@
     }
 
     /**
+     * Create a wakapac CustomEvent carrying Win32-style message data.
+     * @param {number} messageId
+     * @param {number} wParam
+     * @param {number} lParam
+     * @param {Object} extended
+     * @returns {CustomEvent}
+     */
+    wakaPAC.createPacMessage = function (messageId, wParam, lParam, extended = {}) {
+        // Create a custom wakapac event that carries Win32-style message data.
+        const event = new CustomEvent('pac:event', {
+            bubbles: false,
+            cancelable: true,
+            detail: extended
+        });
+
+        // Attach core Win32-style message fields directly to the event object.
+        // These are top-level properties to avoid nesting under event.detail
+        // and to keep message handling semantics explicit and predictable.
+        Object.defineProperties(event, {
+            message:   { value: messageId, enumerable: true },
+            wParam:    { value: wParam,    enumerable: true },
+            lParam:    { value: lParam,    enumerable: true },
+            timestamp: { value: Date.now(), enumerable: true }
+        });
+
+        // Return the constructed message for delivery by postMessage or sendMessage.
+        return event;
+    };
+
+    /**
+     * Resolve a WakaPAC container element by its data-pac-id.
+     * @param {string} pacId Identifier of the target container
+     * @returns {HTMLElement|null} The resolved container element, or null
+     */
+    wakaPAC.getContainerByPacId = function (pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context) {
+            console.warn(`wakaPAC: Container with id "${pacId}" not found`);
+            return null;
+        }
+
+        return context.container;
+    };
+
+    /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 SendMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
@@ -7124,32 +7194,57 @@
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
-        const context = window.PACRegistry.get(pacId);
+    wakaPAC.postMessage = function (pacId, messageId, wParam, lParam, extended = {}) {
+        // Resolve the target container from the registry.
+        // If the container does not exist, the message is dropped.
+        const container = this.getContainerByPacId(pacId);
 
-        if (!context) {
-            console.warn(`sendMessage: Container with id "${pacId}" not found`);
+        if (!container) {
             return;
         }
 
-        // Create custom event with extended data in detail (optional)
-        const customEvent = new CustomEvent('pac:event', {
-            bubbles: false,
-            cancelable: true,
-            detail: extended
-        });
+        // Construct a wakapac message object carrying messageId, wParam, and lParam.
+        // This does not deliver the message by itself.
+        const event = this.createPacMessage(messageId, wParam, lParam, extended);
 
-        // Add Win32-style message properties directly to the event object
-        // This avoids the event.detail.property nesting and keeps Win32 semantics clean
-        Object.defineProperties(customEvent, {
-            message: { value: messageId, enumerable: true, configurable: true },
-            wParam: { value: wParam, enumerable: true, configurable: true },
-            lParam: { value: lParam, enumerable: true, configurable: true },
-            timestamp: { value: Date.now(), enumerable: true, configurable: true }
-        });
+        // Dispatch the message through the DOM event system.
+        // Delivery is asynchronous and follows normal event routing semantics.
+        container.dispatchEvent(event);
+    };
 
-        // Send the event
-        context.container.dispatchEvent(customEvent);
+    /**
+     * Send a message to a specific WakaPAC container by its data-pac-id
+     * Similar to Win32 SendMessage with a specific HWND
+     * @param {string} pacId - Target container's data-pac-id attribute value
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
+     */
+    wakaPAC.sendMessage = function (pacId, messageId, wParam, lParam, extended = {}) {
+        // Resolve the target container from the registry.
+        // If the container does not exist, the message is dropped.
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container) {
+            return;
+        }
+
+        // Each container may optionally expose a Win32-style message procedure.
+        // If none is present, the container does not participate in synchronous messaging.
+        const msgProc = container.msgProc;
+
+        if (typeof msgProc !== "function") {
+            return;
+        }
+
+        // Construct a wakapac message object carrying messageId, wParam, and lParam.
+        // This does not dispatch anything by itself.
+        const event = this.createPacMessage(messageId, wParam, lParam, extended);
+
+        // Invoke the message procedure directly.
+        // This call is synchronous and executes immediately in the current call stack.
+        msgProc.call(container, event);
     };
 
     /**

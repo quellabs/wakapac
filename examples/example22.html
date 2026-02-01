@@ -463,7 +463,7 @@
 
         console.log(`Sending message to ${target}: msg=0x${messageId.toString(16)}, wParam=${wParam}, lParam=${lParam}`);
 
-        wakaPAC.sendMessage(target, messageId, wParam, lParam, {
+        wakaPAC.postMessage(target, messageId, wParam, lParam, {
             source: 'control-panel',
             timestamp: Date.now()
         });
@@ -513,9 +513,9 @@
     // Quick test buttons for demonstration
     console.log('WakaPAC Message System Demo loaded');
     console.log('Try these commands in console:');
-    console.log('  wakaPAC.sendMessage("counterA", wakaPAC.MSG_USER + 1, 5, 0)  // Increment counter A by 5');
+    console.log('  wakaPAC.postMessage("counterA", wakaPAC.MSG_USER + 1, 5, 0)  // Increment counter A by 5');
     console.log('  wakaPAC.broadcastMessage(wakaPAC.MSG_USER + 3, 0, 0)               // Reset all counters');
-    console.log('  wakaPAC.sendMessage("statusMonitor", wakaPAC.MSG_USER + 4, 2, 0)  // Set status to "Complete"');
+    console.log('  wakaPAC.postMessage("statusMonitor", wakaPAC.MSG_USER + 4, 2, 0)  // Set status to "Complete"');
 </script>
 </body>
 </html>
