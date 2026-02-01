@@ -1069,7 +1069,7 @@
             document.addEventListener('focusin', function(event) {
                 const container = self.getContainerForEvent(MSG_FOCUS, event);
                 const customEvent = self.wrapDomEventAsMessage(MSG_FOCUS, event);
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             /**
@@ -1079,7 +1079,7 @@
             document.addEventListener('focusout', function(event) {
                 const container = self.getContainerForEvent(MSG_BLUR, event);
                 const customEvent = self.wrapDomEventAsMessage(MSG_BLUR, event);
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             /**
@@ -1112,7 +1112,7 @@
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             /**
@@ -1154,7 +1154,7 @@
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             // Click event recognises left button
@@ -1164,7 +1164,7 @@
                 const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_LCLICK, event, wParam, lParam);
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             // Auxclick event recognises middle button
@@ -1175,7 +1175,7 @@
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_MCLICK, event, wParam, lParam);
 
-                    self.postMessage(container, customEvent);
+                    self.dispatchToContainer(container, customEvent);
                 }
             });
 
@@ -1197,7 +1197,7 @@
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_RCLICK, event, wParam, lParam);
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             // Handle double-click (left button only)
@@ -1209,7 +1209,7 @@
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDBLCLK, event, wParam, lParam);
 
-                    self.postMessage(container, customEvent);
+                    self.dispatchToContainer(container, customEvent);
                 }
             });
 
@@ -1232,7 +1232,7 @@
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             /**
@@ -1244,7 +1244,7 @@
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDOWN, event, wParam, lParam);
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             /**
@@ -1256,7 +1256,7 @@
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONUP, event, wParam, lParam);
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             /**
@@ -1268,7 +1268,7 @@
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONUP, event, wParam, lParam);
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             /**
@@ -1281,7 +1281,7 @@
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
-                    self.postMessage(container, customEvent);
+                    self.dispatchToContainer(container, customEvent);
                 }
             });
 
@@ -1295,7 +1295,7 @@
                 const lParam = self.buildKeyboardLParam(event); // Keyboard state flags and repeat count
                 const customEvent = self.wrapDomEventAsMessage(MSG_KEYUP, event, wParam, lParam);
 
-                self.postMessage(container, customEvent, {
+                self.dispatchToContainer(container, customEvent, {
                     key: event.key,
                     code: event.code
                 });
@@ -1311,7 +1311,8 @@
                 const keyDownWparam = self.buildKeyboardWParam(event);
                 const keyDownLparam = self.buildKeyboardLParam(event);
                 const keyDownEvent = self.wrapDomEventAsMessage(MSG_KEYDOWN, event, keyDownWparam, keyDownLparam);
-                self.postMessage(container, keyDownEvent);
+
+                self.dispatchToContainer(container, keyDownEvent);
 
                 // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
                 // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
@@ -1321,7 +1322,8 @@
                     const msgCharWparam = event.key.charCodeAt(0);
                     const msgCharLparam = keyDownLparam;
                     const msgCharEvent = self.wrapDomEventAsMessage(MSG_CHAR, event, msgCharWparam, msgCharLparam);
-                    self.postMessage(container, msgCharEvent);
+
+                    self.dispatchToContainer(container, msgCharEvent);
                 }
             });
 
@@ -1342,7 +1344,7 @@
                         elementType: isSelect ? 'select' : target.type
                     });
 
-                    self.postMessage(container, customEvent);
+                    self.dispatchToContainer(container, customEvent);
                 }
             });
 
@@ -1367,7 +1369,7 @@
                         text: event.data
                     });
 
-                    self.postMessage(container, customEvent);
+                    self.dispatchToContainer(container, customEvent);
                 }
             });
 
@@ -1384,7 +1386,7 @@
                     entries: Object.fromEntries(formData.entries()),
                 });
 
-                self.postMessage(container, customEvent);
+                self.dispatchToContainer(container, customEvent);
             });
 
             /**
@@ -1584,7 +1586,7 @@
          * @param {HTMLElement} container
          * @param {CustomEvent} event
          */
-        postMessage(container, event) {
+        dispatchToContainer(container, event) {
             // Exit early if no container is found - event cannot be properly tracked
             if (!container) {
                 return;
@@ -1601,15 +1603,8 @@
 
         /**
          * Synchronously deliver a wakapac message directly to a container's message procedure.
-         * This is the equivalent of Win32 SendMessage:
-         * - Bypasses DOM event dispatch and bubbling
-         * - Does NOT go through the message queue
-         * - Invokes the container's msgProc immediately
-         *
-         * This is intended for framework-internal notifications (e.g. state changes),
-         * not for general user input or DOM-originated events.
          */
-        sendMessage(container, event) {
+        sendToContainer(container, event) {
             // No target container: nothing to deliver
             if (!container) {
                 return;
@@ -7209,12 +7204,13 @@
 
         // Dispatch the message through the DOM event system.
         // Delivery is asynchronous and follows normal event routing semantics.
-        container.dispatchEvent(event);
+        DomUpdateTracker.dispatchToContainer(container, event);
     };
 
     /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 SendMessage with a specific HWND
+     * This bypasses DOM event dispatch and invokes the container’s message procedure directly.
      * @param {string} pacId - Target container's data-pac-id attribute value
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
@@ -7230,21 +7226,13 @@
             return;
         }
 
-        // Each container may optionally expose a Win32-style message procedure.
-        // If none is present, the container does not participate in synchronous messaging.
-        const msgProc = container.msgProc;
-
-        if (typeof msgProc !== "function") {
-            return;
-        }
-
         // Construct a wakapac message object carrying messageId, wParam, and lParam.
         // This does not dispatch anything by itself.
         const event = this.createPacMessage(messageId, wParam, lParam, extended);
 
         // Invoke the message procedure directly.
         // This call is synchronous and executes immediately in the current call stack.
-        msgProc.call(container, event);
+        DomUpdateTracker.sendToContainer(container, event);
     };
 
     /**
