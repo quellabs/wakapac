@@ -2064,6 +2064,7 @@
                    messageType === MSG_MCLICK ||
                    messageType === MSG_RCLICK;
         },
+
         /**
          * Enable mouse capture for a specific PAC container.
          * When active, all mouse events are treated as if they target this container,
