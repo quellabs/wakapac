@@ -7242,29 +7242,17 @@
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
      * @param {number} lParam - Second message parameter (integer)
-     * @param {Object} [extraData={}] - Additional data stored in event.detail for custom use cases
+     * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extraData = {}) {
-        // Create custom event with extended data in detail (optional)
-        const customEvent = new CustomEvent('pac:event', {
-            bubbles: false,
-            cancelable: true,
-            detail: extraData
-        });
-
-        // Add Win32-style message properties directly to the event object
-        // This avoids the event.detail.property nesting and keeps Win32 semantics clean
-        Object.defineProperties(customEvent, {
-            message: { value: messageId, enumerable: true, configurable: true },
-            wParam: { value: wParam, enumerable: true, configurable: true },
-            lParam: { value: lParam, enumerable: true, configurable: true },
-            timestamp: { value: Date.now(), enumerable: true, configurable: true }
-        });
+    wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extended = {}) {
+        // Construct a wakapac message object carrying messageId, wParam, and lParam.
+        // This does not deliver the message by itself.
+        const event = this.createPacMessage(messageId, wParam, lParam, extended);
 
         // Broadcast the message to each registered container
         // Uses the registry instead of DOM queries for better performance
         window.PACRegistry.components.forEach((context) => {
-            context.container.dispatchEvent(customEvent);
+            DomUpdateTracker.dispatchToContainer(context.container, event);
         });
     };
 
