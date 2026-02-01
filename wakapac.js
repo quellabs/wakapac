@@ -94,7 +94,6 @@
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
     const MSG_INPUT = 0x0303;
-    const MSG_APP_ACTIVATE = 0x0304;
     const MSG_FOCUS = 0x0007;
     const MSG_BLUR = 0x0008;
     const MSG_KEYDOWN = 0x0100;
@@ -1019,9 +1018,10 @@
              * Handle document visibility changes (tab switches, window minimize, etc.)
              * Updates browserVisible property for all PAC containers
              */
-            document.addEventListener('visibilitychange', function(event) {
-                const customEvent = self.wrapEvent(MSG_APP_ACTIVATE, event, Number(!document.hidden), 0);
-                self.broadcastEvent(customEvent);
+            document.addEventListener('visibilitychange', function() {
+                self.dispatchBrowserStateEvent('visibility', {
+                    visible: !document.hidden
+                });
             });
 
             /**
@@ -4050,11 +4050,6 @@
      * @returns {void}
      */
     Context.prototype.handlePacEvent = function(event) {
-        // Update browser visibility state
-        if (event.message === MSG_APP_ACTIVATE) {
-            this.abstraction.browserVisible = event.wParam === 1;
-        }
-
         // Call user's message handler (msgProc) before framework processes the event
         // This allows user code to intercept and handle messages first, Win32-style
         let preventDefault = false;
@@ -4582,6 +4577,11 @@
         const { stateType, stateData } = event.detail;
 
         switch(stateType) {
+            case 'visibility':
+                // Update browser visibility state
+                this.abstraction.browserVisible = stateData.visible;
+                break;
+
             case 'online':
                 // Update network connectivity and connection type
                 this.abstraction.browserOnline = stateData.online;
@@ -7392,7 +7392,6 @@
     wakaPAC.MSG_CHANGE = MSG_CHANGE;
     wakaPAC.MSG_SUBMIT = MSG_SUBMIT;
     wakaPAC.MSG_INPUT = MSG_INPUT;
-    wakaPAC.MSG_APP_ACTIVATE = MSG_APP_ACTIVATE;
     wakaPAC.MSG_FOCUS = MSG_FOCUS;
     wakaPAC.MSG_BLUR = MSG_BLUR;
     wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
