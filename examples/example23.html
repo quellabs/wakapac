@@ -159,6 +159,10 @@
             background: #fadbd8;
             color: #e74c3c;
         }
+
+        .pac-capture-active * {
+            cursor: grabbing;
+        }
     </style>
 </head>
 <body>
@@ -278,7 +282,7 @@
                     const viewportPt = this.containerToViewport(pt.x, pt.y);
 
                     if (wakaPAC.ptInElement(viewportPt.x, viewportPt.y, document.querySelector('#targetBroken .box'))) {
-                        wakaPAC.sendMessage(
+                        wakaPAC.postMessage(
                             'targetBroken',
                             MSG_DROP_ITEM,
                             0,
@@ -345,7 +349,7 @@
                     const viewportPt = this.containerToViewport(pt.x, pt.y);
 
                     if (wakaPAC.ptInElement(viewportPt.x, viewportPt.y, document.querySelector('#targetWorking .box'))) {
-                        wakaPAC.sendMessage(
+                        wakaPAC.postMessage(
                             'targetWorking',
                             MSG_DROP_ITEM,
                             0,
