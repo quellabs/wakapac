@@ -4533,14 +4533,48 @@
     };
 
     /**
-     * Triggers watchers for root-level property changes
+     * Triggers watchers for property changes
+     * When a nested property changes, fires the watcher for the root property
      * @param {CustomEvent} event - The pac:change event with change details
      */
     Context.prototype.handleWatchersForChange = function(event) {
-        // Handle watchers for root-level changes
-        if (event.detail.path.length === 1) {
-            this.triggerWatcher(event.detail.path[0], event.detail.newValue, event.detail.oldValue);
+        const path = event.detail.path;
+        const rootProperty = path[0];
+
+        // ======================================================
+        // Root-level change (e.g., this.count = 5)
+        // Pass the actual primitive or object values directly
+        if (path.length === 1) {
+            this.triggerWatcher(rootProperty, event.detail.newValue, event.detail.oldValue);
+            return;
         }
+
+        // ======================================================
+        // Nested property change (e.g., this.settings.theme = 'dark')
+        // Reconstruct the parent object in both before/after states
+        // Get the current parent object (contains the new value)
+        const newParentObject = this.abstraction[rootProperty];
+
+        // Clone the parent object to reconstruct the old state
+        const oldParentObject = Array.isArray(newParentObject)
+            ? [...newParentObject]
+            : { ...newParentObject };
+
+        // Navigate through the path to find the changed property
+        // For path ['settings', 'theme'], navigate to oldParentObject.theme
+        let target = oldParentObject;
+        for (let i = 1; i < path.length - 1; i++) {
+            target = target[path[i]];
+        }
+
+        // Set the old value at the final property
+        // This reconstructs the object as it was before the change
+        const lastProperty = path[path.length - 1];
+        target[lastProperty] = event.detail.oldValue;
+
+        // Trigger watcher with complete before/after objects
+        // newParentObject has the changed value, oldParentObject has the old value
+        this.triggerWatcher(rootProperty, newParentObject, oldParentObject);
     };
 
     /**
@@ -4551,6 +4585,7 @@
         // Handle foreach rebuilds only for array changes
         if (event.detail.path.length === 1 && Array.isArray(this.abstraction[event.detail.path[0]])) {
             const foreachElements = this.findForeachElementsByArrayPath(event.detail.path[0]);
+
             foreachElements.forEach((el) => {
                 if (this.shouldRebuildForeach(el)) {
                     this.renderForeach(el);
