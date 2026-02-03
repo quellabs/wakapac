@@ -6179,14 +6179,15 @@
     };
 
     /**
-     * This method handles the complete removal of items including cleanup of interpolation maps
-     * to prevent memory leaks and stale references.
+     * Removes items from a foreach-rendered element and cleans up all associated references
+     * to prevent memory leaks. This method handles both DOM removal and tracking map cleanup.
      * @param {Element} element - The container element containing the items to remove
      * @param {number[]} removedIndices - Array of original indices of items to remove
      * @throws {TypeError} If element is not a valid DOM Element
      * @throws {TypeError} If removedIndices is not an array
      */
     Context.prototype.removeItems = function(element, removedIndices) {
+        // Validate input parameters to catch programming errors early
         if (!(element instanceof Element)) {
             throw new TypeError('element must be a DOM Element');
         }
@@ -6195,8 +6196,68 @@
             throw new TypeError('removedIndices must be an array');
         }
 
+        // Store reference to context for use in walker callback
+        // (callbacks don't have access to 'this' unless bound or captured)
+        const self = this;
+
+        // Process each index that needs to be removed
         removedIndices.forEach(index => {
-            this.findItemNodes(element, index).forEach(node => {
+            // Find all DOM nodes associated with this foreach item
+            // (includes the comment markers and all content between them)
+            const nodes = this.findItemNodes(element, index);
+
+            nodes.forEach(node => {
+                // STEP 1: CLEANUP PHASE - Remove all map references before DOM removal
+                // This prevents memory leaks by ensuring removed nodes can be garbage collected
+
+                // Create a tree walker to traverse all descendant nodes
+                // We need to walk the entire subtree because nested elements might have their own bindings
+                const walker = document.createTreeWalker(
+                    // Start from the node itself if it's an element, otherwise from its parent
+                    // (text/comment nodes can't be tree roots, so we use their parent)
+                    node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement,
+
+                    // Walk elements, text nodes, and comment nodes
+                    // (all three types can have entries in our tracking maps)
+                    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT,
+
+                    // Filter function to only process nodes that belong to this component
+                    // This prevents accidentally cleaning up nodes from nested child components
+                    {
+                        acceptNode(n) {
+                            // Check if this node belongs to our container, not a nested component
+                            // belongsToPacContainer returns true only if 'element' is the immediate PAC parent
+                            return Utils.belongsToPacContainer(element, n)
+                                ? NodeFilter.FILTER_ACCEPT  // Process this node
+                                : NodeFilter.FILTER_SKIP;   // Skip this node and its descendants
+                        }
+                    }
+                );
+
+                // Walk through all nodes in the subtree and clean up map references
+                let currentNode;
+
+                while ((currentNode = walker.nextNode())) {
+                    // Clean up based on node type - each type uses a different map
+
+                    if (currentNode instanceof Element) {
+                        // Element nodes have attribute bindings (wp-text, wp-class, etc.)
+                        // Remove from interpolationMap to release binding metadata
+                        self.interpolationMap.delete(currentNode);
+                    } else if (currentNode.nodeType === Node.TEXT_NODE) {
+                        // Text nodes have interpolation templates ({{variable}})
+                        // Remove from textInterpolationMap to release template data
+                        self.textInterpolationMap.delete(currentNode);
+                    } else if (currentNode.nodeType === Node.COMMENT_NODE) {
+                        // Comment nodes might have conditional directives (<!-- wp-if: condition -->)
+                        // Remove from commentBindingMap to release conditional metadata
+                        self.commentBindingMap.delete(currentNode);
+                    }
+                }
+
+                // STEP 2: DOM REMOVAL PHASE - Remove the node from the DOM tree
+                // At this point, all map references have been cleaned up, so the node
+                // and its descendants can be garbage collected once removed from the DOM
                 node.remove();
             });
         });
