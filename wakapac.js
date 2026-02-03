@@ -6409,17 +6409,31 @@
                 return; // Already initialized
             }
 
+            // Process all DOM mutations in this batch
             this.observer = new MutationObserver(mutations => {
                 mutations.forEach(mutation => {
+                    // Check each removed node for cleanup opportunities
                     mutation.removedNodes.forEach(node => {
-                        if (node.nodeType === 1) { // Element node
+                        // Only process element nodes (ignore text/comment nodes)
+                        if (node.nodeType === 1) {
+                            // Check if this is a PAC container
                             const pacId = node.getAttribute('data-pac-id');
 
                             if (pacId) {
+                                // Clean up the removed PAC component
                                 const context = window.PACRegistry.components.get(pacId);
 
                                 if (context) {
                                     context.destroy();
+                                }
+
+                                // Release mouse capture if this container had it
+                                if (
+                                    DomUpdateTracker._captureActive &&
+                                    DomUpdateTracker._capturedContainer &&
+                                    node === DomUpdateTracker._capturedContainer
+                                ) {
+                                    DomUpdateTracker.releaseCapture();
                                 }
                             }
                         }
