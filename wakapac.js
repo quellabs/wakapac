@@ -1558,18 +1558,9 @@
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            // Calculate hit-test result as fallback
             let container = originalEvent.target.closest('[data-pac-id]');
 
-            // Click routing - ensure click goes to same container as button down
-            if (msgType === MSG_LCLICK || msgType === MSG_RCLICK || msgType === MSG_MCLICK) {
-                if (this._downContainer?.isConnected) {
-                    container = this._downContainer;
-                }
-
-                this._downContainer = null;
-            } else if (this._captureActive && this.isCaptureAffected(msgType)) {
-                // Capture routing - send mouse events to captured container
+            if (this._captureActive && this.isCaptureAffected(msgType)) {
                 if (this._capturedContainer?.isConnected) {
                     container = this._capturedContainer;
                 } else {
@@ -1577,7 +1568,6 @@
                 }
             }
 
-            // Return container
             return container;
         },
 
@@ -2068,16 +2058,32 @@
         /**
          * Enable mouse capture for a specific PAC container.
          * When active, all mouse events are treated as if they target this container,
-         * even if the cursor is over a different element.
+         * even if the cursor is over a different element or outside the browser window.
          * @param {HTMLElement} container - Target PAC container that should receive captured mouse events
+         * @returns {boolean} True if capture was successfully set, false if container is invalid
          */
         setCapture(container) {
-            // If capture is already active, clean up previous capture state first
+            // Validate that container exists and is attached to the DOM
+            // Can't capture events for disconnected elements
+            if (!container?.isConnected) {
+                console.warn('Cannot capture disconnected element');
+                return false;
+            }
+
+            // If this exact container already has capture, nothing to do
+            // Return true to indicate capture is active (idempotent operation)
+            if (this._captureActive && this._capturedContainer === container) {
+                return true;
+            }
+
+            // If a different container currently has capture, release it first
+            // Only one container can have capture at a time (Win32 behavior)
             if (this._captureActive) {
                 this.releaseCapture();
             }
 
-            // Add a global CSS flag so styles/behavior can react to capture mode
+            // Add CSS class to body for styling purposes
+            // Allows CSS to react to capture mode (e.g., change cursor globally)
             document.body.classList.add('pac-capture-active');
 
             // Mark capture as active in internal state
@@ -2085,6 +2091,9 @@
 
             // Store reference to the container that will receive captured events
             this._capturedContainer = container;
+
+            // Return success
+            return true;
         },
 
         /**
@@ -7467,6 +7476,25 @@
      */
     wakaPAC.hasCapture = function() {
         return DomUpdateTracker.hasCapture();
+    };
+
+    /**
+     * Gets the pac-id of the container that currently has mouse capture, if any.
+     * Similar to Win32 GetCapture() which returns the window handle that has capture.
+     * @returns {string|null} The pac-id of the capturing container, or null if no capture is active
+     */
+    wakaPAC.getCapture = function() {
+        // Return null if no capture is currently active
+        if (!DomUpdateTracker._captureActive) {
+            return null;
+        }
+
+        // Extract the pac-id from the captured container element
+        // Use optional chaining since container might be removed from DOM
+        const pacId = DomUpdateTracker._capturedContainer?.getAttribute('data-pac-id');
+
+        // Return pac-id or null if container no longer has the attribute
+        return pacId || null;
     };
 
     /**
