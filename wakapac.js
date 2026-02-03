@@ -999,9 +999,6 @@
         /** @private {HTMLElement|null} The container element that has captured mouse input */
         _capturedContainer: null,
 
-        /** @private {HTMLElement|null} The container that received the last mousedown event (for click routing) */
-        _downContainer: null,
-
         initialize() {
             // Store reference to this object for use in closures
             const self = this;
