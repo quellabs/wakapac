@@ -3570,7 +3570,39 @@
     // LIFECYCLE METHODS
     // =============================================================================
 
+    /**
+     * Component destructor - performs complete cleanup and resource deallocation.
+     *
+     * This method is automatically called by CleanupObserver when the component's DOM container
+     * is removed from the document. It ensures all resources are properly released to prevent
+     * memory leaks and dangling references.
+     *
+     * IMPORTANT: Do not call this method directly unless you have a very specific reason.
+     * The framework handles component lifecycle automatically through DOM observation.
+     *
+     * Cleanup order is carefully designed to prevent issues during teardown:
+     * 1. Release external resources (mouse capture)
+     * 2. Remove event listeners (prevent new updates during teardown)
+     * 3. Disconnect observers and clear timers (stop async callbacks)
+     * 4. Call user's destroy hook (user cleanup with data still accessible)
+     * 5. Kill component timers (after user hook completes)
+     * 6. Remove from parent's children (break hierarchy links)
+     * 7. Clear internal maps (release binding data)
+     * 8. Deregister from global registry (remove from framework tracking)
+     * 9. Nullify references (enable garbage collection)
+     *
+     * @returns {void}
+     */
     Context.prototype.destroy = function() {
+        // Release mouse capture if this container had it
+        if (
+            DomUpdateTracker._captureActive &&
+            DomUpdateTracker._capturedContainer &&
+            this.container === DomUpdateTracker._capturedContainer
+        ) {
+            DomUpdateTracker.releaseCapture();
+        }
+
         // Remove event listeners
         this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
@@ -3603,7 +3635,13 @@
             this.containerScrollHandler = null;
         }
 
+        // Kill all timers for this component
+        this.killAllTimers();
+
         // Call user's destroy hook
+        // Note: Called after event listeners are removed to prevent the user's cleanup
+        // code from accidentally triggering reactive updates during component teardown.
+        // Maps are still available if user code needs to access binding data.
         if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
             try {
                 this.abstraction.destroy();
@@ -3612,16 +3650,9 @@
             }
         }
 
-        // Kill all timers for this component
-        this.killAllTimers();
-
-        // Remove this component from parent's children array
+        // Remove this component from parent's children set
         if (this.parent && this.parent.children) {
-            const idx = this.parent.children.indexOf(this);
-
-            if (idx !== -1) {
-                this.parent.children.splice(idx, 1);
-            }
+            this.parent.children.delete(this);
         }
 
         // Clean up all maps
@@ -6492,15 +6523,6 @@
 
                                 if (context) {
                                     context.destroy();
-                                }
-
-                                // Release mouse capture if this container had it
-                                if (
-                                    DomUpdateTracker._captureActive &&
-                                    DomUpdateTracker._capturedContainer &&
-                                    node === DomUpdateTracker._capturedContainer
-                                ) {
-                                    DomUpdateTracker.releaseCapture();
                                 }
                             }
                         }
