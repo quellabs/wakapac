@@ -999,9 +999,6 @@
         /** @private {HTMLElement|null} The container element that has captured mouse input */
         _capturedContainer: null,
 
-        /** @private {HTMLElement|null} The container that received the last mousedown event (for click routing) */
-        _downContainer: null,
-
         initialize() {
             // Store reference to this object for use in closures
             const self = this;
@@ -1558,18 +1555,9 @@
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            // Calculate hit-test result as fallback
             let container = originalEvent.target.closest('[data-pac-id]');
 
-            // Click routing - ensure click goes to same container as button down
-            if (msgType === MSG_LCLICK || msgType === MSG_RCLICK || msgType === MSG_MCLICK) {
-                if (this._downContainer?.isConnected) {
-                    container = this._downContainer;
-                }
-
-                this._downContainer = null;
-            } else if (this._captureActive && this.isCaptureAffected(msgType)) {
-                // Capture routing - send mouse events to captured container
+            if (this._captureActive && this.isCaptureAffected(msgType)) {
                 if (this._capturedContainer?.isConnected) {
                     container = this._capturedContainer;
                 } else {
@@ -1577,7 +1565,6 @@
                 }
             }
 
-            // Return container
             return container;
         },
 
@@ -2068,16 +2055,32 @@
         /**
          * Enable mouse capture for a specific PAC container.
          * When active, all mouse events are treated as if they target this container,
-         * even if the cursor is over a different element.
+         * even if the cursor is over a different element or outside the browser window.
          * @param {HTMLElement} container - Target PAC container that should receive captured mouse events
+         * @returns {boolean} True if capture was successfully set, false if container is invalid
          */
         setCapture(container) {
-            // If capture is already active, clean up previous capture state first
+            // Validate that container exists and is attached to the DOM
+            // Can't capture events for disconnected elements
+            if (!container?.isConnected) {
+                console.warn('Cannot capture disconnected element');
+                return false;
+            }
+
+            // If this exact container already has capture, nothing to do
+            // Return true to indicate capture is active (idempotent operation)
+            if (this._captureActive && this._capturedContainer === container) {
+                return true;
+            }
+
+            // If a different container currently has capture, release it first
+            // Only one container can have capture at a time (Win32 behavior)
             if (this._captureActive) {
                 this.releaseCapture();
             }
 
-            // Add a global CSS flag so styles/behavior can react to capture mode
+            // Add CSS class to body for styling purposes
+            // Allows CSS to react to capture mode (e.g., change cursor globally)
             document.body.classList.add('pac-capture-active');
 
             // Mark capture as active in internal state
@@ -2085,6 +2088,9 @@
 
             // Store reference to the container that will receive captured events
             this._capturedContainer = container;
+
+            // Return success
+            return true;
         },
 
         /**
@@ -3564,7 +3570,39 @@
     // LIFECYCLE METHODS
     // =============================================================================
 
+    /**
+     * Component destructor - performs complete cleanup and resource deallocation.
+     *
+     * This method is automatically called by CleanupObserver when the component's DOM container
+     * is removed from the document. It ensures all resources are properly released to prevent
+     * memory leaks and dangling references.
+     *
+     * IMPORTANT: Do not call this method directly unless you have a very specific reason.
+     * The framework handles component lifecycle automatically through DOM observation.
+     *
+     * Cleanup order is carefully designed to prevent issues during teardown:
+     * 1. Release external resources (mouse capture)
+     * 2. Remove event listeners (prevent new updates during teardown)
+     * 3. Disconnect observers and clear timers (stop async callbacks)
+     * 4. Call user's destroy hook (user cleanup with data still accessible)
+     * 5. Kill component timers (after user hook completes)
+     * 6. Remove from parent's children (break hierarchy links)
+     * 7. Clear internal maps (release binding data)
+     * 8. Deregister from global registry (remove from framework tracking)
+     * 9. Nullify references (enable garbage collection)
+     *
+     * @returns {void}
+     */
     Context.prototype.destroy = function() {
+        // Release mouse capture if this container had it
+        if (
+            DomUpdateTracker._captureActive &&
+            DomUpdateTracker._capturedContainer &&
+            this.container === DomUpdateTracker._capturedContainer
+        ) {
+            DomUpdateTracker.releaseCapture();
+        }
+
         // Remove event listeners
         this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
@@ -3597,7 +3635,13 @@
             this.containerScrollHandler = null;
         }
 
+        // Kill all timers for this component
+        this.killAllTimers();
+
         // Call user's destroy hook
+        // Note: Called after event listeners are removed to prevent the user's cleanup
+        // code from accidentally triggering reactive updates during component teardown.
+        // Maps are still available if user code needs to access binding data.
         if (this.abstraction.destroy && typeof this.abstraction.destroy === 'function') {
             try {
                 this.abstraction.destroy();
@@ -3606,16 +3650,9 @@
             }
         }
 
-        // Kill all timers for this component
-        this.killAllTimers();
-
-        // Remove this component from parent's children array
+        // Remove this component from parent's children set
         if (this.parent && this.parent.children) {
-            const idx = this.parent.children.indexOf(this);
-
-            if (idx !== -1) {
-                this.parent.children.splice(idx, 1);
-            }
+            this.parent.children.delete(this);
         }
 
         // Clean up all maps
@@ -6173,14 +6210,15 @@
     };
 
     /**
-     * This method handles the complete removal of items including cleanup of interpolation maps
-     * to prevent memory leaks and stale references.
+     * Removes items from a foreach-rendered element and cleans up all associated references
+     * to prevent memory leaks. This method handles both DOM removal and tracking map cleanup.
      * @param {Element} element - The container element containing the items to remove
      * @param {number[]} removedIndices - Array of original indices of items to remove
      * @throws {TypeError} If element is not a valid DOM Element
      * @throws {TypeError} If removedIndices is not an array
      */
     Context.prototype.removeItems = function(element, removedIndices) {
+        // Validate input parameters to catch programming errors early
         if (!(element instanceof Element)) {
             throw new TypeError('element must be a DOM Element');
         }
@@ -6189,8 +6227,68 @@
             throw new TypeError('removedIndices must be an array');
         }
 
+        // Store reference to context for use in walker callback
+        // (callbacks don't have access to 'this' unless bound or captured)
+        const self = this;
+
+        // Process each index that needs to be removed
         removedIndices.forEach(index => {
-            this.findItemNodes(element, index).forEach(node => {
+            // Find all DOM nodes associated with this foreach item
+            // (includes the comment markers and all content between them)
+            const nodes = this.findItemNodes(element, index);
+
+            nodes.forEach(node => {
+                // STEP 1: CLEANUP PHASE - Remove all map references before DOM removal
+                // This prevents memory leaks by ensuring removed nodes can be garbage collected
+
+                // Create a tree walker to traverse all descendant nodes
+                // We need to walk the entire subtree because nested elements might have their own bindings
+                const walker = document.createTreeWalker(
+                    // Start from the node itself if it's an element, otherwise from its parent
+                    // (text/comment nodes can't be tree roots, so we use their parent)
+                    node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement,
+
+                    // Walk elements, text nodes, and comment nodes
+                    // (all three types can have entries in our tracking maps)
+                    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT,
+
+                    // Filter function to only process nodes that belong to this component
+                    // This prevents accidentally cleaning up nodes from nested child components
+                    {
+                        acceptNode(n) {
+                            // Check if this node belongs to our container, not a nested component
+                            // belongsToPacContainer returns true only if 'element' is the immediate PAC parent
+                            return Utils.belongsToPacContainer(element, n)
+                                ? NodeFilter.FILTER_ACCEPT  // Process this node
+                                : NodeFilter.FILTER_SKIP;   // Skip this node and its descendants
+                        }
+                    }
+                );
+
+                // Walk through all nodes in the subtree and clean up map references
+                let currentNode;
+
+                while ((currentNode = walker.nextNode())) {
+                    // Clean up based on node type - each type uses a different map
+
+                    if (currentNode instanceof Element) {
+                        // Element nodes have attribute bindings (wp-text, wp-class, etc.)
+                        // Remove from interpolationMap to release binding metadata
+                        self.interpolationMap.delete(currentNode);
+                    } else if (currentNode.nodeType === Node.TEXT_NODE) {
+                        // Text nodes have interpolation templates ({{variable}})
+                        // Remove from textInterpolationMap to release template data
+                        self.textInterpolationMap.delete(currentNode);
+                    } else if (currentNode.nodeType === Node.COMMENT_NODE) {
+                        // Comment nodes might have conditional directives (<!-- wp-if: condition -->)
+                        // Remove from commentBindingMap to release conditional metadata
+                        self.commentBindingMap.delete(currentNode);
+                    }
+                }
+
+                // STEP 2: DOM REMOVAL PHASE - Remove the node from the DOM tree
+                // At this point, all map references have been cleaned up, so the node
+                // and its descendants can be garbage collected once removed from the DOM
                 node.remove();
             });
         });
@@ -6409,13 +6507,18 @@
                 return; // Already initialized
             }
 
+            // Process all DOM mutations in this batch
             this.observer = new MutationObserver(mutations => {
                 mutations.forEach(mutation => {
+                    // Check each removed node for cleanup opportunities
                     mutation.removedNodes.forEach(node => {
-                        if (node.nodeType === 1) { // Element node
+                        // Only process element nodes (ignore text/comment nodes)
+                        if (node.nodeType === 1) {
+                            // Check if this is a PAC container
                             const pacId = node.getAttribute('data-pac-id');
 
                             if (pacId) {
+                                // Clean up the removed PAC component
                                 const context = window.PACRegistry.components.get(pacId);
 
                                 if (context) {
@@ -7453,6 +7556,25 @@
      */
     wakaPAC.hasCapture = function() {
         return DomUpdateTracker.hasCapture();
+    };
+
+    /**
+     * Gets the pac-id of the container that currently has mouse capture, if any.
+     * Similar to Win32 GetCapture() which returns the window handle that has capture.
+     * @returns {string|null} The pac-id of the capturing container, or null if no capture is active
+     */
+    wakaPAC.getCapture = function() {
+        // Return null if no capture is currently active
+        if (!DomUpdateTracker._captureActive) {
+            return null;
+        }
+
+        // Extract the pac-id from the captured container element
+        // Use optional chaining since container might be removed from DOM
+        const pacId = DomUpdateTracker._capturedContainer?.getAttribute('data-pac-id');
+
+        // Return pac-id or null if container no longer has the attribute
+        return pacId || null;
     };
 
     /**
