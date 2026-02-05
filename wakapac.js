@@ -3968,6 +3968,29 @@
     };
 
     /**
+     * Calculates how deeply an element is nested inside this context's container.
+     * Used to ensure inner foreach blocks render before outer ones.
+     * @param element
+     * @returns {number}
+     */
+    Context.prototype.getElementDepth = function(element) {
+        // Depth counter relative to the container root
+        let depth = 0;
+
+        // Walk up the DOM tree starting from the element
+        let current = element;
+
+        // Stop when we reach the container or run out of parents
+        while (current && current !== this.container) {
+            depth++;
+            current = current.parentElement;
+        }
+
+        // Return computed nesting depth
+        return depth;
+    };
+
+    /**
      * Analyzes computed properties to build a dependency graph showing which computed
      * properties depend on which data properties.
      * @returns {Map<string, string[]>} A Map where keys are property names that are accessed
@@ -4901,6 +4924,7 @@
             const foreachExpr = mappingData.bindings.foreach.target;
             const itemVar = element.getAttribute('data-pac-item') || 'item';
             const indexVar = element.getAttribute('data-pac-index') || '$index';
+            const depth = self.getElementDepth(element);
 
             Object.assign(mappingData, {
                 foreachId: foreachId,
@@ -4908,7 +4932,8 @@
                 sourceArray: this.inferArrayRoot(foreachExpr),
                 template: element.innerHTML, // Capture clean template
                 itemVar: itemVar,
-                indexVar: indexVar
+                indexVar: indexVar,
+				depth: depth
             });
 
             interpolationMap.set(element, mappingData);
