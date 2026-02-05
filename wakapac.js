@@ -5652,21 +5652,6 @@
     };
 
     /**
-     * Resolve a foreach source path against scoped variables.
-     * API wrapper that preserves string-based semantics.
-     * @param {string|Array<string|number>} source - Path expression.
-     * @param {Map<string, string|number>} scope - Scoped variable map.
-     * @returns {string} Fully-qualified normalized path.
-     */
-    Context.prototype.resolveScopedSource = function (source, scope) {
-        const tokens = Utils.pathStringToArray(source);
-
-        const resolved = this.resolveScopedTokens(tokens, scope);
-
-        return Utils.pathArrayToString(resolved);
-    };
-
-    /**
      * Count how many leading "parent" tokens appear in a path.
      * These tokens indicate how many foreach scopes should be climbed.
      * @param {Array<string|number>} path - Tokenized path.
@@ -5686,24 +5671,34 @@
 
     /**
      * Build a scoped variable map from foreach frames.
-     * Each frame contributes item/index variables that resolve to
-     * fully-qualified global paths or numeric indices.
-     * @param {Array<Object>} frames - Effective foreach frames.
+     * @param {Array<Object>} frames - Effective foreach frames (outer → inner).
      * @returns {Map<string, string|number>} Scoped variable map.
      */
     Context.prototype.buildForeachScope = function (frames) {
-        // Stores scoped variable → resolved value mappings
+        // Stores scoped variable → resolved path/index mappings
         const scope = new Map();
 
-        // Expand each frame into scoped variables
+        // Expand each foreach frame into scoped variables
         for (const f of frames) {
-            // Resolve item variable into a fully-qualified path
+            // Resolve item variable into a fully-qualified global path
             if (!scope.has(f.itemVar)) {
-                const base = this.resolveScopedSource(f.sourceArray, scope);
-                scope.set(f.itemVar, `${base}[${f.index}]`);
+                // Normalize the frame source path into tokens
+                const tokens = Utils.pathStringToArray(f.sourceArray);
+
+                // Resolve tokens against the current scope chain
+                const resolved = this.resolveScopedTokens(tokens, scope);
+
+                // Convert resolved tokens into a normalized base path string
+                const base = Utils.pathArrayToString(resolved);
+
+                // Append the current index to produce the final scoped path
+                scope.set(
+                    f.itemVar,
+                    `${base}[${f.index}]`
+                );
             }
 
-            // Map index variable directly to numeric index
+            // Map index variable directly to its numeric index
             if (f.indexVar && !scope.has(f.indexVar)) {
                 scope.set(f.indexVar, f.index);
             }
