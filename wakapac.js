@@ -1391,10 +1391,10 @@
                     entries: Object.fromEntries(formData.entries()),
 
                     // Form metadata - useful for routing/debugging
-                    action: form.action,                    // Where form submits to
-                    method: form.method.toUpperCase(),      // GET, POST, etc.
-                    enctype: form.enctype,                  // How data is encoded (multipart/form-data, etc.)
-                    name: form.name,                        // Form name attribute
+                    action: form.action,                           // Where form submits to
+                    method: form.method.toUpperCase(),             // GET, POST, etc.
+                    enctype: form.enctype,                         // How data is encoded (multipart/form-data, etc.)
+                    name: form.getAttribute('name'),   // Form name attribute
 
                     // Validation state - indicates if form passes HTML5 validation
                     // Returns false if any field has required, pattern, min/max violations
