@@ -5581,42 +5581,58 @@
     };
 
     /**
-     * Fetches the entire chain of foreaches for the given element
-     * @param element
-     * @returns {*[]}
+     * Walks up the DOM from a given element and collects all enclosing
+     * foreach contexts, starting from the closest one.
+     * @param {Element} element
+     * @returns {Array<Object>}
      */
     Context.prototype.getForeachChain = function(element) {
-        const result = [];
+        // Accumulates the discovered foreach contexts in traversal order
+        const chain = [];
 
-        let current = element;
+        // Cache frequently accessed properties to avoid repeated lookups
+        const containerRoot = this.container;
+        const interpolationMap = this.interpolationMap;
 
-        while (current != null) {
-            const context = this.extractClosestForeachContext(current);
+        // Start traversal at the provided element
+        let currentElement = element;
 
-            if (context) {
-                const forEachContainer = this.container.querySelector('[data-pac-foreach-id="' + context.foreachId + '"]');
-                const forEachData = this.interpolationMap.get(forEachContainer);
+        // Continue walking up the foreach hierarchy until no parent exists
+        while (currentElement) {
+            // Resolve the closest foreach context associated with this element
+            const foreachContext = this.extractClosestForeachContext(currentElement);
 
-                // Ensure forEachData exists before accessing properties
-                if (forEachData) {
-                    result.push({
-                        foreachId: context.foreachId,
-                        depth: forEachData.depth,
-                        index: context.index,
-                        renderIndex: context.renderIndex,
-                        container: forEachContainer,
-                        itemVar: forEachData.itemVar,
-                        indexVar: forEachData.indexVar,
-                        sourceArray: forEachData.sourceArray
+            if (foreachContext) {
+                // Locate the DOM container tied to this foreach instance
+                const foreachContainer = containerRoot.querySelector(
+                    `[data-pac-foreach-id="${foreachContext.foreachId}"]`
+                );
+
+                // Retrieve stored metadata for this container, if available
+                const foreachData = foreachContainer && interpolationMap.get(foreachContainer);
+
+                if (foreachData) {
+                    // Store a snapshot of the current foreach state
+                    chain.push({
+                        foreachId: foreachContext.foreachId,
+                        depth: foreachData.depth,
+                        index: foreachContext.index,
+                        renderIndex: foreachContext.renderIndex,
+                        container: foreachContainer,
+                        itemVar: foreachData.itemVar,
+                        indexVar: foreachData.indexVar,
+                        sourceArray: foreachData.sourceArray
                     });
                 }
             }
 
-            current = this.findParentForeachElement(current);
+            // Move to the next parent foreach element in the hierarchy
+            currentElement = this.findParentForeachElement(currentElement);
         }
 
-        return result;
-    }
+        // Return the collected foreach chain
+        return chain;
+    };
 
     /**
      * Resolve scoped variables into a flattened token array.
