@@ -1426,7 +1426,7 @@
 
                     // Multi-value fields - captures ALL values for checkbox groups and multi-selects
                     // Object.fromEntries() only keeps the LAST value, this preserves all selections
-                    multiValues: Array.from(new Set(
+                    multiEntries: Array.from(new Set(
                         Array.from(formData.keys()).filter(key =>
                             formData.getAll(key).length > 1  // Find fields with multiple values
                         )
