@@ -3968,6 +3968,29 @@
     };
 
     /**
+     * Calculates how deeply an element is nested inside this context's container.
+     * Used to ensure inner foreach blocks render before outer ones.
+     * @param element
+     * @returns {number}
+     */
+    Context.prototype.getElementDepth = function(element) {
+        // Depth counter relative to the container root
+        let depth = 0;
+
+        // Walk up the DOM tree starting from the element
+        let current = element;
+
+        // Stop when we reach the container or run out of parents
+        while (current && current !== this.container) {
+            depth++;
+            current = current.parentElement;
+        }
+
+        // Return computed nesting depth
+        return depth;
+    };
+
+    /**
      * Analyzes computed properties to build a dependency graph showing which computed
      * properties depend on which data properties.
      * @returns {Map<string, string[]>} A Map where keys are property names that are accessed
@@ -4901,6 +4924,7 @@
             const foreachExpr = mappingData.bindings.foreach.target;
             const itemVar = element.getAttribute('data-pac-item') || 'item';
             const indexVar = element.getAttribute('data-pac-index') || '$index';
+            const depth = self.getElementDepth(element);
 
             Object.assign(mappingData, {
                 foreachId: foreachId,
@@ -4908,7 +4932,8 @@
                 sourceArray: this.inferArrayRoot(foreachExpr),
                 template: element.innerHTML, // Capture clean template
                 itemVar: itemVar,
-                indexVar: indexVar
+                indexVar: indexVar,
+				depth: depth
             });
 
             interpolationMap.set(element, mappingData);
@@ -5556,134 +5581,211 @@
     };
 
     /**
-     * Fetches the entire chain of foreaches for the given element
-     * @param element
-     * @returns {*[]}
+     * Walks up the DOM from a given element and collects all enclosing
+     * foreach contexts, starting from the closest one.
+     * @param {Element} element
+     * @returns {Array<Object>}
      */
     Context.prototype.getForeachChain = function(element) {
-        const result = [];
+        // Accumulates the discovered foreach contexts in traversal order
+        const chain = [];
 
-        let current = element;
+        // Cache frequently accessed properties to avoid repeated lookups
+        const containerRoot = this.container;
+        const interpolationMap = this.interpolationMap;
 
-        while (current != null) {
-            const context = this.extractClosestForeachContext(current);
+        // Start traversal at the provided element
+        let currentElement = element;
 
-            if (context) {
-                const forEachContainer = this.container.querySelector('[data-pac-foreach-id="' + context.foreachId + '"]');
-                const forEachData = this.interpolationMap.get(forEachContainer);
+        // Continue walking up the foreach hierarchy until no parent exists
+        while (currentElement) {
+            // Resolve the closest foreach context associated with this element
+            const foreachContext = this.extractClosestForeachContext(currentElement);
 
-                // Ensure forEachData exists before accessing properties
-                if (forEachData) {
-                    result.push({
-                        foreachId: context.foreachId,
-                        depth: forEachData.depth,
-                        index: context.index,
-                        renderIndex: context.renderIndex,
-                        container: forEachContainer,
-                        itemVar: forEachData.itemVar,
-                        indexVar: forEachData.indexVar,
-                        sourceArray: forEachData.sourceArray
+            if (foreachContext) {
+                // Locate the DOM container tied to this foreach instance
+                const foreachContainer = containerRoot.querySelector(
+                    `[data-pac-foreach-id="${foreachContext.foreachId}"]`
+                );
+
+                // Retrieve stored metadata for this container, if available
+                const foreachData = foreachContainer && interpolationMap.get(foreachContainer);
+
+                if (foreachData) {
+                    // Store a snapshot of the current foreach state
+                    chain.push({
+                        foreachId: foreachContext.foreachId,
+                        depth: foreachData.depth,
+                        index: foreachContext.index,
+                        renderIndex: foreachContext.renderIndex,
+                        container: foreachContainer,
+                        itemVar: foreachData.itemVar,
+                        indexVar: foreachData.indexVar,
+                        sourceArray: foreachData.sourceArray
                     });
                 }
             }
 
-            current = this.findParentForeachElement(current);
+            // Move to the next parent foreach element in the hierarchy
+            currentElement = this.findParentForeachElement(currentElement);
         }
 
-        return result;
-    }
+        // Return the collected foreach chain
+        return chain;
+    };
 
     /**
-     * Normalize a scoped path to a global path using the element's foreach chain.
-     * Example: ["parent", "item", "name"] inside a nested foreach becomes "users[0].posts[1].name"
-     * Note: Assumes getForeachChain returns frames in innermost-first order
-     * @param {string|string[]} pathSegments - Local path as array or string.
-     * @param {HTMLElement} element - DOM element inside the foreach hierarchy.
-     * @returns {string} Fully qualified data path.
+     * Resolve scoped variables into a flattened token array.
+     * Scope values may be numbers or string paths.
      */
-    Context.prototype.normalizePath = function normalizePath(pathSegments, element) {
-        // Convert to array and handle empty paths
-        const path = Utils.pathStringToArray(pathSegments);
+    Context.prototype.resolveScopedTokens = function(tokens, scope) {
+        const resolved = [];
 
-        if (!path.length) {
-            return "";
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+
+            if (!scope.has(token)) {
+                resolved.push(token);
+                continue;
+            }
+
+            const value = scope.get(token);
+
+            if (typeof value === "number") {
+                resolved.push(value);
+                continue;
+            }
+
+            // Convert once when expanding scope value
+            const parts = Utils.pathStringToArray(value);
+
+            for (let j = 0; j < parts.length; j++) {
+                resolved.push(parts[j]);
+            }
         }
 
-        // Count leading "parent" tokens to climb up foreach stack
+        return resolved;
+    };
+
+    /**
+     * Count how many leading "parent" tokens appear in a path.
+     * These tokens indicate how many foreach scopes should be climbed.
+     * @param {Array<string|number>} path - Tokenized path.
+     * @returns {number} Number of parent climbs requested.
+     */
+    Context.prototype.extractParentClimbs = function (path) {
+        // Tracks how many scope levels to climb
         let climbs = 0;
+
+        // Count consecutive "parent" tokens from the start
         while (climbs < path.length && path[climbs] === "parent") {
             climbs++;
         }
 
-        // Get the complete foreach chain
-        const allFrames = this.getForeachChain(element);
+        return climbs;
+    };
 
-        // Validate that we don't climb more than available frames
-        if (climbs > allFrames.length) {
-            console.warn(`Cannot climb ${climbs} levels - only ${allFrames.length} foreach frames available`);
-            // Clamp to maximum available frames to prevent undefined behavior
-            climbs = allFrames.length;
-        }
-
-        // Get effective frames after climbing (slice removes the climbed frames)
-        const frames = allFrames.slice(climbs);
+    /**
+     * Build a scoped variable map from foreach frames.
+     * @param {Array<Object>} frames - Effective foreach frames (outer → inner).
+     * @returns {Map<string, string|number>} Scoped variable map.
+     */
+    Context.prototype.buildForeachScope = function (frames) {
+        // Stores scoped variable → resolved path/index mappings
         const scope = new Map();
 
-        // Build variable scope from remaining frames
+        // Expand each foreach frame into scoped variables
         for (const f of frames) {
-            // Map item variable: "item" → "users[0]"
+            // Resolve item variable into a fully-qualified global path
             if (!scope.has(f.itemVar)) {
-                const base = scope.get(f.sourceArray) || f.sourceArray;
-                scope.set(f.itemVar, `${base}[${f.index}]`);
+                // Normalize the frame source path into tokens
+                const tokens = Utils.pathStringToArray(f.sourceArray);
+
+                // Resolve tokens against the current scope chain
+                const resolved = this.resolveScopedTokens(tokens, scope);
+
+                // Convert resolved tokens into a normalized base path string
+                const base = Utils.pathArrayToString(resolved);
+
+                // Append the current index to produce the final scoped path
+                scope.set(
+                    f.itemVar,
+                    `${base}[${f.index}]`
+                );
             }
 
-            // Map index variable to numeric value
+            // Map index variable directly to its numeric index
             if (f.indexVar && !scope.has(f.indexVar)) {
                 scope.set(f.indexVar, f.index);
             }
         }
 
-        // Get path after removing "parent" tokens
-        const remaining = path.slice(climbs);
+        return scope;
+    };
 
-        if (!remaining.length) {
-            // If all tokens were "parent", we've climbed out of all foreach contexts
-            // This might be valid (accessing root scope) or an error condition
-            console.warn(`Path resolved to empty after climbing ${climbs} levels`);
+    /**
+     * Select the active foreach frames after applying parent climbs.
+     * Frames are returned in outer → inner order for correct scope resolution.
+     * @param {HTMLElement} element - Element inside a foreach hierarchy.
+     * @param {number} climbs - Number of scopes to climb.
+     * @returns {Array<Object>} Effective frame list.
+     */
+    Context.prototype.getEffectiveFrames = function (element, climbs) {
+        // Retrieve full foreach chain for the element
+        const frames = this.getForeachChain(element);
+
+        // Clamp climb count to available frames
+        if (climbs > frames.length) {
+            console.warn(`Cannot climb ${climbs} levels - only ${frames.length} available`);
+            climbs = frames.length;
+        }
+
+        // Remove climbed frames and reverse for dependency-safe processing
+        return frames.slice(climbs).reverse();
+    };
+
+    /**
+     * Normalize a scoped path to a fully-qualified global data path.
+     * @param {string|Array<string|number>} pathSegments - Local path expression.
+     * @param {HTMLElement} element - Element inside a foreach hierarchy.
+     * @returns {string|number} Fully-qualified path or direct numeric index.
+     */
+    Context.prototype.normalizePath = function(pathSegments, element) {
+        // Convert incoming path into normalized token form
+        const path = Utils.pathStringToArray(pathSegments);
+
+        // Empty paths resolve to nothing
+        if (path.length === 0) {
             return "";
         }
 
-        // Process each token as a slot that might need replacement
-        const resolvedTokens = [];
+        // Determine how many leading "parent" tokens climb the scope chain
+        const climbs = this.extractParentClimbs(path);
 
-        for (let i = 0; i < remaining.length; i++) {
-            const token = remaining[i];
+        // Select the active foreach frames after climbing
+        const frames = this.getEffectiveFrames(element, climbs);
 
-            if (scope.has(token)) {
-                const scopeValue = scope.get(token);
+        // Build a scoped variable map from those frames
+        const scope = this.buildForeachScope(frames);
 
-                if (typeof scopeValue === 'number') {
-                    // Index variable - add as numeric index
-                    resolvedTokens.push(scopeValue);
-                } else {
-                    // Item variable - it's already a resolved path like "users[0]"
-                    // Split it and add each part
-                    const itemParts = scopeValue.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
-                    resolvedTokens.push(...itemParts);
-                }
-            } else {
-                // Regular token - add as-is
-                resolvedTokens.push(token);
-            }
+        // Remove parent climb tokens from the working path
+        const remaining = path.slice(climbs);
+
+        // If nothing remains, resolution ends at root scope
+        if (remaining.length === 0) {
+            return "";
         }
 
-        // Special case: if the entire path resolves to just a number, return it directly
-        if (resolvedTokens.length === 1 && typeof resolvedTokens[0] === 'number') {
-            return resolvedTokens[0];
+        // Resolve remaining tokens through scoped mappings
+        const resolved = this.resolveScopedTokens(remaining, scope);
+
+        // Special case: a single numeric token resolves directly
+        if (resolved.length === 1 && typeof resolved[0] === "number") {
+            return resolved[0];
         }
 
-        // Convert resolved tokens back to path string
-        return Utils.pathArrayToString(resolvedTokens);
+        // Convert resolved tokens back into normalized path string
+        return Utils.pathArrayToString(resolved);
     };
 
     /**
@@ -5694,8 +5796,9 @@
     Context.prototype.shouldRebuildForeach = function(foreachElement) {
         // Get the mapping data for this foreach element from the interpolation map
         const mappingData = this.interpolationMap.get(foreachElement);
+
+        // No mapping data means this isn't a valid foreach element
         if (!mappingData) {
-            // No mapping data means this isn't a valid foreach element
             return false;
         }
 
@@ -5718,6 +5821,7 @@
 
         // Get the previously cached array from the element's internal property
         const previousArray = foreachElement._pacPreviousArray;
+
         if (!previousArray) {
             // First time rendering - rebuild required
             return true;
@@ -5740,13 +5844,24 @@
         return false;
     };
 
-    Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
+    /**
+     * Find all registered DOM elements whose foreach binding is driven by
+     * the given array path.
+     * @param {string} arrayPath - Fully-qualified data array path to match.
+     * @returns {HTMLElement[]} Elements whose foreach bindings depend on the array.
+     */
+    Context.prototype.findForeachElementsByArrayPath = function (arrayPath) {
+        // Collect elements that need to be re-rendered
         const elementsToUpdate = [];
 
+        // Scan all registered interpolation mappings
         for (const [element, mappingData] of this.interpolationMap) {
             if (mappingData.bindings && mappingData.bindings.foreach) {
-                // Check both direct expression match and source array match
-                if (mappingData.foreachExpr === arrayPath || mappingData.sourceArray === arrayPath) {
+                // Match either raw foreach expression or resolved source array
+                if (
+                    mappingData.foreachExpr === arrayPath ||
+                    mappingData.sourceArray === arrayPath
+                ) {
                     elementsToUpdate.push(element);
                 }
             }
