@@ -5619,44 +5619,50 @@
     }
 
     /**
-     * Resolve a foreach source path against the current scoped variable map.
-     * This expands item variables into their fully-qualified global paths so
-     * nested foreach frames inherit parent context correctly.
-     * @param {string|string[]} source - Path expression to resolve.
-     * @param {Map} scope - Map of scoped variables to resolved paths/indices.
-     * @returns {string} Fully-qualified path string.
+     * Resolve scoped variables into a flattened token array.
+     * Scope values may be numbers or string paths.
      */
-    Context.prototype.resolveScopedSource = function(source, scope) {
-        // Convert the source path into normalized tokens
-        const tokens = Utils.pathStringToArray(source);
-
-        // Accumulates resolved path segments
+    Context.prototype.resolveScopedTokens = function(tokens, scope) {
         const resolved = [];
 
-        // Walk each token and expand scoped variables
-        for (const token of tokens) {
-            if (scope.has(token)) {
-                // Replace scoped variable with its mapped value
-                const value = scope.get(token);
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
 
-                if (typeof value === "number") {
-                    // Numeric index variables are inserted directly
-                    resolved.push(value);
-                } else {
-                    // Path mappings are split into segments and merged
-                    const parts = value
-                        .split(DOTS_AND_BRACKETS_PATTERN)
-                        .filter(Boolean);
-
-                    resolved.push(...parts);
-                }
-            } else {
-                // Non-scoped tokens are preserved as-is
+            if (!scope.has(token)) {
                 resolved.push(token);
+                continue;
+            }
+
+            const value = scope.get(token);
+
+            if (typeof value === "number") {
+                resolved.push(value);
+                continue;
+            }
+
+            // Convert once when expanding scope value
+            const parts = Utils.pathStringToArray(value);
+
+            for (let j = 0; j < parts.length; j++) {
+                resolved.push(parts[j]);
             }
         }
 
-        // Convert resolved tokens back into a normalized path string
+        return resolved;
+    };
+
+    /**
+     * Resolve a foreach source path against scoped variables.
+     * API wrapper that preserves string-based semantics.
+     * @param {string|Array<string|number>} source - Path expression.
+     * @param {Map<string, string|number>} scope - Scoped variable map.
+     * @returns {string} Fully-qualified normalized path.
+     */
+    Context.prototype.resolveScopedSource = function (source, scope) {
+        const tokens = Utils.pathStringToArray(source);
+
+        const resolved = this.resolveScopedTokens(tokens, scope);
+
         return Utils.pathArrayToString(resolved);
     };
 
@@ -5728,15 +5734,13 @@
     };
 
     /**
-     * Normalize a scoped path to a global path using the element's foreach chain.
-     * Example: ["parent", "item", "name"] inside a nested foreach becomes "users[0].posts[1].name"
-     * Note: Assumes getForeachChain returns frames in innermost-first order
-     * @param {string|string[]} pathSegments - Local path as array or string.
-     * @param {HTMLElement} element - DOM element inside the foreach hierarchy.
-     * @returns {string} Fully qualified data path.
+     * Normalize a scoped path to a fully-qualified global data path.
+     * @param {string|Array<string|number>} pathSegments - Local path expression.
+     * @param {HTMLElement} element - Element inside a foreach hierarchy.
+     * @returns {string|number} Fully-qualified path or direct numeric index.
      */
-    Context.prototype.normalizePath = function (pathSegments, element) {
-        // Convert the incoming path into normalized token form
+    Context.prototype.normalizePath = function(pathSegments, element) {
+        // Convert incoming path into normalized token form
         const path = Utils.pathStringToArray(pathSegments);
 
         // Empty paths resolve to nothing
@@ -5744,16 +5748,16 @@
             return "";
         }
 
-        // Count how many leading "parent" tokens climb the foreach stack
+        // Determine how many leading "parent" tokens climb the scope chain
         const climbs = this.extractParentClimbs(path);
 
-        // Determine which foreach frames remain after climbing
+        // Select the active foreach frames after climbing
         const frames = this.getEffectiveFrames(element, climbs);
 
-        // Build scoped variable map from remaining frames
+        // Build a scoped variable map from those frames
         const scope = this.buildForeachScope(frames);
 
-        // Remove parent tokens from the working path
+        // Remove parent climb tokens from the working path
         const remaining = path.slice(climbs);
 
         // If nothing remains, resolution ends at root scope
@@ -5761,12 +5765,10 @@
             return "";
         }
 
-        // Resolve the remaining path through the scoped variables
-        const resolved = Utils.pathStringToArray(
-            this.resolveScopedSource(remaining, scope)
-        );
+        // Resolve remaining tokens through scoped mappings
+        const resolved = this.resolveScopedTokens(remaining, scope);
 
-        // Special case: single numeric token resolves directly
+        // Special case: a single numeric token resolves directly
         if (resolved.length === 1 && typeof resolved[0] === "number") {
             return resolved[0];
         }
