@@ -67,6 +67,14 @@
      */
     const BOOLEAN_ATTRIBUTES = ["readonly", "required", "selected", "checked", "hidden", "multiple", "autofocus"];
 
+    // List of extended keys
+    const EXTENDED_KEYS = new Set([
+        'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+        'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+        'Home', 'End', 'PageUp', 'PageDown', 'Insert', 'Delete',
+        'NumpadEnter', 'NumpadDivide', 'MetaLeft', 'MetaRight', 'ContextMenu'
+    ]);
+
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
      * Populated on first use to avoid repeated reflection on wakaPAC.
@@ -1233,39 +1241,23 @@
             });
 
             /**
-             * Touch start simulates left button down
+             * Touch events
              */
-            document.addEventListener('touchstart', function (event) {
-                const container = self.getContainerForEvent(MSG_LBUTTONDOWN, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDOWN, event, wParam, lParam);
+            const touchMap = {
+                'touchstart': MSG_LBUTTONDOWN,
+                'touchend': MSG_LBUTTONUP,
+                'touchcancel': MSG_LBUTTONUP
+            };
 
-                self.dispatchToContainer(container, customEvent);
-            });
+            Object.entries(touchMap).forEach(([eventName, msgType]) => {
+                document.addEventListener(eventName, function(event) {
+                    const container = self.getContainerForEvent(msgType, event);
+                    const wParam = self.buildMouseWParam(event);
+                    const lParam = self.buildMouseLParam(event, container);
+                    const customEvent = self.wrapDomEventAsMessage(msgType, event, wParam, lParam);
 
-            /**
-             * Touch end simulates left button up
-             */
-            document.addEventListener('touchend', function (event) {
-                const container = self.getContainerForEvent(MSG_LBUTTONUP, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONUP, event, wParam, lParam);
-
-                self.dispatchToContainer(container, customEvent);
-            });
-
-            /**
-             * Touch cancel also simulates left button up
-             */
-            document.addEventListener('touchcancel', function (event) {
-                const container = self.getContainerForEvent(MSG_LBUTTONUP, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONUP, event, wParam, lParam);
-
-                self.dispatchToContainer(container, customEvent);
+                    self.dispatchToContainer(container, customEvent);
+                });
             });
 
             /**
@@ -1873,31 +1865,7 @@
          * @returns {boolean} True if this is considered an extended key
          */
         isExtendedKey(code) {
-            if (!code) {
-                return false;
-            }
-
-            const extendedKeys = [
-                // Arrow keys
-                'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-
-                // Function keys
-                'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
-
-                // Navigation keys
-                'Home', 'End', 'PageUp', 'PageDown', 'Insert', 'Delete',
-
-                // Numpad keys (when NumLock is on)
-                'NumpadEnter', 'NumpadDivide',
-
-                // Windows/Meta keys
-                'MetaLeft', 'MetaRight',
-
-                // Menu key
-                'ContextMenu'
-            ];
-
-            return extendedKeys.includes(code);
+            return code ? EXTENDED_KEYS.has(code) : false;
         },
 
         /**
@@ -3224,6 +3192,39 @@
         maxSize: 1000, // Prevent unbounded growth
 
         /**
+         * Returns a cached parse result for a key, computing and storing it if absent.
+         * Keys are normalized via trimming. When the cache reaches maxSize,
+         * the oldest entry is evicted (FIFO) before inserting the new value.
+         * @param {Map<string, *>} cache - Cache storing normalized keys to parse results.
+         * @param {*} key - Input key to normalize and parse.
+         * @param {(key: *) => *} parseFn - Function that computes the result for the key.
+         * @returns {*} The cached or newly computed parse result.
+         */
+        _cachedParse(cache, key, parseFn) {
+            // Normalize the key to avoid duplicate entries caused by whitespace.
+            const trimmed = String(key).trim();
+
+            // Fast path: return cached value if present.
+            if (cache.has(trimmed)) {
+                return cache.get(trimmed);
+            }
+
+            // Compute the value since it is not cached yet.
+            const result = parseFn(key);
+
+            // Evict the oldest entry if the cache is at capacity.
+            if (cache.size >= this.maxSize) {
+                cache.delete(cache.keys().next().value);
+            }
+
+            // Store the computed result under the normalized key.
+            cache.set(trimmed, result);
+
+            // Return the result
+            return result;
+        },
+
+        /**
          * Parses an expression with caching support.
          * Uses string representation of the expression as cache key for consistent lookups.
          * Implements simple LRU eviction when cache exceeds maxSize.
@@ -3231,29 +3232,7 @@
          * @returns {*} The parsed expression result from ExpressionParser or cache
          */
         parseExpression(expression) {
-            // Convert to string and use as cache key
-            // Trimming ensures consistent keys regardless of whitespace variations
-            const key = String(expression).trim();
-
-            // Check cache first - O(1) lookup
-            if (this.cache.has(key)) {
-                return this.cache.get(key);
-            }
-
-            // Parse using existing parser
-            const result = ExpressionParser.parseExpression(expression);
-
-            // Cache management - implement simple LRU eviction
-            if (this.cache.size >= this.maxSize) {
-                // Simple LRU: delete oldest entry (first inserted)
-                // Note: Map maintains insertion order, so first key is oldest
-                const firstKey = this.cache.keys().next().value;
-                this.cache.delete(firstKey);
-            }
-
-            // Store result in cache for future lookups
-            this.cache.set(key, result);
-            return result;
+            return this._cachedParse(this.cache, expression, e => ExpressionParser.parseExpression(e));
         },
 
         /**
@@ -3264,39 +3243,7 @@
          * @returns {Array} The parsed binding pairs from ExpressionParser or cache
          */
         parseBindingString(bindingString) {
-            // Convert to string and use as cache key
-            // Trimming ensures consistent keys regardless of whitespace variations
-            const key = String(bindingString).trim();
-
-            // Check binding cache first - O(1) lookup
-            if (this.bindingCache.has(key)) {
-                return this.bindingCache.get(key);
-            }
-
-            // Parse using existing parser
-            const result = ExpressionParser.parseBindingString(bindingString);
-
-            // Cache management - implement simple LRU eviction for binding cache
-            if (this.bindingCache.size >= this.maxSize) {
-                // Simple LRU: delete oldest entry (first inserted)
-                // Note: Map maintains insertion order, so first key is oldest
-                const firstKey = this.bindingCache.keys().next().value;
-                this.bindingCache.delete(firstKey);
-            }
-
-            // Store result in binding cache for future lookups
-            this.bindingCache.set(key, result);
-            return result;
-        },
-
-        /**
-         * Clears all cached expressions.
-         * Useful for memory management or when expression parsing logic changes.
-         * @returns {void}
-         */
-        clear() {
-            this.cache.clear();
-            this.bindingCache.clear();
+            return this._cachedParse(this.bindingCache, bindingString, s => ExpressionParser.parseBindingString(s));
         }
     };
 
@@ -3781,18 +3728,9 @@
      * @returns {number} Number of timers that were killed
      */
     Context.prototype.killAllTimers = function() {
-        let count = 0;
-
-        // Clear each interval and count them
-        this.timers.forEach((intervalId) => {
-            clearInterval(intervalId);
-            count++;
-        });
-
-        // Clear the entire timer registry
+        const count = this.timers.size;
+        this.timers.forEach(clearInterval);
         this.timers.clear();
-
-        // Return number of timers that were killed
         return count;
     };
 
@@ -4956,11 +4894,6 @@
                 acceptNode: node => {
                     // Skip if no interpolation
                     if (!INTERPOLATION_TEST_REGEX.test(node.textContent)) {
-                        return NodeFilter.FILTER_SKIP;
-                    }
-
-                    // Skip if belongs to a nested PAC container
-                    if (!Utils.belongsToPacContainer(this.container, node)) {
                         return NodeFilter.FILTER_SKIP;
                     }
 
@@ -6869,12 +6802,13 @@
          * @returns {boolean} True if pattern was removed, false if not found
          */
         unregisterPattern(name) {
-            if (this.patterns[name]) {
+            const exists = name in this.patterns;
+
+            if (exists) {
                 delete this.patterns[name];
-                return true;
-            } else {
-                return false;
             }
+
+            return exists;
         },
 
         /**
@@ -7643,19 +7577,24 @@
     };
 
     /**
-     * Kills all timers for a specific component
+     * Stops all timers associated with a PAC context identified by pacId.
+     * Returns the number of timers that were stopped, or 0 if no context exists.
      * @param {string} pacId - Target container's data-pac-id
-     * @returns {number} Number of timers killed
+     * @returns {*|number}
      */
-    wakaPAC.killAllTimers = function(pacId) {
+    wakaPAC.killAllTimers = function (pacId) {
+        // Look up the PAC execution context from the global registry
         const context = window.PACRegistry.get(pacId);
 
+        // If no context is found, there are no timers to stop
         if (!context) {
             return 0;
         }
 
+        // Delegate timer cleanup to the context and return its result
         return context.killAllTimers();
     };
+
 
     /**
      * Register a custom binding handler
@@ -7687,9 +7626,7 @@
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {number} X coordinate relative to container's left edge
      */
-    wakaPAC.LOWORD = function(lParam) {
-        return Utils.LOWORD(lParam);
-    };
+    wakaPAC.LOWORD = Utils.LOWORD;
 
     /**
      * Extracts the high-order word (y coordinate) from lParam
@@ -7697,9 +7634,7 @@
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {number} Y coordinate relative to container's top edge
      */
-    wakaPAC.HIWORD = function(lParam) {
-        return Utils.HIWORD(lParam);
-    };
+    wakaPAC.HIWORD = Utils.HIWORD;
 
     /**
      * Extracts both x and y coordinates from lParam
@@ -7707,18 +7642,14 @@
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
      */
-    wakaPAC.MAKEPOINTS = function(lParam) {
-        return Utils.MAKEPOINTS(lParam);
-    };
+    wakaPAC.MAKEPOINTS =  Utils.MAKEPOINTS;
 
     /**
      * Retrieves a string that represents the name of a key.
      * @param keyCode
      * @returns {string|null}
      */
-    wakaPAC.getKeyName = function(keyCode) {
-        return Utils.getKeyName(keyCode);
-    };
+    wakaPAC.getKeyName = Utils.getKeyName.bind(Utils);
 
     /**
      * Registers a new gesture
