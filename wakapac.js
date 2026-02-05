@@ -1375,14 +1375,68 @@
              * Tracks when user submits any form on the page
              */
             document.addEventListener('submit', function (event) {
-                const formData = new FormData(event.target);
+                const form = event.target;
+                const formData = new FormData(form);
                 const container = self.getContainerForEvent(MSG_SUBMIT, event);
-                const wParam = event.target.id || 0;
+                const wParam = form.id || 0;
                 const lParam = 0;
+
+                // Get the submit button that triggered the event (useful for forms with multiple submit buttons)
+                const submitter = event.submitter;
+
+                // Create a MSG_SUBMIT event
                 const customEvent = self.wrapDomEventAsMessage(MSG_SUBMIT, event, wParam, lParam, {
+                    // Basic form data as key-value pairs
+                    // Note: Only captures the FIRST value for fields with same name (use multiValues for complete data)
                     entries: Object.fromEntries(formData.entries()),
+
+                    // Form metadata - useful for routing/debugging
+                    action: form.action,                    // Where form submits to
+                    method: form.method.toUpperCase(),      // GET, POST, etc.
+                    enctype: form.enctype,                  // How data is encoded (multipart/form-data, etc.)
+                    name: form.name,                        // Form name attribute
+
+                    // Validation state - indicates if form passes HTML5 validation
+                    // Returns false if any field has required, pattern, min/max violations
+                    isValid: form.checkValidity(),
+
+                    // Which submit button was clicked (null if submitted via Enter key or JS)
+                    // Critical for forms with multiple submit buttons (Save Draft vs Publish, etc.)
+                    submitter: submitter ? {
+                        name: submitter.name,               // Button name (sent to server)
+                        value: submitter.value,             // Button value (sent to server)
+                        id: submitter.id                    // Button ID (client-side only)
+                    } : null,
+
+                    // File upload metadata (separate because File objects don't serialize to JSON)
+                    // Contains name, size, type but NOT the actual file data
+                    files: Array.from(form.elements)
+                        .filter(el => el.type === 'file' && el.files.length > 0)
+                        .reduce((acc, el) => {
+                            acc[el.name] = Array.from(el.files).map(f => ({
+                                name: f.name,               // Original filename
+                                size: f.size,               // File size in bytes
+                                type: f.type                // MIME type (e.g., 'image/jpeg')
+                            }));
+                            return acc;
+                        }, {}),
+
+                    // Total number of form fields (for analytics/debugging)
+                    fieldCount: form.elements.length,
+
+                    // Multi-value fields - captures ALL values for checkbox groups and multi-selects
+                    // Object.fromEntries() only keeps the LAST value, this preserves all selections
+                    multiValues: Array.from(new Set(
+                        Array.from(formData.keys()).filter(key =>
+                            formData.getAll(key).length > 1  // Find fields with multiple values
+                        )
+                    )).reduce((acc, key) => {
+                        acc[key] = formData.getAll(key);    // Get all values as array
+                        return acc;
+                    }, {})
                 });
 
+                // Dispatch the event to the container
                 self.dispatchToContainer(container, customEvent);
             });
 
