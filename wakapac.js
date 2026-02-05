@@ -5783,8 +5783,9 @@
     Context.prototype.shouldRebuildForeach = function(foreachElement) {
         // Get the mapping data for this foreach element from the interpolation map
         const mappingData = this.interpolationMap.get(foreachElement);
+
+        // No mapping data means this isn't a valid foreach element
         if (!mappingData) {
-            // No mapping data means this isn't a valid foreach element
             return false;
         }
 
@@ -5807,6 +5808,7 @@
 
         // Get the previously cached array from the element's internal property
         const previousArray = foreachElement._pacPreviousArray;
+
         if (!previousArray) {
             // First time rendering - rebuild required
             return true;
@@ -5829,13 +5831,24 @@
         return false;
     };
 
-    Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
+    /**
+     * Find all registered DOM elements whose foreach binding is driven by
+     * the given array path.
+     * @param {string} arrayPath - Fully-qualified data array path to match.
+     * @returns {HTMLElement[]} Elements whose foreach bindings depend on the array.
+     */
+    Context.prototype.findForeachElementsByArrayPath = function (arrayPath) {
+        // Collect elements that need to be re-rendered
         const elementsToUpdate = [];
 
+        // Scan all registered interpolation mappings
         for (const [element, mappingData] of this.interpolationMap) {
             if (mappingData.bindings && mappingData.bindings.foreach) {
-                // Check both direct expression match and source array match
-                if (mappingData.foreachExpr === arrayPath || mappingData.sourceArray === arrayPath) {
+                // Match either raw foreach expression or resolved source array
+                if (
+                    mappingData.foreachExpr === arrayPath ||
+                    mappingData.sourceArray === arrayPath
+                ) {
                     elementsToUpdate.push(element);
                 }
             }
