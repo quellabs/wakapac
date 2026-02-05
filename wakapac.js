@@ -5508,6 +5508,9 @@
             // Add to hash map
             this.arrayHashMaps.set(arrayPath, hashMap);
 
+            // Cache context on item elements for fast lookups
+            this.cacheContextOnItemElements(foreachElement);
+
             // Recursively scan the newly generated content for bindings and nested foreach elements
             // This is where the "natural retry" happens - nested foreach elements found here
             // will now have proper parent context available for successful rendering
@@ -5873,8 +5876,9 @@
     /**
      * Extracts the closest foreach context information by walking up the DOM tree
      * from a starting element, looking for comment markers that identify foreach items.
+     * Checks cache first for O(1) lookup before falling back to comment parsing.
      * @param {Element} startElement - The DOM element to start searching from
-     * @returns {number|null} Foreach context object with foreachId, index, and renderIndex or null
+     * @returns {Object|null} Foreach context object with foreachId, index, and renderIndex or null
      * @returns {string} returns.foreachId - The identifier of the foreach loop
      * @returns {number} returns.index - The logical index in the data array
      * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
@@ -5884,7 +5888,12 @@
         let current = startElement;
 
         while (current && current !== this.container) {
-            // Check previous siblings for comment markers
+            // Check cache first - avoids repeated DOM traversal and regex matching
+            if (current._pacForeachContext) {
+                return current._pacForeachContext;
+            }
+
+            // Not cached - check previous siblings for comment markers
             let sibling = current.previousSibling;
 
             while (sibling) {
@@ -5915,6 +5924,39 @@
 
         // No foreach context found in the entire tree up to container
         return null;
+    };
+
+    /**
+     * Caches foreach context on item elements after rendering.
+     * Walks the DOM tree, finds comment markers, and attaches context to the first element after each start marker.
+     * This enables O(1) context lookups instead of repeated comment parsing.
+     * @param {HTMLElement} foreachElement - The foreach container element
+     */
+    Context.prototype.cacheContextOnItemElements = function(foreachElement) {
+        const walker = document.createTreeWalker(foreachElement, NodeFilter.SHOW_ALL);
+        let node;
+        let currentContext = null;
+
+        while ((node = walker.nextNode())) {
+            if (node.nodeType === Node.COMMENT_NODE) {
+                const match = node.textContent.match(FOREACH_INDEX_REGEX);
+
+                if (match) {
+                    // Found start marker - prepare context for next element
+                    currentContext = {
+                        foreachId: match[1].trim(),
+                        index: parseInt(match[2], 10),
+                        renderIndex: parseInt(match[3], 10)
+                    };
+                } else if (node.textContent.trim() === '/pac-foreach-item') {
+                    // Found end marker - clear context
+                    currentContext = null;
+                }
+            } else if (node.nodeType === Node.ELEMENT_NODE && currentContext) {
+                // Cache context on the first element after start comment
+                node._pacForeachContext = currentContext;
+            }
+        }
     };
 
     /**
@@ -6535,6 +6577,9 @@
             // Create appropriate container based on parent element type
             const tempContainer = this.createTemporaryContainer(element);
             tempContainer.innerHTML = itemHTML;
+
+            // Cache context on the newly created item elements
+            this.cacheContextOnItemElements(tempContainer);
 
             // Find insertion point
             const insertPoint = this.findInsertionPoint(element, index);
