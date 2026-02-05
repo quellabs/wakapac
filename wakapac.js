@@ -5619,6 +5619,48 @@
     }
 
     /**
+     * Resolve a foreach source path against the current scoped variable map.
+     * This expands item variables into their fully-qualified global paths so
+     * nested foreach frames inherit parent context correctly.
+     * @param {string|string[]} source - Path expression to resolve.
+     * @param {Map} scope - Map of scoped variables to resolved paths/indices.
+     * @returns {string} Fully-qualified path string.
+     */
+    Context.prototype.resolveScopedSource = function(source, scope) {
+        // Convert the source path into normalized tokens
+        const tokens = Utils.pathStringToArray(source);
+
+        // Accumulates resolved path segments
+        const resolved = [];
+
+        // Walk each token and expand scoped variables
+        for (const token of tokens) {
+            if (scope.has(token)) {
+                // Replace scoped variable with its mapped value
+                const value = scope.get(token);
+
+                if (typeof value === "number") {
+                    // Numeric index variables are inserted directly
+                    resolved.push(value);
+                } else {
+                    // Path mappings are split into segments and merged
+                    const parts = value
+                        .split(DOTS_AND_BRACKETS_PATTERN)
+                        .filter(Boolean);
+
+                    resolved.push(...parts);
+                }
+            } else {
+                // Non-scoped tokens are preserved as-is
+                resolved.push(token);
+            }
+        }
+
+        // Convert resolved tokens back into a normalized path string
+        return Utils.pathArrayToString(resolved);
+    };
+
+    /**
      * Normalize a scoped path to a global path using the element's foreach chain.
      * Example: ["parent", "item", "name"] inside a nested foreach becomes "users[0].posts[1].name"
      * Note: Assumes getForeachChain returns frames in innermost-first order
@@ -5646,23 +5688,22 @@
         // Validate that we don't climb more than available frames
         if (climbs > allFrames.length) {
             console.warn(`Cannot climb ${climbs} levels - only ${allFrames.length} foreach frames available`);
+
             // Clamp to maximum available frames to prevent undefined behavior
             climbs = allFrames.length;
         }
 
         // Get effective frames after climbing (slice removes the climbed frames)
-        const frames = allFrames.slice(climbs);
+        const frames = allFrames.slice(climbs).reverse();
         const scope = new Map();
 
         // Build variable scope from remaining frames
         for (const f of frames) {
-            // Map item variable: "item" → "users[0]"
             if (!scope.has(f.itemVar)) {
-                const base = scope.get(f.sourceArray) || f.sourceArray;
+                const base = this.resolveScopedSource(f.sourceArray, scope);
                 scope.set(f.itemVar, `${base}[${f.index}]`);
             }
 
-            // Map index variable to numeric value
             if (f.indexVar && !scope.has(f.indexVar)) {
                 scope.set(f.indexVar, f.index);
             }
@@ -5708,7 +5749,9 @@
         }
 
         // Convert resolved tokens back to path string
-        return Utils.pathArrayToString(resolvedTokens);
+        const test = Utils.pathArrayToString(resolvedTokens);
+        console.log(path, test);
+        return test;
     };
 
     /**
