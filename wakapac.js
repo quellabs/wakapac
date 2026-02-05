@@ -1378,7 +1378,7 @@
                 const form = event.target;
                 const formData = new FormData(form);
                 const container = self.getContainerForEvent(MSG_SUBMIT, event);
-                const wParam = form.id || 0;
+                const wParam = 0;
                 const lParam = 0;
 
                 // Get the submit button that triggered the event (useful for forms with multiple submit buttons)
