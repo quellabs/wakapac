@@ -5873,47 +5873,55 @@
     /**
      * Extracts the closest foreach context information by walking up the DOM tree
      * from a starting element, looking for comment markers that identify foreach items.
+     * Caches the result on the element for O(1) subsequent lookups.
      * @param {Element} startElement - The DOM element to start searching from
-     * @returns {number|null} Foreach context object with foreachId, index, and renderIndex or null
+     * @returns {Object|null} Foreach context object with foreachId, index, and renderIndex or null
      * @returns {string} returns.foreachId - The identifier of the foreach loop
      * @returns {number} returns.index - The logical index in the data array
      * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
      */
-    Context.prototype.extractClosestForeachContext = function(startElement) {
+    Context.prototype.extractClosestForeachContext = function (startElement) {
         // Start from the element and walk up the DOM tree
         let current = startElement;
 
         while (current && current !== this.container) {
-            // Check previous siblings for comment markers
+            // Check cache first - avoids repeated DOM traversal and regex matching
+            if (current._pacForeachContext) {
+                return current._pacForeachContext;
+            }
+
+            // Not cached - search previous siblings for comment markers
             let sibling = current.previousSibling;
 
             while (sibling) {
                 // Only process comment nodes
                 if (sibling.nodeType === Node.COMMENT_NODE) {
-                    const commentText = sibling.textContent.trim();
-
                     // Look for comment pattern: "pac-foreach-item: foreachId, index=X, renderIndex=Y"
-                    // This regex captures the foreach ID and both index values
-                    const match = commentText.match(FOREACH_INDEX_REGEX);
+                    const match = sibling.textContent.match(FOREACH_INDEX_REGEX);
 
                     if (match) {
-                        return {
+                        // Parse the foreach context from comment text
+                        const context = {
                             foreachId: match[1].trim(),
-                            index: parseInt(match[2], 10),      // Convert string to integer
-                            renderIndex: parseInt(match[3], 10) // Convert string to integer
+                            index: parseInt(match[2], 10),      // Logical index in data array
+                            renderIndex: parseInt(match[3], 10) // Visual position in rendered list
                         };
+
+                        // Cache on element to avoid re-parsing on subsequent accesses
+                        current._pacForeachContext = context;
+                        return context;
                     }
                 }
 
-                // Move to the next previous sibling
+                // Move to next previous sibling
                 sibling = sibling.previousSibling;
             }
 
-            // Move up to parent element to continue searching
+            // Move up to parent element and continue search
             current = current.parentElement;
         }
 
-        // No foreach context found in the entire tree up to container
+        // No foreach context found in tree up to container
         return null;
     };
 
