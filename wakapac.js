@@ -1421,9 +1421,6 @@
                             return acc;
                         }, {}),
 
-                    // Total number of form fields (for analytics/debugging)
-                    fieldCount: form.elements.length,
-
                     // Multi-value fields - captures ALL values for checkbox groups and multi-selects
                     // Object.fromEntries() only keeps the LAST value, this preserves all selections
                     multiEntries: Array.from(new Set(
