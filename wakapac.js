@@ -1522,7 +1522,7 @@
                             {
                                 width: width,
                                 height: height,
-                                contentRect: entry.contentRect,
+                                contentRect: self.domRectToSimpleObject(entry.contentRect),
                                 borderBoxSize: entry.borderBoxSize,
                                 contentBoxSize: entry.contentBoxSize
                             }
