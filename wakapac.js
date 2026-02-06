@@ -7327,14 +7327,9 @@
             // Check for pure cardinal directions (one axis strongly dominant)
             if (dxSq > minRatio * dySq) {
                 return dx > 0 ? 'R' : 'L';
-            }
-
-            if (dySq > minRatio * dxSq) {
+            } else if (dySq > minRatio * dxSq) {
                 return dy > 0 ? 'D' : 'U';
-            }
-
-            // Diagonal movement - pick dominant axis
-            if (dx > 0) {
+            } else if (dx > 0) {
                 return dxSq > dySq ? 'R' : (dy > 0 ? 'D' : 'U');
             } else {
                 return dxSq > dySq ? 'L' : (dy > 0 ? 'D' : 'U');
@@ -7371,7 +7366,7 @@
          */
         findContainer(element) {
             // Ensure we start with an actual Element node
-            if (!element || element.nodeType !== 1) {
+            if (!element || element.nodeType !== Node.ELEMENT_NODE) {
                 element = element?.parentElement;
             }
 
