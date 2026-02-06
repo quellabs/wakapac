@@ -1133,7 +1133,7 @@
 
                 // Dispatch event to container
                 const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
@@ -1143,7 +1143,7 @@
             // Click event recognises left button
             document.addEventListener('click', function (event) {
                 const container = self.getContainerForEvent(MSG_LCLICK, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_LCLICK, event, wParam, lParam);
 
@@ -1176,7 +1176,7 @@
 
                 // Dispatch event to container
                 const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
@@ -1187,7 +1187,7 @@
             document.addEventListener('auxclick', function (event) {
                 if (event.button === 1) {
                     const container = self.getContainerForEvent(MSG_MCLICK, event);
-                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_MCLICK, event, wParam, lParam);
 
@@ -1209,7 +1209,7 @@
 
                 // Dispatch the event
                 const container = self.getContainerForEvent(MSG_RCLICK, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_RCLICK, event, wParam, lParam);
 
@@ -1221,7 +1221,7 @@
                 // Only handle left button double-clicks
                 if (event.button === 0) {
                     const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDBLCLK, event, wParam, lParam);
 
@@ -1244,7 +1244,7 @@
 
                 // Dispatch move event to container
                 const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
@@ -1282,7 +1282,7 @@
             Object.entries(touchMap).forEach(([eventName, msgType]) => {
                 document.addEventListener(eventName, function(event) {
                     const container = self.getContainerForEvent(msgType, event);
-                    const wParam = self.buildMouseWParam(event);
+                    const wParam = self.getModifierState(event);
                     const lParam = self.buildMouseLParam(event, container);
                     const customEvent = self.wrapDomEventAsMessage(msgType, event, wParam, lParam);
 
@@ -1296,7 +1296,7 @@
             self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
                 if (event.touches.length > 0) {
                     const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
@@ -1710,7 +1710,7 @@
          * @param {MouseEvent} event - The mouse event
          * @returns {number} wParam value with packed key state flags
          */
-        buildMouseWParam(event) {
+        getModifierState(event) {
             let wParam = 0;
 
             if (event.ctrlKey) {
