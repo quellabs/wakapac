@@ -996,45 +996,65 @@
         /** @private Shared resize observer */
         _resizeObserver: null,
 
+        /**
+         * Performs one-time initialization of the input/event subsystem.
+         * @returns {void}
+         */
         initialize() {
-            // Store reference to this object for use in closures
-            const self = this;
-
-            // Prevent double initialization
+            // Guard against multiple initialization passes
             if (this._initialized) {
                 return;
             }
 
-            // Set initialized flag
+            // Mark subsystem as initialized before registering listeners
             this._initialized = true;
 
-            /**
-             * Handle document visibility changes (tab switches, window minimize, etc.)
-             * Updates browserVisible property for all PAC containers
-             */
+            // Setup all event categories — each method wires a specific domain
+            this._setupBrowserStateEvents(); // Visibility/network state tracking
+            this._setupFocusEvents();        // Focus/blur routing
+            this._setupMouseEvents();        // Mouse button/movement handling
+            this._setupTouchEvents();        // Touch normalization
+            this._setupKeyboardEvents();     // Keyboard input dispatch
+            this._setupFormEvents();         // Form interaction tracking
+            this._setupWindowEvents();       // Scroll/resize state updates
+            this._setupObservers();          // Intersection/resize observers
+        },
+
+        /**
+         * Registers browser-level state listeners and publishes normalized
+         * visibility and network status updates to the system. Tracks document visibility,
+         * online/offline transitions, and — when available — connection characteristic changes.
+         * @private
+         * @returns {void}
+         */
+        _setupBrowserStateEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            // Visibility changes
+            // Fires when the document becomes hidden or visible (tab/app switch)
             document.addEventListener('visibilitychange', function() {
+                // Dispatch visibility state snapshot
                 self.dispatchBrowserStateEvent('visibility', {
-                    visible: !document.hidden
+                    visible: !document.hidden // True when page is foregrounded
                 });
             });
 
-            /**
-             * Handle browser coming online
-             * Updates network state for all PAC containers
-             */
+            // Network state changes — online
+            // Fires when browser regains connectivity
             window.addEventListener('online', function() {
+                // Publish network availability and quality metadata
                 self.dispatchBrowserStateEvent('online', {
                     online: true,
-                    networkType: Utils.getNetworkEffectiveType(),
-                    networkQuality: Utils.detectNetworkQuality(),
+                    networkType: Utils.getNetworkEffectiveType(), // Browser-reported connection class
+                    networkQuality: Utils.detectNetworkQuality(), // App-level quality heuristic
                 });
             });
 
-            /**
-             * Handle browser going offline
-             * Updates network state for all PAC containers
-             */
+            // Network state changes — offline
+            // Fires when browser loses connectivity
             window.addEventListener('offline', function() {
+                // Publish loss of connectivity and last-known characteristics
                 self.dispatchBrowserStateEvent('online', {
                     online: false,
                     networkType: Utils.getNetworkEffectiveType(),
@@ -1042,466 +1062,691 @@
                 });
             });
 
-            /**
-             * Handle network connection changes (if supported)
-             * Updates network quality when connection type changes
-             */
+            // Connection type/quality changes (if supported by the browser)
+            // Provides updates when connection characteristics shift
             if ('connection' in navigator && navigator.connection) {
                 navigator.connection.addEventListener('change', function() {
+                    // Dispatch updated connection state snapshot
                     self.dispatchBrowserStateEvent('online', {
-                        online: navigator.onLine,
+                        online: navigator.onLine, // Current connectivity flag
                         networkType: Utils.getNetworkEffectiveType(),
                         networkQuality: Utils.detectNetworkQuality(),
                     });
                 });
             }
+        },
 
-            /**
-             * Handle focus entering any element (captures phase)
-             * Updates container focus states when focus moves into PAC containers
-             */
+        /**
+         * Registers focus transition listeners and translates them into
+         * normalized focus/blur messages for the container system.
+         * @private
+         * @returns {void}
+         */
+        _setupFocusEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            // Focus in
+            // Fires when an element gains focus anywhere in the document
             document.addEventListener('focusin', function(event) {
+                // Resolve container responsible for the focused element
                 const container = self.getContainerForEvent(MSG_FOCUS, event);
+
+                // Wrap DOM focus event into unified message format
                 const customEvent = self.wrapDomEventAsMessage(MSG_FOCUS, event);
+
+                // Dispatch normalized focus message
                 self.dispatchToContainer(container, customEvent);
             });
 
-            /**
-             * Handle focus leaving any element (captures phase)
-             * Updates container focus states when focus moves out of PAC containers
-             */
+            // Focus out
+            // Fires when an element loses focus
             document.addEventListener('focusout', function(event) {
+                // Resolve container responsible for the blurred element
                 const container = self.getContainerForEvent(MSG_BLUR, event);
+
+                // Wrap DOM blur event into unified message format
                 const customEvent = self.wrapDomEventAsMessage(MSG_BLUR, event);
+
+                // Dispatch normalized blur message
                 self.dispatchToContainer(container, customEvent);
             });
+        },
 
-            /**
-             * Disable native drag/drop when capture is activated
-             */
-            document.addEventListener('dragstart', event => {
-                if (this.hasCapture()) {
-                    event.preventDefault();
-                }
-            });
+        /**
+         * Setup all mouse event handlers
+         * @private
+         */
+        _setupMouseEvents() {
+            this._setupMouseButtonEvents();
+            this._setupMouseMoveEvent();
+            this._setupMouseWheelEvent();
+            this._setupDragPrevention();
+        },
 
-            /**
-             * Handle mouse button up events
-             * Maps browser mouse button codes to application message types
-             */
-            window.addEventListener('mouseup', function (event) {
-                // Define button map
-                const buttonMap = {
-                    0: MSG_LBUTTONUP,
-                    1: MSG_MBUTTONUP,
-                    2: MSG_RBUTTONUP,
-                };
+        /**
+         * Registers mouse button and click-related listeners and translates them
+         * into normalized internal messages.
+         * @private
+         * @returns {void}
+         */
+        _setupMouseButtonEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
 
-                // Track right button specifically for gestures
-                const messageType = buttonMap[event.button];
-
-                if (!messageType) {
-                    return;
-                }
-
-                // Check for gesture completion on right button
-                if (event.button === 2 && MouseGestureRecognizer.isRecording) {
-                    MouseGestureRecognizer.stopRecording(event);
-                }
-
-                // Dispatch event to container
-                const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
-
-                self.dispatchToContainer(container, customEvent);
-            });
-
-            // Click event recognises left button
-            document.addEventListener('click', function (event) {
-                const container = self.getContainerForEvent(MSG_LCLICK, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_LCLICK, event, wParam, lParam);
-
-                self.dispatchToContainer(container, customEvent);
-            });
-
-            /**
-             * Handle mouse button down events
-             * Maps browser mouse button codes to application message types
-             */
-            document.addEventListener('mousedown', function (event) {
-                // Define button map
+            // Mouse down
+            // Capture button press and normalize into message format
+            document.addEventListener('mousedown', function(event) {
+                // Map DOM button codes to internal message identifiers
                 const buttonMap = {
                     0: MSG_LBUTTONDOWN,
                     1: MSG_MBUTTONDOWN,
                     2: MSG_RBUTTONDOWN,
                 };
 
-                // Track right button specifically for gestures
+                const messageType = buttonMap[event.button];
+
+                // Ignore unsupported buttons
+                if (!messageType) {
+                    return;
+                }
+
+                // Begin gesture recording when right button is pressed
+                if (event.button === 2) {
+                    MouseGestureRecognizer.startRecording(event);
+                }
+
+                // Resolve container responsible for handling the interaction
+                const container = self.getContainerForEvent(messageType, event);
+
+                // Encode modifier key state present during the click
+                const wParam = self.getModifierState(event);
+
+                // Encode pointer coordinates relative to the container
+                const lParam = self.buildMouseLParam(event, container);
+
+                // Wrap DOM event into unified message structure
+                const customEvent = self.wrapDomEventAsMessage(
+                    messageType,
+                    event,
+                    wParam,
+                    lParam
+                );
+
+                // Dispatch normalized mouse-down message
+                self.dispatchToContainer(container, customEvent);
+            });
+
+            // Mouse up
+            // Capture button release and optionally finalize gesture recording
+            window.addEventListener('mouseup', function(event) {
+                // Map DOM button codes to internal release messages
+                const buttonMap = {
+                    0: MSG_LBUTTONUP,
+                    1: MSG_MBUTTONUP,
+                    2: MSG_RBUTTONUP,
+                };
+
                 const messageType = buttonMap[event.button];
 
                 if (!messageType) {
                     return;
                 }
 
-                // Track right button specifically for gestures
-                if (event.button === 2) {
-                    MouseGestureRecognizer.startRecording(event);
+                // Stop gesture recording if right-button interaction completes
+                if (event.button === 2 && MouseGestureRecognizer.isRecording) {
+                    MouseGestureRecognizer.stopRecording(event);
                 }
 
-                // Dispatch event to container
+                // Resolve container and encode event state
                 const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
+                const wParam = self.getModifierState(event);
+                const lParam = self.buildMouseLParam(event, container);
+
+                // Wrap and dispatch normalized mouse-up message
+                const customEvent = self.wrapDomEventAsMessage(
+                    messageType,
+                    event,
+                    wParam,
+                    lParam
+                );
 
                 self.dispatchToContainer(container, customEvent);
             });
 
-            // Auxclick event recognises middle button
-            document.addEventListener('auxclick', function (event) {
+            // Left click
+            document.addEventListener('click', function(event) {
+                const container = self.getContainerForEvent(MSG_LCLICK, event);
+                const wParam = self.getModifierState(event);
+                const lParam = self.buildMouseLParam(event, container);
+
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_LCLICK,
+                    event,
+                    wParam,
+                    lParam
+                );
+
+                self.dispatchToContainer(container, customEvent);
+            });
+
+            // Middle click
+            document.addEventListener('auxclick', function(event) {
                 if (event.button === 1) {
+
                     const container = self.getContainerForEvent(MSG_MCLICK, event);
-                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                    const customEvent = self.wrapDomEventAsMessage(MSG_MCLICK, event, wParam, lParam);
+                    const wParam = self.getModifierState(event);
+                    const lParam = self.buildMouseLParam(event, container);
+
+                    const customEvent = self.wrapDomEventAsMessage(
+                        MSG_MCLICK,
+                        event,
+                        wParam,
+                        lParam
+                    );
 
                     self.dispatchToContainer(container, customEvent);
                 }
             });
 
-            // Contextmenu event recognises right button
-            document.addEventListener('contextmenu', function (event) {
-                // Check if gesture was just dispatched in the preceding mouseup
+            // Right click / context menu
+            // Normalize context interactions and optionally suppress native menu
+            document.addEventListener('contextmenu', function(event) {
+                // Prevent browser context menu if a gesture was just dispatched
                 if (MouseGestureRecognizer.gestureJustDispatched) {
-                    // Reset gestureJustDispatched flag
                     MouseGestureRecognizer.gestureJustDispatched = false;
-
-                    // Always suppress context menu after any gesture motion (recognized or not)
-                    // A drag motion is not a click, regardless of whether pattern matched
                     event.preventDefault();
                 }
 
-                // Dispatch the event
                 const container = self.getContainerForEvent(MSG_RCLICK, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_RCLICK, event, wParam, lParam);
+                const wParam = self.getModifierState(event);
+                const lParam = self.buildMouseLParam(event, container);
+
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_RCLICK,
+                    event,
+                    wParam,
+                    lParam
+                );
 
                 self.dispatchToContainer(container, customEvent);
             });
 
-            // Handle double-click (left button only)
-            document.addEventListener('dblclick', function (event) {
-                // Only handle left button double-clicks
+            // Double click (left button only)
+            // Capture rapid primary-button activation
+            document.addEventListener('dblclick', function(event) {
                 if (event.button === 0) {
                     const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                    const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDBLCLK, event, wParam, lParam);
+                    const wParam = self.getModifierState(event);
+                    const lParam = self.buildMouseLParam(event, container);
+
+                    const customEvent = self.wrapDomEventAsMessage(
+                        MSG_LBUTTONDBLCLK,
+                        event,
+                        wParam,
+                        lParam
+                    );
 
                     self.dispatchToContainer(container, customEvent);
                 }
             });
+        },
 
-            /**
-             * Handle mouse movement with throttling
-             * Throttles updates to configured FPS (default 60fps = ~16ms)
-             * Set wakaPAC.mouseMoveThrottleFps = 0 for no throttling (updates on every mousemove)
-             * Set wakaPAC.mouseMoveThrottleFps = 120 for higher precision (gaming, drawing apps)
-             * Must be set before first wakaPAC() call
-             */
-            self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (event) => {
-                // Record gesture point if gesture is active
+        /**
+         * Registers throttled mouse movement tracking and forwards normalized
+         * pointer motion into the internal message system. Movement events are
+         * coalesced to limit dispatch frequency, while optionally feeding active
+         * gesture recognition with raw motion data.
+         * @private
+         * @returns {void}
+         */
+        _setupMouseMoveEvent() {
+            // Preserve instance reference for use inside the coalesced callback
+            const self = this;
+
+            // Coalesce high-frequency mousemove events to a controlled rate
+            this.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (event) => {
+                // Feed raw movement into gesture recognizer when recording is active
                 if (MouseGestureRecognizer.isRecording) {
                     MouseGestureRecognizer.recordPoint(event);
                 }
 
-                // Dispatch move event to container
+                // Resolve container responsible for handling pointer movement
                 const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
+                // Capture modifier key state at time of movement
+                const wParam = self.getModifierState(event);
+
+                // Encode pointer coordinates relative to the container
+                const lParam = self.buildMouseLParam(event, container);
+
+                // Wrap DOM movement event into unified message format
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_MOUSEMOVE,
+                    event,
+                    wParam,
+                    lParam
+                );
+
+                // Dispatch throttled movement message
                 self.dispatchToContainer(container, customEvent);
             });
+        },
 
-            /**
-             * Listen for native wheel events and translate them into the
-             * application’s internal mouse wheel message format.
-             */
+        /**
+         * Registers mouse wheel listeners and normalizes scroll input into the
+         * internal message format. Wheel deltas and modifier state are encoded so
+         * consumers receive a consistent representation regardless of browser differences.
+         * @private
+         * @returns {void}
+         */
+        _setupMouseWheelEvent() {
+            // Preserve instance reference for use inside DOM callback
+            const self = this;
+
+            // Listen for wheel input at the document level
             document.addEventListener("wheel", function(event) {
-                // Fetch the container
+                // Resolve container responsible for handling this scroll interaction
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
+
+                // Capture modifier key state present during the wheel event
                 const modifiers = self.getModifierState(event);
+
+                // Encode vertical scroll delta and modifiers into message parameters
                 const wParam = self.buildWheelWParam(event.deltaY, modifiers);
+
+                // Encode pointer position relative to the container
                 const lParam = self.buildMouseLParam(event, container);
+
+                // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
-                    wheelDelta: event.deltaY,        // Vertical scroll delta
-                    wheelDeltaX: event.deltaX,       // Horizontal scroll delta
-                    deltaMode: event.deltaMode       // Units: pixel / line / page
+                    wheelDelta: event.deltaY,   // Primary vertical scroll delta
+                    wheelDeltaX: event.deltaX,  // Horizontal scroll delta (if supported)
+                    deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
                 });
 
+                // Dispatch normalized wheel message
                 self.dispatchToContainer(container, customEvent);
-            }, { passive: false });
+            }, { passive: false }); // Allow preventDefault by consumers if needed
+        },
 
-            /**
-             * Touch events
-             */
+        /**
+         * Registers a dragstart handler that suppresses the browser’s native
+         * drag behavior while the system has pointer capture.
+         * @private
+         * @returns {void}
+         */
+        _setupDragPrevention() {
+            // Intercept drag initiation at the document level
+            document.addEventListener('dragstart', event => {
+                // If the input system currently owns capture, block native drag
+                if (this.hasCapture()) {
+                    event.preventDefault();
+                }
+            });
+        },
+
+        /**
+         * Registers touch interaction handlers and normalizes them into the
+         * internal mouse-style message system.
+         * @private
+         * @returns {void}
+         */
+        _setupTouchEvents() {
+            // Preserve instance reference for use inside event callbacks
+            const self = this;
+
+            // Touch button events
+            // Map touch lifecycle events onto mouse-style button semantics
             const touchMap = {
-                'touchstart': MSG_LBUTTONDOWN,
-                'touchend': MSG_LBUTTONUP,
-                'touchcancel': MSG_LBUTTONUP
+                'touchstart': MSG_LBUTTONDOWN,  // Finger contact behaves like left button press
+                'touchend': MSG_LBUTTONUP,      // Finger release behaves like left button release
+                'touchcancel': MSG_LBUTTONUP    // Cancellation is treated as a release for consistency
             };
 
+            // Register touch handlers that normalize events into the message system
             Object.entries(touchMap).forEach(([eventName, msgType]) => {
                 document.addEventListener(eventName, function(event) {
+                    // Resolve the container responsible for handling this interaction
                     const container = self.getContainerForEvent(msgType, event);
+
+                    // Encode modifier/key state carried with the touch event
                     const wParam = self.getModifierState(event);
+
+                    // Encode pointer position relative to the container
                     const lParam = self.buildMouseLParam(event, container);
+
+                    // Wrap DOM touch event into unified message format
                     const customEvent = self.wrapDomEventAsMessage(msgType, event, wParam, lParam);
 
+                    // Dispatch normalized touch-as-mouse event
                     self.dispatchToContainer(container, customEvent);
                 });
             });
 
-            /**
-             * Touch move simulates mouse move
-             */
-            self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
+            // Touch move (throttled)
+            // Coalesce high-frequency movement to match mouse move dispatch behavior
+            this.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
+                // Ignore events without active touch points
                 if (event.touches.length > 0) {
+                    // Resolve destination container for movement handling
                     const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+
+                    // Capture modifier state at time of movement
+                    const wParam = self.getModifierState(event);
+
+                    // Encode movement coordinates relative to the container
+                    const lParam = self.buildMouseLParam(event, container);
+
+                    // Wrap movement into unified mouse-move message
                     const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
+                    // Dispatch throttled movement event
                     self.dispatchToContainer(container, customEvent);
                 }
             });
+        },
 
-            /**
-             * Handle keyboard key release events
-             * Tracks when user releases any key
-             */
-            document.addEventListener('keyup', function (event) {
+        /**
+         * Registers keyboard listeners and translates DOM key activity into the
+         * internal message format.
+         * @returns {void}
+         * @private
+         */
+        _setupKeyboardEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            // Key up
+            // Capture key release and forward normalized keyboard state
+            document.addEventListener('keyup', function(event) {
+                // Resolve container responsible for handling this keyboard event
                 const container = self.getContainerForEvent(MSG_KEYUP, event);
-                const wParam = self.buildKeyboardWParam(event); // Win32 virtual key code
-                const lParam = self.buildKeyboardLParam(event); // Keyboard state flags and repeat count
-                const customEvent = self.wrapDomEventAsMessage(MSG_KEYUP, event, wParam, lParam);
 
-                self.dispatchToContainer(container, customEvent, {
-                    key: event.key,
-                    code: event.code
+                // Encode keyboard state into message parameters
+                const wParam = self.buildKeyboardWParam(event);
+                const lParam = self.buildKeyboardLParam(event);
+
+                // Wrap DOM event with additional key metadata for consumers
+                const customEvent = self.wrapDomEventAsMessage(MSG_KEYUP, event, wParam, lParam, {
+                    key: event.key,   // Logical key value
+                    code: event.code  // Physical key identifier
                 });
+
+                // Dispatch normalized key-up message
+                self.dispatchToContainer(container, customEvent);
             });
 
-            /**
-             * Handle keyboard key press events
-             * Tracks when user presses any key down
-             */
-            document.addEventListener('keydown', function (event) {
-                // Dispatch keydown
+            // Key down (with MSG_CHAR for printable characters)
+            // Handles key press and optional character emission
+            document.addEventListener('keydown', function(event) {
+                // Resolve target container for keyboard input
                 const container = self.getContainerForEvent(MSG_KEYDOWN, event);
+
+                // Encode keyboard press state
                 const keyDownWparam = self.buildKeyboardWParam(event);
                 const keyDownLparam = self.buildKeyboardLParam(event);
-                const keyDownEvent = self.wrapDomEventAsMessage(MSG_KEYDOWN, event, keyDownWparam, keyDownLparam);
+
+                // Wrap and dispatch key-down message
+                const keyDownEvent = self.wrapDomEventAsMessage(
+                    MSG_KEYDOWN,
+                    event,
+                    keyDownWparam,
+                    keyDownLparam
+                );
 
                 self.dispatchToContainer(container, keyDownEvent);
 
-                // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
-                // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
+                // Win32-style WM_CHAR: emit character message for printable input
                 if (event.key && event.key.length === 1) {
-                    // Single character key press - send as MSG_CHAR with char code in wParam
-                    const container = self.getContainerForEvent(MSG_CHAR, event);
+                    // Convert character to numeric code representation
                     const msgCharWparam = event.key.charCodeAt(0);
-                    const msgCharEvent = self.wrapDomEventAsMessage(MSG_CHAR, event, msgCharWparam, keyDownLparam);
 
+                    // Wrap character event using same positional metadata
+                    const msgCharEvent = self.wrapDomEventAsMessage(
+                        MSG_CHAR,
+                        event,
+                        msgCharWparam,
+                        keyDownLparam
+                    );
+
+                    // Dispatch character message alongside key-down event
                     self.dispatchToContainer(container, msgCharEvent);
                 }
             });
+        },
 
-            /**
-             * Handle form element change events
-             */
-            document.addEventListener('change', function (event) {
+        /**
+         * Setup form event handling (change, input, submit)
+         * @returns {void}
+         * @private
+         */
+        _setupFormEvents() {
+            // Preserve instance reference for DOM callback scope
+            const self = this;
+
+            // Change events (select, radio, checkbox)
+            // Handles discrete value changes for non-text form controls
+            document.addEventListener('change', function(event) {
+                // Fetch target element
                 const target = event.target;
+
+                // Identify supported control types
                 const isSelect = target.tagName === 'SELECT';
                 const isRadio = target.type === 'radio';
                 const isCheckbox = target.type === 'checkbox';
 
+                // Only process relevant control changes
                 if (isSelect || isRadio || isCheckbox) {
+                    // Resolve owning container and build change message payload
                     const container = self.getContainerForEvent(MSG_CHANGE, event);
                     const wParam = self.buildChangeWParam(event);
-                    const lParam = 0;
+                    const lParam = 0; // No positional payload required
+
+                    // Create wrapper event (MSG_CHANGE)
                     const customEvent = self.wrapDomEventAsMessage(MSG_CHANGE, event, wParam, lParam, {
-                        elementType: isSelect ? 'select' : target.type
+                        elementType: isSelect ? 'select' : target.type // Describe control type for consumers
                     });
 
+                    // Dispatch normalized change event
                     self.dispatchToContainer(container, customEvent);
                 }
             });
 
-            /**
-             * Handle real-time input events for text fields
-             * Tracks continuous user typing in text inputs and textareas.
-             * Excludes radio buttons and checkboxes which use 'change' event instead.
-             * This catches paste, cut, drag-drop, autocomplete, and IME input.
-             */
-            document.addEventListener('input', function (event) {
+            // Input events (text fields, textareas, contenteditable)
+            // Captures live text/content mutations rather than discrete value commits
+            document.addEventListener('input', function(event) {
+                // Fetch target element
                 const target = event.target;
+
+                // Identify editable text sources
                 const isTextInput = target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(target.type);
                 const isTextarea = target.tagName === 'TEXTAREA';
                 const isContentEditable = target.isContentEditable === true;
 
+                // Only process text/content updates
                 if (isTextInput || isTextarea || isContentEditable) {
+                    // Resolve container and encode text delta metadata
                     const container = self.getContainerForEvent(MSG_INPUT, event);
-                    const wParam = event.data ? event.data.length : 0;
+                    const wParam = event.data ? event.data.length : 0; // Length of inserted data (if available)
                     const lParam = 0;
+
+                    // Create wrapper event (MSG_INPUT)
                     const customEvent = self.wrapDomEventAsMessage(MSG_INPUT, event, wParam, lParam, {
-                        elementType: target.tagName.toLowerCase(),
-                        text: event.data
+                        elementType: target.tagName.toLowerCase(), // Element category
+                        text: event.data // Raw inserted text (may be null for deletions)
                     });
 
+                    // Dispatch normalized input event
                     self.dispatchToContainer(container, customEvent);
                 }
             });
 
-            /**
-             * Handle form submission events
-             * Tracks when user submits any form on the page
-             */
-            document.addEventListener('submit', function (event) {
+            // Submit events
+            // Serializes form state into a structured message payload
+            document.addEventListener('submit', function(event) {
+                // Fetch target (form)
                 const form = event.target;
+
+                // Snapshot current form data
                 const formData = new FormData(form);
+
+                // Resolve dispatch container
                 const container = self.getContainerForEvent(MSG_SUBMIT, event);
                 const wParam = 0;
                 const lParam = 0;
 
-                // Get the submit button that triggered the event (useful for forms with multiple submit buttons)
+                // Identify the control responsible for submission (if available)
                 const submitter = event.submitter;
 
-                // Create a MSG_SUBMIT event
+                // Create wrapper event (MSG_SUBMIT)
                 const customEvent = self.wrapDomEventAsMessage(MSG_SUBMIT, event, wParam, lParam, {
-                    // Basic form data as key-value pairs
-                    // Note: Only captures the FIRST value for fields with same name (use multiValues for complete data)
+                    // Flat key/value representation of form entries
                     entries: Object.fromEntries(formData.entries()),
 
-                    // Form metadata - useful for routing/debugging
-                    action: form.action,                           // Where form submits to
-                    method: form.method.toUpperCase(),             // GET, POST, etc.
-                    enctype: form.enctype,                         // How data is encoded (multipart/form-data, etc.)
-                    name: form.getAttribute('name'),   // Form name attribute
+                    // Submission metadata
+                    action: form.action,
+                    method: form.method.toUpperCase(),
+                    enctype: form.enctype,
+                    name: form.getAttribute('name'),
 
-                    // Validation state - indicates if form passes HTML5 validation
-                    // Returns false if any field has required, pattern, min/max violations
+                    // Browser validation state at submit time
                     isValid: form.checkValidity(),
 
-                    // Which submit button was clicked (null if submitted via Enter key or JS)
-                    // Critical for forms with multiple submit buttons (Save Draft vs Publish, etc.)
+                    // Submit button metadata (if applicable)
                     submitter: submitter ? {
-                        name: submitter.name,               // Button name (sent to server)
-                        value: submitter.value,             // Button value (sent to server)
-                        id: submitter.id                    // Button ID (client-side only)
+                        name: submitter.name,
+                        value: submitter.value,
+                        id: submitter.id
                     } : null,
 
-                    // File upload metadata (separate because File objects don't serialize to JSON)
-                    // Contains name, size, type but NOT the actual file data
+                    // File input metadata (names, sizes, types — not file blobs)
                     files: Array.from(form.elements)
                         .filter(el => el.type === 'file' && el.files.length > 0)
                         .reduce((acc, el) => {
                             acc[el.name] = Array.from(el.files).map(f => ({
-                                name: f.name,               // Original filename
-                                size: f.size,               // File size in bytes
-                                type: f.type                // MIME type (e.g., 'image/jpeg')
+                                name: f.name,
+                                size: f.size,
+                                type: f.type
                             }));
                             return acc;
                         }, {}),
 
-                    // Multi-value fields - captures ALL values for checkbox groups and multi-selects
-                    // Object.fromEntries() only keeps the LAST value, this preserves all selections
+                    // Multi-value fields (e.g., multi-select, repeated inputs)
                     multiEntries: Array.from(new Set(
                         Array.from(formData.keys()).filter(key =>
-                            formData.getAll(key).length > 1  // Find fields with multiple values
+                            formData.getAll(key).length > 1
                         )
                     )).reduce((acc, key) => {
-                        acc[key] = formData.getAll(key);    // Get all values as array
+                        acc[key] = formData.getAll(key);
                         return acc;
                     }, {})
                 });
 
-                // Dispatch the event to the container
+                // Dispatch structured submit message
                 self.dispatchToContainer(container, customEvent);
             });
+        },
 
-            /**
-             * Handle scroll events (debounced for performance)
-             * Updates current scroll position for all PAC containers
-             */
-            self.setupMoveCoalescer('window.scroll', 60, function() {
+        /**
+         * Setup window-level events (scroll, resize)
+         * @returns {void}
+         * @private
+         */
+        _setupWindowEvents() {
+            // Preserve instance context for use inside coalesced callbacks
+            const self = this;
+
+            // Scroll tracking (debounced)
+            // Coalesces rapid scroll events into a controlled dispatch rate
+            this.setupMoveCoalescer('window.scroll', 60, function() {
+                // Publish current scroll offsets as a browser state update
                 self.dispatchBrowserStateEvent('scroll', {
-                    scrollX: window.scrollX,
-                    scrollY: window.scrollY
+                    scrollX: window.scrollX, // Horizontal scroll position in pixels
+                    scrollY: window.scrollY  // Vertical scroll position in pixels
                 });
             });
 
-            /**
-             * Handle window resize events (debounced for performance)
-             * Updates viewport/document dimensions and scroll position
-             */
-            self.setupMoveCoalescer('window.resize', 60, function() {
+            // Resize tracking (debounced)
+            // Coalesces rapid resize/layout changes to avoid excessive dispatch
+            this.setupMoveCoalescer('window.resize', 60, function() {
+                // Publish viewport and document metrics after resize
                 self.dispatchBrowserStateEvent('resize', {
-                    viewportWidth: window.innerWidth,
-                    viewportHeight: window.innerHeight,
+                    viewportWidth: window.innerWidth,   // Visible viewport width
+                    viewportHeight: window.innerHeight, // Visible viewport height
+
+                    // Total scrollable document dimensions
                     documentWidth: document.documentElement.scrollWidth,
                     documentHeight: document.documentElement.scrollHeight,
+
+                    // Scroll offsets at time of resize (useful for layout consumers)
                     scrollX: window.scrollX,
                     scrollY: window.scrollY
                 });
             });
+        },
 
-            /**
-             * Intersection observer (shared across all components)
-             * @type {IntersectionObserver}
-             * @private
-             */
-            self._intersectionObserver = new IntersectionObserver((entries) => {
+        /**
+         * Setup intersection and resize observers
+         * @returns {void}
+         * @private
+         */
+        _setupObservers() {
+            const self = this;
+
+            // Intersection observer (viewport visibility tracking)
+            this._intersectionObserver = new IntersectionObserver((entries) => {
+                // Process all intersection updates generated in this observer batch
                 entries.forEach(entry => {
+                    // Resolve the framework component associated with the observed element
                     const component = window.PACRegistry.getByElement(entry.target);
 
+                    // Only update state when a valid abstraction layer exists
                     if (component && component.abstraction) {
+                        // Snapshot of the element’s client rectangle at the time of intersection
                         const rect = entry.boundingClientRect;
+
+                        // Whether any portion of the container is visible in the viewport
                         component.abstraction.containerVisible = entry.isIntersecting;
+
+                        // Treat near-complete intersection as fully visible (tolerates float precision)
                         component.abstraction.containerFullyVisible = entry.intersectionRatio >= 0.99;
+
+                        // Persist simplified geometry for downstream layout/logic consumers
                         component.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
                     }
                 });
-            }, { threshold: [0, 1.0] });
+            }, {
+                threshold: [0, 1.0] // Fire when element transitions between hidden, partially visible, and fully visible states
+            });
 
             /**
-             * Resize observer (shared across all components)
+             * Resize observer (element size tracking)
              * @type {ResizeObserver}
              * @private
              */
-            self._resizeObserver = new ResizeObserver((entries) => {
+            this._resizeObserver = new ResizeObserver((entries) => {
+                // Iterate over all resize notifications produced in this batch
                 entries.forEach(entry => {
-                    // Get the container element
+                    // The DOM element whose size changed
                     const container = entry.target;
+
+                    // Resolve the framework component associated with this element
                     const component = window.PACRegistry.getByElement(container);
 
+                    // Only proceed if a valid abstraction layer exists
                     if (component && component.abstraction) {
-                        // Get dimensions from content rect
+                        // Normalize reported size to integer pixels
                         const width = Math.round(entry.contentRect.width);
                         const height = Math.round(entry.contentRect.height);
 
-                        // Set properties on the component
+                        // Persist latest container dimensions on the abstraction
                         component.abstraction.containerWidth = width;
                         component.abstraction.containerHeight = height;
 
-                        // Determine size type
+                        // Determine logical size state used by the message system
                         let sizeType;
+
                         if (width === 0 && height === 0) {
                             sizeType = SIZE_HIDDEN;
                         } else if (document.fullscreenElement === container) {
@@ -1510,24 +1755,31 @@
                             sizeType = SIZE_RESTORED;
                         }
 
-                        // Build message
+                        // Message parameters encode size state and dimensions
                         const wParam = sizeType;
                         const lParam = self.makeLParam(width, height);
 
+                        // Build structured resize message including raw observer data
                         const customEvent = self.wrapDomEventAsMessage(
                             MSG_SIZE,
-                            null,  // No DOM event for ResizeObserver
+                            null, // No originating DOM event — observer-driven
                             wParam,
                             lParam,
                             {
+                                // Pixel dimensions after normalization
                                 width: width,
                                 height: height,
+
+                                // Simplified rectangle snapshot for consumers
                                 contentRect: Utils.domRectToSimpleObject(entry.contentRect),
+
+                                // Low-level box metrics from ResizeObserver
                                 borderBoxSize: entry.borderBoxSize,
                                 contentBoxSize: entry.contentBoxSize
                             }
                         );
 
+                        // Dispatch size update to the owning container/component
                         self.dispatchToContainer(container, customEvent);
                     }
                 });
@@ -1535,8 +1787,9 @@
         },
 
         /**
-         * Start observing the container element for intersection changes
+         * Start observing the container element for intersection and size changes
          * @param {HTMLElement} container
+         * @returns {void}
          */
         observeContainer(container) {
             this._intersectionObserver.observe(container);
@@ -1546,10 +1799,11 @@
         /**
          * Stop observing the container element
          * @param {HTMLElement} container
+         * @returns {void}
          */
         unObserveContainer(container) {
-            this._intersectionObserver.unobserve(container);
             this._resizeObserver.unobserve(container);
+            this._intersectionObserver.unobserve(container);
         },
 
         /**
