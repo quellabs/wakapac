@@ -642,43 +642,6 @@
         },
 
         /**
-         * Extracts the low-order word (x coordinate) from lParam
-         * Equivalent to Win32 LOWORD macro - gets bits 0-15
-         * Coordinates are container-relative (client-area relative in Win32 terms)
-         * @param {number} lParam - Packed mouse coordinates from event.lParam
-         * @returns {number} X coordinate relative to container's left edge
-         */
-        LOWORD(lParam) {
-            return lParam & 0xFFFF;
-        },
-
-        /**
-         * Extracts the high-order word (y coordinate) from lParam
-         * Equivalent to Win32 HIWORD macro - gets bits 16-31
-         * Coordinates are container-relative (client-area relative in Win32 terms)
-         * @param {number} lParam - Packed mouse coordinates from event.lParam
-         * @returns {number} Y coordinate relative to container's top edge
-         */
-        HIWORD(lParam) {
-            return (lParam >> 16) & 0xFFFF;
-        },
-
-        /**
-         * Extracts both x and y coordinates from lParam
-         * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
-         * Coordinates are container-relative (client-area relative in Win32 terms)
-         * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
-         * @param {number} lParam - Packed mouse coordinates from event.lParam
-         * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
-         */
-        MAKEPOINTS(lParam) {
-            return {
-                x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
-                y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
-            };
-        },
-
-        /**
          * Builds the reverse key name mapping once for caching.
          * @returns {Object<number, string>}
          */
@@ -7670,18 +7633,24 @@
     /**
      * Extracts the low-order word (x coordinate) from lParam
      * Equivalent to Win32 LOWORD macro - gets bits 0-15
+     * Coordinates are container-relative (client-area relative in Win32 terms)
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {number} X coordinate relative to container's left edge
      */
-    wakaPAC.LOWORD = Utils.LOWORD;
+    wakaPAC.LOWORD = function(lParam) {
+        return lParam & 0xFFFF;
+    };
 
     /**
      * Extracts the high-order word (y coordinate) from lParam
      * Equivalent to Win32 HIWORD macro - gets bits 16-31
+     * Coordinates are container-relative (client-area relative in Win32 terms)
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {number} Y coordinate relative to container's top edge
      */
-    wakaPAC.HIWORD = Utils.HIWORD;
+    wakaPAC.HIWORD = function(lParam) {
+        return (lParam >> 16) & 0xFFFF;
+    };
 
     /**
      * Extracts both x and y coordinates from lParam
@@ -7689,7 +7658,29 @@
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
      */
-    wakaPAC.MAKEPOINTS =  Utils.MAKEPOINTS;
+    wakaPAC.MAKEPOINTS = function(lParam) {
+        return {
+            x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
+            y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
+        };
+    };
+
+    /**
+     * Extracts wheel delta from MSG_MOUSEWHEEL wParam
+     * Positive = scroll up, Negative = scroll down
+     * Standard value is ±120 per notch
+     */
+    wakaPAC.GET_WHEEL_DELTA = function(wParam) {
+        const hiWord = (wParam >> 16) & 0xFFFF;
+        return (hiWord << 16) >> 16; // Sign-extend
+    };
+
+    /**
+     * Gets modifier keys from wheel event wParam
+     */
+    wakaPAC.GET_KEYSTATE = function(wParam) {
+        return wParam & 0xFFFF; // LOWORD
+    };
 
     /**
      * Retrieves a string that represents the name of a key.
