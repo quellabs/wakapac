@@ -143,7 +143,7 @@
     const KM_ALT = (1 << 29);       // Alt key held down (lParam bit 29)
 
     /**
-     * WM_SIZE constants
+     * MSG_SIZE constants
      * @type {number}
      */
     const SIZE_RESTORED = 0;   // Normal resize (user action, layout change)
