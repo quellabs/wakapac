@@ -389,24 +389,29 @@
          * @returns {string} Formatted property access string (e.g., "user.settings[0].name")
          */
         pathArrayToString(pathArray) {
+            // If there are no segments, return an empty string
             if (pathArray.length === 0) {
                 return '';
             }
 
+            // Start with the first segment — it never needs dot/bracket prefix
             let result = String(pathArray[0]); // Convert first token to string
 
-            for (let i = 1; i < pathArray.length; i++) {
+            // Iterate through remaining path segments
+            for (let i = 1; i < pathArray.length; ++i) {
+                // Fetch part
                 const part = pathArray[i];
 
-                // Handle numeric indices
+                // If the segment is numeric (number or numeric string),
+                // use bracket notation to represent an array index
                 if (typeof part === 'number' || /^\d+$/.test(String(part))) {
-                    result += `[${part}]`;
+                    result += `[${part}]`; // Handle numeric indices
                 } else {
-                    // Handle property names
-                    result += `.${part}`;
+                    result += `.${part}`;  // Handle property names
                 }
             }
 
+            // Return the fully constructed access string
             return result;
         },
 
