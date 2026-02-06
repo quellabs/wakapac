@@ -7645,6 +7645,7 @@
                         parent = containerMap.get(element);
                         break;
                     }
+
                     element = element.parentElement;
                 }
 
@@ -7662,6 +7663,7 @@
                     if (!hierarchyMap.has(parent.container)) {
                         hierarchyMap.set(parent.container, { parent: null, children: [] });
                     }
+
                     // Add to parent's children array
                     hierarchyMap.get(parent.container).children.push(component);
                 }
@@ -7934,7 +7936,6 @@
         return context.killAllTimers();
     };
 
-
     /**
      * Register a custom binding handler
      * Allows users to extend WakaPAC with their own binding types
@@ -7998,6 +7999,8 @@
      * Extracts wheel delta from MSG_MOUSEWHEEL wParam
      * Positive = scroll up, Negative = scroll down
      * Standard value is ±120 per notch
+     * @param wParam
+     * @returns {number}
      */
     wakaPAC.GET_WHEEL_DELTA = function(wParam) {
         const hiWord = (wParam >> 16) & 0xFFFF;
@@ -8006,6 +8009,8 @@
 
     /**
      * Gets modifier keys from wheel event wParam
+     * @param wParam
+     * @returns {number}
      */
     wakaPAC.GET_KEYSTATE = function(wParam) {
         return wParam & 0xFFFF; // LOWORD
