@@ -35,7 +35,7 @@
      * More efficient for boolean checks than INTERPOLATION_REGEX
      * @type {RegExp}
      */
-    const INTERPOLATION_TEST_REGEX = /\{\{.*}}/;
+    const INTERPOLATION_TEST_REGEX = /\{\{.*?}}/;
 
     /**
      * Extracts foreach item metadata from PAC syntax
@@ -65,7 +65,11 @@
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
-    const BOOLEAN_ATTRIBUTES = ["readonly", "required", "selected", "checked", "hidden", "multiple", "autofocus"];
+    const BOOLEAN_ATTRIBUTES = [
+        "readonly", "required", "selected", "checked", "hidden", "multiple", "autofocus",
+        "disabled", "async", "defer", "formnovalidate", "ismap", "novalidate",
+        "open", "reversed", "scoped", "seamless", "truespeed"
+    ];
 
     // List of extended keys
     const EXTENDED_KEYS = new Set([
@@ -81,6 +85,12 @@
      * @type {Object<number, string>|null}
      */
     let cachedKeyNames = null;
+
+    /**
+     * The wheel delta constant (120 units per notch is Win32 standard)
+     * @type {number}
+     */
+    const WHEEL_DELTA = 120;
 
     /**
      * Windows-style message type constants for event handling
@@ -107,6 +117,7 @@
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
     const MSG_TIMER = 0x0113;
+    const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
     const MSG_USER = 0x1000;
 
@@ -631,43 +642,6 @@
         },
 
         /**
-         * Extracts the low-order word (x coordinate) from lParam
-         * Equivalent to Win32 LOWORD macro - gets bits 0-15
-         * Coordinates are container-relative (client-area relative in Win32 terms)
-         * @param {number} lParam - Packed mouse coordinates from event.lParam
-         * @returns {number} X coordinate relative to container's left edge
-         */
-        LOWORD(lParam) {
-            return lParam & 0xFFFF;
-        },
-
-        /**
-         * Extracts the high-order word (y coordinate) from lParam
-         * Equivalent to Win32 HIWORD macro - gets bits 16-31
-         * Coordinates are container-relative (client-area relative in Win32 terms)
-         * @param {number} lParam - Packed mouse coordinates from event.lParam
-         * @returns {number} Y coordinate relative to container's top edge
-         */
-        HIWORD(lParam) {
-            return (lParam >> 16) & 0xFFFF;
-        },
-
-        /**
-         * Extracts both x and y coordinates from lParam
-         * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
-         * Coordinates are container-relative (client-area relative in Win32 terms)
-         * To get absolute viewport coordinates, use event.originalEvent.clientX/Y
-         * @param {number} lParam - Packed mouse coordinates from event.lParam
-         * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
-         */
-        MAKEPOINTS(lParam) {
-            return {
-                x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
-                y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
-            };
-        },
-
-        /**
          * Builds the reverse key name mapping once for caching.
          * @returns {Object<number, string>}
          */
@@ -1088,39 +1062,6 @@
             });
 
             /**
-             * Handle mouse button down events
-             * Maps browser mouse button codes to application message types
-             */
-            document.addEventListener('mousedown', function (event) {
-                // Define button map
-                const buttonMap = {
-                    0: MSG_LBUTTONDOWN,
-                    1: MSG_MBUTTONDOWN,
-                    2: MSG_RBUTTONDOWN,
-                };
-
-                // Track right button specifically for gestures
-                const messageType = buttonMap[event.button];
-
-                if (!messageType) {
-                    return;
-                }
-
-                // Track right button specifically for gestures
-                if (event.button === 2) {
-                    MouseGestureRecognizer.startRecording(event);
-                }
-
-                // Dispatch event to container
-                const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
-
-                self.dispatchToContainer(container, customEvent);
-            });
-
-            /**
              * Disable native drag/drop when capture is activated
              */
             document.addEventListener('dragstart', event => {
@@ -1155,7 +1096,7 @@
 
                 // Dispatch event to container
                 const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
@@ -1165,9 +1106,42 @@
             // Click event recognises left button
             document.addEventListener('click', function (event) {
                 const container = self.getContainerForEvent(MSG_LCLICK, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_LCLICK, event, wParam, lParam);
+
+                self.dispatchToContainer(container, customEvent);
+            });
+
+            /**
+             * Handle mouse button down events
+             * Maps browser mouse button codes to application message types
+             */
+            document.addEventListener('mousedown', function (event) {
+                // Define button map
+                const buttonMap = {
+                    0: MSG_LBUTTONDOWN,
+                    1: MSG_MBUTTONDOWN,
+                    2: MSG_RBUTTONDOWN,
+                };
+
+                // Track right button specifically for gestures
+                const messageType = buttonMap[event.button];
+
+                if (!messageType) {
+                    return;
+                }
+
+                // Track right button specifically for gestures
+                if (event.button === 2) {
+                    MouseGestureRecognizer.startRecording(event);
+                }
+
+                // Dispatch event to container
+                const container = self.getContainerForEvent(messageType, event);
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
+                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
+                const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
                 self.dispatchToContainer(container, customEvent);
             });
@@ -1176,7 +1150,7 @@
             document.addEventListener('auxclick', function (event) {
                 if (event.button === 1) {
                     const container = self.getContainerForEvent(MSG_MCLICK, event);
-                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_MCLICK, event, wParam, lParam);
 
@@ -1198,7 +1172,7 @@
 
                 // Dispatch the event
                 const container = self.getContainerForEvent(MSG_RCLICK, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_RCLICK, event, wParam, lParam);
 
@@ -1210,7 +1184,7 @@
                 // Only handle left button double-clicks
                 if (event.button === 0) {
                     const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDBLCLK, event, wParam, lParam);
 
@@ -1233,12 +1207,31 @@
 
                 // Dispatch move event to container
                 const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-                const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                 const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
                 self.dispatchToContainer(container, customEvent);
             });
+
+            /**
+             * Listen for native wheel events and translate them into the
+             * application’s internal mouse wheel message format.
+             */
+            document.addEventListener("wheel", function(event) {
+                // Fetch the container
+                const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
+                const modifiers = self.getModifierState(event);
+                const wParam = self.buildWheelWParam(event.deltaY, modifiers);
+                const lParam = self.buildMouseLParam(event, container);
+                const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
+                    wheelDelta: event.deltaY,        // Vertical scroll delta
+                    wheelDeltaX: event.deltaX,       // Horizontal scroll delta
+                    deltaMode: event.deltaMode       // Units: pixel / line / page
+                });
+
+                self.dispatchToContainer(container, customEvent);
+            }, { passive: false });
 
             /**
              * Touch events
@@ -1252,7 +1245,7 @@
             Object.entries(touchMap).forEach(([eventName, msgType]) => {
                 document.addEventListener(eventName, function(event) {
                     const container = self.getContainerForEvent(msgType, event);
-                    const wParam = self.buildMouseWParam(event);
+                    const wParam = self.getModifierState(event);
                     const lParam = self.buildMouseLParam(event, container);
                     const customEvent = self.wrapDomEventAsMessage(msgType, event, wParam, lParam);
 
@@ -1266,7 +1259,7 @@
             self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
                 if (event.touches.length > 0) {
                     const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-                    const wParam = self.buildMouseWParam(event); // Mouse button and modifier key flags
+                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
                     const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
                     const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
 
@@ -1680,7 +1673,7 @@
          * @param {MouseEvent} event - The mouse event
          * @returns {number} wParam value with packed key state flags
          */
-        buildMouseWParam(event) {
+        getModifierState(event) {
             let wParam = 0;
 
             if (event.ctrlKey) {
@@ -1750,6 +1743,22 @@
 
             // Pack coordinates: high 16 bits = y, low 16 bits = x
             return (y << 16) | x;
+        },
+
+        /**
+         * Packs wheel delta and modifier keys into wParam
+         * HIWORD = signed wheel delta (typically ±120 per notch)
+         * LOWORD = modifier key flags (MK_SHIFT, MK_CONTROL, etc.)
+         * @param {number} delta - Raw wheel delta from event
+         * @param {number} modifiers - Bitmask of MK_* flags
+         * @returns {number} Packed wParam value
+         */
+        buildWheelWParam(delta, modifiers) {
+            // Normalize delta to ±120 per notch (Win32 standard)
+            const normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
+
+            // Pack: HIWORD=delta (signed), LOWORD=modifiers
+            return ((normalizedDelta & 0xFFFF) << 16) | (modifiers & 0xFFFF);
         },
 
         /**
@@ -2059,6 +2068,7 @@
          */
         isCaptureAffected(messageType) {
             return messageType === MSG_MOUSEMOVE ||
+                   messageType === MSG_MOUSEWHEEL ||
                    messageType === MSG_LBUTTONDOWN ||
                    messageType === MSG_LBUTTONUP ||
                    messageType === MSG_LBUTTONDBLCLK ||
@@ -7623,18 +7633,24 @@
     /**
      * Extracts the low-order word (x coordinate) from lParam
      * Equivalent to Win32 LOWORD macro - gets bits 0-15
+     * Coordinates are container-relative (client-area relative in Win32 terms)
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {number} X coordinate relative to container's left edge
      */
-    wakaPAC.LOWORD = Utils.LOWORD;
+    wakaPAC.LOWORD = function(lParam) {
+        return lParam & 0xFFFF;
+    };
 
     /**
      * Extracts the high-order word (y coordinate) from lParam
      * Equivalent to Win32 HIWORD macro - gets bits 16-31
+     * Coordinates are container-relative (client-area relative in Win32 terms)
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {number} Y coordinate relative to container's top edge
      */
-    wakaPAC.HIWORD = Utils.HIWORD;
+    wakaPAC.HIWORD = function(lParam) {
+        return (lParam >> 16) & 0xFFFF;
+    };
 
     /**
      * Extracts both x and y coordinates from lParam
@@ -7642,7 +7658,29 @@
      * @param {number} lParam - Packed mouse coordinates from event.lParam
      * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
      */
-    wakaPAC.MAKEPOINTS =  Utils.MAKEPOINTS;
+    wakaPAC.MAKEPOINTS = function(lParam) {
+        return {
+            x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
+            y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
+        };
+    };
+
+    /**
+     * Extracts wheel delta from MSG_MOUSEWHEEL wParam
+     * Positive = scroll up, Negative = scroll down
+     * Standard value is ±120 per notch
+     */
+    wakaPAC.GET_WHEEL_DELTA = function(wParam) {
+        const hiWord = (wParam >> 16) & 0xFFFF;
+        return (hiWord << 16) >> 16; // Sign-extend
+    };
+
+    /**
+     * Gets modifier keys from wheel event wParam
+     */
+    wakaPAC.GET_KEYSTATE = function(wParam) {
+        return wParam & 0xFFFF; // LOWORD
+    };
 
     /**
      * Retrieves a string that represents the name of a key.
@@ -7751,178 +7789,60 @@
     window.wakaPAC = wakaPAC;
 
     // Attach message type constants to wakaPAC
-    wakaPAC.MSG_UNKNOWN = MSG_UNKNOWN;
-    wakaPAC.MSG_MOUSEMOVE = MSG_MOUSEMOVE;
-    wakaPAC.MSG_LBUTTONDOWN = MSG_LBUTTONDOWN;
-    wakaPAC.MSG_LBUTTONUP = MSG_LBUTTONUP;
-    wakaPAC.MSG_LBUTTONDBLCLK = MSG_LBUTTONDBLCLK;
-    wakaPAC.MSG_RBUTTONDOWN = MSG_RBUTTONDOWN;
-    wakaPAC.MSG_RBUTTONUP = MSG_RBUTTONUP;
-    wakaPAC.MSG_MBUTTONDOWN = MSG_MBUTTONDOWN;
-    wakaPAC.MSG_MBUTTONUP = MSG_MBUTTONUP;
-    wakaPAC.MSG_LCLICK = MSG_LCLICK;
-    wakaPAC.MSG_MCLICK = MSG_MCLICK;
-    wakaPAC.MSG_RCLICK = MSG_RCLICK;
-    wakaPAC.MSG_CHAR = MSG_CHAR;
-    wakaPAC.MSG_CHANGE = MSG_CHANGE;
-    wakaPAC.MSG_SUBMIT = MSG_SUBMIT;
-    wakaPAC.MSG_INPUT = MSG_INPUT;
-    wakaPAC.MSG_FOCUS = MSG_FOCUS;
-    wakaPAC.MSG_BLUR = MSG_BLUR;
-    wakaPAC.MSG_KEYDOWN = MSG_KEYDOWN;
-    wakaPAC.MSG_KEYUP = MSG_KEYUP;
-    wakaPAC.MSG_USER = MSG_USER;
-    wakaPAC.MSG_TIMER = MSG_TIMER;
-    wakaPAC.MSG_GESTURE = MSG_GESTURE;
+    Object.assign(wakaPAC, {
+        // Message types
+        MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
+        MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
+        MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
+        MSG_FOCUS, MSG_BLUR, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
+        MSG_MOUSEWHEEL, MSG_GESTURE,
 
-    // Attach mouse event modifier key constants to wakaPAC (for use with mouse wParam)
-    wakaPAC.MK_LBUTTON = MK_LBUTTON;
-    wakaPAC.MK_RBUTTON = MK_RBUTTON;
-    wakaPAC.MK_MBUTTON = MK_MBUTTON;
-    wakaPAC.MK_SHIFT = MK_SHIFT;
-    wakaPAC.MK_CONTROL = MK_CONTROL;
-    wakaPAC.MK_ALT = MK_ALT;
+        // Mouse modifier keys
+        MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
 
-    // Attach keyboard event modifier key constants to wakaPAC (for use with keyboard lParam)
-    wakaPAC.KM_SHIFT = KM_SHIFT;
-    wakaPAC.KM_CONTROL = KM_CONTROL;
-    wakaPAC.KM_ALT = KM_ALT;
+        // Keyboard modifier keys
+        KM_SHIFT, KM_CONTROL, KM_ALT,
 
-    // Attach Virtual Key (VK) code constants to wakaPAC
-    // Control keys
-    wakaPAC.VK_BACK = VK_BACK;
-    wakaPAC.VK_TAB = VK_TAB;
-    wakaPAC.VK_RETURN = VK_RETURN;
-    wakaPAC.VK_SHIFT = VK_SHIFT;
-    wakaPAC.VK_CONTROL = VK_CONTROL;
-    wakaPAC.VK_MENU = VK_MENU;
-    wakaPAC.VK_PAUSE = VK_PAUSE;
-    wakaPAC.VK_CAPITAL = VK_CAPITAL;
-    wakaPAC.VK_ESCAPE = VK_ESCAPE;
-    wakaPAC.VK_SPACE = VK_SPACE;
-    wakaPAC.VK_PRIOR = VK_PRIOR;
-    wakaPAC.VK_NEXT = VK_NEXT;
-    wakaPAC.VK_END = VK_END;
-    wakaPAC.VK_HOME = VK_HOME;
-    wakaPAC.VK_LEFT = VK_LEFT;
-    wakaPAC.VK_UP = VK_UP;
-    wakaPAC.VK_RIGHT = VK_RIGHT;
-    wakaPAC.VK_DOWN = VK_DOWN;
-    wakaPAC.VK_SNAPSHOT = VK_SNAPSHOT;
-    wakaPAC.VK_INSERT = VK_INSERT;
-    wakaPAC.VK_DELETE = VK_DELETE;
+        // Control keys
+        VK_BACK, VK_TAB, VK_RETURN, VK_SHIFT, VK_CONTROL, VK_MENU, VK_PAUSE,
+        VK_CAPITAL, VK_ESCAPE, VK_SPACE, VK_PRIOR, VK_NEXT, VK_END, VK_HOME,
+        VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN, VK_SNAPSHOT, VK_INSERT, VK_DELETE,
 
-    // Number keys (0-9)
-    wakaPAC.VK_0 = VK_0;
-    wakaPAC.VK_1 = VK_1;
-    wakaPAC.VK_2 = VK_2;
-    wakaPAC.VK_3 = VK_3;
-    wakaPAC.VK_4 = VK_4;
-    wakaPAC.VK_5 = VK_5;
-    wakaPAC.VK_6 = VK_6;
-    wakaPAC.VK_7 = VK_7;
-    wakaPAC.VK_8 = VK_8;
-    wakaPAC.VK_9 = VK_9;
+        // Number keys
+        VK_0, VK_1, VK_2, VK_3, VK_4, VK_5, VK_6, VK_7, VK_8, VK_9,
 
-    // Letter keys (A-Z)
-    wakaPAC.VK_A = VK_A;
-    wakaPAC.VK_B = VK_B;
-    wakaPAC.VK_C = VK_C;
-    wakaPAC.VK_D = VK_D;
-    wakaPAC.VK_E = VK_E;
-    wakaPAC.VK_F = VK_F;
-    wakaPAC.VK_G = VK_G;
-    wakaPAC.VK_H = VK_H;
-    wakaPAC.VK_I = VK_I;
-    wakaPAC.VK_J = VK_J;
-    wakaPAC.VK_K = VK_K;
-    wakaPAC.VK_L = VK_L;
-    wakaPAC.VK_M = VK_M;
-    wakaPAC.VK_N = VK_N;
-    wakaPAC.VK_O = VK_O;
-    wakaPAC.VK_P = VK_P;
-    wakaPAC.VK_Q = VK_Q;
-    wakaPAC.VK_R = VK_R;
-    wakaPAC.VK_S = VK_S;
-    wakaPAC.VK_T = VK_T;
-    wakaPAC.VK_U = VK_U;
-    wakaPAC.VK_V = VK_V;
-    wakaPAC.VK_W = VK_W;
-    wakaPAC.VK_X = VK_X;
-    wakaPAC.VK_Y = VK_Y;
-    wakaPAC.VK_Z = VK_Z;
+        // Letter keys
+        VK_A, VK_B, VK_C, VK_D, VK_E, VK_F, VK_G, VK_H, VK_I, VK_J, VK_K, VK_L,
+        VK_M, VK_N, VK_O, VK_P, VK_Q, VK_R, VK_S, VK_T, VK_U, VK_V, VK_W, VK_X,
+        VK_Y, VK_Z,
 
-    // Windows keys
-    wakaPAC.VK_LWIN = VK_LWIN;
-    wakaPAC.VK_RWIN = VK_RWIN;
-    wakaPAC.VK_APPS = VK_APPS;
+        // Windows keys
+        VK_LWIN, VK_RWIN, VK_APPS,
 
-    // Numpad keys
-    wakaPAC.VK_NUMPAD0 = VK_NUMPAD0;
-    wakaPAC.VK_NUMPAD1 = VK_NUMPAD1;
-    wakaPAC.VK_NUMPAD2 = VK_NUMPAD2;
-    wakaPAC.VK_NUMPAD3 = VK_NUMPAD3;
-    wakaPAC.VK_NUMPAD4 = VK_NUMPAD4;
-    wakaPAC.VK_NUMPAD5 = VK_NUMPAD5;
-    wakaPAC.VK_NUMPAD6 = VK_NUMPAD6;
-    wakaPAC.VK_NUMPAD7 = VK_NUMPAD7;
-    wakaPAC.VK_NUMPAD8 = VK_NUMPAD8;
-    wakaPAC.VK_NUMPAD9 = VK_NUMPAD9;
-    wakaPAC.VK_MULTIPLY = VK_MULTIPLY;
-    wakaPAC.VK_ADD = VK_ADD;
-    wakaPAC.VK_SUBTRACT = VK_SUBTRACT;
-    wakaPAC.VK_DECIMAL = VK_DECIMAL;
-    wakaPAC.VK_DIVIDE = VK_DIVIDE;
+        // Numpad keys
+        VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3, VK_NUMPAD4, VK_NUMPAD5,
+        VK_NUMPAD6, VK_NUMPAD7, VK_NUMPAD8, VK_NUMPAD9, VK_MULTIPLY, VK_ADD,
+        VK_SUBTRACT, VK_DECIMAL, VK_DIVIDE,
 
-    // Function keys
-    wakaPAC.VK_F1 = VK_F1;
-    wakaPAC.VK_F2 = VK_F2;
-    wakaPAC.VK_F3 = VK_F3;
-    wakaPAC.VK_F4 = VK_F4;
-    wakaPAC.VK_F5 = VK_F5;
-    wakaPAC.VK_F6 = VK_F6;
-    wakaPAC.VK_F7 = VK_F7;
-    wakaPAC.VK_F8 = VK_F8;
-    wakaPAC.VK_F9 = VK_F9;
-    wakaPAC.VK_F10 = VK_F10;
-    wakaPAC.VK_F11 = VK_F11;
-    wakaPAC.VK_F12 = VK_F12;
+        // Function keys
+        VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10,
+        VK_F11, VK_F12,
 
-    // Lock keys
-    wakaPAC.VK_NUMLOCK = VK_NUMLOCK;
-    wakaPAC.VK_SCROLL = VK_SCROLL;
+        // Lock keys
+        VK_NUMLOCK, VK_SCROLL,
 
-    // Browser keys
-    wakaPAC.VK_BROWSER_BACK = VK_BROWSER_BACK;
-    wakaPAC.VK_BROWSER_FORWARD = VK_BROWSER_FORWARD;
-    wakaPAC.VK_BROWSER_REFRESH = VK_BROWSER_REFRESH;
-    wakaPAC.VK_BROWSER_STOP = VK_BROWSER_STOP;
-    wakaPAC.VK_BROWSER_SEARCH = VK_BROWSER_SEARCH;
-    wakaPAC.VK_BROWSER_FAVORITES = VK_BROWSER_FAVORITES;
-    wakaPAC.VK_BROWSER_HOME = VK_BROWSER_HOME;
+        // Browser keys
+        VK_BROWSER_BACK, VK_BROWSER_FORWARD, VK_BROWSER_REFRESH, VK_BROWSER_STOP,
+        VK_BROWSER_SEARCH, VK_BROWSER_FAVORITES, VK_BROWSER_HOME,
 
-    // Media keys
-    wakaPAC.VK_VOLUME_MUTE = VK_VOLUME_MUTE;
-    wakaPAC.VK_VOLUME_DOWN = VK_VOLUME_DOWN;
-    wakaPAC.VK_VOLUME_UP = VK_VOLUME_UP;
-    wakaPAC.VK_MEDIA_NEXT_TRACK = VK_MEDIA_NEXT_TRACK;
-    wakaPAC.VK_MEDIA_PREV_TRACK = VK_MEDIA_PREV_TRACK;
-    wakaPAC.VK_MEDIA_STOP = VK_MEDIA_STOP;
-    wakaPAC.VK_MEDIA_PLAY_PAUSE = VK_MEDIA_PLAY_PAUSE;
+        // Media keys
+        VK_VOLUME_MUTE, VK_VOLUME_DOWN, VK_VOLUME_UP, VK_MEDIA_NEXT_TRACK,
+        VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_MEDIA_PLAY_PAUSE,
 
-    // OEM keys (punctuation - US layout)
-    wakaPAC.VK_OEM_1 = VK_OEM_1;            // Semicolon
-    wakaPAC.VK_OEM_PLUS = VK_OEM_PLUS;      // Equal
-    wakaPAC.VK_OEM_COMMA = VK_OEM_COMMA;    // Comma
-    wakaPAC.VK_OEM_MINUS = VK_OEM_MINUS;    // Minus
-    wakaPAC.VK_OEM_PERIOD = VK_OEM_PERIOD;  // Period
-    wakaPAC.VK_OEM_2 = VK_OEM_2;            // Slash
-    wakaPAC.VK_OEM_3 = VK_OEM_3;            // Backquote
-    wakaPAC.VK_OEM_4 = VK_OEM_4;            // BracketLeft
-    wakaPAC.VK_OEM_5 = VK_OEM_5;            // Backslash
-    wakaPAC.VK_OEM_6 = VK_OEM_6;            // BracketRight
-    wakaPAC.VK_OEM_7 = VK_OEM_7;            // Quote
-    wakaPAC.VK_OEM_102 = VK_OEM_102;        // IntlBackslash
+        // OEM keys
+        VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD,
+        VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_102
+    });
 
     /**
      * Global mousemove throttling configuration
