@@ -106,6 +106,8 @@
     const MSG_RBUTTONUP = 0x0205;
     const MSG_MBUTTONDOWN = 0x0207;
     const MSG_MBUTTONUP = 0x0208;
+    const MSG_MOUSEENTER = 0x020B;
+    const MSG_MOUSELEAVE = 0x020C;
     const MSG_LCLICK = 0x0210;
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
@@ -992,6 +994,9 @@
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
 
+        /** @private {HTMLElement|null} The container that currently has the pointer inside it */
+        _hoveredContainer: null,
+
         /** @private {HTMLElement|null} The container element that has captured mouse input */
         _capturedContainer: null,
 
@@ -1127,6 +1132,7 @@
             this._setupMouseMoveEvent();
             this._setupMouseWheelEvent();
             this._setupDragPrevention();
+            this._setupDocumentLeave();
         },
 
         /**
@@ -1149,9 +1155,9 @@
                     2: MSG_RBUTTONDOWN,
                 };
 
+                // Ignore unsupported buttons
                 const messageType = buttonMap[event.button];
 
-                // Ignore unsupported buttons
                 if (!messageType) {
                     return;
                 }
@@ -1164,22 +1170,8 @@
                 // Resolve container responsible for handling the interaction
                 const container = self.getContainerForEvent(messageType, event);
 
-                // Encode modifier key state present during the click
-                const wParam = self.getModifierState(event);
-
-                // Encode pointer coordinates relative to the container
-                const lParam = self.buildMouseLParam(event, container);
-
-                // Wrap DOM event into unified message structure
-                const customEvent = self.wrapDomEventAsMessage(
-                    messageType,
-                    event,
-                    wParam,
-                    lParam
-                );
-
-                // Dispatch normalized mouse-down message
-                self.dispatchToContainer(container, customEvent);
+                // Dispatch normalized message
+                self.dispatchMouseMessage(messageType, event, container);
             });
 
             // Mouse up
@@ -1192,6 +1184,7 @@
                     2: MSG_RBUTTONUP,
                 };
 
+                // Ignore unsupported buttons
                 const messageType = buttonMap[event.button];
 
                 if (!messageType) {
@@ -1203,54 +1196,22 @@
                     MouseGestureRecognizer.stopRecording(event);
                 }
 
-                // Resolve container and encode event state
+                // Resolve container and dispatch message
                 const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.getModifierState(event);
-                const lParam = self.buildMouseLParam(event, container);
-
-                // Wrap and dispatch normalized mouse-up message
-                const customEvent = self.wrapDomEventAsMessage(
-                    messageType,
-                    event,
-                    wParam,
-                    lParam
-                );
-
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(messageType, event, container);
             });
 
             // Left click
             document.addEventListener('click', function(event) {
                 const container = self.getContainerForEvent(MSG_LCLICK, event);
-                const wParam = self.getModifierState(event);
-                const lParam = self.buildMouseLParam(event, container);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_LCLICK,
-                    event,
-                    wParam,
-                    lParam
-                );
-
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_LCLICK, event, container);
             });
 
             // Middle click
             document.addEventListener('auxclick', function(event) {
                 if (event.button === 1) {
-
                     const container = self.getContainerForEvent(MSG_MCLICK, event);
-                    const wParam = self.getModifierState(event);
-                    const lParam = self.buildMouseLParam(event, container);
-
-                    const customEvent = self.wrapDomEventAsMessage(
-                        MSG_MCLICK,
-                        event,
-                        wParam,
-                        lParam
-                    );
-
-                    self.dispatchToContainer(container, customEvent);
+                    self.dispatchMouseMessage(MSG_MCLICK, event, container);
                 }
             });
 
@@ -1264,17 +1225,7 @@
                 }
 
                 const container = self.getContainerForEvent(MSG_RCLICK, event);
-                const wParam = self.getModifierState(event);
-                const lParam = self.buildMouseLParam(event, container);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_RCLICK,
-                    event,
-                    wParam,
-                    lParam
-                );
-
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_RCLICK, event, container);
             });
 
             // Double click (left button only)
@@ -1282,60 +1233,63 @@
             document.addEventListener('dblclick', function(event) {
                 if (event.button === 0) {
                     const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    const wParam = self.getModifierState(event);
-                    const lParam = self.buildMouseLParam(event, container);
-
-                    const customEvent = self.wrapDomEventAsMessage(
-                        MSG_LBUTTONDBLCLK,
-                        event,
-                        wParam,
-                        lParam
-                    );
-
-                    self.dispatchToContainer(container, customEvent);
+                    self.dispatchMouseMessage(MSG_LBUTTONDBLCLK, event, container);
                 }
             });
         },
 
         /**
-         * Registers throttled mouse movement tracking and forwards normalized
-         * pointer motion into the internal message system. Movement events are
-         * coalesced to limit dispatch frequency, while optionally feeding active
-         * gesture recognition with raw motion data.
+         * Configures throttled mousemove event handling. Dispatches enter/leave/move
+         * messages to containers based on pointer position. Optionally feeds raw
+         * coordinates to gesture recognizer when recording is active.
          * @private
          * @returns {void}
          */
         _setupMouseMoveEvent() {
-            // Preserve instance reference for use inside the coalesced callback
             const self = this;
 
-            // Coalesce high-frequency mousemove events to a controlled rate
-            this.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (event) => {
-                // Feed raw movement into gesture recognizer when recording is active
-                if (MouseGestureRecognizer.isRecording) {
-                    MouseGestureRecognizer.recordPoint(event);
+            // Throttle mousemove events to configured FPS limit
+            this.setupMoveCoalescer(
+                'mousemove',
+                wakaPAC.mouseMoveThrottleFps,
+                (event) => {
+                    // Feed raw coordinates to gesture recognizer if active
+                    if (MouseGestureRecognizer.isRecording) {
+                        MouseGestureRecognizer.recordPoint(event);
+                    }
+
+                    // Determine which container is under the pointer
+                    const previousContainer = self._hoveredContainer;
+                    const currentContainer = self.getContainerForEvent(MSG_MOUSEMOVE, event);
+
+                    // Handle container transitions. Suppress when mouse capture is enabled
+                    if (previousContainer !== currentContainer) {
+                        if (!self._captureActive) {
+                            // Mouse left the container
+                            if (previousContainer) {
+                                self.dispatchMouseMessage(MSG_MOUSELEAVE, event, previousContainer);
+                            }
+
+                            // Mouse entered the container
+                            if (currentContainer) {
+                                self.dispatchMouseMessage(MSG_MOUSEENTER, event, currentContainer);
+                            }
+                        }
+
+                        // Update tracked hover state
+                        self._hoveredContainer = currentContainer;
+                    }
+
+                    // Dispatch move event to current container
+                    if (currentContainer) {
+                        self.dispatchMouseMessage(
+                            MSG_MOUSEMOVE,
+                            event,
+                            currentContainer
+                        );
+                    }
                 }
-
-                // Resolve container responsible for handling pointer movement
-                const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-
-                // Capture modifier key state at time of movement
-                const wParam = self.getModifierState(event);
-
-                // Encode pointer coordinates relative to the container
-                const lParam = self.buildMouseLParam(event, container);
-
-                // Wrap DOM movement event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_MOUSEMOVE,
-                    event,
-                    wParam,
-                    lParam
-                );
-
-                // Dispatch throttled movement message
-                self.dispatchToContainer(container, customEvent);
-            });
+            );
         },
 
         /**
@@ -1362,7 +1316,7 @@
 
                 // Encode pointer position relative to the container
                 const lParam = self.buildMouseLParam(event, container);
-
+                
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
@@ -1392,6 +1346,37 @@
         },
 
         /**
+         * Registers document-level mouseleave to handle pointer leaving viewport
+         * Ensures MSG_MOUSELEAVE is dispatched when pointer exits the document
+         * @private
+         * @returns {void}
+         */
+        _setupDocumentLeave() {
+            const self = this;
+
+            document.addEventListener('mouseleave', function(event) {
+                // Only fire if mouse actually left the document (relatedTarget is null)
+                if (event.relatedTarget !== null) {
+                    return;
+                }
+
+                // Don't fire leave during capture - captured container logically retains pointer
+                if (self._captureActive) {
+                    return;
+                }
+
+                // Dispatch leave to whatever container was last hovered
+                if (self._hoveredContainer) {
+                    // Dispatch mouse leave event
+                    self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
+
+                    // Clear tracked state
+                    self._hoveredContainer = null;
+                }
+            }, true); // Use capture phase
+        },
+
+        /**
          * Registers touch interaction handlers and normalizes them into the
          * internal mouse-style message system.
          * @private
@@ -1412,20 +1397,8 @@
             // Register touch handlers that normalize events into the message system
             Object.entries(touchMap).forEach(([eventName, msgType]) => {
                 document.addEventListener(eventName, function(event) {
-                    // Resolve the container responsible for handling this interaction
                     const container = self.getContainerForEvent(msgType, event);
-
-                    // Encode modifier/key state carried with the touch event
-                    const wParam = self.getModifierState(event);
-
-                    // Encode pointer position relative to the container
-                    const lParam = self.buildMouseLParam(event, container);
-
-                    // Wrap DOM touch event into unified message format
-                    const customEvent = self.wrapDomEventAsMessage(msgType, event, wParam, lParam);
-
-                    // Dispatch normalized touch-as-mouse event
-                    self.dispatchToContainer(container, customEvent);
+                    self.dispatchMouseMessage(msgType, event, container);
                 });
             });
 
@@ -1434,20 +1407,8 @@
             this.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
                 // Ignore events without active touch points
                 if (event.touches.length > 0) {
-                    // Resolve destination container for movement handling
                     const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-
-                    // Capture modifier state at time of movement
-                    const wParam = self.getModifierState(event);
-
-                    // Encode movement coordinates relative to the container
-                    const lParam = self.buildMouseLParam(event, container);
-
-                    // Wrap movement into unified mouse-move message
-                    const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
-
-                    // Dispatch throttled movement event
-                    self.dispatchToContainer(container, customEvent);
+                    self.dispatchMouseMessage(MSG_MOUSEMOVE, event, container);
                 }
             });
         },
@@ -1986,6 +1947,20 @@
 
             // Dispatch the custom event to the container
             container.dispatchEvent(event);
+        },
+
+        /**
+         * Helper to dispatch mouse messages with proper wParam/lParam encoding
+         * @param msgType
+         * @param domEvent
+         * @param container
+         * @param extended
+         */
+        dispatchMouseMessage(msgType, domEvent, container, extended={}) {
+            const wParam = this.getModifierState(domEvent);
+            const lParam = this.buildMouseLParam(domEvent, container);
+            const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
+            this.dispatchToContainer(container, customEvent);
         },
 
         /**
@@ -8137,7 +8112,7 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
         MSG_FOCUS, MSG_BLUR, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
-        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE,
+        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
