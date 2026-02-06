@@ -6969,35 +6969,39 @@
 
             // Process all DOM mutations in this batch
             this.observer = new MutationObserver(mutations => {
+                // Track PAC ids already destroyed in this mutation batch
+                const destroyed = new Set();
+
                 mutations.forEach(mutation => {
                     mutation.removedNodes.forEach(node => {
-                        // Skip this node unless it’s an element node
+                        // Only element nodes can contain attributes/query selectors
                         if (node.nodeType !== Node.ELEMENT_NODE) {
                             return;
                         }
 
-                        // Collect all PAC nodes including the root if applicable
-                        const pacNodes = node.querySelectorAll('[data-pac-id]');
+                        // Collect PAC elements in this removed subtree:
+                        // include the root node if it is a PAC container,
+                        // followed by all nested PAC containers
+                        const pacNodes = [
+                            ...(node.matches('[data-pac-id]') ? [node] : []),
+                            ...node.querySelectorAll('[data-pac-id]')
+                        ];
 
-                        // Destroy descendants first (deepest → outer)
+                        // Destroy deepest nodes first to preserve parent/child teardown order
                         for (let i = pacNodes.length - 1; i >= 0; i--) {
+                            // Fetch the pacId
                             const pacId = pacNodes[i].getAttribute('data-pac-id');
-                            const context = window.PACRegistry.components.get(pacId);
 
-                            if (context) {
-                                context.destroy();
+                            // Skip invalid ids or components already destroyed this batch
+                            if (!pacId || destroyed.has(pacId)) {
+                                continue;
                             }
-                        }
 
-                        // Destroy the root last
-                        const rootPacId = node.getAttribute('data-pac-id');
+                            // Add to destroyed list
+                            destroyed.add(pacId);
 
-                        if (rootPacId) {
-                            const context = window.PACRegistry.components.get(rootPacId);
-
-                            if (context) {
-                                context.destroy();
-                            }
+                            // Destroy the registered component if it still exists
+                            window.PACRegistry.components.get(pacId)?.destroy();
                         }
                     });
                 });
