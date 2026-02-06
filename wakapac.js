@@ -1252,7 +1252,8 @@
             });
 
             /**
-             * Wheel listener
+             * Listen for native wheel events and translate them into the
+             * application’s internal mouse wheel message format.
              */
             document.addEventListener("wheel", function(event) {
                 // Fetch the container
@@ -1261,9 +1262,9 @@
                 const wParam = self.buildWheelWParam(event.deltaY, modifiers);
                 const lParam = self.buildMouseLParam(event, container);
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
-                    wheelDelta: event.deltaY,        // Normalized vertical delta
-                    wheelDeltaX: event.deltaX,       // Horizontal delta (for custom handling)
-                    deltaMode: event.deltaMode       // 0=pixel, 1=line, 2=page
+                    wheelDelta: event.deltaY,        // Vertical scroll delta
+                    wheelDeltaX: event.deltaX,       // Horizontal scroll delta
+                    deltaMode: event.deltaMode       // Units: pixel / line / page
                 });
 
                 self.dispatchToContainer(container, customEvent);
@@ -2104,6 +2105,7 @@
          */
         isCaptureAffected(messageType) {
             return messageType === MSG_MOUSEMOVE ||
+                   messageType === MSG_MOUSEWHEEL ||
                    messageType === MSG_LBUTTONDOWN ||
                    messageType === MSG_LBUTTONUP ||
                    messageType === MSG_LBUTTONDBLCLK ||
