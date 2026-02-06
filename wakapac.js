@@ -1462,7 +1462,6 @@
                 });
             });
 
-            //
             /**
              * Intersection observer (shared across all components)
              * @type {IntersectionObserver}
