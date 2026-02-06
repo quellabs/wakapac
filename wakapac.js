@@ -97,6 +97,7 @@
      * Hex values match Win32 API message identifiers
      */
     const MSG_UNKNOWN = 0x0000;
+    const MSG_SIZE = 0x0005;
     const MSG_MOUSEMOVE = 0x0200;
     const MSG_LBUTTONDOWN = 0x0201;
     const MSG_LBUTTONUP = 0x0202;
@@ -140,6 +141,14 @@
     const KM_SHIFT = (1 << 25);     // Shift key held down (lParam bit 25)
     const KM_CONTROL = (1 << 26);   // Ctrl key held down (lParam bit 26)
     const KM_ALT = (1 << 29);       // Alt key held down (lParam bit 29)
+
+    /**
+     * WM_SIZE constants
+     * @type {number}
+     */
+    const SIZE_RESTORED = 0;   // Normal resize (user action, layout change)
+    const SIZE_HIDDEN = 1;     // Element became hidden (width/height = 0)
+    const SIZE_FULLSCREEN = 2; // Element entered fullscreen mode
 
     /**
      * Win32 Virtual Key codes
@@ -981,6 +990,12 @@
         /** @private {HTMLElement|null} The container element that has captured mouse input */
         _capturedContainer: null,
 
+        /** @private Shared intersection observer */
+        _intersectionObserver: null,
+
+        /** @private Shared resize observer */
+        _resizeObserver: null,
+
         initialize() {
             // Store reference to this object for use in closures
             const self = this;
@@ -1302,8 +1317,7 @@
                     // Single character key press - send as MSG_CHAR with char code in wParam
                     const container = self.getContainerForEvent(MSG_CHAR, event);
                     const msgCharWparam = event.key.charCodeAt(0);
-                    const msgCharLparam = keyDownLparam;
-                    const msgCharEvent = self.wrapDomEventAsMessage(MSG_CHAR, event, msgCharWparam, msgCharLparam);
+                    const msgCharEvent = self.wrapDomEventAsMessage(MSG_CHAR, event, msgCharWparam, keyDownLparam);
 
                     self.dispatchToContainer(container, msgCharEvent);
                 }
@@ -1447,6 +1461,96 @@
                     scrollY: window.scrollY
                 });
             });
+
+            //
+            /**
+             * Intersection observer (shared across all components)
+             * @type {IntersectionObserver}
+             * @private
+             */
+            self._intersectionObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    const component = window.PACRegistry.getByElement(entry.target);
+
+                    if (component && component.abstraction) {
+                        const rect = entry.boundingClientRect;
+                        component.abstraction.containerVisible = entry.isIntersecting;
+                        component.abstraction.containerFullyVisible = entry.intersectionRatio >= 0.99;
+                        component.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
+                    }
+                });
+            }, { threshold: [0, 1.0] });
+
+            /**
+             * Resize observer (shared across all components)
+             * @type {ResizeObserver}
+             * @private
+             */
+            self._resizeObserver = new ResizeObserver((entries) => {
+                entries.forEach(entry => {
+                    // Get the container element
+                    const container = entry.target;
+                    const component = window.PACRegistry.getByElement(container);
+
+                    if (component && component.abstraction) {
+                        // Get dimensions from content rect
+                        const width = Math.round(entry.contentRect.width);
+                        const height = Math.round(entry.contentRect.height);
+
+                        // Set properties on the component
+                        component.abstraction.containerWidth = width;
+                        component.abstraction.containerHeight = height;
+
+                        // Determine size type
+                        let sizeType;
+                        if (width === 0 && height === 0) {
+                            sizeType = SIZE_HIDDEN;
+                        } else if (document.fullscreenElement === container) {
+                            sizeType = SIZE_FULLSCREEN;
+                        } else {
+                            sizeType = SIZE_RESTORED;
+                        }
+
+                        // Build message
+                        const wParam = sizeType;
+                        const lParam = self.makeLParam(width, height);
+
+                        const customEvent = self.wrapDomEventAsMessage(
+                            MSG_SIZE,
+                            null,  // No DOM event for ResizeObserver
+                            wParam,
+                            lParam,
+                            {
+                                width: width,
+                                height: height,
+                                contentRect: entry.contentRect,
+                                borderBoxSize: entry.borderBoxSize,
+                                contentBoxSize: entry.contentBoxSize
+                            }
+                        );
+
+                        self.dispatchToContainer(container, customEvent);
+                    }
+                });
+            });
+        },
+
+        /**
+         * Start observing the container element for intersection changes
+         * @param {HTMLElement} container
+         */
+        observeContainer(container) {
+            this._intersectionObserver.observe(container);
+            this._resizeObserver.observe(container);
+        },
+
+        /**
+         * Stop observing the container element
+         * @param {HTMLElement} container
+         */
+        unObserveContainer(container) {
+            this._intersectionObserver.unobserve(container);
+            this._resizeObserver.unobserve(container);
         },
 
         /**
@@ -1527,7 +1631,7 @@
          * message properties (message, wParam, lParam) as top-level event properties.
          * The event is dispatched to the nearest container element with a [data-pac-id] attribute.
          * @param {number} messageType - The Win32 message type (e.g., MSG_LBUTTONDOWN, MSG_KEYUP)
-         * @param {Event} originalEvent - The original DOM event to wrap
+         * @param {Event|null} originalEvent - The original DOM event to wrap
          * @param {number} wParam - The wParam value (typically flags or primary data)
          * @param {number} lParam - The lParam value (typically coordinates or secondary data)
          * @param {Object} [extended={}] - Additional extended data to include in event.detail
@@ -1551,7 +1655,7 @@
 
                 // Standard tracking fields
                 timestamp: { value: Date.now(), enumerable: true, configurable: true },
-                target: { value: originalEvent.target, enumerable: true, configurable: true },
+                target: { value: originalEvent?.target, enumerable: true, configurable: true },
 
                 // Reference to the original DOM event for debugging/advanced usage
                 originalEvent: { value: originalEvent, enumerable: true, configurable: true }
@@ -1560,25 +1664,27 @@
             // Forward event control methods to the original event
             // This allows consumers to call preventDefault() on the custom event
             // and have it affect the original event
-            const methodsToForward = ['preventDefault', 'stopPropagation', 'stopImmediatePropagation'];
+            if (originalEvent) {
+                const methodsToForward = ['preventDefault', 'stopPropagation', 'stopImmediatePropagation'];
 
-            methodsToForward.forEach(methodName => {
-                // Store reference to the custom event's original method
-                const originalCustomMethod = customEvent[methodName];
+                methodsToForward.forEach(methodName => {
+                    // Store reference to the custom event's original method
+                    const originalCustomMethod = customEvent[methodName];
 
-                // Override the method to call both the custom event method and original event method
-                customEvent[methodName] = function() {
-                    // Call the custom event's method first (if it exists)
-                    if (originalCustomMethod) {
-                        originalCustomMethod.call(this);
-                    }
+                    // Override the method to call both the custom event method and original event method
+                    customEvent[methodName] = function () {
+                        // Call the custom event's method first (if it exists)
+                        if (originalCustomMethod) {
+                            originalCustomMethod.call(this);
+                        }
 
-                    // Then call the original event's method (if it exists)
-                    if (originalEvent[methodName]) {
-                        originalEvent[methodName].call(originalEvent);
-                    }
-                };
-            });
+                        // Then call the original event's method (if it exists)
+                        if (originalEvent[methodName]) {
+                            originalEvent[methodName].call(originalEvent);
+                        }
+                    };
+                });
+            }
 
             // Return the event
             return customEvent;
@@ -1729,20 +1835,34 @@
             const clientX = touch ? touch.clientX : event.clientX;
             const clientY = touch ? touch.clientY : event.clientY;
 
-            // Get container's bounding rectangle to calculate relative coordinates
+            // Read the container’s on-screen bounds so we can convert
+            // global/page coordinates into container-local coordinates.
             const rect = container.getBoundingClientRect();
 
-            // Calculate container-relative coordinates (client-area relative)
-            // This matches Win32 convention where coordinates are relative to the window's client area
+            // Translate the input coordinates into values relative to
+            // the container’s client area (Win32-style origin at top-left).
             const relativeX = clientX - rect.left;
             const relativeY = clientY - rect.top;
 
-            // Clamp to 16-bit unsigned range and ensure non-negative
-            const x = Math.max(0, Math.min(0xFFFF, Math.round(relativeX)));
-            const y = Math.max(0, Math.min(0xFFFF, Math.round(relativeY)));
+            // Get container's bounding rectangle to calculate relative coordinates
+            return this.makeLParam(relativeX, relativeY);
+        },
 
-            // Pack coordinates: high 16 bits = y, low 16 bits = x
-            return (y << 16) | x;
+        /**
+         * Build a Win32-style LPARAM value by converting page coordinates into a single 32-bit integer.
+         * @param {number} x
+         * @param {number} y
+         * @returns {number}
+         */
+        makeLParam(x, y) {
+            // Round to integers and clamp into an unsigned 16-bit range
+            // so they are safe to pack into a single LPARAM value.
+            const transformedX = Math.max(0, Math.min(0xFFFF, Math.round(x)));
+            const transformedY = Math.max(0, Math.min(0xFFFF, Math.round(y)));
+
+            // Combine into a 32-bit value:
+            // low word = x, high word = y.
+            return (transformedY << 16) | transformedX;
         },
 
         /**
@@ -3552,8 +3672,8 @@
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
 
-        // Setup intersection observer for container visibility checking
-        this.setupIntersectionObserver();
+        // Clean up observers
+        DomUpdateTracker.observeContainer(this.container);
 
         // Add interval for checking updateQueue
         this.updateQueue = new Map();
@@ -3611,17 +3731,14 @@
             DomUpdateTracker.releaseCapture();
         }
 
+        // Clean up observers
+        DomUpdateTracker.unObserveContainer(this.container);
+
         // Remove event listeners
         this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
-
-        // Clean up intersection observer
-        if (this.intersectionObserver) {
-            this.intersectionObserver.disconnect();
-            this.intersectionObserver = null;
-        }
 
         // Clear debounce timer if exists
         if (this.debounceTimer) {
@@ -3807,50 +3924,6 @@
             y: scrollY
         });
     }
-
-    /**
-     * Modern approach using Intersection Observer API.
-     * This is more performant as it runs on the main thread and batches calculations.
-     */
-    Context.prototype.setupIntersectionObserver = function() {
-        // Create observer that tracks when container enters/exits viewport
-        this.intersectionObserver = new IntersectionObserver((entries) => {
-            // Process each observed element (in this case, just our container)
-            entries.forEach(entry => {
-                // Verify we're handling the correct element
-                if (entry.target === this.container) {
-                    // Get the boundingClientRect
-                    const rect = entry.boundingClientRect;
-
-                    // Basic visibility: any part of element is in viewport
-                    const isVisible = entry.isIntersecting;
-
-                    // Full visibility: element is completely within viewport bounds
-                    // intersectionRatio of 1.0 means 100% of element is visible
-                    // Using 0.99 to account for potential floating point precision issues
-                    const isFullyVisible = entry.intersectionRatio >= 0.99;
-
-                    // Update component state with new visibility data
-                    // These are reactive properties that trigger UI updates
-                    this.abstraction.containerVisible = isVisible;
-                    this.abstraction.containerFullyVisible = isFullyVisible;
-                    this.abstraction.containerWidth = rect.width;
-                    this.abstraction.containerHeight = rect.height;
-
-                    // Store current position/size data for potential use by other components
-                    this.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
-                }
-            });
-        }, {
-            // Define thresholds for intersection callbacks
-            // 0 = trigger when element enters/exits viewport
-            // 1.0 = trigger when element becomes fully visible/hidden
-            threshold: [0, 1.0]
-        });
-
-        // Start observing our container element
-        this.intersectionObserver.observe(this.container);
-    };
 
     // =============================================================================
     // DOM SCANNING AND BINDING REGISTRATION
@@ -7217,6 +7290,17 @@
         },
 
         /**
+         * Retrieves a PAC instance associated with a DOM element.
+         * @param {Element} element - The DOM element to resolve from.
+         * @returns {*} The associated PAC instance, or null if not found.
+         */
+        getByElement(element) {
+            const container = element.closest('[data-pac-id]');
+            const pacId = container?.getAttribute('data-pac-id');
+            return pacId ? this.get(pacId) : undefined;
+        },
+
+        /**
          * Processes all pending components to establish their parent-child relationships.
          *
          * Builds a fresh hierarchy map and assigns parent/children to each pending component.
@@ -7795,13 +7879,16 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
         MSG_FOCUS, MSG_BLUR, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
-        MSG_MOUSEWHEEL, MSG_GESTURE,
+        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
 
         // Keyboard modifier keys
         KM_SHIFT, KM_CONTROL, KM_ALT,
+
+        // Constants for MSG_SIZE
+        SIZE_RESTORED, SIZE_HIDDEN, SIZE_FULLSCREEN,
 
         // Control keys
         VK_BACK, VK_TAB, VK_RETURN, VK_SHIFT, VK_CONTROL, VK_MENU, VK_PAUSE,
