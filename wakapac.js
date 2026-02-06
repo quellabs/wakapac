@@ -6971,29 +6971,27 @@
             this.observer = new MutationObserver(mutations => {
                 mutations.forEach(mutation => {
                     mutation.removedNodes.forEach(node => {
-                        if (node.nodeType === 1) {
-                            // Clean up this node if it's a PAC container
-                            const pacId = node.getAttribute('data-pac-id');
+                        if (node.nodeType !== 1) return;
 
-                            if (pacId) {
-                                const context = window.PACRegistry.components.get(pacId);
+                        // Collect all PAC nodes including the root if applicable
+                        const pacNodes = node.querySelectorAll('[data-pac-id]');
 
-                                if (context) {
-                                    context.destroy();
-                                }
+                        // Destroy descendants first (deepest → outer)
+                        for (let i = pacNodes.length - 1; i >= 0; i--) {
+                            const pacId = pacNodes[i].getAttribute('data-pac-id');
+                            const context = window.PACRegistry.components.get(pacId);
+                            
+                            if (context) {
+                                context.destroy();
                             }
+                        }
 
-                            // Recursively check all descendants for PAC containers
-                            const nestedPacs = node.querySelectorAll('[data-pac-id]');
+                        // Destroy the root last
+                        const rootPacId = node.getAttribute('data-pac-id');
 
-                            nestedPacs.forEach(nestedNode => {
-                                const nestedId = nestedNode.getAttribute('data-pac-id');
-                                const context = window.PACRegistry.components.get(nestedId);
-
-                                if (context) {
-                                    context.destroy();
-                                }
-                            });
+                        if (rootPacId) {
+                            const context = window.PACRegistry.components.get(rootPacId);
+                            if (context) context.destroy();
                         }
                     });
                 });
