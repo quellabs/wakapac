@@ -6970,21 +6970,30 @@
             // Process all DOM mutations in this batch
             this.observer = new MutationObserver(mutations => {
                 mutations.forEach(mutation => {
-                    // Check each removed node for cleanup opportunities
                     mutation.removedNodes.forEach(node => {
-                        // Only process element nodes (ignore text/comment nodes)
                         if (node.nodeType === 1) {
-                            // Check if this is a PAC container
+                            // Clean up this node if it's a PAC container
                             const pacId = node.getAttribute('data-pac-id');
 
                             if (pacId) {
-                                // Clean up the removed PAC component
                                 const context = window.PACRegistry.components.get(pacId);
 
                                 if (context) {
                                     context.destroy();
                                 }
                             }
+
+                            // Recursively check all descendants for PAC containers
+                            const nestedPacs = node.querySelectorAll('[data-pac-id]');
+
+                            nestedPacs.forEach(nestedNode => {
+                                const nestedId = nestedNode.getAttribute('data-pac-id');
+                                const context = window.PACRegistry.components.get(nestedId);
+
+                                if (context) {
+                                    context.destroy();
+                                }
+                            });
                         }
                     });
                 });
