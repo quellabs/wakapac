@@ -6972,7 +6972,7 @@
                 mutations.forEach(mutation => {
                     mutation.removedNodes.forEach(node => {
                         // Skip this node unless it’s an element node
-                        if (node.nodeType !== 1) {
+                        if (node.nodeType !== Node.ELEMENT_NODE) {
                             return;
                         }
 
@@ -6994,7 +6994,7 @@
 
                         if (rootPacId) {
                             const context = window.PACRegistry.components.get(rootPacId);
-                            
+
                             if (context) {
                                 context.destroy();
                             }
