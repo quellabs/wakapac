@@ -6994,7 +6994,10 @@
 
                         if (rootPacId) {
                             const context = window.PACRegistry.components.get(rootPacId);
-                            if (context) context.destroy();
+                            
+                            if (context) {
+                                context.destroy();
+                            }
                         }
                     });
                 });
