@@ -571,6 +571,25 @@
         },
 
         /**
+         * Sanitizes user input by stripping HTML tags and returning escaped HTML
+         * Uses the browser's built-in text content handling to safely process untrusted input
+         * @param {string} html - The potentially unsafe HTML string to sanitize
+         * @returns {string} The sanitized string with HTML tags stripped and special characters escaped
+         */
+        sanitizeUserInput(html) {
+            // Create a temporary div element to leverage browser's text content handling
+            const div = document.createElement('div');
+
+            // Set textContent (not innerHTML) to automatically strip all HTML tags
+            // The browser treats the input as plain text, removing any markup
+            div.textContent = html;
+
+            // Return the innerHTML, which gives us the text with HTML entities properly escaped
+            // This converts characters like < > & " ' into their HTML entity equivalents
+            return div.innerHTML;
+        },
+
+        /**
          * Manually escapes HTML special characters to prevent XSS attacks
          * Converts potentially dangerous characters into their HTML entity equivalents
          * @param {string} str - The string containing characters that need to be escaped
@@ -5494,6 +5513,18 @@
              */
             escapeHTML: {
                 value: (str) => Utils.escapeHTML(str),
+                writable: false,
+                enumerable: false
+            },
+
+            /**
+             * Strips all HTML tags from user input to get plain text
+             * Use this for user-generated content that should not contain HTML
+             * @param {string} html - HTML string to sanitize
+             * @returns {string} Plain text with all HTML tags removed
+             */
+            sanitizeUserInput: {
+                value: (html) => Utils.sanitizeUserInput(html),
                 writable: false,
                 enumerable: false
             },
