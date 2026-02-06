@@ -6971,7 +6971,10 @@
             this.observer = new MutationObserver(mutations => {
                 mutations.forEach(mutation => {
                     mutation.removedNodes.forEach(node => {
-                        if (node.nodeType !== 1) return;
+                        // Skip this node unless it’s an element node
+                        if (node.nodeType !== 1) {
+                            return;
+                        }
 
                         // Collect all PAC nodes including the root if applicable
                         const pacNodes = node.querySelectorAll('[data-pac-id]');
@@ -6980,7 +6983,7 @@
                         for (let i = pacNodes.length - 1; i >= 0; i--) {
                             const pacId = pacNodes[i].getAttribute('data-pac-id');
                             const context = window.PACRegistry.components.get(pacId);
-                            
+
                             if (context) {
                                 context.destroy();
                             }
