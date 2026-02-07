@@ -4803,50 +4803,75 @@
     // =============================================================================
 
     /**
-     * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.)
-     * Evaluates each binding expression and updates the DOM if the value has changed
+     * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.).
+     * Evaluates each binding expression and updates the DOM if the value has changed.
      */
     Context.prototype.updateElementBindings = function() {
-        this.interpolationMap.forEach((mappingData, element) => {
-            const { bindings } = mappingData;
+        // Cache frequently accessed properties to avoid repeated lookups
+        // through `this` in the inner loops
+        const abstraction = this.abstraction;
+        const domUpdater = this.domUpdater;
+        const self = this;
 
-            Object.keys(bindings).forEach(bindingType => {
-                // Skip foreach and click binds. They are handled elsewhere
-                if (['foreach', 'click'].includes(bindingType)) {
-                    return;
+        this.interpolationMap.forEach(function(mappingData, element) {
+            const bindings = mappingData.bindings;
+            const keys = Object.keys(bindings);
+
+            // Nothing to process if there are no bindings
+            if (keys.length === 0) {
+                return;
+            }
+
+            // Build the scope resolver once per element rather than per binding,
+            // since it only depends on the element for path normalization
+            const scopeResolver = {
+                resolveScopedPath: function(path) {
+                    return self.normalizePath(path, element);
+                }
+            };
+
+            // Initialize the previous values store on first encounter.
+            // Cache the reference to avoid repeated DOM element property access
+            // inside the binding loop.
+            if (!element._pacPreviousValues) {
+                element._pacPreviousValues = {};
+            }
+
+            // Fetch the previousValues list
+            const previousValues = element._pacPreviousValues;
+
+            // Iterate bindings using a for loop to avoid closure creation per key
+            for (let i = 0, len = keys.length; i < len; i++) {
+                // Fetch the binding type
+                const bindingType = keys[i];
+
+                // Skip foreach and click binds — they are handled elsewhere.
+                // Uses direct equality checks instead of Array.includes() to
+                // avoid array allocation and linear scan on every iteration.
+                if (bindingType === 'foreach' || bindingType === 'click') {
+                    continue;
                 }
 
-                // Fetch the binding type
-                const bindingData = bindings[bindingType];
-
-                // For each binding, evaluate it now and see if the result changed
                 try {
-                    // Create scope resolver for this element
-                    const scopeResolver = {
-                        resolveScopedPath: (path) => this.normalizePath(path, element)
-                    };
-
                     // Parse and evaluate the binding expression
+                    const bindingData = bindings[bindingType];
                     const parsed = ExpressionCache.parseExpression(bindingData.target);
-                    const currentValue = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
+                    const currentValue = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
 
-                    // Store previous values to detect changes
-                    if (!element._pacPreviousValues) {
-                        element._pacPreviousValues = {};
-                    }
-
-                    // Grab previous value
-                    const previousValue = element._pacPreviousValues[bindingType];
-
-                    // Update if value changed
-                    if (!Utils.isEqual(previousValue, currentValue)) {
-                        element._pacPreviousValues[bindingType] = currentValue;
-                        this.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
+                    // Only touch the DOM if the value actually changed.
+                    // DOM writes are expensive, so we diff against the cached
+                    // previous value first.
+                    if (!Utils.isEqual(previousValues[bindingType], currentValue)) {
+                        // Update value
+                        previousValues[bindingType] = currentValue;
+                        
+                        // Update DOM
+                        domUpdater.updateAttributeBinding(element, bindingType, bindingData);
                     }
                 } catch (error) {
                     console.warn('Error evaluating binding:', bindingType, error);
                 }
-            });
+            }
         });
     };
 
