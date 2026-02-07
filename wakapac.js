@@ -4851,10 +4851,13 @@
     };
 
     /**
-     * Updates all text interpolations ({{expression}} in text nodes)
-     * Re-evaluates template expressions and updates text content if changed
+     * Updates all text interpolations ({{expression}} in text nodes).
+     * Re-evaluates template expressions and updates text content if changed.
      */
     Context.prototype.updateTextInterpolations = function() {
+        const abstraction = this.abstraction;
+        const self = this;
+
         this.textInterpolationMap.forEach((mappingData, textNode) => {
             try {
                 // Store previous text content to detect changes
@@ -4862,13 +4865,18 @@
                     textNode._pacPreviousText = textNode.textContent;
                 }
 
-                const newText = mappingData.template.replace(INTERPOLATION_REGEX, (match, expression) => {
+                // Build the scope resolver once per text node, not once per expression.
+                // The resolver only depends on the text node for path normalization.
+                const scopeResolver = {
+                    resolveScopedPath: function(path) {
+                        return self.normalizePath(path, textNode);
+                    }
+                };
+
+                const newText = mappingData.template.replace(INTERPOLATION_REGEX, function(match, expression) {
                     try {
                         const parsed = ExpressionCache.parseExpression(expression);
-                        const scopeResolver = {
-                            resolveScopedPath: (path) => this.normalizePath(path, textNode)
-                        };
-                        const result = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
+                        const result = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
                         return result != null ? String(result) : '';
                     } catch (error) {
                         console.warn('Error evaluating text interpolation:', expression, error);
@@ -4876,7 +4884,7 @@
                     }
                 });
 
-                // Only update if text actually changed
+                // Only update DOM if text actually changed
                 if (textNode._pacPreviousText !== newText) {
                     textNode.textContent = newText;
                     textNode._pacPreviousText = newText;
