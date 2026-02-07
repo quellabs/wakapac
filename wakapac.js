@@ -4995,43 +4995,57 @@
     };
 
     /**
-     * Rebuilds foreach loops when their source arrays change.
-     * Only acts on top-level array property changes (path length === 1).
-     * @param {CustomEvent} event - The pac:change event with change details
+     * Handles foreach rebuilds triggered by reactive property changes.
+     * When a property changes, checks if any foreach elements need re-rendering,
+     * either because they're bound directly to the changed array, or because
+     * they're bound to a computed property that depends on the changed property
+     * (e.g., changing 'filter' triggers rebuild of foreach bound to 'filteredTodos').
+     * @param {CustomEvent} event - The pac:change event containing change details
+     * @param {string[]} event.detail.path - Property path that changed
      */
     Context.prototype.handleForeachRebuildForChange = function(event) {
+        // Only handle top-level property changes (e.g., ['filter'], not ['todos', '0', 'text'])
         const path = event.detail.path;
 
-        // Only handle top-level property changes
         if (path.length !== 1) {
             return;
         }
 
+        // Fast exit: property is not an array and no computed properties depend on it,
+        // so no foreach could possibly need a rebuild
         const changedProp = path[0];
-
-        // Collect property names to check: the changed prop itself (if array)
-        // plus any computed properties that depend on it
-        const propsToCheck = [];
-
-        if (Array.isArray(this.abstraction[changedProp])) {
-            propsToCheck.push(changedProp);
-        }
-
         const dependents = this.dependencies.get(changedProp);
+        const isArray = Array.isArray(this.abstraction[changedProp]);
 
-        if (dependents) {
-            for (let i = 0; i < dependents.length; i++) {
-                propsToCheck.push(dependents[i]);
-            }
+        if (!isArray && !dependents) {
+            return;
         }
 
-        // Find and rebuild foreach elements for all candidate properties
-        for (let p = 0; p < propsToCheck.length; p++) {
-            const foreachElements = this.findForeachElementsByArrayPath(propsToCheck[p]);
+        // Single-pass scan of interpolationMap instead of calling
+        // findForeachElementsByArrayPath once per candidate property
+        for (const [element, mappingData] of this.interpolationMap) {
+            // Skip non-foreach elements
+            if (!mappingData.bindings || !mappingData.bindings.foreach) {
+                continue;
+            }
 
-            for (let i = 0; i < foreachElements.length; i++) {
-                if (this.shouldRebuildForeach(foreachElements[i])) {
-                    this.renderForeach(foreachElements[i]);
+            // Direct match: the changed property is an array and this foreach is bound to it
+            const expr = mappingData.foreachExpr;
+            const source = mappingData.sourceArray;
+
+            if (isArray && (expr === changedProp || source === changedProp)) {
+                if (this.shouldRebuildForeach(element)) {
+                    this.renderForeach(element);
+                }
+
+                continue;
+            }
+
+            // Indirect match: this foreach is bound to a computed property
+            // that depends on the changed property (e.g., filter → filteredTodos)
+            if (dependents && (dependents.indexOf(expr) !== -1 || dependents.indexOf(source) !== -1)) {
+                if (this.shouldRebuildForeach(element)) {
+                    this.renderForeach(element);
                 }
             }
         }
