@@ -6177,33 +6177,45 @@
      * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
      */
     Context.prototype.extractClosestForeachContext = function(startElement) {
+        console.log("x");
+
+        // Cache container
+        const container = this.container;
+
+        // Cache the constant to avoid repeated global property lookups in the inner loop
+        const COMMENT_NODE = Node.COMMENT_NODE;
+
         // Start from the element and walk up the DOM tree
         let current = startElement;
 
-        while (current && current !== this.container) {
-            // Check cache first - avoids repeated DOM traversal and regex matching
+        while (current && current !== container) {
+            // Check cache first — avoids repeated DOM traversal and regex matching
             if (current._pacForeachContext) {
                 return current._pacForeachContext;
             }
 
-            // Not cached - check previous siblings for comment markers
+            // Not cached — check previous siblings for comment markers
             let sibling = current.previousSibling;
 
             while (sibling) {
                 // Only process comment nodes
-                if (sibling.nodeType === Node.COMMENT_NODE) {
-                    const commentText = sibling.textContent.trim();
-
-                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X, renderIndex=Y"
-                    // This regex captures the foreach ID and both index values
-                    const match = commentText.match(FOREACH_INDEX_REGEX);
+                if (sibling.nodeType === COMMENT_NODE) {
+                    const match = sibling.textContent.trim().match(FOREACH_INDEX_REGEX);
 
                     if (match) {
-                        return {
+                        // Build the context object from the regex capture groups
+                        const context = {
                             foreachId: match[1].trim(),
-                            index: parseInt(match[2], 10),      // Convert string to integer
-                            renderIndex: parseInt(match[3], 10) // Convert string to integer
+                            index: parseInt(match[2], 10),
+                            renderIndex: parseInt(match[3], 10)
                         };
+
+                        // Cache on the starting element so subsequent lookups
+                        // from the same element or its descendants are O(1)
+                        startElement._pacForeachContext = context;
+
+                        // Return the context
+                        return context;
                     }
                 }
 
