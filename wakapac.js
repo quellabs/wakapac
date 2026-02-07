@@ -97,6 +97,7 @@
      * Hex values match Win32 API message identifiers
      */
     const MSG_UNKNOWN = 0x0000;
+    const MSG_SIZE = 0x0005;
     const MSG_MOUSEMOVE = 0x0200;
     const MSG_LBUTTONDOWN = 0x0201;
     const MSG_LBUTTONUP = 0x0202;
@@ -105,6 +106,8 @@
     const MSG_RBUTTONUP = 0x0205;
     const MSG_MBUTTONDOWN = 0x0207;
     const MSG_MBUTTONUP = 0x0208;
+    const MSG_MOUSEENTER = 0x020B;
+    const MSG_MOUSELEAVE = 0x020C;
     const MSG_LCLICK = 0x0210;
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
@@ -140,6 +143,14 @@
     const KM_SHIFT = (1 << 25);     // Shift key held down (lParam bit 25)
     const KM_CONTROL = (1 << 26);   // Ctrl key held down (lParam bit 26)
     const KM_ALT = (1 << 29);       // Alt key held down (lParam bit 29)
+
+    /**
+     * MSG_SIZE constants
+     * @type {number}
+     */
+    const SIZE_RESTORED = 0;   // Normal resize (user action, layout change)
+    const SIZE_HIDDEN = 1;     // Element became hidden (width/height = 0)
+    const SIZE_FULLSCREEN = 2; // Element entered fullscreen mode
 
     /**
      * Win32 Virtual Key codes
@@ -380,24 +391,29 @@
          * @returns {string} Formatted property access string (e.g., "user.settings[0].name")
          */
         pathArrayToString(pathArray) {
+            // If there are no segments, return an empty string
             if (pathArray.length === 0) {
                 return '';
             }
 
+            // Start with the first segment — it never needs dot/bracket prefix
             let result = String(pathArray[0]); // Convert first token to string
 
-            for (let i = 1; i < pathArray.length; i++) {
+            // Iterate through remaining path segments
+            for (let i = 1; i < pathArray.length; ++i) {
+                // Fetch part
                 const part = pathArray[i];
 
-                // Handle numeric indices
+                // If the segment is numeric (number or numeric string),
+                // use bracket notation to represent an array index
                 if (typeof part === 'number' || /^\d+$/.test(String(part))) {
-                    result += `[${part}]`;
+                    result += `[${part}]`; // Handle numeric indices
                 } else {
-                    // Handle property names
-                    result += `.${part}`;
+                    result += `.${part}`;  // Handle property names
                 }
             }
 
+            // Return the fully constructed access string
             return result;
         },
 
@@ -978,48 +994,77 @@
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
 
+        /** @private {HTMLElement|null} The container that currently has the pointer inside it */
+        _hoveredContainer: null,
+
         /** @private {HTMLElement|null} The container element that has captured mouse input */
         _capturedContainer: null,
 
-        initialize() {
-            // Store reference to this object for use in closures
-            const self = this;
+        /** @private Shared intersection observer */
+        _intersectionObserver: null,
 
-            // Prevent double initialization
+        /** @private Shared resize observer */
+        _resizeObserver: null,
+
+        /**
+         * Performs one-time initialization of the input/event subsystem.
+         * @returns {void}
+         */
+        initialize() {
+            // Guard against multiple initialization passes
             if (this._initialized) {
                 return;
             }
 
-            // Set initialized flag
+            // Mark subsystem as initialized before registering listeners
             this._initialized = true;
 
-            /**
-             * Handle document visibility changes (tab switches, window minimize, etc.)
-             * Updates browserVisible property for all PAC containers
-             */
+            // Setup all event categories — each method wires a specific domain
+            this._setupBrowserStateEvents(); // Visibility/network state tracking
+            this._setupFocusEvents();        // Focus/blur routing
+            this._setupMouseEvents();        // Mouse button/movement handling
+            this._setupTouchEvents();        // Touch normalization
+            this._setupKeyboardEvents();     // Keyboard input dispatch
+            this._setupFormEvents();         // Form interaction tracking
+            this._setupWindowEvents();       // Scroll/resize state updates
+            this._setupObservers();          // Intersection/resize observers
+        },
+
+        /**
+         * Registers browser-level state listeners and publishes normalized
+         * visibility and network status updates to the system. Tracks document visibility,
+         * online/offline transitions, and — when available — connection characteristic changes.
+         * @private
+         * @returns {void}
+         */
+        _setupBrowserStateEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            // Visibility changes
+            // Fires when the document becomes hidden or visible (tab/app switch)
             document.addEventListener('visibilitychange', function() {
+                // Dispatch visibility state snapshot
                 self.dispatchBrowserStateEvent('visibility', {
-                    visible: !document.hidden
+                    visible: !document.hidden // True when page is foregrounded
                 });
             });
 
-            /**
-             * Handle browser coming online
-             * Updates network state for all PAC containers
-             */
+            // Network state changes — online
+            // Fires when browser regains connectivity
             window.addEventListener('online', function() {
+                // Publish network availability and quality metadata
                 self.dispatchBrowserStateEvent('online', {
                     online: true,
-                    networkType: Utils.getNetworkEffectiveType(),
-                    networkQuality: Utils.detectNetworkQuality(),
+                    networkType: Utils.getNetworkEffectiveType(), // Browser-reported connection class
+                    networkQuality: Utils.detectNetworkQuality(), // App-level quality heuristic
                 });
             });
 
-            /**
-             * Handle browser going offline
-             * Updates network state for all PAC containers
-             */
+            // Network state changes — offline
+            // Fires when browser loses connectivity
             window.addEventListener('offline', function() {
+                // Publish loss of connectivity and last-known characteristics
                 self.dispatchBrowserStateEvent('online', {
                     online: false,
                     networkType: Utils.getNetworkEffectiveType(),
@@ -1027,426 +1072,704 @@
                 });
             });
 
-            /**
-             * Handle network connection changes (if supported)
-             * Updates network quality when connection type changes
-             */
+            // Connection type/quality changes (if supported by the browser)
+            // Provides updates when connection characteristics shift
             if ('connection' in navigator && navigator.connection) {
                 navigator.connection.addEventListener('change', function() {
+                    // Dispatch updated connection state snapshot
                     self.dispatchBrowserStateEvent('online', {
-                        online: navigator.onLine,
+                        online: navigator.onLine, // Current connectivity flag
                         networkType: Utils.getNetworkEffectiveType(),
                         networkQuality: Utils.detectNetworkQuality(),
                     });
                 });
             }
+        },
 
-            /**
-             * Handle focus entering any element (captures phase)
-             * Updates container focus states when focus moves into PAC containers
-             */
+        /**
+         * Registers focus transition listeners and translates them into
+         * normalized focus/blur messages for the container system.
+         * @private
+         * @returns {void}
+         */
+        _setupFocusEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            // Focus in
+            // Fires when an element gains focus anywhere in the document
             document.addEventListener('focusin', function(event) {
+                // Resolve container responsible for the focused element
                 const container = self.getContainerForEvent(MSG_FOCUS, event);
+
+                // Wrap DOM focus event into unified message format
                 const customEvent = self.wrapDomEventAsMessage(MSG_FOCUS, event);
+
+                // Dispatch normalized focus message
                 self.dispatchToContainer(container, customEvent);
             });
 
-            /**
-             * Handle focus leaving any element (captures phase)
-             * Updates container focus states when focus moves out of PAC containers
-             */
+            // Focus out
+            // Fires when an element loses focus
             document.addEventListener('focusout', function(event) {
+                // Resolve container responsible for the blurred element
                 const container = self.getContainerForEvent(MSG_BLUR, event);
+
+                // Wrap DOM blur event into unified message format
                 const customEvent = self.wrapDomEventAsMessage(MSG_BLUR, event);
+
+                // Dispatch normalized blur message
                 self.dispatchToContainer(container, customEvent);
             });
+        },
 
-            /**
-             * Disable native drag/drop when capture is activated
-             */
-            document.addEventListener('dragstart', event => {
-                if (this.hasCapture()) {
-                    event.preventDefault();
-                }
-            });
+        /**
+         * Setup all mouse event handlers
+         * @private
+         */
+        _setupMouseEvents() {
+            this._setupMouseButtonEvents();
+            this._setupMouseMoveEvent();
+            this._setupMouseWheelEvent();
+            this._setupDragPrevention();
+            this._setupDocumentLeave();
+        },
 
-            /**
-             * Handle mouse button up events
-             * Maps browser mouse button codes to application message types
-             */
-            window.addEventListener('mouseup', function (event) {
-                // Define button map
-                const buttonMap = {
-                    0: MSG_LBUTTONUP,
-                    1: MSG_MBUTTONUP,
-                    2: MSG_RBUTTONUP,
-                };
+        /**
+         * Registers mouse button and click-related listeners and translates them
+         * into normalized internal messages.
+         * @private
+         * @returns {void}
+         */
+        _setupMouseButtonEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
 
-                // Track right button specifically for gestures
-                const messageType = buttonMap[event.button];
-
-                if (!messageType) {
-                    return;
-                }
-
-                // Check for gesture completion on right button
-                if (event.button === 2 && MouseGestureRecognizer.isRecording) {
-                    MouseGestureRecognizer.stopRecording(event);
-                }
-
-                // Dispatch event to container
-                const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
-
-                self.dispatchToContainer(container, customEvent);
-            });
-
-            // Click event recognises left button
-            document.addEventListener('click', function (event) {
-                const container = self.getContainerForEvent(MSG_LCLICK, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container) // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_LCLICK, event, wParam, lParam);
-
-                self.dispatchToContainer(container, customEvent);
-            });
-
-            /**
-             * Handle mouse button down events
-             * Maps browser mouse button codes to application message types
-             */
-            document.addEventListener('mousedown', function (event) {
-                // Define button map
+            // Mouse down
+            // Capture button press and normalize into message format
+            document.addEventListener('mousedown', function(event) {
+                // Map DOM button codes to internal message identifiers
                 const buttonMap = {
                     0: MSG_LBUTTONDOWN,
                     1: MSG_MBUTTONDOWN,
                     2: MSG_RBUTTONDOWN,
                 };
 
-                // Track right button specifically for gestures
+                // Ignore unsupported buttons
                 const messageType = buttonMap[event.button];
 
                 if (!messageType) {
                     return;
                 }
 
-                // Track right button specifically for gestures
+                // Begin gesture recording when right button is pressed
                 if (event.button === 2) {
                     MouseGestureRecognizer.startRecording(event);
                 }
 
-                // Dispatch event to container
+                // Resolve container responsible for handling the interaction
                 const container = self.getContainerForEvent(messageType, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(messageType, event, wParam, lParam);
 
-                self.dispatchToContainer(container, customEvent);
+                // Dispatch normalized message
+                self.dispatchMouseMessage(messageType, event, container);
             });
 
-            // Auxclick event recognises middle button
-            document.addEventListener('auxclick', function (event) {
+            // Mouse up
+            // Capture button release and optionally finalize gesture recording
+            window.addEventListener('mouseup', function(event) {
+                // Map DOM button codes to internal release messages
+                const buttonMap = {
+                    0: MSG_LBUTTONUP,
+                    1: MSG_MBUTTONUP,
+                    2: MSG_RBUTTONUP,
+                };
+
+                // Ignore unsupported buttons
+                const messageType = buttonMap[event.button];
+
+                if (!messageType) {
+                    return;
+                }
+
+                // Stop gesture recording if right-button interaction completes
+                if (event.button === 2 && MouseGestureRecognizer.isRecording) {
+                    MouseGestureRecognizer.stopRecording(event);
+                }
+
+                // Resolve container and dispatch message
+                const container = self.getContainerForEvent(messageType, event);
+                self.dispatchMouseMessage(messageType, event, container);
+            });
+
+            // Left click
+            document.addEventListener('click', function(event) {
+                const container = self.getContainerForEvent(MSG_LCLICK, event);
+                self.dispatchMouseMessage(MSG_LCLICK, event, container);
+            });
+
+            // Middle click
+            document.addEventListener('auxclick', function(event) {
                 if (event.button === 1) {
                     const container = self.getContainerForEvent(MSG_MCLICK, event);
-                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                    const customEvent = self.wrapDomEventAsMessage(MSG_MCLICK, event, wParam, lParam);
-
-                    self.dispatchToContainer(container, customEvent);
+                    self.dispatchMouseMessage(MSG_MCLICK, event, container);
                 }
             });
 
-            // Contextmenu event recognises right button
-            document.addEventListener('contextmenu', function (event) {
-                // Check if gesture was just dispatched in the preceding mouseup
+            // Right click / context menu
+            // Normalize context interactions and optionally suppress native menu
+            document.addEventListener('contextmenu', function(event) {
+                // Prevent browser context menu if a gesture was just dispatched
                 if (MouseGestureRecognizer.gestureJustDispatched) {
-                    // Reset gestureJustDispatched flag
                     MouseGestureRecognizer.gestureJustDispatched = false;
-
-                    // Always suppress context menu after any gesture motion (recognized or not)
-                    // A drag motion is not a click, regardless of whether pattern matched
                     event.preventDefault();
                 }
 
-                // Dispatch the event
                 const container = self.getContainerForEvent(MSG_RCLICK, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_RCLICK, event, wParam, lParam);
-
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_RCLICK, event, container);
             });
 
-            // Handle double-click (left button only)
-            document.addEventListener('dblclick', function (event) {
-                // Only handle left button double-clicks
+            // Double click (left button only)
+            // Capture rapid primary-button activation
+            document.addEventListener('dblclick', function(event) {
                 if (event.button === 0) {
                     const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                    const customEvent = self.wrapDomEventAsMessage(MSG_LBUTTONDBLCLK, event, wParam, lParam);
-
-                    self.dispatchToContainer(container, customEvent);
+                    self.dispatchMouseMessage(MSG_LBUTTONDBLCLK, event, container);
                 }
             });
+        },
 
-            /**
-             * Handle mouse movement with throttling
-             * Throttles updates to configured FPS (default 60fps = ~16ms)
-             * Set wakaPAC.mouseMoveThrottleFps = 0 for no throttling (updates on every mousemove)
-             * Set wakaPAC.mouseMoveThrottleFps = 120 for higher precision (gaming, drawing apps)
-             * Must be set before first wakaPAC() call
-             */
-            self.setupMoveCoalescer('mousemove', wakaPAC.mouseMoveThrottleFps, (event) => {
-                // Record gesture point if gesture is active
-                if (MouseGestureRecognizer.isRecording) {
-                    MouseGestureRecognizer.recordPoint(event);
+        /**
+         * Configures throttled mousemove event handling. Dispatches enter/leave/move
+         * messages to containers based on pointer position. Optionally feeds raw
+         * coordinates to gesture recognizer when recording is active.
+         * @private
+         * @returns {void}
+         */
+        _setupMouseMoveEvent() {
+            const self = this;
+
+            // Throttle mousemove events to configured FPS limit
+            this.setupMoveCoalescer(
+                'mousemove',
+                wakaPAC.mouseMoveThrottleFps,
+                (event) => {
+                    // Feed raw coordinates to gesture recognizer if active
+                    if (MouseGestureRecognizer.isRecording) {
+                        MouseGestureRecognizer.recordPoint(event);
+                    }
+
+                    // Determine which container is under the pointer
+                    const previousContainer = self._hoveredContainer;
+                    const currentContainer = self.getContainerForEvent(MSG_MOUSEMOVE, event);
+
+                    // Handle container transitions. Suppress when mouse capture is enabled
+                    if (previousContainer !== currentContainer) {
+                        if (!self._captureActive) {
+                            // Mouse left the container
+                            if (previousContainer) {
+                                self.dispatchMouseMessage(MSG_MOUSELEAVE, event, previousContainer);
+                            }
+
+                            // Mouse entered the container
+                            if (currentContainer) {
+                                self.dispatchMouseMessage(MSG_MOUSEENTER, event, currentContainer);
+                            }
+                        }
+
+                        // Update tracked hover state
+                        self._hoveredContainer = currentContainer;
+                    }
+
+                    // Dispatch move event to current container
+                    if (currentContainer) {
+                        self.dispatchMouseMessage(
+                            MSG_MOUSEMOVE,
+                            event,
+                            currentContainer
+                        );
+                    }
                 }
+            );
+        },
 
-                // Dispatch move event to container
-                const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-                const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
+        /**
+         * Registers mouse wheel listeners and normalizes scroll input into the
+         * internal message format. Wheel deltas and modifier state are encoded so
+         * consumers receive a consistent representation regardless of browser differences.
+         * @private
+         * @returns {void}
+         */
+        _setupMouseWheelEvent() {
+            // Preserve instance reference for use inside DOM callback
+            const self = this;
 
-                self.dispatchToContainer(container, customEvent);
-            });
-
-            /**
-             * Listen for native wheel events and translate them into the
-             * application’s internal mouse wheel message format.
-             */
+            // Listen for wheel input at the document level
             document.addEventListener("wheel", function(event) {
-                // Fetch the container
+                // Resolve container responsible for handling this scroll interaction
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
+
+                // Capture modifier key state present during the wheel event
                 const modifiers = self.getModifierState(event);
+
+                // Encode vertical scroll delta and modifiers into message parameters
                 const wParam = self.buildWheelWParam(event.deltaY, modifiers);
+
+                // Encode pointer position relative to the container
                 const lParam = self.buildMouseLParam(event, container);
+                
+                // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
-                    wheelDelta: event.deltaY,        // Vertical scroll delta
-                    wheelDeltaX: event.deltaX,       // Horizontal scroll delta
-                    deltaMode: event.deltaMode       // Units: pixel / line / page
+                    wheelDelta: event.deltaY,   // Primary vertical scroll delta
+                    wheelDeltaX: event.deltaX,  // Horizontal scroll delta (if supported)
+                    deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
                 });
 
+                // Dispatch normalized wheel message
                 self.dispatchToContainer(container, customEvent);
-            }, { passive: false });
+            }, { passive: false }); // Allow preventDefault by consumers if needed
+        },
 
-            /**
-             * Touch events
-             */
+        /**
+         * Registers a dragstart handler that suppresses the browser’s native
+         * drag behavior while the system has pointer capture.
+         * @private
+         * @returns {void}
+         */
+        _setupDragPrevention() {
+            // Intercept drag initiation at the document level
+            document.addEventListener('dragstart', event => {
+                // If the input system currently owns capture, block native drag
+                if (this.hasCapture()) {
+                    event.preventDefault();
+                }
+            });
+        },
+
+        /**
+         * Registers document-level mouseleave to handle pointer leaving viewport
+         * Ensures MSG_MOUSELEAVE is dispatched when pointer exits the document
+         * @private
+         * @returns {void}
+         */
+        _setupDocumentLeave() {
+            const self = this;
+
+            document.addEventListener('mouseleave', function(event) {
+                // Only fire if mouse actually left the document (relatedTarget is null)
+                if (event.relatedTarget !== null) {
+                    return;
+                }
+
+                // Don't fire leave during capture - captured container logically retains pointer
+                if (self._captureActive) {
+                    return;
+                }
+
+                // Dispatch leave to whatever container was last hovered
+                if (self._hoveredContainer) {
+                    // Dispatch mouse leave event
+                    self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
+
+                    // Clear tracked state
+                    self._hoveredContainer = null;
+                }
+            }, true); // Use capture phase
+        },
+
+        /**
+         * Registers touch interaction handlers and normalizes them into the
+         * internal mouse-style message system.
+         * @private
+         * @returns {void}
+         */
+        _setupTouchEvents() {
+            // Preserve instance reference for use inside event callbacks
+            const self = this;
+
+            // Touch button events
+            // Map touch lifecycle events onto mouse-style button semantics
             const touchMap = {
-                'touchstart': MSG_LBUTTONDOWN,
-                'touchend': MSG_LBUTTONUP,
-                'touchcancel': MSG_LBUTTONUP
+                'touchstart': MSG_LBUTTONDOWN,  // Finger contact behaves like left button press
+                'touchend': MSG_LBUTTONUP,      // Finger release behaves like left button release
+                'touchcancel': MSG_LBUTTONUP    // Cancellation is treated as a release for consistency
             };
 
+            // Register touch handlers that normalize events into the message system
             Object.entries(touchMap).forEach(([eventName, msgType]) => {
                 document.addEventListener(eventName, function(event) {
                     const container = self.getContainerForEvent(msgType, event);
-                    const wParam = self.getModifierState(event);
-                    const lParam = self.buildMouseLParam(event, container);
-                    const customEvent = self.wrapDomEventAsMessage(msgType, event, wParam, lParam);
-
-                    self.dispatchToContainer(container, customEvent);
+                    self.dispatchMouseMessage(msgType, event, container);
                 });
             });
 
-            /**
-             * Touch move simulates mouse move
-             */
-            self.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
+            // Touch move (throttled)
+            // Coalesce high-frequency movement to match mouse move dispatch behavior
+            this.setupMoveCoalescer('touchmove', wakaPAC.mouseMoveThrottleFps, (event) => {
+                // Ignore events without active touch points
                 if (event.touches.length > 0) {
                     const container = self.getContainerForEvent(MSG_MOUSEMOVE, event);
-                    const wParam = self.getModifierState(event); // Mouse button and modifier key flags
-                    const lParam = self.buildMouseLParam(event, container); // Packed x,y coordinates (container-relative)
-                    const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEMOVE, event, wParam, lParam);
-
-                    self.dispatchToContainer(container, customEvent);
+                    self.dispatchMouseMessage(MSG_MOUSEMOVE, event, container);
                 }
             });
+        },
 
-            /**
-             * Handle keyboard key release events
-             * Tracks when user releases any key
-             */
-            document.addEventListener('keyup', function (event) {
+        /**
+         * Registers keyboard listeners and translates DOM key activity into the
+         * internal message format.
+         * @returns {void}
+         * @private
+         */
+        _setupKeyboardEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            // Key up
+            // Capture key release and forward normalized keyboard state
+            document.addEventListener('keyup', function(event) {
+                // Resolve container responsible for handling this keyboard event
                 const container = self.getContainerForEvent(MSG_KEYUP, event);
-                const wParam = self.buildKeyboardWParam(event); // Win32 virtual key code
-                const lParam = self.buildKeyboardLParam(event); // Keyboard state flags and repeat count
-                const customEvent = self.wrapDomEventAsMessage(MSG_KEYUP, event, wParam, lParam);
 
-                self.dispatchToContainer(container, customEvent, {
-                    key: event.key,
-                    code: event.code
+                // Encode keyboard state into message parameters
+                const wParam = self.buildKeyboardWParam(event);
+                const lParam = self.buildKeyboardLParam(event);
+
+                // Wrap DOM event with additional key metadata for consumers
+                const customEvent = self.wrapDomEventAsMessage(MSG_KEYUP, event, wParam, lParam, {
+                    key: event.key,   // Logical key value
+                    code: event.code  // Physical key identifier
                 });
+
+                // Dispatch normalized key-up message
+                self.dispatchToContainer(container, customEvent);
             });
 
-            /**
-             * Handle keyboard key press events
-             * Tracks when user presses any key down
-             */
-            document.addEventListener('keydown', function (event) {
-                // Dispatch keydown
+            // Key down (with MSG_CHAR for printable characters)
+            // Handles key press and optional character emission
+            document.addEventListener('keydown', function(event) {
+                // Resolve target container for keyboard input
                 const container = self.getContainerForEvent(MSG_KEYDOWN, event);
+
+                // Encode keyboard press state
                 const keyDownWparam = self.buildKeyboardWParam(event);
                 const keyDownLparam = self.buildKeyboardLParam(event);
-                const keyDownEvent = self.wrapDomEventAsMessage(MSG_KEYDOWN, event, keyDownWparam, keyDownLparam);
+
+                // Wrap and dispatch key-down message
+                const keyDownEvent = self.wrapDomEventAsMessage(
+                    MSG_KEYDOWN,
+                    event,
+                    keyDownWparam,
+                    keyDownLparam
+                );
 
                 self.dispatchToContainer(container, keyDownEvent);
 
-                // Win32-style WM_CHAR: Send MSG_CHAR for printable characters
-                // This mimics Win32 behavior where WM_CHAR follows WM_KEYDOWN for character keys
+                // Win32-style WM_CHAR: emit character message for printable input
                 if (event.key && event.key.length === 1) {
-                    // Single character key press - send as MSG_CHAR with char code in wParam
-                    const container = self.getContainerForEvent(MSG_CHAR, event);
+                    // Convert character to numeric code representation
                     const msgCharWparam = event.key.charCodeAt(0);
-                    const msgCharLparam = keyDownLparam;
-                    const msgCharEvent = self.wrapDomEventAsMessage(MSG_CHAR, event, msgCharWparam, msgCharLparam);
 
+                    // Wrap character event using same positional metadata
+                    const msgCharEvent = self.wrapDomEventAsMessage(
+                        MSG_CHAR,
+                        event,
+                        msgCharWparam,
+                        keyDownLparam
+                    );
+
+                    // Dispatch character message alongside key-down event
                     self.dispatchToContainer(container, msgCharEvent);
                 }
             });
+        },
 
-            /**
-             * Handle form element change events
-             */
-            document.addEventListener('change', function (event) {
+        /**
+         * Setup form event handling (change, input, submit)
+         * @returns {void}
+         * @private
+         */
+        _setupFormEvents() {
+            // Preserve instance reference for DOM callback scope
+            const self = this;
+
+            // Change events (select, radio, checkbox)
+            // Handles discrete value changes for non-text form controls
+            document.addEventListener('change', function(event) {
+                // Fetch target element
                 const target = event.target;
+
+                // Identify supported control types
                 const isSelect = target.tagName === 'SELECT';
                 const isRadio = target.type === 'radio';
                 const isCheckbox = target.type === 'checkbox';
 
+                // Only process relevant control changes
                 if (isSelect || isRadio || isCheckbox) {
+                    // Resolve owning container and build change message payload
                     const container = self.getContainerForEvent(MSG_CHANGE, event);
                     const wParam = self.buildChangeWParam(event);
-                    const lParam = 0;
+                    const lParam = 0; // No positional payload required
+
+                    // Create wrapper event (MSG_CHANGE)
                     const customEvent = self.wrapDomEventAsMessage(MSG_CHANGE, event, wParam, lParam, {
-                        elementType: isSelect ? 'select' : target.type
+                        elementType: isSelect ? 'select' : target.type // Describe control type for consumers
                     });
 
+                    // Dispatch normalized change event
                     self.dispatchToContainer(container, customEvent);
                 }
             });
 
-            /**
-             * Handle real-time input events for text fields
-             * Tracks continuous user typing in text inputs and textareas.
-             * Excludes radio buttons and checkboxes which use 'change' event instead.
-             * This catches paste, cut, drag-drop, autocomplete, and IME input.
-             */
-            document.addEventListener('input', function (event) {
+            // Input events (text fields, textareas, contenteditable)
+            // Captures live text/content mutations rather than discrete value commits
+            document.addEventListener('input', function(event) {
+                // Fetch target element
                 const target = event.target;
+
+                // Identify editable text sources
                 const isTextInput = target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(target.type);
                 const isTextarea = target.tagName === 'TEXTAREA';
                 const isContentEditable = target.isContentEditable === true;
 
+                // Only process text/content updates
                 if (isTextInput || isTextarea || isContentEditable) {
+                    // Resolve container and encode text delta metadata
                     const container = self.getContainerForEvent(MSG_INPUT, event);
-                    const wParam = event.data ? event.data.length : 0;
+                    const wParam = event.data ? event.data.length : 0; // Length of inserted data (if available)
                     const lParam = 0;
+
+                    // Create wrapper event (MSG_INPUT)
                     const customEvent = self.wrapDomEventAsMessage(MSG_INPUT, event, wParam, lParam, {
-                        elementType: target.tagName.toLowerCase(),
-                        text: event.data
+                        elementType: target.tagName.toLowerCase(), // Element category
+                        text: event.data // Raw inserted text (may be null for deletions)
                     });
 
+                    // Dispatch normalized input event
                     self.dispatchToContainer(container, customEvent);
                 }
             });
 
-            /**
-             * Handle form submission events
-             * Tracks when user submits any form on the page
-             */
-            document.addEventListener('submit', function (event) {
+            // Submit events
+            // Serializes form state into a structured message payload
+            document.addEventListener('submit', function(event) {
+                // Fetch target (form)
                 const form = event.target;
+
+                // Snapshot current form data
                 const formData = new FormData(form);
+
+                // Resolve dispatch container
                 const container = self.getContainerForEvent(MSG_SUBMIT, event);
                 const wParam = 0;
                 const lParam = 0;
 
-                // Get the submit button that triggered the event (useful for forms with multiple submit buttons)
+                // Identify the control responsible for submission (if available)
                 const submitter = event.submitter;
 
-                // Create a MSG_SUBMIT event
+                // Create wrapper event (MSG_SUBMIT)
                 const customEvent = self.wrapDomEventAsMessage(MSG_SUBMIT, event, wParam, lParam, {
-                    // Basic form data as key-value pairs
-                    // Note: Only captures the FIRST value for fields with same name (use multiValues for complete data)
+                    // Flat key/value representation of form entries
                     entries: Object.fromEntries(formData.entries()),
 
-                    // Form metadata - useful for routing/debugging
-                    action: form.action,                           // Where form submits to
-                    method: form.method.toUpperCase(),             // GET, POST, etc.
-                    enctype: form.enctype,                         // How data is encoded (multipart/form-data, etc.)
-                    name: form.getAttribute('name'),   // Form name attribute
+                    // Submission metadata
+                    action: form.action,
+                    method: form.method.toUpperCase(),
+                    enctype: form.enctype,
+                    name: form.getAttribute('name'),
 
-                    // Validation state - indicates if form passes HTML5 validation
-                    // Returns false if any field has required, pattern, min/max violations
+                    // Browser validation state at submit time
                     isValid: form.checkValidity(),
 
-                    // Which submit button was clicked (null if submitted via Enter key or JS)
-                    // Critical for forms with multiple submit buttons (Save Draft vs Publish, etc.)
+                    // Submit button metadata (if applicable)
                     submitter: submitter ? {
-                        name: submitter.name,               // Button name (sent to server)
-                        value: submitter.value,             // Button value (sent to server)
-                        id: submitter.id                    // Button ID (client-side only)
+                        name: submitter.name,
+                        value: submitter.value,
+                        id: submitter.id
                     } : null,
 
-                    // File upload metadata (separate because File objects don't serialize to JSON)
-                    // Contains name, size, type but NOT the actual file data
+                    // File input metadata (names, sizes, types — not file blobs)
                     files: Array.from(form.elements)
                         .filter(el => el.type === 'file' && el.files.length > 0)
                         .reduce((acc, el) => {
                             acc[el.name] = Array.from(el.files).map(f => ({
-                                name: f.name,               // Original filename
-                                size: f.size,               // File size in bytes
-                                type: f.type                // MIME type (e.g., 'image/jpeg')
+                                name: f.name,
+                                size: f.size,
+                                type: f.type
                             }));
                             return acc;
                         }, {}),
 
-                    // Multi-value fields - captures ALL values for checkbox groups and multi-selects
-                    // Object.fromEntries() only keeps the LAST value, this preserves all selections
+                    // Multi-value fields (e.g., multi-select, repeated inputs)
                     multiEntries: Array.from(new Set(
                         Array.from(formData.keys()).filter(key =>
-                            formData.getAll(key).length > 1  // Find fields with multiple values
+                            formData.getAll(key).length > 1
                         )
                     )).reduce((acc, key) => {
-                        acc[key] = formData.getAll(key);    // Get all values as array
+                        acc[key] = formData.getAll(key);
                         return acc;
                     }, {})
                 });
 
-                // Dispatch the event to the container
+                // Dispatch structured submit message
                 self.dispatchToContainer(container, customEvent);
             });
+        },
 
-            /**
-             * Handle scroll events (debounced for performance)
-             * Updates current scroll position for all PAC containers
-             */
-            self.setupMoveCoalescer('window.scroll', 60, function() {
+        /**
+         * Setup window-level events (scroll, resize)
+         * @returns {void}
+         * @private
+         */
+        _setupWindowEvents() {
+            // Preserve instance context for use inside coalesced callbacks
+            const self = this;
+
+            // Scroll tracking (debounced)
+            // Coalesces rapid scroll events into a controlled dispatch rate
+            this.setupMoveCoalescer('window.scroll', 60, function() {
+                // Publish current scroll offsets as a browser state update
                 self.dispatchBrowserStateEvent('scroll', {
-                    scrollX: window.scrollX,
-                    scrollY: window.scrollY
+                    scrollX: window.scrollX, // Horizontal scroll position in pixels
+                    scrollY: window.scrollY  // Vertical scroll position in pixels
                 });
             });
 
-            /**
-             * Handle window resize events (debounced for performance)
-             * Updates viewport/document dimensions and scroll position
-             */
-            self.setupMoveCoalescer('window.resize', 60, function() {
+            // Resize tracking (debounced)
+            // Coalesces rapid resize/layout changes to avoid excessive dispatch
+            this.setupMoveCoalescer('window.resize', 60, function() {
+                // Publish viewport and document metrics after resize
                 self.dispatchBrowserStateEvent('resize', {
-                    viewportWidth: window.innerWidth,
-                    viewportHeight: window.innerHeight,
+                    viewportWidth: window.innerWidth,   // Visible viewport width
+                    viewportHeight: window.innerHeight, // Visible viewport height
+
+                    // Total scrollable document dimensions
                     documentWidth: document.documentElement.scrollWidth,
                     documentHeight: document.documentElement.scrollHeight,
+
+                    // Scroll offsets at time of resize (useful for layout consumers)
                     scrollX: window.scrollX,
                     scrollY: window.scrollY
                 });
             });
+        },
+
+        /**
+         * Setup intersection and resize observers
+         * @returns {void}
+         * @private
+         */
+        _setupObservers() {
+            const self = this;
+
+            // Intersection observer (viewport visibility tracking)
+            this._intersectionObserver = new IntersectionObserver((entries) => {
+                // Process all intersection updates generated in this observer batch
+                entries.forEach(entry => {
+                    // Resolve the framework component associated with the observed element
+                    const component = window.PACRegistry.getByElement(entry.target);
+
+                    // Only update state when a valid abstraction layer exists
+                    if (component && component.abstraction) {
+                        // Snapshot of the element’s client rectangle at the time of intersection
+                        const rect = entry.boundingClientRect;
+
+                        // Whether any portion of the container is visible in the viewport
+                        component.abstraction.containerVisible = entry.isIntersecting;
+
+                        // Treat near-complete intersection as fully visible (tolerates float precision)
+                        component.abstraction.containerFullyVisible = entry.intersectionRatio >= 0.99;
+
+                        // Persist simplified geometry for downstream layout/logic consumers
+                        component.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
+                    }
+                });
+            }, {
+                threshold: [0, 1.0] // Fire when element transitions between hidden, partially visible, and fully visible states
+            });
+
+            /**
+             * Resize observer (element size tracking)
+             * @type {ResizeObserver}
+             * @private
+             */
+            this._resizeObserver = new ResizeObserver((entries) => {
+                // Iterate over all resize notifications produced in this batch
+                entries.forEach(entry => {
+                    // The DOM element whose size changed
+                    const container = entry.target;
+
+                    // Resolve the framework component associated with this element
+                    const component = window.PACRegistry.getByElement(container);
+
+                    // Only proceed if a valid abstraction layer exists
+                    if (component && component.abstraction) {
+                        // Normalize reported size to integer pixels
+                        const width = Math.round(entry.contentRect.width);
+                        const height = Math.round(entry.contentRect.height);
+
+                        // Persist latest container dimensions on the abstraction
+                        component.abstraction.containerWidth = width;
+                        component.abstraction.containerHeight = height;
+
+                        // Determine logical size state used by the message system
+                        let sizeType;
+
+                        if (width === 0 && height === 0) {
+                            sizeType = SIZE_HIDDEN;
+                        } else if (document.fullscreenElement === container) {
+                            sizeType = SIZE_FULLSCREEN;
+                        } else {
+                            sizeType = SIZE_RESTORED;
+                        }
+
+                        // Message parameters encode size state and dimensions
+                        const wParam = sizeType;
+                        const lParam = self.makeLParam(width, height);
+
+                        // Build structured resize message including raw observer data
+                        const customEvent = self.wrapDomEventAsMessage(
+                            MSG_SIZE,
+                            null, // No originating DOM event — observer-driven
+                            wParam,
+                            lParam,
+                            {
+                                // Pixel dimensions after normalization
+                                width: width,
+                                height: height,
+
+                                // Simplified rectangle snapshot for consumers
+                                contentRect: Utils.domRectToSimpleObject(entry.contentRect),
+
+                                // Low-level box metrics from ResizeObserver
+                                borderBoxSize: entry.borderBoxSize,
+                                contentBoxSize: entry.contentBoxSize
+                            }
+                        );
+
+                        // Dispatch size update to the owning container/component
+                        self.dispatchToContainer(container, customEvent);
+                    }
+                });
+            });
+        },
+
+        /**
+         * Start observing the container element for intersection and size changes
+         * @param {HTMLElement} container
+         * @returns {void}
+         */
+        observeContainer(container) {
+            this._intersectionObserver.observe(container);
+            this._resizeObserver.observe(container);
+        },
+
+        /**
+         * Stop observing the container element
+         * @param {HTMLElement} container
+         * @returns {void}
+         */
+        unObserveContainer(container) {
+            this._resizeObserver.unobserve(container);
+            this._intersectionObserver.unobserve(container);
         },
 
         /**
@@ -1527,7 +1850,7 @@
          * message properties (message, wParam, lParam) as top-level event properties.
          * The event is dispatched to the nearest container element with a [data-pac-id] attribute.
          * @param {number} messageType - The Win32 message type (e.g., MSG_LBUTTONDOWN, MSG_KEYUP)
-         * @param {Event} originalEvent - The original DOM event to wrap
+         * @param {Event|null} originalEvent - The original DOM event to wrap
          * @param {number} wParam - The wParam value (typically flags or primary data)
          * @param {number} lParam - The lParam value (typically coordinates or secondary data)
          * @param {Object} [extended={}] - Additional extended data to include in event.detail
@@ -1551,7 +1874,7 @@
 
                 // Standard tracking fields
                 timestamp: { value: Date.now(), enumerable: true, configurable: true },
-                target: { value: originalEvent.target, enumerable: true, configurable: true },
+                target: { value: originalEvent?.target, enumerable: true, configurable: true },
 
                 // Reference to the original DOM event for debugging/advanced usage
                 originalEvent: { value: originalEvent, enumerable: true, configurable: true }
@@ -1560,25 +1883,27 @@
             // Forward event control methods to the original event
             // This allows consumers to call preventDefault() on the custom event
             // and have it affect the original event
-            const methodsToForward = ['preventDefault', 'stopPropagation', 'stopImmediatePropagation'];
+            if (originalEvent) {
+                const methodsToForward = ['preventDefault', 'stopPropagation', 'stopImmediatePropagation'];
 
-            methodsToForward.forEach(methodName => {
-                // Store reference to the custom event's original method
-                const originalCustomMethod = customEvent[methodName];
+                methodsToForward.forEach(methodName => {
+                    // Store reference to the custom event's original method
+                    const originalCustomMethod = customEvent[methodName];
 
-                // Override the method to call both the custom event method and original event method
-                customEvent[methodName] = function() {
-                    // Call the custom event's method first (if it exists)
-                    if (originalCustomMethod) {
-                        originalCustomMethod.call(this);
-                    }
+                    // Override the method to call both the custom event method and original event method
+                    customEvent[methodName] = function () {
+                        // Call the custom event's method first (if it exists)
+                        if (originalCustomMethod) {
+                            originalCustomMethod.call(this);
+                        }
 
-                    // Then call the original event's method (if it exists)
-                    if (originalEvent[methodName]) {
-                        originalEvent[methodName].call(originalEvent);
-                    }
-                };
-            });
+                        // Then call the original event's method (if it exists)
+                        if (originalEvent[methodName]) {
+                            originalEvent[methodName].call(originalEvent);
+                        }
+                    };
+                });
+            }
 
             // Return the event
             return customEvent;
@@ -1622,6 +1947,20 @@
 
             // Dispatch the custom event to the container
             container.dispatchEvent(event);
+        },
+
+        /**
+         * Helper to dispatch mouse messages with proper wParam/lParam encoding
+         * @param msgType
+         * @param domEvent
+         * @param container
+         * @param extended
+         */
+        dispatchMouseMessage(msgType, domEvent, container, extended={}) {
+            const wParam = this.getModifierState(domEvent);
+            const lParam = this.buildMouseLParam(domEvent, container);
+            const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
+            this.dispatchToContainer(container, customEvent);
         },
 
         /**
@@ -1729,20 +2068,34 @@
             const clientX = touch ? touch.clientX : event.clientX;
             const clientY = touch ? touch.clientY : event.clientY;
 
-            // Get container's bounding rectangle to calculate relative coordinates
+            // Read the container’s on-screen bounds so we can convert
+            // global/page coordinates into container-local coordinates.
             const rect = container.getBoundingClientRect();
 
-            // Calculate container-relative coordinates (client-area relative)
-            // This matches Win32 convention where coordinates are relative to the window's client area
+            // Translate the input coordinates into values relative to
+            // the container’s client area (Win32-style origin at top-left).
             const relativeX = clientX - rect.left;
             const relativeY = clientY - rect.top;
 
-            // Clamp to 16-bit unsigned range and ensure non-negative
-            const x = Math.max(0, Math.min(0xFFFF, Math.round(relativeX)));
-            const y = Math.max(0, Math.min(0xFFFF, Math.round(relativeY)));
+            // Get container's bounding rectangle to calculate relative coordinates
+            return this.makeLParam(relativeX, relativeY);
+        },
 
-            // Pack coordinates: high 16 bits = y, low 16 bits = x
-            return (y << 16) | x;
+        /**
+         * Build a Win32-style LPARAM value by converting page coordinates into a single 32-bit integer.
+         * @param {number} x
+         * @param {number} y
+         * @returns {number}
+         */
+        makeLParam(x, y) {
+            // Round to integers and clamp into an unsigned 16-bit range
+            // so they are safe to pack into a single LPARAM value.
+            const transformedX = Math.max(0, Math.min(0xFFFF, Math.round(x)));
+            const transformedY = Math.max(0, Math.min(0xFFFF, Math.round(y)));
+
+            // Combine into a 32-bit value:
+            // low word = x, high word = y.
+            return (transformedY << 16) | transformedX;
         },
 
         /**
@@ -3467,26 +3820,40 @@
     };
 
     /**
+     * Resolves the current value of a binding expression for a given element.
+     * Parses the expression, builds a scope resolver, and evaluates against the abstraction.
+     * @param {Element} element - The DOM element providing scope context
+     * @param {Object} bindingData - Binding configuration with a .target expression string
+     * @returns {*} The evaluated result of the binding expression
+     */
+    DomUpdater.prototype.resolveBindingValue = function (element, bindingData) {
+        // Parse (or retrieve cached) expression structure
+        const parsed = ExpressionCache.parseExpression(bindingData.target);
+
+        // Resolver translates scoped paths into normalized context paths
+        const scopeResolver = {
+            resolveScopedPath: (path) => this.context.normalizePath(path, element)
+        };
+
+        // Evaluate expression using the abstraction model and resolver
+        return ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
+    };
+
+    /**
      * Updates an element's attribute or property based on data binding configuration.
      * Evaluates the binding expression and applies the result using the appropriate binding method.
      * @param {Element} element - The DOM element to update
      * @param {string} bindingType - Type of binding (value, checked, visible, class, style, or attribute name)
      * @param {Object} bindingData - Binding configuration object
      * @param {string} bindingData.target - Expression string to evaluate for the binding value
+     * @param {*} [precomputedValue] - Optional pre-evaluated value to skip redundant expression evaluation
      * @returns {void}
      */
-    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData) {
+    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, precomputedValue) {
         try {
-            // Parse the expression
-            const parsed = ExpressionCache.parseExpression(bindingData.target);
-
-            // Create resolver context for this element
-            const scopeResolver = {
-                resolveScopedPath: (path) => this.context.normalizePath(path, element)
-            };
-
-            // Evaluate the expression
-            const value = ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
+            // Use precomputed value if available (from updateElementBindings change-detection),
+            // otherwise evaluate the expression (for initial render and other call sites)
+            const value = arguments.length >= 4 ? precomputedValue : this.resolveBindingValue(element, bindingData);
 
             // Use registered handler if available
             const handler = BindingHandlers[bindingType];
@@ -3552,8 +3919,8 @@
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
 
-        // Setup intersection observer for container visibility checking
-        this.setupIntersectionObserver();
+        // Clean up observers
+        DomUpdateTracker.observeContainer(this.container);
 
         // Add interval for checking updateQueue
         this.updateQueue = new Map();
@@ -3611,17 +3978,14 @@
             DomUpdateTracker.releaseCapture();
         }
 
+        // Clean up observers
+        DomUpdateTracker.unObserveContainer(this.container);
+
         // Remove event listeners
         this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
         this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
-
-        // Clean up intersection observer
-        if (this.intersectionObserver) {
-            this.intersectionObserver.disconnect();
-            this.intersectionObserver = null;
-        }
 
         // Clear debounce timer if exists
         if (this.debounceTimer) {
@@ -3807,50 +4171,6 @@
             y: scrollY
         });
     }
-
-    /**
-     * Modern approach using Intersection Observer API.
-     * This is more performant as it runs on the main thread and batches calculations.
-     */
-    Context.prototype.setupIntersectionObserver = function() {
-        // Create observer that tracks when container enters/exits viewport
-        this.intersectionObserver = new IntersectionObserver((entries) => {
-            // Process each observed element (in this case, just our container)
-            entries.forEach(entry => {
-                // Verify we're handling the correct element
-                if (entry.target === this.container) {
-                    // Get the boundingClientRect
-                    const rect = entry.boundingClientRect;
-
-                    // Basic visibility: any part of element is in viewport
-                    const isVisible = entry.isIntersecting;
-
-                    // Full visibility: element is completely within viewport bounds
-                    // intersectionRatio of 1.0 means 100% of element is visible
-                    // Using 0.99 to account for potential floating point precision issues
-                    const isFullyVisible = entry.intersectionRatio >= 0.99;
-
-                    // Update component state with new visibility data
-                    // These are reactive properties that trigger UI updates
-                    this.abstraction.containerVisible = isVisible;
-                    this.abstraction.containerFullyVisible = isFullyVisible;
-                    this.abstraction.containerWidth = rect.width;
-                    this.abstraction.containerHeight = rect.height;
-
-                    // Store current position/size data for potential use by other components
-                    this.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
-                }
-            });
-        }, {
-            // Define thresholds for intersection callbacks
-            // 0 = trigger when element enters/exits viewport
-            // 1.0 = trigger when element becomes fully visible/hidden
-            threshold: [0, 1.0]
-        });
-
-        // Start observing our container element
-        this.intersectionObserver.observe(this.container);
-    };
 
     // =============================================================================
     // DOM SCANNING AND BINDING REGISTRATION
@@ -4497,58 +4817,87 @@
     // =============================================================================
 
     /**
-     * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.)
-     * Evaluates each binding expression and updates the DOM if the value has changed
+     * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.).
+     * Evaluates each binding expression and updates the DOM if the value has changed.
      */
     Context.prototype.updateElementBindings = function() {
-        this.interpolationMap.forEach((mappingData, element) => {
-            const { bindings } = mappingData;
+        // Cache frequently accessed properties to avoid repeated lookups
+        // through `this` in the inner loops
+        const abstraction = this.abstraction;
+        const domUpdater = this.domUpdater;
+        const self = this;
 
-            Object.keys(bindings).forEach(bindingType => {
-                // Skip foreach and click binds. They are handled elsewhere
-                if (['foreach', 'click'].includes(bindingType)) {
-                    return;
+        this.interpolationMap.forEach(function(mappingData, element) {
+            const bindings = mappingData.bindings;
+            const keys = Object.keys(bindings);
+
+            // Nothing to process if there are no bindings
+            if (keys.length === 0) {
+                return;
+            }
+
+            // Build the scope resolver once per element rather than per binding,
+            // since it only depends on the element for path normalization
+            const scopeResolver = {
+                resolveScopedPath: function(path) {
+                    return self.normalizePath(path, element);
+                }
+            };
+
+            // Initialize the previous values store on first encounter.
+            // Cache the reference to avoid repeated DOM element property access
+            // inside the binding loop.
+            if (!element._pacPreviousValues) {
+                element._pacPreviousValues = {};
+            }
+
+            // Fetch the previousValues list
+            const previousValues = element._pacPreviousValues;
+
+            // Iterate bindings using a for loop to avoid closure creation per key
+            for (let i = 0, len = keys.length; i < len; i++) {
+                // Fetch the binding type
+                const bindingType = keys[i];
+
+                // Skip foreach and click binds — they are handled elsewhere.
+                // Uses direct equality checks instead of Array.includes() to
+                // avoid array allocation and linear scan on every iteration.
+                if (bindingType === 'foreach' || bindingType === 'click') {
+                    continue;
                 }
 
-                // Fetch the binding type
-                const bindingData = bindings[bindingType];
-
-                // For each binding, evaluate it now and see if the result changed
                 try {
-                    // Create scope resolver for this element
-                    const scopeResolver = {
-                        resolveScopedPath: (path) => this.normalizePath(path, element)
-                    };
-
                     // Parse and evaluate the binding expression
+                    const bindingData = bindings[bindingType];
                     const parsed = ExpressionCache.parseExpression(bindingData.target);
-                    const currentValue = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
+                    const currentValue = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
 
-                    // Store previous values to detect changes
-                    if (!element._pacPreviousValues) {
-                        element._pacPreviousValues = {};
-                    }
-
-                    // Grab previous value
-                    const previousValue = element._pacPreviousValues[bindingType];
-
-                    // Update if value changed
-                    if (!Utils.isEqual(previousValue, currentValue)) {
-                        element._pacPreviousValues[bindingType] = currentValue;
-                        this.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
+                    // Only touch the DOM if the value actually changed.
+                    // DOM writes are expensive, so we diff against the cached
+                    // previous value first.
+                    if (!Utils.isEqual(previousValues[bindingType], currentValue)) {
+                        // Update value
+                        previousValues[bindingType] = currentValue;
+                        
+                        // Update DOM — pass pre-computed value to avoid re-evaluating
+                        // the same expression through a second normalizePath chain
+                        domUpdater.updateAttributeBinding(element, bindingType, bindingData, currentValue);
                     }
                 } catch (error) {
                     console.warn('Error evaluating binding:', bindingType, error);
                 }
-            });
+            }
         });
     };
 
     /**
-     * Updates all text interpolations ({{expression}} in text nodes)
-     * Re-evaluates template expressions and updates text content if changed
+     * Updates all text interpolations ({{expression}} in text nodes).
+     * Re-evaluates template expressions and updates text content if changed.
      */
     Context.prototype.updateTextInterpolations = function() {
+        const abstraction = this.abstraction;
+        const self = this;
+
         this.textInterpolationMap.forEach((mappingData, textNode) => {
             try {
                 // Store previous text content to detect changes
@@ -4556,13 +4905,18 @@
                     textNode._pacPreviousText = textNode.textContent;
                 }
 
-                const newText = mappingData.template.replace(INTERPOLATION_REGEX, (match, expression) => {
+                // Build the scope resolver once per text node, not once per expression.
+                // The resolver only depends on the text node for path normalization.
+                const scopeResolver = {
+                    resolveScopedPath: function(path) {
+                        return self.normalizePath(path, textNode);
+                    }
+                };
+
+                const newText = mappingData.template.replace(INTERPOLATION_REGEX, function(match, expression) {
                     try {
                         const parsed = ExpressionCache.parseExpression(expression);
-                        const scopeResolver = {
-                            resolveScopedPath: (path) => this.normalizePath(path, textNode)
-                        };
-                        const result = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
+                        const result = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
                         return result != null ? String(result) : '';
                     } catch (error) {
                         console.warn('Error evaluating text interpolation:', expression, error);
@@ -4570,7 +4924,7 @@
                     }
                 });
 
-                // Only update if text actually changed
+                // Only update DOM if text actually changed
                 if (textNode._pacPreviousText !== newText) {
                     textNode.textContent = newText;
                     textNode._pacPreviousText = newText;
@@ -4641,19 +4995,59 @@
     };
 
     /**
-     * Rebuilds foreach loops when their source arrays change
-     * @param {CustomEvent} event - The pac:change event with change details
+     * Handles foreach rebuilds triggered by reactive property changes.
+     * When a property changes, checks if any foreach elements need re-rendering,
+     * either because they're bound directly to the changed array, or because
+     * they're bound to a computed property that depends on the changed property
+     * (e.g., changing 'filter' triggers rebuild of foreach bound to 'filteredTodos').
+     * @param {CustomEvent} event - The pac:change event containing change details
+     * @param {string[]} event.detail.path - Property path that changed
      */
     Context.prototype.handleForeachRebuildForChange = function(event) {
-        // Handle foreach rebuilds only for array changes
-        if (event.detail.path.length === 1 && Array.isArray(this.abstraction[event.detail.path[0]])) {
-            const foreachElements = this.findForeachElementsByArrayPath(event.detail.path[0]);
+        // Only handle top-level property changes (e.g., ['filter'], not ['todos', '0', 'text'])
+        const path = event.detail.path;
 
-            foreachElements.forEach((el) => {
-                if (this.shouldRebuildForeach(el)) {
-                    this.renderForeach(el);
+        if (path.length !== 1) {
+            return;
+        }
+
+        // Fast exit: property is not an array and no computed properties depend on it,
+        // so no foreach could possibly need a rebuild
+        const changedProp = path[0];
+        const dependents = this.dependencies.get(changedProp);
+        const isArray = Array.isArray(this.abstraction[changedProp]);
+
+        if (!isArray && !dependents) {
+            return;
+        }
+
+        // Single-pass scan of interpolationMap instead of calling
+        // findForeachElementsByArrayPath once per candidate property
+        for (const [element, mappingData] of this.interpolationMap) {
+            // Skip non-foreach elements
+            if (!mappingData.bindings || !mappingData.bindings.foreach) {
+                continue;
+            }
+
+            // Direct match: the changed property is an array and this foreach is bound to it
+            const expr = mappingData.foreachExpr;
+            const source = mappingData.sourceArray;
+
+            if (isArray && (expr === changedProp || source === changedProp)) {
+                if (this.shouldRebuildForeach(element)) {
+                    this.renderForeach(element);
                 }
-            });
+
+                continue;
+            }
+
+            // Indirect match: this foreach is bound to a computed property
+            // that depends on the changed property (e.g., filter → filteredTodos)
+            if (dependents && (dependents.indexOf(expr) !== -1 || dependents.indexOf(source) !== -1)) {
+                if (this.shouldRebuildForeach(element)) {
+                    this.renderForeach(element);
+                }
+            }
         }
     };
 
@@ -4751,30 +5145,39 @@
      * @param {Array<string|number>} event.detail.path - Array representing the path to the changed array
      */
     Context.prototype.handleArrayChange = function(event) {
+        const detail = event.detail;
+
         // Convert the array path to a dot-notation string for easier matching
         // e.g., ['users', 0, 'orders'] becomes 'users.0.orders'
-        const pathString = Utils.pathArrayToString(event.detail.path);
+        const pathString = Utils.pathArrayToString(detail.path);
 
-        // Locate all DOM elements with foreach directives that are bound to this array path
-        // This method searches the DOM for elements whose foreach binding matches the changed array
+        // Locate all DOM elements with foreach directives that are bound to this array path.
+        // This method searches the DOM for elements whose foreach binding matches the changed array.
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
-        // Re-render each affected foreach element to reflect the array changes
-        // The index parameter is provided by forEach but not used in this implementation
-        foreachElements.forEach((element) => {
-            // Fetch the changes list
-            const oldHashMap = this.arrayHashMaps.get(pathString) || new Map();
-            const changes = this.classifyArrayChanges(oldHashMap, event.detail.newValue);
+        // Nothing to update if no foreach elements are bound to this path
+        if (foreachElements.length === 0) {
+            return;
+        }
 
-            if (this.canHandleSimply(changes)) {
-                // Simple approach: handle common cases efficiently, fall back for complex ones
-                this.handleSimpleArrayChange(element, changes, event.detail.newValue, pathString);
-            } else {
-                // Trigger a complete re-render of the foreach element
-                // This will recreate child elements based on the updated array data
-                this.renderForeach(element);
+        // Compute the change classification once, shared across all affected elements.
+        // Avoids redundant diffing when multiple foreach elements bind to the same array.
+        const oldHashMap = this.arrayHashMaps.get(pathString) || new Map();
+        const changes = this.classifyArrayChanges(oldHashMap, detail.newValue);
+        const isSimple = this.canHandleSimply(changes);
+
+        // Re-render each affected foreach element to reflect the array changes
+        for (let i = 0, len = foreachElements.length; i < len; i++) {
+            // Simple approach: handle common cases efficiently
+            if (isSimple) {
+                this.handleSimpleArrayChange(foreachElements[i], changes, detail.newValue, pathString);
+                continue;
             }
-        });
+
+            // Trigger a complete re-render of the foreach element.
+            // This will recreate child elements based on the updated array data.
+            this.renderForeach(foreachElements[i]);
+        }
     };
 
     /**
@@ -4783,38 +5186,38 @@
      * @returns {Map<WeakKey, any>}
      */
     Context.prototype.scanBindings = function(parentElement) {
-        const self = this;
         const interpolationMap = new Map();
         const elements = parentElement.querySelectorAll('[data-pac-bind]');
 
-        elements.forEach(element => {
-            // Skip elements that are already in the map
-            if (interpolationMap.has(element)) {
-                return;
-            }
+        // Use a for loop instead of forEach to avoid closure creation per iteration
+        for (let i = 0, len = elements.length; i < len; i++) {
+            const element = elements[i];
 
             // Skip elements that don't belong to this container
-            if (!Utils.belongsToPacContainer(self.container, element)) {
-                return;
+            if (!Utils.belongsToPacContainer(this.container, element)) {
+                continue;
             }
 
+            // Extract and parse the binding string from the element's attribute
             const bindingString = element.getAttribute('data-pac-bind');
             const parsedBindings = ExpressionCache.parseBindingString(bindingString);
 
-            // Transform bindings array into object keyed by binding type
-            const bindingsObject = {};
-            parsedBindings.forEach(binding => {
-                bindingsObject[binding.type] = {
-                    target: binding.target
-                };
-            });
+            // Transform bindings array into object keyed by binding type.
+            // Object.create(null) avoids prototype chain lookups on property access.
+            const bindingsObject = Object.create(null);
 
-            // Put the data in the map
+            for (let j = 0, bLen = parsedBindings.length; j < bLen; j++) {
+                bindingsObject[parsedBindings[j].type] = {
+                    target: parsedBindings[j].target
+                };
+            }
+
+            // Store the binding string and parsed bindings, keyed by element
             interpolationMap.set(element, {
                 bindingString: bindingString,
                 bindings: bindingsObject
             });
-        });
+        }
 
         // Extend data of foreach bindings
         this.extendBindingsWithForEachData(interpolationMap);
@@ -4823,13 +5226,22 @@
         return interpolationMap;
     };
 
-    Context.prototype.findElementByForEachId = function(forEachId) {
+    /**
+     * Finds the element associated with a specific forEach identifier.
+     * @param {string|number} forEachId - Identifier used to look up the element.
+     * @returns {*} The matching element, or null if no match is found.
+     */
+    Context.prototype.findElementByForEachId = function (forEachId) {
+        // Loop over all element → mappingData pairs in the interpolation map
         for (const [element, mappingData] of this.interpolationMap) {
+            // Check whether this entry belongs to the requested forEachId
             if (mappingData.foreachId === forEachId) {
+                // Return the matching element immediately
                 return element;
             }
         }
 
+        // No matching element was found
         return null;
     };
 
@@ -4895,6 +5307,7 @@
      */
     Context.prototype.scanTextBindings = function(parentElement) {
         const interpolationMap = new Map();
+        const container = this.container;
 
         // Create tree walker to find text nodes with interpolation expressions
         const walker = document.createTreeWalker(
@@ -4902,8 +5315,9 @@
             NodeFilter.SHOW_TEXT,
             {
                 acceptNode: node => {
-                    // Skip if no interpolation
-                    if (!INTERPOLATION_TEST_REGEX.test(node.textContent)) {
+                    // Skip if no interpolation or node doesn't belong to this container
+                    if (!INTERPOLATION_TEST_REGEX.test(node.textContent) ||
+                        !Utils.belongsToPacContainer(container, node)) {
                         return NodeFilter.FILTER_SKIP;
                     }
 
@@ -4913,25 +5327,15 @@
             }
         );
 
-        // Walk through matching text nodes that belong to this container
-        let element;
-
-        while ((element = walker.nextNode())) {
-            // Skip elements that are already in the map
-            if (interpolationMap.has(element)) {
-                continue;
-            }
-
-            // Skip elements that don't belong to this container
-            if (!Utils.belongsToPacContainer(this.container, element)) {
-                continue;
-            }
-
-            interpolationMap.set(element, {
-                template: element.textContent
+        // Walk through matching text nodes and record their templates
+        let node;
+        while ((node = walker.nextNode())) {
+            interpolationMap.set(node, {
+                template: node.textContent
             });
         }
 
+        // Return bindings map
         return interpolationMap;
     };
 
@@ -4943,63 +5347,56 @@
      */
     Context.prototype.scanCommentBindings = function(parentElement) {
         const commentBindingMap = new Map();
+        const openComments = []; // Stack to track nested wp-if comments
 
         // Create tree walker to find comment nodes
         const walker = document.createTreeWalker(
             parentElement,
             NodeFilter.SHOW_COMMENT,
             {
-                acceptNode: node => {
-                    // Only process comments that belong to this container
-                    return !Utils.belongsToPacContainer(this.container, node)
-                        ? NodeFilter.FILTER_SKIP
-                        : NodeFilter.FILTER_ACCEPT;
-                }
+                acceptNode: node =>
+                    Utils.belongsToPacContainer(this.container, node)
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_SKIP
             }
         );
 
         let commentNode;
-        const openComments = []; // Stack to track nested wp-if comments
 
         while ((commentNode = walker.nextNode())) {
-            const commentText = commentNode.textContent;
+            // nodeValue is more direct than textContent for comment nodes
+            const text = commentNode.nodeValue;
 
             // Check for opening wp-if comment
-            const openMatch = commentText.match(WP_IF_COMMENT_REGEX);
+            const openMatch = text.match(WP_IF_COMMENT_REGEX);
 
+            // If found, add it to the array
             if (openMatch) {
-                const expression = openMatch[1].trim();
-
-                openComments.push({
-                    comment: commentNode,
-                    expression: expression
-                });
+                openComments.push({ comment: commentNode, expression: openMatch[1].trim() });
                 continue;
             }
 
-            // Check for closing /wp-if comment
-            const closeMatch = commentText.match(WP_IF_CLOSE_COMMENT_REGEX);
-
-            if (closeMatch && openComments.length > 0) {
-                const openData = openComments.pop();
-
-                // Collect all nodes between opening and closing comments
-                const content = [];
-                let currentNode = openData.comment.nextSibling;
-
-                while (currentNode && currentNode !== commentNode) {
-                    content.push(currentNode);
-                    currentNode = currentNode.nextSibling;
-                }
-
-                // Store in map
-                commentBindingMap.set(openData.comment, {
-                    expression: openData.expression,
-                    closingComment: commentNode,
-                    content: content,
-                    isVisible: true // Track current visibility state
-                });
+            // Check for closing /wp-if comment — must have a matching open
+            if (!text.match(WP_IF_CLOSE_COMMENT_REGEX) || openComments.length === 0) {
+                continue;
             }
+
+            // pop comment off array
+            const { comment: openComment, expression } = openComments.pop();
+
+            // Collect all nodes between opening and closing comments
+            const content = [];
+            for (let node = openComment.nextSibling; node && node !== commentNode; node = node.nextSibling) {
+                content.push(node);
+            }
+
+            // Store in map
+            commentBindingMap.set(openComment, {
+                expression,
+                closingComment: commentNode,
+                content,
+                isVisible: true // Track current visibility state
+            });
         }
 
         // Warn about unmatched opening tags
@@ -5007,6 +5404,7 @@
             console.warn('WakaPAC: Unmatched wp-if comment directives found', openComments);
         }
 
+        // Return bindings map
         return commentBindingMap;
     };
 
@@ -5498,25 +5896,36 @@
             return fallbackIndex;
         }
 
-        // Strategy 1: Direct reference comparison (works for object references)
-        for (let i = 0; i < sourceArray.length; i++) {
-            if (sourceArray[i] === item) {
+        // Pre-compute ID lookup capability once, outside the loop
+        const hasId = item && typeof item === 'object' && item.id !== undefined;
+        const itemId = hasId ? item.id : undefined;
+        const len = sourceArray.length;
+
+        // Single pass: reference equality (immediate return) + ID tracking (deferred)
+        let idMatch = -1;
+
+        for (let i = 0; i < len; i++) {
+            const sourceItem = sourceArray[i];
+
+            // Strategy 1: Direct reference comparison — highest priority, return immediately
+            if (sourceItem === item) {
                 return i;
             }
-        }
 
-        // Strategy 2: ID-based comparison (common pattern in data)
-        if (item && typeof item === 'object' && item.id !== undefined) {
-            for (let i = 0; i < sourceArray.length; i++) {
-                const sourceItem = sourceArray[i];
-                if (sourceItem && typeof sourceItem === 'object' && sourceItem.id === item.id) {
-                    return i;
-                }
+            // Strategy 2: Track first ID match for deferred return
+            if (hasId && idMatch === -1 &&
+                sourceItem && typeof sourceItem === 'object' && sourceItem.id === itemId) {
+                idMatch = i;
             }
         }
 
-        // Strategy 3: Deep equality comparison (for primitive values or value objects)
-        for (let i = 0; i < sourceArray.length; i++) {
+        // Return ID match if found
+        if (idMatch !== -1) {
+            return idMatch;
+        }
+
+        // Strategy 3: Deep equality — expensive, only runs when reference and ID both failed
+        for (let i = 0; i < len; i++) {
             if (Utils.isEqual(sourceArray[i], item)) {
                 return i;
             }
@@ -5533,6 +5942,13 @@
      * @returns {Array<Object>}
      */
     Context.prototype.getForeachChain = function(element) {
+        // Return cached chain if available — avoids repeated DOM traversal
+        // and comment parsing for the same element across multiple normalizePath calls.
+        // Cache is valid until foreach rebuild (old elements are discarded entirely).
+        if (element._pacForeachChain) {
+            return element._pacForeachChain;
+        }
+
         // Accumulates the discovered foreach contexts in traversal order
         const chain = [];
 
@@ -5575,6 +5991,9 @@
             // Move to the next parent foreach element in the hierarchy
             currentElement = this.findParentForeachElement(currentElement);
         }
+
+        // Cache the chain on the element for subsequent lookups
+        element._pacForeachChain = chain;
 
         // Return the collected foreach chain
         return chain;
@@ -5711,6 +6130,20 @@
         // Select the active foreach frames after climbing
         const frames = this.getEffectiveFrames(element, climbs);
 
+        // Fast path: if no foreach frames apply, skip scope resolution entirely.
+        // This avoids building an empty Map and running resolveScopedTokens as a no-op.
+        if (frames.length === 0) {
+            const remaining = path.slice(climbs);
+
+            if (remaining.length === 0) {
+                return "";
+            } else if (remaining.length === 1 && typeof remaining[0] === "number") {
+                return remaining[0];
+            } else {
+                return Utils.pathArrayToString(remaining);
+            }
+        }
+
         // Build a scoped variable map from those frames
         const scope = this.buildForeachScope(frames);
 
@@ -5827,33 +6260,43 @@
      * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
      */
     Context.prototype.extractClosestForeachContext = function(startElement) {
+        // Cache container
+        const container = this.container;
+
+        // Cache the constant to avoid repeated global property lookups in the inner loop
+        const COMMENT_NODE = Node.COMMENT_NODE;
+
         // Start from the element and walk up the DOM tree
         let current = startElement;
 
-        while (current && current !== this.container) {
-            // Check cache first - avoids repeated DOM traversal and regex matching
+        while (current && current !== container) {
+            // Check cache first — avoids repeated DOM traversal and regex matching
             if (current._pacForeachContext) {
                 return current._pacForeachContext;
             }
 
-            // Not cached - check previous siblings for comment markers
+            // Not cached — check previous siblings for comment markers
             let sibling = current.previousSibling;
 
             while (sibling) {
                 // Only process comment nodes
-                if (sibling.nodeType === Node.COMMENT_NODE) {
-                    const commentText = sibling.textContent.trim();
-
-                    // Look for comment pattern: "pac-foreach-item: foreachId, index=X, renderIndex=Y"
-                    // This regex captures the foreach ID and both index values
-                    const match = commentText.match(FOREACH_INDEX_REGEX);
+                if (sibling.nodeType === COMMENT_NODE) {
+                    const match = sibling.textContent.trim().match(FOREACH_INDEX_REGEX);
 
                     if (match) {
-                        return {
+                        // Build the context object from the regex capture groups
+                        const context = {
                             foreachId: match[1].trim(),
-                            index: parseInt(match[2], 10),      // Convert string to integer
-                            renderIndex: parseInt(match[3], 10) // Convert string to integer
+                            index: parseInt(match[2], 10),
+                            renderIndex: parseInt(match[3], 10)
                         };
+
+                        // Cache on the starting element so subsequent lookups
+                        // from the same element or its descendants are O(1)
+                        startElement._pacForeachContext = context;
+
+                        // Return the context
+                        return context;
                     }
                 }
 
@@ -5931,6 +6374,7 @@
             delete element._pacPreviousValues;
             delete element._pacPreviousArray;
             delete element._pacDynamicClass;
+            delete element._pacForeachChain;
         });
 
         textNodesToRemove.forEach(textNode => {
@@ -5938,6 +6382,7 @@
 
             // Clean up cached text state
             delete textNode._pacPreviousText;
+            delete textNode._pacForeachChain;
         });
     };
 
@@ -6663,22 +7108,39 @@
 
             // Process all DOM mutations in this batch
             this.observer = new MutationObserver(mutations => {
+                // Track PAC ids already destroyed in this mutation batch
+                const destroyed = new Set();
+
                 mutations.forEach(mutation => {
-                    // Check each removed node for cleanup opportunities
                     mutation.removedNodes.forEach(node => {
-                        // Only process element nodes (ignore text/comment nodes)
-                        if (node.nodeType === 1) {
-                            // Check if this is a PAC container
-                            const pacId = node.getAttribute('data-pac-id');
+                        // Only element nodes can contain attributes/query selectors
+                        if (node.nodeType !== Node.ELEMENT_NODE) {
+                            return;
+                        }
 
-                            if (pacId) {
-                                // Clean up the removed PAC component
-                                const context = window.PACRegistry.components.get(pacId);
+                        // Collect PAC elements in this removed subtree:
+                        // include the root node if it is a PAC container,
+                        // followed by all nested PAC containers
+                        const pacNodes = [
+                            ...(node.matches('[data-pac-id]') ? [node] : []),
+                            ...node.querySelectorAll('[data-pac-id]')
+                        ];
 
-                                if (context) {
-                                    context.destroy();
-                                }
+                        // Destroy deepest nodes first to preserve parent/child teardown order
+                        for (let i = pacNodes.length - 1; i >= 0; i--) {
+                            // Fetch the pacId
+                            const pacId = pacNodes[i].getAttribute('data-pac-id');
+
+                            // Skip invalid ids or components already destroyed this batch
+                            if (!pacId || destroyed.has(pacId)) {
+                                continue;
                             }
+
+                            // Add to destroyed list
+                            destroyed.add(pacId);
+
+                            // Destroy the registered component if it still exists
+                            window.PACRegistry.components.get(pacId)?.destroy();
                         }
                     });
                 });
@@ -7004,14 +7466,9 @@
             // Check for pure cardinal directions (one axis strongly dominant)
             if (dxSq > minRatio * dySq) {
                 return dx > 0 ? 'R' : 'L';
-            }
-
-            if (dySq > minRatio * dxSq) {
+            } else if (dySq > minRatio * dxSq) {
                 return dy > 0 ? 'D' : 'U';
-            }
-
-            // Diagonal movement - pick dominant axis
-            if (dx > 0) {
+            } else if (dx > 0) {
                 return dxSq > dySq ? 'R' : (dy > 0 ? 'D' : 'U');
             } else {
                 return dxSq > dySq ? 'L' : (dy > 0 ? 'D' : 'U');
@@ -7048,7 +7505,7 @@
          */
         findContainer(element) {
             // Ensure we start with an actual Element node
-            if (!element || element.nodeType !== 1) {
+            if (!element || element.nodeType !== Node.ELEMENT_NODE) {
                 element = element?.parentElement;
             }
 
@@ -7217,6 +7674,17 @@
         },
 
         /**
+         * Retrieves a PAC instance associated with a DOM element.
+         * @param {Element} element - The DOM element to resolve from.
+         * @returns {*} The associated PAC instance, or null if not found.
+         */
+        getByElement(element) {
+            const container = element.closest('[data-pac-id]');
+            const pacId = container?.getAttribute('data-pac-id');
+            return pacId ? this.get(pacId) : undefined;
+        },
+
+        /**
          * Processes all pending components to establish their parent-child relationships.
          *
          * Builds a fresh hierarchy map and assigns parent/children to each pending component.
@@ -7316,6 +7784,7 @@
                         parent = containerMap.get(element);
                         break;
                     }
+
                     element = element.parentElement;
                 }
 
@@ -7333,6 +7802,7 @@
                     if (!hierarchyMap.has(parent.container)) {
                         hierarchyMap.set(parent.container, { parent: null, children: [] });
                     }
+
                     // Add to parent's children array
                     hierarchyMap.get(parent.container).children.push(component);
                 }
@@ -7605,7 +8075,6 @@
         return context.killAllTimers();
     };
 
-
     /**
      * Register a custom binding handler
      * Allows users to extend WakaPAC with their own binding types
@@ -7669,6 +8138,8 @@
      * Extracts wheel delta from MSG_MOUSEWHEEL wParam
      * Positive = scroll up, Negative = scroll down
      * Standard value is ±120 per notch
+     * @param wParam
+     * @returns {number}
      */
     wakaPAC.GET_WHEEL_DELTA = function(wParam) {
         const hiWord = (wParam >> 16) & 0xFFFF;
@@ -7677,6 +8148,8 @@
 
     /**
      * Gets modifier keys from wheel event wParam
+     * @param wParam
+     * @returns {number}
      */
     wakaPAC.GET_KEYSTATE = function(wParam) {
         return wParam & 0xFFFF; // LOWORD
@@ -7795,13 +8268,16 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
         MSG_FOCUS, MSG_BLUR, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
-        MSG_MOUSEWHEEL, MSG_GESTURE,
+        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
 
         // Keyboard modifier keys
         KM_SHIFT, KM_CONTROL, KM_ALT,
+
+        // Constants for MSG_SIZE
+        SIZE_RESTORED, SIZE_HIDDEN, SIZE_FULLSCREEN,
 
         // Control keys
         VK_BACK, VK_TAB, VK_RETURN, VK_SHIFT, VK_CONTROL, VK_MENU, VK_PAUSE,
