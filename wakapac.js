@@ -8251,6 +8251,32 @@
             y <= rect.bottom;
     };
 
+    /**
+     * Returns the topmost DOM element at the given client coordinates.
+     * @param {number} x - Horizontal coordinate in client space.
+     * @param {number} y - Vertical coordinate in client space.
+     * @returns {Element|null} The element at the position, or null if none.
+     */
+    wakaPAC.elementFromPoint = function(x, y) {
+        return document.elementFromPoint(x, y);
+    };
+
+    /**
+     * Returns the nearest PAC container at a client coordinate.
+     * @param {number} x - X coordinate in client space
+     * @param {number} y - Y coordinate in client space
+     * @returns {Element|null}
+     */
+    wakaPAC.containerFromPoint = function containerFromPoint(x, y) {
+        const hitElement = wakaPAC.elementFromPoint(x, y);
+
+        if (!hitElement) {
+            return null;
+        }
+
+        return hitElement.closest("[data-pac-id]");
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
