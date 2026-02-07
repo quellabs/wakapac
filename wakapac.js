@@ -5057,30 +5057,39 @@
      * @param {Array<string|number>} event.detail.path - Array representing the path to the changed array
      */
     Context.prototype.handleArrayChange = function(event) {
+        const detail = event.detail;
+
         // Convert the array path to a dot-notation string for easier matching
         // e.g., ['users', 0, 'orders'] becomes 'users.0.orders'
-        const pathString = Utils.pathArrayToString(event.detail.path);
+        const pathString = Utils.pathArrayToString(detail.path);
 
-        // Locate all DOM elements with foreach directives that are bound to this array path
-        // This method searches the DOM for elements whose foreach binding matches the changed array
+        // Locate all DOM elements with foreach directives that are bound to this array path.
+        // This method searches the DOM for elements whose foreach binding matches the changed array.
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
-        // Re-render each affected foreach element to reflect the array changes
-        // The index parameter is provided by forEach but not used in this implementation
-        foreachElements.forEach((element) => {
-            // Fetch the changes list
-            const oldHashMap = this.arrayHashMaps.get(pathString) || new Map();
-            const changes = this.classifyArrayChanges(oldHashMap, event.detail.newValue);
+        // Nothing to update if no foreach elements are bound to this path
+        if (foreachElements.length === 0) {
+            return;
+        }
 
-            if (this.canHandleSimply(changes)) {
-                // Simple approach: handle common cases efficiently, fall back for complex ones
-                this.handleSimpleArrayChange(element, changes, event.detail.newValue, pathString);
-            } else {
-                // Trigger a complete re-render of the foreach element
-                // This will recreate child elements based on the updated array data
-                this.renderForeach(element);
+        // Compute the change classification once, shared across all affected elements.
+        // Avoids redundant diffing when multiple foreach elements bind to the same array.
+        const oldHashMap = this.arrayHashMaps.get(pathString) || new Map();
+        const changes = this.classifyArrayChanges(oldHashMap, detail.newValue);
+        const isSimple = this.canHandleSimply(changes);
+
+        // Re-render each affected foreach element to reflect the array changes
+        for (let i = 0, len = foreachElements.length; i < len; i++) {
+            // Simple approach: handle common cases efficiently
+            if (isSimple) {
+                this.handleSimpleArrayChange(foreachElements[i], changes, detail.newValue, pathString);
+                continue;
             }
-        });
+
+            // Trigger a complete re-render of the foreach element.
+            // This will recreate child elements based on the updated array data.
+            this.renderForeach(foreachElements[i]);
+        }
     };
 
     /**
