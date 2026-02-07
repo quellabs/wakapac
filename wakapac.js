@@ -4947,19 +4947,26 @@
     };
 
     /**
-     * Rebuilds foreach loops when their source arrays change
+     * Rebuilds foreach loops when their source arrays change.
+     * Only acts on top-level array property changes (path length === 1).
      * @param {CustomEvent} event - The pac:change event with change details
      */
     Context.prototype.handleForeachRebuildForChange = function(event) {
-        // Handle foreach rebuilds only for array changes
-        if (event.detail.path.length === 1 && Array.isArray(this.abstraction[event.detail.path[0]])) {
-            const foreachElements = this.findForeachElementsByArrayPath(event.detail.path[0]);
+        const path = event.detail.path;
 
-            foreachElements.forEach((el) => {
-                if (this.shouldRebuildForeach(el)) {
-                    this.renderForeach(el);
-                }
-            });
+        // Only handle top-level array property changes
+        if (path.length !== 1 || !Array.isArray(this.abstraction[path[0]])) {
+            return;
+        }
+
+        // Find all foreach elements bound to this array path
+        const foreachElements = this.findForeachElementsByArrayPath(path[0]);
+
+        // Re-render each foreach element that requires a rebuild
+        for (let i = 0, len = foreachElements.length; i < len; i++) {
+            if (this.shouldRebuildForeach(foreachElements[i])) {
+                this.renderForeach(foreachElements[i]);
+            }
         }
     };
 
