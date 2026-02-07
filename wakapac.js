@@ -5089,38 +5089,38 @@
      * @returns {Map<WeakKey, any>}
      */
     Context.prototype.scanBindings = function(parentElement) {
-        const self = this;
         const interpolationMap = new Map();
         const elements = parentElement.querySelectorAll('[data-pac-bind]');
 
-        elements.forEach(element => {
-            // Skip elements that are already in the map
-            if (interpolationMap.has(element)) {
-                return;
-            }
+        // Use a for loop instead of forEach to avoid closure creation per iteration
+        for (let i = 0, len = elements.length; i < len; i++) {
+            const element = elements[i];
 
             // Skip elements that don't belong to this container
-            if (!Utils.belongsToPacContainer(self.container, element)) {
-                return;
+            if (!Utils.belongsToPacContainer(this.container, element)) {
+                continue;
             }
 
+            // Extract and parse the binding string from the element's attribute
             const bindingString = element.getAttribute('data-pac-bind');
             const parsedBindings = ExpressionCache.parseBindingString(bindingString);
 
-            // Transform bindings array into object keyed by binding type
-            const bindingsObject = {};
-            parsedBindings.forEach(binding => {
-                bindingsObject[binding.type] = {
-                    target: binding.target
-                };
-            });
+            // Transform bindings array into object keyed by binding type.
+            // Object.create(null) avoids prototype chain lookups on property access.
+            const bindingsObject = Object.create(null);
 
-            // Put the data in the map
+            for (let j = 0, bLen = parsedBindings.length; j < bLen; j++) {
+                bindingsObject[parsedBindings[j].type] = {
+                    target: parsedBindings[j].target
+                };
+            }
+
+            // Store the binding string and parsed bindings, keyed by element
             interpolationMap.set(element, {
                 bindingString: bindingString,
                 bindings: bindingsObject
             });
-        });
+        }
 
         // Extend data of foreach bindings
         this.extendBindingsWithForEachData(interpolationMap);
@@ -5129,13 +5129,22 @@
         return interpolationMap;
     };
 
-    Context.prototype.findElementByForEachId = function(forEachId) {
+    /**
+     * Finds the element associated with a specific forEach identifier.
+     * @param {string|number} forEachId - Identifier used to look up the element.
+     * @returns {*} The matching element, or null if no match is found.
+     */
+    Context.prototype.findElementByForEachId = function (forEachId) {
+        // Loop over all element → mappingData pairs in the interpolation map
         for (const [element, mappingData] of this.interpolationMap) {
+            // Check whether this entry belongs to the requested forEachId
             if (mappingData.foreachId === forEachId) {
+                // Return the matching element immediately
                 return element;
             }
         }
 
+        // No matching element was found
         return null;
     };
 
