@@ -5201,6 +5201,7 @@
      */
     Context.prototype.scanTextBindings = function(parentElement) {
         const interpolationMap = new Map();
+        const container = this.container;
 
         // Create tree walker to find text nodes with interpolation expressions
         const walker = document.createTreeWalker(
@@ -5208,8 +5209,9 @@
             NodeFilter.SHOW_TEXT,
             {
                 acceptNode: node => {
-                    // Skip if no interpolation
-                    if (!INTERPOLATION_TEST_REGEX.test(node.textContent)) {
+                    // Skip if no interpolation or node doesn't belong to this container
+                    if (!INTERPOLATION_TEST_REGEX.test(node.textContent) ||
+                        !Utils.belongsToPacContainer(container, node)) {
                         return NodeFilter.FILTER_SKIP;
                     }
 
@@ -5219,25 +5221,15 @@
             }
         );
 
-        // Walk through matching text nodes that belong to this container
-        let element;
-
-        while ((element = walker.nextNode())) {
-            // Skip elements that are already in the map
-            if (interpolationMap.has(element)) {
-                continue;
-            }
-
-            // Skip elements that don't belong to this container
-            if (!Utils.belongsToPacContainer(this.container, element)) {
-                continue;
-            }
-
-            interpolationMap.set(element, {
-                template: element.textContent
+        // Walk through matching text nodes and record their templates
+        let node;
+        while ((node = walker.nextNode())) {
+            interpolationMap.set(node, {
+                template: node.textContent
             });
         }
 
+        // Return bindings map
         return interpolationMap;
     };
 
@@ -5249,63 +5241,56 @@
      */
     Context.prototype.scanCommentBindings = function(parentElement) {
         const commentBindingMap = new Map();
+        const openComments = []; // Stack to track nested wp-if comments
 
         // Create tree walker to find comment nodes
         const walker = document.createTreeWalker(
             parentElement,
             NodeFilter.SHOW_COMMENT,
             {
-                acceptNode: node => {
-                    // Only process comments that belong to this container
-                    return !Utils.belongsToPacContainer(this.container, node)
-                        ? NodeFilter.FILTER_SKIP
-                        : NodeFilter.FILTER_ACCEPT;
-                }
+                acceptNode: node =>
+                    Utils.belongsToPacContainer(this.container, node)
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_SKIP
             }
         );
 
         let commentNode;
-        const openComments = []; // Stack to track nested wp-if comments
 
         while ((commentNode = walker.nextNode())) {
-            const commentText = commentNode.textContent;
+            // nodeValue is more direct than textContent for comment nodes
+            const text = commentNode.nodeValue;
 
             // Check for opening wp-if comment
-            const openMatch = commentText.match(WP_IF_COMMENT_REGEX);
+            const openMatch = text.match(WP_IF_COMMENT_REGEX);
 
+            // If found, add it to the array
             if (openMatch) {
-                const expression = openMatch[1].trim();
-
-                openComments.push({
-                    comment: commentNode,
-                    expression: expression
-                });
+                openComments.push({ comment: commentNode, expression: openMatch[1].trim() });
                 continue;
             }
 
-            // Check for closing /wp-if comment
-            const closeMatch = commentText.match(WP_IF_CLOSE_COMMENT_REGEX);
-
-            if (closeMatch && openComments.length > 0) {
-                const openData = openComments.pop();
-
-                // Collect all nodes between opening and closing comments
-                const content = [];
-                let currentNode = openData.comment.nextSibling;
-
-                while (currentNode && currentNode !== commentNode) {
-                    content.push(currentNode);
-                    currentNode = currentNode.nextSibling;
-                }
-
-                // Store in map
-                commentBindingMap.set(openData.comment, {
-                    expression: openData.expression,
-                    closingComment: commentNode,
-                    content: content,
-                    isVisible: true // Track current visibility state
-                });
+            // Check for closing /wp-if comment — must have a matching open
+            if (!text.match(WP_IF_CLOSE_COMMENT_REGEX) || openComments.length === 0) {
+                continue;
             }
+
+            // pop comment off array
+            const { comment: openComment, expression } = openComments.pop();
+
+            // Collect all nodes between opening and closing comments
+            const content = [];
+            for (let node = openComment.nextSibling; node && node !== commentNode; node = node.nextSibling) {
+                content.push(node);
+            }
+
+            // Store in map
+            commentBindingMap.set(openComment, {
+                expression,
+                closingComment: commentNode,
+                content,
+                isVisible: true // Track current visibility state
+            });
         }
 
         // Warn about unmatched opening tags
@@ -5313,6 +5298,7 @@
             console.warn('WakaPAC: Unmatched wp-if comment directives found', openComments);
         }
 
+        // Return bindings map
         return commentBindingMap;
     };
 
