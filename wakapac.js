@@ -5863,25 +5863,36 @@
             return fallbackIndex;
         }
 
-        // Strategy 1: Direct reference comparison (works for object references)
-        for (let i = 0; i < sourceArray.length; i++) {
-            if (sourceArray[i] === item) {
+        // Pre-compute ID lookup capability once, outside the loop
+        const hasId = item && typeof item === 'object' && item.id !== undefined;
+        const itemId = hasId ? item.id : undefined;
+        const len = sourceArray.length;
+
+        // Single pass: reference equality (immediate return) + ID tracking (deferred)
+        let idMatch = -1;
+
+        for (let i = 0; i < len; i++) {
+            const sourceItem = sourceArray[i];
+
+            // Strategy 1: Direct reference comparison — highest priority, return immediately
+            if (sourceItem === item) {
                 return i;
             }
-        }
 
-        // Strategy 2: ID-based comparison (common pattern in data)
-        if (item && typeof item === 'object' && item.id !== undefined) {
-            for (let i = 0; i < sourceArray.length; i++) {
-                const sourceItem = sourceArray[i];
-                if (sourceItem && typeof sourceItem === 'object' && sourceItem.id === item.id) {
-                    return i;
-                }
+            // Strategy 2: Track first ID match for deferred return
+            if (hasId && idMatch === -1 &&
+                sourceItem && typeof sourceItem === 'object' && sourceItem.id === itemId) {
+                idMatch = i;
             }
         }
 
-        // Strategy 3: Deep equality comparison (for primitive values or value objects)
-        for (let i = 0; i < sourceArray.length; i++) {
+        // Return ID match if found
+        if (idMatch !== -1) {
+            return idMatch;
+        }
+
+        // Strategy 3: Deep equality — expensive, only runs when reference and ID both failed
+        for (let i = 0; i < len; i++) {
             if (Utils.isEqual(sourceArray[i], item)) {
                 return i;
             }
