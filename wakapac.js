@@ -3820,26 +3820,40 @@
     };
 
     /**
+     * Resolves the current value of a binding expression for a given element.
+     * Parses the expression, builds a scope resolver, and evaluates against the abstraction.
+     * @param {Element} element - The DOM element providing scope context
+     * @param {Object} bindingData - Binding configuration with a .target expression string
+     * @returns {*} The evaluated result of the binding expression
+     */
+    DomUpdater.prototype.resolveBindingValue = function (element, bindingData) {
+        // Parse (or retrieve cached) expression structure
+        const parsed = ExpressionCache.parseExpression(bindingData.target);
+
+        // Resolver translates scoped paths into normalized context paths
+        const scopeResolver = {
+            resolveScopedPath: (path) => this.context.normalizePath(path, element)
+        };
+
+        // Evaluate expression using the abstraction model and resolver
+        return ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
+    };
+
+    /**
      * Updates an element's attribute or property based on data binding configuration.
      * Evaluates the binding expression and applies the result using the appropriate binding method.
      * @param {Element} element - The DOM element to update
      * @param {string} bindingType - Type of binding (value, checked, visible, class, style, or attribute name)
      * @param {Object} bindingData - Binding configuration object
      * @param {string} bindingData.target - Expression string to evaluate for the binding value
+     * @param {*} [precomputedValue] - Optional pre-evaluated value to skip redundant expression evaluation
      * @returns {void}
      */
-    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData) {
+    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, precomputedValue) {
         try {
-            // Parse the expression
-            const parsed = ExpressionCache.parseExpression(bindingData.target);
-
-            // Create resolver context for this element
-            const scopeResolver = {
-                resolveScopedPath: (path) => this.context.normalizePath(path, element)
-            };
-
-            // Evaluate the expression
-            const value = ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
+            // Use precomputed value if available (from updateElementBindings change-detection),
+            // otherwise evaluate the expression (for initial render and other call sites)
+            const value = arguments.length >= 4 ? precomputedValue : this.resolveBindingValue(element, bindingData);
 
             // Use registered handler if available
             const handler = BindingHandlers[bindingType];
@@ -4865,8 +4879,9 @@
                         // Update value
                         previousValues[bindingType] = currentValue;
                         
-                        // Update DOM
-                        domUpdater.updateAttributeBinding(element, bindingType, bindingData);
+                        // Update DOM — pass pre-computed value to avoid re-evaluating
+                        // the same expression through a second normalizePath chain
+                        domUpdater.updateAttributeBinding(element, bindingType, bindingData, currentValue);
                     }
                 } catch (error) {
                     console.warn('Error evaluating binding:', bindingType, error);
@@ -5883,6 +5898,13 @@
      * @returns {Array<Object>}
      */
     Context.prototype.getForeachChain = function(element) {
+        // Return cached chain if available — avoids repeated DOM traversal
+        // and comment parsing for the same element across multiple normalizePath calls.
+        // Cache is valid until foreach rebuild (old elements are discarded entirely).
+        if (element._pacForeachChain) {
+            return element._pacForeachChain;
+        }
+
         // Accumulates the discovered foreach contexts in traversal order
         const chain = [];
 
@@ -5925,6 +5947,9 @@
             // Move to the next parent foreach element in the hierarchy
             currentElement = this.findParentForeachElement(currentElement);
         }
+
+        // Cache the chain on the element for subsequent lookups
+        element._pacForeachChain = chain;
 
         // Return the collected foreach chain
         return chain;
@@ -6061,6 +6086,20 @@
         // Select the active foreach frames after climbing
         const frames = this.getEffectiveFrames(element, climbs);
 
+        // Fast path: if no foreach frames apply, skip scope resolution entirely.
+        // This avoids building an empty Map and running resolveScopedTokens as a no-op.
+        if (frames.length === 0) {
+            const remaining = path.slice(climbs);
+
+            if (remaining.length === 0) {
+                return "";
+            } else if (remaining.length === 1 && typeof remaining[0] === "number") {
+                return remaining[0];
+            } else {
+                return Utils.pathArrayToString(remaining);
+            }
+        }
+
         // Build a scoped variable map from those frames
         const scope = this.buildForeachScope(frames);
 
@@ -6177,8 +6216,6 @@
      * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
      */
     Context.prototype.extractClosestForeachContext = function(startElement) {
-        console.log("x");
-
         // Cache container
         const container = this.container;
 
@@ -6293,6 +6330,7 @@
             delete element._pacPreviousValues;
             delete element._pacPreviousArray;
             delete element._pacDynamicClass;
+            delete element._pacForeachChain;
         });
 
         textNodesToRemove.forEach(textNode => {
@@ -6300,6 +6338,7 @@
 
             // Clean up cached text state
             delete textNode._pacPreviousText;
+            delete textNode._pacForeachChain;
         });
     };
 
