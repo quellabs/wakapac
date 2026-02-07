@@ -5002,18 +5002,37 @@
     Context.prototype.handleForeachRebuildForChange = function(event) {
         const path = event.detail.path;
 
-        // Only handle top-level array property changes
-        if (path.length !== 1 || !Array.isArray(this.abstraction[path[0]])) {
+        // Only handle top-level property changes
+        if (path.length !== 1) {
             return;
         }
 
-        // Find all foreach elements bound to this array path
-        const foreachElements = this.findForeachElementsByArrayPath(path[0]);
+        const changedProp = path[0];
 
-        // Re-render each foreach element that requires a rebuild
-        for (let i = 0, len = foreachElements.length; i < len; i++) {
-            if (this.shouldRebuildForeach(foreachElements[i])) {
-                this.renderForeach(foreachElements[i]);
+        // Collect property names to check: the changed prop itself (if array)
+        // plus any computed properties that depend on it
+        const propsToCheck = [];
+
+        if (Array.isArray(this.abstraction[changedProp])) {
+            propsToCheck.push(changedProp);
+        }
+
+        const dependents = this.dependencies.get(changedProp);
+
+        if (dependents) {
+            for (let i = 0; i < dependents.length; i++) {
+                propsToCheck.push(dependents[i]);
+            }
+        }
+
+        // Find and rebuild foreach elements for all candidate properties
+        for (let p = 0; p < propsToCheck.length; p++) {
+            const foreachElements = this.findForeachElementsByArrayPath(propsToCheck[p]);
+
+            for (let i = 0; i < foreachElements.length; i++) {
+                if (this.shouldRebuildForeach(foreachElements[i])) {
+                    this.renderForeach(foreachElements[i]);
+                }
             }
         }
     };
