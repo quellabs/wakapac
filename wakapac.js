@@ -719,8 +719,7 @@
             // Insert operations: return payload length when known,
             // otherwise assume a single semantic insert
             if (type.startsWith("insert")) {
-                const length = typeof data === "string" ? data.length : 1;
-                return length;
+                return typeof data === "string" ? data.length : 1;
             }
 
             // Delete operations: represent as a single semantic delete step
@@ -730,6 +729,102 @@
 
             // Formatting/history/other mutations have no length delta
             return 0;
+        },
+
+        /**
+         * Infer the text that would be removed from a text control during a
+         * delete-style beforeinput event. This must be called before the DOM
+         * mutation occurs, while the element value and selection still reflect
+         * the pre-edit state.
+         *
+         * Behavior:
+         *   - If a selection exists, returns the selected text.
+         *   - If the caret is collapsed:
+         *       • backward delete → character before caret
+         *       • forward delete  → character after caret
+         *   - Returns an empty string when no deletion can be inferred.
+         *
+         * @param {HTMLInputElement|HTMLTextAreaElement} element
+         *   A text input or textarea element supporting selection APIs.
+         * @param {"backward"|"forward"} direction
+         *   Delete direction derived from the inputType.
+         * @returns {string}
+         *   The inferred text that would be deleted, or empty string if none.
+         */
+        getDeletedTextFromTextControl(element, direction) {
+            // Capture pre-mutation selection bounds
+            const start = element.selectionStart;
+            const end = element.selectionEnd;
+
+            if (start == null || end == null) {
+                return "";
+            }
+
+            // Selection delete always wins
+            if (start !== end) {
+                return element.value.slice(start, end);
+            }
+
+            // Collapsed caret deletion
+            if (direction === "backward" && start > 0) {
+                return element.value.slice(start - 1, start);
+            }
+
+            if (direction === "forward" && start < element.value.length) {
+                return element.value.slice(start, start + 1);
+            }
+
+            return "";
+        },
+
+        /**
+         * Normalize an InputEvent inputType into a delete direction.
+         * @param {string|null|undefined} inputType
+         *   The inputType from a beforeinput/input event.
+         * @returns {"backward"|"forward"|null}
+         *   The normalized delete direction, or null if the inputType does not
+         *   describe a directional delete operation.
+         */
+        getDeleteDirection(inputType) {
+            // Guard against missing or non-delete input types
+            if (!inputType) {
+                return null;
+            }
+
+            // Backward delete (e.g., backspace-style operations)
+            if (inputType.includes("Backward")) {
+                return "backward";
+            }
+
+            // Forward delete (e.g., delete-key operations)
+            if (inputType.includes("Forward")) {
+                return "forward";
+            }
+
+            // Not a directional delete operation
+            return null;
+        },
+
+        /**
+         * Normalize a text control selection into an ordered range.
+         * Ensures the returned range always satisfies: start ≤ end
+         * @param {HTMLInputElement|HTMLTextAreaElement} element
+         *   A text input or textarea element.
+         * @returns {{start:number, end:number}|null}
+         *   Ordered selection range, or null if unavailable.
+         */
+        getNormalizedSelectionRange(element) {
+            const rawStart = element.selectionStart;
+            const rawEnd = element.selectionEnd;
+
+            if (rawStart == null || rawEnd == null) {
+                return null;
+            }
+
+            const start = Math.min(rawStart, rawEnd);
+            const end = Math.max(rawStart, rawEnd);
+
+            return { start, end };
         }
     }
 
@@ -1566,14 +1661,29 @@
                 if (isTextInput || isTextarea || isContentEditable) {
                     // Resolve container and encode text delta metadata
                     const container = self.getContainerForEvent(MSG_INPUT, event);
+                    const deleteDirection = Utils.getDeleteDirection(event.inputType);
                     const wParam = Utils.computeInputDelta(event);
-                    const lParam = 0;
+                    const lParam = self.getModifierState(event);
+
+                    // Fetch inserted/deleted text
+                    let text = null;
+
+                    if (wParam > 0) {
+                        text = event.data ?? "";
+                    } else if (wParam < 0 && (isTextInput || isTextarea)) {
+                        text = Utils.getDeletedTextFromTextControl(target, deleteDirection);
+                    }
+
+                    // Normalize selection
+                    const selectionInfo = Utils.getNormalizedSelectionRange(target);
 
                     // Create wrapper event (MSG_INPUT)
                     const customEvent = self.wrapDomEventAsMessage(MSG_INPUT, event, wParam, lParam, {
                         inputType: event.inputType,
-                        elementType: target.tagName.toLowerCase(), // Element category
-                        text: event.data // Raw inserted text (may be null for deletions)
+                        elementType: target.tagName.toLowerCase(),
+                        text: text,
+                        selectionStart: selectionInfo?.start ?? null,
+                        selectionEnd: selectionInfo?.end ?? null,
                     });
 
                     // Dispatch normalized input event
