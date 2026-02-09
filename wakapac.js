@@ -111,6 +111,7 @@
     const MSG_LCLICK = 0x0210;
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
+    const MSG_CAPTURECHANGED = 0x0215;
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
@@ -2627,6 +2628,10 @@
             if (!this._captureActive) {
                 return;
             }
+
+            // Send capture changed message to container losing the capture
+            const pacId = this._capturedContainer.getAttribute('data-pac-id');
+            wakaPAC.postMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
 
             // Remove the global CSS flag that indicates capture mode
             document.body.classList.remove('pac-capture-active');
@@ -8438,6 +8443,7 @@
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
         MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
         MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
+        MSG_CAPTURECHANGED,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
