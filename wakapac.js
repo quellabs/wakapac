@@ -2637,7 +2637,7 @@
             if (this._capturedContainer?.isConnected) {
                 const pacId = this._capturedContainer.getAttribute('data-pac-id');
                 
-                if (pacId != null) {
+                if (pacId !== null) {
                     wakaPAC.postMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
                 }
             }
