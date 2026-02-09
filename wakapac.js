@@ -79,6 +79,9 @@
         'NumpadEnter', 'NumpadDivide', 'MetaLeft', 'MetaRight', 'ContextMenu'
     ]);
 
+    // List of text input types
+    const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
+
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
      * Populated on first use to avoid repeated reflection on wakaPAC.
@@ -1654,7 +1657,7 @@
                 const target = event.target;
 
                 // Identify editable text sources
-                const isTextInput = target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(target.type);
+                const isTextInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
                 const isTextarea = target.tagName === 'TEXTAREA';
                 const isContentEditable = target.isContentEditable === true;
 
@@ -1662,6 +1665,7 @@
                 if (isTextInput || isTextarea || isContentEditable) {
                     // Resolve container and encode text delta metadata
                     const container = self.getContainerForEvent(MSG_INPUT, event);
+                    const supportsSelectionAPI = isTextInput || isTextarea;
                     const deleteDirection = Utils.getDeleteDirection(event.inputType);
                     const wParam = Utils.computeInputDelta(event);
                     const lParam = self.getModifierState(event);
@@ -1670,7 +1674,7 @@
                     let text = null;
 
                     if (wParam > 0) {
-                        text = event.data ?? "";
+                        text = event.data ?? event.dataTransfer?.getData("text/plain") ?? "";
                     } else if (wParam < 0 && (isTextInput || isTextarea)) {
                         text = Utils.getDeletedTextFromTextControl(target, deleteDirection);
                     }
@@ -1683,8 +1687,9 @@
                         inputType: event.inputType,
                         elementType: target.tagName.toLowerCase(),
                         text: text,
-                        selectionStart: selectionInfo?.start ?? null,
-                        selectionEnd: selectionInfo?.end ?? null,
+                        selectionStart: supportsSelectionAPI ? (selectionInfo?.start ?? null) : null,
+                        selectionEnd: supportsSelectionAPI ? (selectionInfo?.end ?? null) : null,
+                        contentEditable: isContentEditable,
                     });
 
                     // Dispatch normalized input event
