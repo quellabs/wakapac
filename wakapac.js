@@ -115,8 +115,8 @@
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
     const MSG_INPUT = 0x0303;
-    const MSG_FOCUS = 0x0007;
-    const MSG_BLUR = 0x0008;
+    const MSG_SETFOCUS = 0x0007;
+    const MSG_KILLFOCUS = 0x0008;
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
     const MSG_TIMER = 0x0113;
@@ -1100,10 +1100,10 @@
             // Fires when an element gains focus anywhere in the document
             document.addEventListener('focusin', function(event) {
                 // Resolve container responsible for the focused element
-                const container = self.getContainerForEvent(MSG_FOCUS, event);
+                const container = self.getContainerForEvent(MSG_SETFOCUS, event);
 
                 // Wrap DOM focus event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(MSG_FOCUS, event);
+                const customEvent = self.wrapDomEventAsMessage(MSG_SETFOCUS, event);
 
                 // Dispatch normalized focus message
                 self.dispatchToContainer(container, customEvent);
@@ -1113,10 +1113,10 @@
             // Fires when an element loses focus
             document.addEventListener('focusout', function(event) {
                 // Resolve container responsible for the blurred element
-                const container = self.getContainerForEvent(MSG_BLUR, event);
+                const container = self.getContainerForEvent(MSG_KILLFOCUS, event);
 
                 // Wrap DOM blur event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(MSG_BLUR, event);
+                const customEvent = self.wrapDomEventAsMessage(MSG_KILLFOCUS, event);
 
                 // Dispatch normalized blur message
                 self.dispatchToContainer(container, customEvent);
@@ -4482,7 +4482,7 @@
         }
 
         // Update reactive focus properties
-        if (event.message === MSG_FOCUS || event.message === MSG_BLUR) {
+        if (event.message === MSG_SETFOCUS || event.message === MSG_KILLFOCUS) {
             this.updateFocusProperties();
         }
 
@@ -4508,7 +4508,7 @@
                 this.handleDomInput(event);
                 break;
 
-            case MSG_BLUR:
+            case MSG_KILLFOCUS:
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
                 break;
@@ -4517,7 +4517,7 @@
 
     /**
      * Updates container focus reactive properties
-     * Called automatically after MSG_FOCUS/MSG_BLUR events
+     * Called automatically after MSG_SETFOCUS/MSG_KILLFOCUS events
      */
     Context.prototype.updateFocusProperties = function() {
         this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
@@ -8293,7 +8293,7 @@
         MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
-        MSG_FOCUS, MSG_BLUR, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
+        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
         MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
 
         // Mouse modifier keys
