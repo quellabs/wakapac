@@ -1489,7 +1489,7 @@
                 }
 
                 // Don't fire leave during capture - captured container logically retains pointer
-                if (self._captureActive) {
+                if (self.hasCapture()) {
                     return;
                 }
 
