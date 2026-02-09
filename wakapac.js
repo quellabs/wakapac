@@ -1688,8 +1688,7 @@
                         elementType: target.tagName.toLowerCase(),
                         text: text,
                         selectionStart: supportsSelectionAPI ? (selectionInfo?.start ?? null) : null,
-                        selectionEnd: supportsSelectionAPI ? (selectionInfo?.end ?? null) : null,
-                        contentEditable: isContentEditable,
+                        selectionEnd: supportsSelectionAPI ? (selectionInfo?.end ?? null) : null
                     });
 
                     // Dispatch normalized input event
