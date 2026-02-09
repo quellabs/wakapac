@@ -2595,13 +2595,13 @@
 
             // If this exact container already has capture, nothing to do
             // Return true to indicate capture is active (idempotent operation)
-            if (this._captureActive && this._capturedContainer === container) {
+            if (this.hasCapture() && this._capturedContainer === container) {
                 return true;
             }
 
             // If a different container currently has capture, release it first
             // Only one container can have capture at a time (Win32 behavior)
-            if (this._captureActive) {
+            if (this.hasCapture()) {
                 this.releaseCapture();
             }
 
@@ -2625,7 +2625,7 @@
          */
         releaseCapture() {
             // If capture is not active, there is nothing to release
-            if (!this._captureActive) {
+            if (!this.hasCapture()) {
                 return;
             }
 
