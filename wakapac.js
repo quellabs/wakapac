@@ -1392,7 +1392,7 @@
 
                     // Handle container transitions. Suppress when mouse capture is enabled
                     if (previousContainer !== currentContainer) {
-                        if (!self._captureActive) {
+                        if (!self.hasCapture()) {
                             // Mouse left the container
                             if (previousContainer) {
                                 self.dispatchMouseMessage(MSG_MOUSELEAVE, event, previousContainer);
@@ -7463,7 +7463,7 @@
         /**
          * Records a point along the gesture path
          * Only records if moved far enough from last point to filter out jitter
-         * @param {MouseEvent} event - The mousemove event
+         * @param {Event} event - The mousemove event
          * @returns {void}
          */
         recordPoint(event) {
