@@ -2630,7 +2630,7 @@
             }
 
             // Send capture changed message to container losing the capture
-            if (this._capturedContainer) {
+            if (this._capturedContainer?.isConnected) {
                 const pacId = this._capturedContainer.getAttribute('data-pac-id');
                 
                 if (pacId != null) {
