@@ -319,7 +319,7 @@
 
             // Combine prefix + base ID + optional random suffix.
             // Random suffix is a truncated 8-digit random number for additional entropy
-            return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
+            return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}` : ""}`;
         },
 
         /**
@@ -699,6 +699,38 @@
 
             return '0x' + keyCode.toString(16).toUpperCase().padStart(2, '0');
         },
+
+        /**
+         * Compute a signed semantic delta for a beforeinput/input event.
+         * The returned value encodes both operation direction and magnitude:
+         *
+         *   > 0  → insertion (character or text added)
+         *   < 0  → deletion (semantic delete step)
+         *   = 0  → non-length mutation (formatting, history, etc.)
+         *
+         * @param {InputEvent} event - A beforeinput or input event.
+         * @returns {number} Signed delta representing the text mutation.
+         */
+        computeInputDelta(event) {
+            // Normalize input type and payload for safe inspection
+            const type = event.inputType || "";
+            const data = event.data;
+
+            // Insert operations: return payload length when known,
+            // otherwise assume a single semantic insert
+            if (type.startsWith("insert")) {
+                const length = typeof data === "string" ? data.length : 1;
+                return length;
+            }
+
+            // Delete operations: represent as a single semantic delete step
+            if (type.startsWith("delete")) {
+                return -1;
+            }
+
+            // Formatting/history/other mutations have no length delta
+            return 0;
+        }
     }
 
     // ========================================================================
@@ -1521,7 +1553,7 @@
 
             // Input events (text fields, textareas, contenteditable)
             // Captures live text/content mutations rather than discrete value commits
-            document.addEventListener('input', function(event) {
+            document.addEventListener('beforeinput', function(event) {
                 // Fetch target element
                 const target = event.target;
 
@@ -1534,11 +1566,12 @@
                 if (isTextInput || isTextarea || isContentEditable) {
                     // Resolve container and encode text delta metadata
                     const container = self.getContainerForEvent(MSG_INPUT, event);
-                    const wParam = event.data ? event.data.length : 0; // Length of inserted data (if available)
+                    const wParam = Utils.computeInputDelta(event);
                     const lParam = 0;
 
                     // Create wrapper event (MSG_INPUT)
                     const customEvent = self.wrapDomEventAsMessage(MSG_INPUT, event, wParam, lParam, {
+                        inputType: event.inputType,
                         elementType: target.tagName.toLowerCase(), // Element category
                         text: event.data // Raw inserted text (may be null for deletions)
                     });
