@@ -2630,8 +2630,13 @@
             }
 
             // Send capture changed message to container losing the capture
-            const pacId = this._capturedContainer.getAttribute('data-pac-id');
-            wakaPAC.postMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
+            if (this._capturedContainer) {
+                const pacId = this._capturedContainer.getAttribute('data-pac-id');
+                
+                if (pacId != null) {
+                    wakaPAC.postMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
+                }
+            }
 
             // Remove the global CSS flag that indicates capture mode
             document.body.classList.remove('pac-capture-active');
