@@ -1702,27 +1702,34 @@
             // for two-way data binding. The beforeinput event above captures pre-mutation
             // delta information, while this handler ensures value bindings read the final value.
             document.addEventListener('input', function(event) {
-                // Fetch target element
                 const target = event.target;
 
-                // Identify editable text sources
                 const isTextInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
                 const isTextarea = target.tagName === 'TEXTAREA';
                 const isContentEditable = target.isContentEditable === true;
+                const supportsSelectionAPI = isTextInput || isTextarea;
 
-                // Only process text/content updates
                 if (isTextInput || isTextarea || isContentEditable) {
-                    // Resolve container
+                    // Fetch container
                     const container = self.getContainerForEvent(MSG_INPUT_COMPLETE, event);
-                    const wParam = 0;
-                    const lParam = 0;
 
-                    // Create wrapper event (MSG_INPUT_COMPLETE)
+                    // Post-mutation value
+                    const value = supportsSelectionAPI ? target.value : (target.textContent ?? '');
+
+                    // wParam: current value length (state indicator, mirrors MSG_CHANGE carrying control state)
+                    const wParam = value.length;
+
+                    // lParam: modifier key state (consistent with MSG_INPUT)
+                    const lParam = self.getModifierState(event);
+
+                    // Create custom event
                     const customEvent = self.wrapDomEventAsMessage(MSG_INPUT_COMPLETE, event, wParam, lParam, {
-                        elementType: target.tagName.toLowerCase()
+                        inputType: event.inputType ?? null,
+                        elementType: target.tagName.toLowerCase(),
+                        value: value
                     });
 
-                    // Dispatch post-mutation input event
+                    // Dispatch custom event
                     self.dispatchToContainer(container, customEvent);
                 }
             });
