@@ -119,6 +119,7 @@
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
     const MSG_INPUT = 0x0303;
+    const MSG_INPUT_COMPLETE = 0x0304;
     const MSG_SETFOCUS = 0x0007;
     const MSG_KILLFOCUS = 0x0008;
     const MSG_KEYDOWN = 0x0100;
@@ -1692,6 +1693,36 @@
                     });
 
                     // Dispatch normalized input event
+                    self.dispatchToContainer(container, customEvent);
+                }
+            });
+
+            // Post-input events (text fields, textareas, contenteditable)
+            // Fires after the DOM has been updated, providing accurate targetElement.value
+            // for two-way data binding. The beforeinput event above captures pre-mutation
+            // delta information, while this handler ensures value bindings read the final value.
+            document.addEventListener('input', function(event) {
+                // Fetch target element
+                const target = event.target;
+
+                // Identify editable text sources
+                const isTextInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
+                const isTextarea = target.tagName === 'TEXTAREA';
+                const isContentEditable = target.isContentEditable === true;
+
+                // Only process text/content updates
+                if (isTextInput || isTextarea || isContentEditable) {
+                    // Resolve container
+                    const container = self.getContainerForEvent(MSG_INPUT_COMPLETE, event);
+                    const wParam = 0;
+                    const lParam = 0;
+
+                    // Create wrapper event (MSG_INPUT_COMPLETE)
+                    const customEvent = self.wrapDomEventAsMessage(MSG_INPUT_COMPLETE, event, wParam, lParam, {
+                        elementType: target.tagName.toLowerCase()
+                    });
+
+                    // Dispatch post-mutation input event
                     self.dispatchToContainer(container, customEvent);
                 }
             });
@@ -4660,9 +4691,9 @@
                 this.handleDomChange(event);
                 break;
 
-            case MSG_INPUT:
-                // Character input
-                this.handleDomInput(event);
+            case MSG_INPUT_COMPLETE:
+                // Post-mutation input (input event - value is updated)
+                this.handleDomInputComplete(event);
                 break;
 
             case MSG_KILLFOCUS:
@@ -4843,14 +4874,13 @@
     };
 
     /**
-     * Handles DOM change events for data-bound elements, updating the underlying data model
-     * when form controls change their values. This enables two-way data binding by listening
-     * for custom DOM change events and propagating changes back to the data context.
-     * @param {CustomEvent} event - The DOM change event containing target element and new value
-     * @param {Element} event.target - The DOM element that changed
-     * @param {*} event.value - The new value from the changed element
+     * Handles post-mutation input events for data-bound elements, updating the underlying
+     * data model with the correct (post-mutation) value from targetElement.value.
+     * Fires on the 'input' DOM event via MSG_INPUT_COMPLETE.
+     * @param {CustomEvent} event - The post-mutation input event
+     * @param {Element} event.target - The DOM element whose value changed
      */
-    Context.prototype.handleDomInput = function(event) {
+    Context.prototype.handleDomInputComplete = function(event) {
         const self = this;
         const targetElement = event.target;
 
@@ -8449,7 +8479,7 @@
         // Message types
         MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
-        MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
+        MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
         MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
         MSG_CAPTURECHANGED,
