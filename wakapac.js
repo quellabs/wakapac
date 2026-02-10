@@ -79,6 +79,9 @@
         'NumpadEnter', 'NumpadDivide', 'MetaLeft', 'MetaRight', 'ContextMenu'
     ]);
 
+    // List of text input types
+    const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
+
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
      * Populated on first use to avoid repeated reflection on wakaPAC.
@@ -111,12 +114,14 @@
     const MSG_LCLICK = 0x0210;
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
+    const MSG_CAPTURECHANGED = 0x0215;
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
     const MSG_INPUT = 0x0303;
-    const MSG_FOCUS = 0x0007;
-    const MSG_BLUR = 0x0008;
+    const MSG_INPUT_COMPLETE = 0x0304;
+    const MSG_SETFOCUS = 0x0007;
+    const MSG_KILLFOCUS = 0x0008;
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
     const MSG_TIMER = 0x0113;
@@ -319,7 +324,7 @@
 
             // Combine prefix + base ID + optional random suffix.
             // Random suffix is a truncated 8-digit random number for additional entropy
-            return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}`:""}`;
+            return `${prefix}${id}${random ? `.${Math.trunc(Math.random() * 100000000)}` : ""}`;
         },
 
         /**
@@ -699,6 +704,133 @@
 
             return '0x' + keyCode.toString(16).toUpperCase().padStart(2, '0');
         },
+
+        /**
+         * Compute a signed semantic delta for a beforeinput/input event.
+         * The returned value encodes both operation direction and magnitude:
+         *
+         *   > 0  → insertion (character or text added)
+         *   < 0  → deletion (semantic delete step)
+         *   = 0  → non-length mutation (formatting, history, etc.)
+         *
+         * @param {InputEvent} event - A beforeinput or input event.
+         * @returns {number} Signed delta representing the text mutation.
+         */
+        computeInputDelta(event) {
+            // Normalize input type and payload for safe inspection
+            const type = event.inputType || "";
+            const data = event.data;
+
+            // Insert operations: return payload length when known,
+            // otherwise assume a single semantic insert
+            if (type.startsWith("insert")) {
+                return typeof data === "string" ? data.length : 1;
+            }
+
+            // Delete operations: represent as a single semantic delete step
+            if (type.startsWith("delete")) {
+                return -1;
+            }
+
+            // Formatting/history/other mutations have no length delta
+            return 0;
+        },
+
+        /**
+         * Infer the text that would be removed from a text control during a
+         * delete-style beforeinput event. This must be called before the DOM
+         * mutation occurs, while the element value and selection still reflect
+         * the pre-edit state.
+         *
+         * Behavior:
+         *   - If a selection exists, returns the selected text.
+         *   - If the caret is collapsed:
+         *       • backward delete → character before caret
+         *       • forward delete  → character after caret
+         *   - Returns an empty string when no deletion can be inferred.
+         *
+         * @param {HTMLInputElement|HTMLTextAreaElement} element
+         *   A text input or textarea element supporting selection APIs.
+         * @param {"backward"|"forward"} direction
+         *   Delete direction derived from the inputType.
+         * @returns {string}
+         *   The inferred text that would be deleted, or empty string if none.
+         */
+        getDeletedTextFromTextControl(element, direction) {
+            // Capture pre-mutation selection bounds
+            const start = element.selectionStart;
+            const end = element.selectionEnd;
+
+            if (start == null || end == null) {
+                return "";
+            }
+
+            // Selection delete always wins
+            if (start !== end) {
+                return element.value.slice(start, end);
+            }
+
+            // Collapsed caret deletion
+            if (direction === "backward" && start > 0) {
+                return element.value.slice(start - 1, start);
+            }
+
+            if (direction === "forward" && start < element.value.length) {
+                return element.value.slice(start, start + 1);
+            }
+
+            return "";
+        },
+
+        /**
+         * Normalize an InputEvent inputType into a delete direction.
+         * @param {string|null|undefined} inputType
+         *   The inputType from a beforeinput/input event.
+         * @returns {"backward"|"forward"|null}
+         *   The normalized delete direction, or null if the inputType does not
+         *   describe a directional delete operation.
+         */
+        getDeleteDirection(inputType) {
+            // Guard against missing or non-delete input types
+            if (!inputType) {
+                return null;
+            }
+
+            // Backward delete (e.g., backspace-style operations)
+            if (inputType.includes("Backward")) {
+                return "backward";
+            }
+
+            // Forward delete (e.g., delete-key operations)
+            if (inputType.includes("Forward")) {
+                return "forward";
+            }
+
+            // Not a directional delete operation
+            return null;
+        },
+
+        /**
+         * Normalize a text control selection into an ordered range.
+         * Ensures the returned range always satisfies: start ≤ end
+         * @param {HTMLInputElement|HTMLTextAreaElement} element
+         *   A text input or textarea element.
+         * @returns {{start:number, end:number}|null}
+         *   Ordered selection range, or null if unavailable.
+         */
+        getNormalizedSelectionRange(element) {
+            const rawStart = element.selectionStart;
+            const rawEnd = element.selectionEnd;
+
+            if (rawStart == null || rawEnd == null) {
+                return null;
+            }
+
+            const start = Math.min(rawStart, rawEnd);
+            const end = Math.max(rawStart, rawEnd);
+
+            return { start, end };
+        }
     }
 
     // ========================================================================
@@ -1100,10 +1232,10 @@
             // Fires when an element gains focus anywhere in the document
             document.addEventListener('focusin', function(event) {
                 // Resolve container responsible for the focused element
-                const container = self.getContainerForEvent(MSG_FOCUS, event);
+                const container = self.getContainerForEvent(MSG_SETFOCUS, event);
 
                 // Wrap DOM focus event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(MSG_FOCUS, event);
+                const customEvent = self.wrapDomEventAsMessage(MSG_SETFOCUS, event);
 
                 // Dispatch normalized focus message
                 self.dispatchToContainer(container, customEvent);
@@ -1113,10 +1245,10 @@
             // Fires when an element loses focus
             document.addEventListener('focusout', function(event) {
                 // Resolve container responsible for the blurred element
-                const container = self.getContainerForEvent(MSG_BLUR, event);
+                const container = self.getContainerForEvent(MSG_KILLFOCUS, event);
 
                 // Wrap DOM blur event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(MSG_BLUR, event);
+                const customEvent = self.wrapDomEventAsMessage(MSG_KILLFOCUS, event);
 
                 // Dispatch normalized blur message
                 self.dispatchToContainer(container, customEvent);
@@ -1264,7 +1396,7 @@
 
                     // Handle container transitions. Suppress when mouse capture is enabled
                     if (previousContainer !== currentContainer) {
-                        if (!self._captureActive) {
+                        if (!self.hasCapture()) {
                             // Mouse left the container
                             if (previousContainer) {
                                 self.dispatchMouseMessage(MSG_MOUSELEAVE, event, previousContainer);
@@ -1361,7 +1493,7 @@
                 }
 
                 // Don't fire leave during capture - captured container logically retains pointer
-                if (self._captureActive) {
+                if (self.hasCapture()) {
                     return;
                 }
 
@@ -1521,12 +1653,12 @@
 
             // Input events (text fields, textareas, contenteditable)
             // Captures live text/content mutations rather than discrete value commits
-            document.addEventListener('input', function(event) {
+            document.addEventListener('beforeinput', function(event) {
                 // Fetch target element
                 const target = event.target;
 
                 // Identify editable text sources
-                const isTextInput = target.tagName === 'INPUT' && !['radio', 'checkbox'].includes(target.type);
+                const isTextInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
                 const isTextarea = target.tagName === 'TEXTAREA';
                 const isContentEditable = target.isContentEditable === true;
 
@@ -1534,16 +1666,63 @@
                 if (isTextInput || isTextarea || isContentEditable) {
                     // Resolve container and encode text delta metadata
                     const container = self.getContainerForEvent(MSG_INPUT, event);
-                    const wParam = event.data ? event.data.length : 0; // Length of inserted data (if available)
-                    const lParam = 0;
+                    const supportsSelectionAPI = isTextInput || isTextarea;
+                    const deleteDirection = Utils.getDeleteDirection(event.inputType);
+                    const wParam = Utils.computeInputDelta(event);
+                    const lParam = self.getModifierState(event);
+
+                    // Fetch inserted/deleted text
+                    let text = null;
+
+                    if (wParam > 0) {
+                        text = event.data ?? event.dataTransfer?.getData("text/plain") ?? "";
+                    } else if (wParam < 0 && (isTextInput || isTextarea)) {
+                        text = Utils.getDeletedTextFromTextControl(target, deleteDirection);
+                    }
+
+                    // Normalize selection
+                    const selectionInfo = Utils.getNormalizedSelectionRange(target);
 
                     // Create wrapper event (MSG_INPUT)
                     const customEvent = self.wrapDomEventAsMessage(MSG_INPUT, event, wParam, lParam, {
-                        elementType: target.tagName.toLowerCase(), // Element category
-                        text: event.data // Raw inserted text (may be null for deletions)
+                        inputType: event.inputType,
+                        elementType: target.tagName.toLowerCase(),
+                        text: text,
+                        selectionStart: supportsSelectionAPI ? (selectionInfo?.start ?? null) : null,
+                        selectionEnd: supportsSelectionAPI ? (selectionInfo?.end ?? null) : null
                     });
 
                     // Dispatch normalized input event
+                    self.dispatchToContainer(container, customEvent);
+                }
+            });
+
+            // Post-input events (text fields, textareas, contenteditable)
+            // Fires after the DOM has been updated, providing accurate targetElement.value
+            // for two-way data binding. The beforeinput event above captures pre-mutation
+            // delta information, while this handler ensures value bindings read the final value.
+            document.addEventListener('input', function(event) {
+                // Fetch target element
+                const target = event.target;
+
+                // Identify editable text sources
+                const isTextInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
+                const isTextarea = target.tagName === 'TEXTAREA';
+                const isContentEditable = target.isContentEditable === true;
+
+                // Only process text/content updates
+                if (isTextInput || isTextarea || isContentEditable) {
+                    // Resolve container
+                    const container = self.getContainerForEvent(MSG_INPUT_COMPLETE, event);
+                    const wParam = 0;
+                    const lParam = 0;
+
+                    // Create wrapper event (MSG_INPUT_COMPLETE)
+                    const customEvent = self.wrapDomEventAsMessage(MSG_INPUT_COMPLETE, event, wParam, lParam, {
+                        elementType: target.tagName.toLowerCase()
+                    });
+
+                    // Dispatch post-mutation input event
                     self.dispatchToContainer(container, customEvent);
                 }
             });
@@ -2451,13 +2630,13 @@
 
             // If this exact container already has capture, nothing to do
             // Return true to indicate capture is active (idempotent operation)
-            if (this._captureActive && this._capturedContainer === container) {
+            if (this.hasCapture() && this._capturedContainer === container) {
                 return true;
             }
 
             // If a different container currently has capture, release it first
             // Only one container can have capture at a time (Win32 behavior)
-            if (this._captureActive) {
+            if (this.hasCapture()) {
                 this.releaseCapture();
             }
 
@@ -2481,8 +2660,17 @@
          */
         releaseCapture() {
             // If capture is not active, there is nothing to release
-            if (!this._captureActive) {
+            if (!this.hasCapture()) {
                 return;
+            }
+
+            // Send capture changed message to container losing the capture
+            if (this._capturedContainer?.isConnected) {
+                const pacId = this._capturedContainer.getAttribute('data-pac-id');
+                
+                if (pacId !== null) {
+                    wakaPAC.postMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
+                }
             }
 
             // Remove the global CSS flag that indicates capture mode
@@ -4482,7 +4670,7 @@
         }
 
         // Update reactive focus properties
-        if (event.message === MSG_FOCUS || event.message === MSG_BLUR) {
+        if (event.message === MSG_SETFOCUS || event.message === MSG_KILLFOCUS) {
             this.updateFocusProperties();
         }
 
@@ -4503,12 +4691,12 @@
                 this.handleDomChange(event);
                 break;
 
-            case MSG_INPUT:
-                // Character input
-                this.handleDomInput(event);
+            case MSG_INPUT_COMPLETE:
+                // Post-mutation input (input event - value is updated)
+                this.handleDomInputComplete(event);
                 break;
 
-            case MSG_BLUR:
+            case MSG_KILLFOCUS:
                 // Blur events - handle change mode updates and other blur logic
                 this.handleDomBlur(event);
                 break;
@@ -4517,7 +4705,7 @@
 
     /**
      * Updates container focus reactive properties
-     * Called automatically after MSG_FOCUS/MSG_BLUR events
+     * Called automatically after MSG_SETFOCUS/MSG_KILLFOCUS events
      */
     Context.prototype.updateFocusProperties = function() {
         this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
@@ -4686,14 +4874,13 @@
     };
 
     /**
-     * Handles DOM change events for data-bound elements, updating the underlying data model
-     * when form controls change their values. This enables two-way data binding by listening
-     * for custom DOM change events and propagating changes back to the data context.
-     * @param {CustomEvent} event - The DOM change event containing target element and new value
-     * @param {Element} event.target - The DOM element that changed
-     * @param {*} event.value - The new value from the changed element
+     * Handles post-mutation input events for data-bound elements, updating the underlying
+     * data model with the correct (post-mutation) value from targetElement.value.
+     * Fires on the 'input' DOM event via MSG_INPUT_COMPLETE.
+     * @param {CustomEvent} event - The post-mutation input event
+     * @param {Element} event.target - The DOM element whose value changed
      */
-    Context.prototype.handleDomInput = function(event) {
+    Context.prototype.handleDomInputComplete = function(event) {
         const self = this;
         const targetElement = event.target;
 
@@ -7310,7 +7497,7 @@
         /**
          * Records a point along the gesture path
          * Only records if moved far enough from last point to filter out jitter
-         * @param {MouseEvent} event - The mousemove event
+         * @param {Event} event - The mousemove event
          * @returns {void}
          */
         recordPoint(event) {
@@ -8251,6 +8438,32 @@
             y <= rect.bottom;
     };
 
+    /**
+     * Returns the topmost DOM element at the given client coordinates.
+     * @param {number} x - Horizontal coordinate in client space.
+     * @param {number} y - Vertical coordinate in client space.
+     * @returns {Element|null} The element at the position, or null if none.
+     */
+    wakaPAC.elementFromPoint = function(x, y) {
+        return document.elementFromPoint(x, y);
+    };
+
+    /**
+     * Returns the nearest PAC container at a client coordinate.
+     * @param {number} x - X coordinate in client space
+     * @param {number} y - Y coordinate in client space
+     * @returns {Element|null}
+     */
+    wakaPAC.containerFromPoint = function containerFromPoint(x, y) {
+        const hitElement = wakaPAC.elementFromPoint(x, y);
+
+        if (!hitElement) {
+            return null;
+        }
+
+        return hitElement.closest("[data-pac-id]");
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
@@ -8266,9 +8479,10 @@
         // Message types
         MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
-        MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
-        MSG_FOCUS, MSG_BLUR, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
+        MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
+        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
         MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
+        MSG_CAPTURECHANGED,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
