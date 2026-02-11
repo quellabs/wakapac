@@ -3435,11 +3435,11 @@
                     const leftLogical = this.evaluate(parsedExpr.left, context, scopeResolver);
 
                     if (parsedExpr.operator === '&&') {
-                        return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : false;
+                        return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : leftLogical;
                     } else if (parsedExpr.operator === '||') {
-                        return leftLogical ? true : this.evaluate(parsedExpr.right, context, scopeResolver);
+                        return leftLogical ? leftLogical : this.evaluate(parsedExpr.right, context, scopeResolver);
                     } else {
-                        return false;
+                        return leftLogical;
                     }
                 }
 
