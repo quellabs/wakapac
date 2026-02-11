@@ -3887,33 +3887,31 @@
     };
 
     /**
-     * If binding - Shows/hides element contents conditionally
+     * If binding — conditionally renders an element's child content.
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element with the if binding
+     * @param {*} value - Truthy = show, falsy = hide
      */
     BindingHandlers.if = function(context, element, value) {
+        // Convert value to boolean
         const shouldShow = !!value;
 
-        // Initialize tracking properties if not already set
-        if (element._pacOriginalHTML === undefined) {
-            element._pacOriginalHTML = element.innerHTML;
-            element._pacIsRendered = true; // Initially rendered
-        }
-
-        // Show the element contents: restore original HTML
-        if (shouldShow && !element._pacIsRendered) {
-            element.innerHTML = element._pacOriginalHTML;
+        // First invocation: snapshot child nodes as live references
+        if (element._pacIfChildren === undefined) {
+            element._pacIfChildren = Array.from(element.childNodes);
             element._pacIsRendered = true;
-
-            // Re-scan and register any bindings within the restored content
-            context.scanAndRegisterNewElements(element);
         }
 
-        // Hide the element contents: clear innerHTML
-        if (!shouldShow && element._pacIsRendered) {
-            // Update stored HTML before hiding in case content changed
-            element._pacOriginalHTML = element.innerHTML;
-            element.innerHTML = '';
-            element._pacIsRendered = false;
+        // If already shown, do not change
+        if (shouldShow === element._pacIsRendered) {
+            return;
         }
+
+        // Set new show flag
+        element._pacIsRendered = shouldShow;
+
+        // Toggle DOM
+        context.domUpdater.toggleNodeVisibility(element._pacIfChildren, shouldShow);
     };
 
     /**
@@ -4087,6 +4085,42 @@
             element.setAttribute(attribute, value);
         } else {
             element.removeAttribute(attribute);
+        }
+    };
+
+    /**
+     * Toggles visibility of a set of DOM nodes by swapping them with
+     * lightweight placeholder comments. Preserves all node state (event
+     * listeners, component instances, form values) across hide/show cycles.
+     * @param {Node[]} nodes - The DOM nodes to show or hide
+     * @param {boolean} show - True to restore nodes, false to replace with placeholders
+     * @returns {void}
+     */
+    DomUpdater.prototype.toggleNodeVisibility = function(nodes, show) {
+        if (show) {
+            for (let i = 0; i < nodes.length; i++) {
+                const placeholder = nodes[i]._pacIfPlaceholder;
+
+                if (placeholder && placeholder.parentNode) {
+                    placeholder.parentNode.replaceChild(nodes[i], placeholder);
+                }
+            }
+
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i].nodeType === Node.ELEMENT_NODE) {
+                    this.context.scanAndRegisterNewElements(nodes[i]);
+                }
+            }
+        } else {
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i].parentNode) {
+                    if (!nodes[i]._pacIfPlaceholder) {
+                        nodes[i]._pacIfPlaceholder = document.createComment('pac-if: hidden');
+                    }
+
+                    nodes[i].parentNode.replaceChild(nodes[i]._pacIfPlaceholder, nodes[i]);
+                }
+            }
         }
     };
 
@@ -5666,69 +5700,33 @@
     Context.prototype.updateCommentConditional = function(commentNode, mappingData) {
         const self = this;
 
-        // Create resolver context
         const scopeResolver = {
             resolveScopedPath: (path) => {
-                // For comment bindings, we need to check parent scope
-                // Find the nearest parent element to get proper scope
                 let parentElement = commentNode.parentNode;
+
                 while (parentElement && parentElement.nodeType !== Node.ELEMENT_NODE) {
                     parentElement = parentElement.parentNode;
                 }
+
                 return parentElement ? self.normalizePath(path, parentElement) : path;
             }
         };
 
         try {
-            // Parse and evaluate the expression (ExpressionCache handles caching)
             const parsed = ExpressionCache.parseExpression(mappingData.expression);
-            const value = ExpressionParser.evaluate(
-                parsed,
-                this.abstraction,
-                scopeResolver
-            );
-
+            const value = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
             const shouldShow = !!value;
 
-            // If state hasn't changed, do nothing
+            // Do not toggle node if visibility status did not change
             if (shouldShow === mappingData.isVisible) {
                 return;
             }
 
-            // Update visibility state
+            // Set new visible flag
             mappingData.isVisible = shouldShow;
 
-            if (shouldShow) {
-                // Show: Replace placeholder comments with actual content nodes
-                mappingData.content.forEach(node => {
-                    // Each node should have a corresponding placeholder
-                    const placeholder = node._wpIfPlaceholder;
-                    if (placeholder && placeholder.parentNode) {
-                        placeholder.parentNode.replaceChild(node, placeholder);
-                    }
-                });
-
-                // Re-scan and register any new elements in the content
-                mappingData.content.forEach(node => {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        self.scanAndRegisterNewElements(node);
-                    }
-                });
-
-            } else {
-                // Hide: Replace content nodes with placeholder comments
-                mappingData.content.forEach(node => {
-                    if (node.parentNode) {
-                        // Create placeholder comment if it doesn't exist
-                        if (!node._wpIfPlaceholder) {
-                            node._wpIfPlaceholder = document.createComment('wp-if: hidden');
-                        }
-                        // Replace node with its placeholder
-                        node.parentNode.replaceChild(node._wpIfPlaceholder, node);
-                    }
-                });
-            }
-
+            // Toggle DOM
+            this.domUpdater.toggleNodeVisibility(mappingData.content, shouldShow);
         } catch (error) {
             console.warn('Error evaluating wp-if comment expression:', mappingData.expression, error);
         }
