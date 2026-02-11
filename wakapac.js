@@ -3903,12 +3903,12 @@
         }
 
         // If already shown, do not change
-        if (shouldShow === element._pacIsRendered) {
+        if (shouldShow === element._pacIsVisible) {
             return;
         }
 
         // Set new show flag
-        element._pacIsRendered = shouldShow;
+        element._pacIsVisible = shouldShow;
 
         // Toggle DOM
         context.domUpdater.toggleNodeVisibility(element._pacIfChildren, shouldShow);
