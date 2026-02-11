@@ -4120,6 +4120,7 @@
         // Add interval for checking updateQueue
         this.updateQueue = new Map();
         this._updateQueueTimer = null;
+        this._updateQueueFireAt = 0;
 
         // Handle click events
         this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
@@ -4526,71 +4527,105 @@
     };
 
     /**
-     * Processes queued updates that are ready for execution.
-     * Handles both delay-triggered and blur-triggered updates safely by avoiding
-     * Map modification during iteration and providing proper error handling.
+     * Processes pending delayed updates from the update queue.
+     *
+     * Iterates through queued entries in a single pass, immediately applying any
+     * whose scheduled time has elapsed and tracking the earliest future entry
+     * for rescheduling. Blur-triggered entries are skipped here since they are
+     * handled synchronously by {@link Context#handleDomBlur}.
+     *
+     * Deletion of processed entries is deferred to a separate pass to avoid
+     * mutating the Map during iteration.
+     *
      * @returns {void}
      */
     Context.prototype.updateQueueHandler = function() {
-        // Clear the reference — we're running now
+        // Clear timer reference — this callback is now executing
         this._updateQueueTimer = null;
+        this._updateQueueFireAt = 0;
 
+        // Fast exit when nothing is queued
         if (this.updateQueue.size === 0) {
             return;
         }
 
         const now = Date.now();
-        const updatesToProcess = [];
-        const pathsToDelete = [];
         let nextExecuteAt = Infinity;
 
-        // Collect expired updates and find earliest future one
+        // Paths whose entries have been applied and should be removed.
+        // Collected separately because deleting Map keys during forEach
+        // can cause unpredictable visitation order.
+        const pathsToDelete = [];
+
+        // Single-pass scan: apply expired delay entries, find nearest future one
         this.updateQueue.forEach((queueEntry, resolvedPath) => {
+            // Skip non-delay entries (e.g. blur-triggered); those are
+            // processed event-driven in handleDomBlur
             if (queueEntry.trigger !== 'delay') {
-                return; // blur entries are handled by handleDomBlur
+                return;
             }
 
             if (now >= queueEntry.executeAt) {
-                updatesToProcess.push({
-                    path: resolvedPath,
-                    value: queueEntry.value
-                });
+                // Entry has matured — apply the value directly to the
+                // reactive abstraction and mark the path for cleanup
                 pathsToDelete.push(resolvedPath);
+
+                try {
+                    Utils.setNestedProperty(resolvedPath, queueEntry.value, this.abstraction);
+                } catch (error) {
+                    console.warn(`Error applying queued update for path "${resolvedPath}":`, error);
+                }
             } else if (queueEntry.executeAt < nextExecuteAt) {
+                // Track the earliest future entry so we can schedule
+                // the next processing pass at exactly the right time
                 nextExecuteAt = queueEntry.executeAt;
             }
         });
 
-        // Apply expired updates
-        updatesToProcess.forEach(update => {
-            try {
-                Utils.setNestedProperty(update.path, update.value, this.abstraction);
-            } catch (error) {
-                console.warn(`Error applying queued update for path "${update.path}":`, error);
-            }
-        });
+        // Remove processed entries after iteration is complete
+        for (let i = 0; i < pathsToDelete.length; i++) {
+            this.updateQueue.delete(pathsToDelete[i]);
+        }
 
-        // Clean up
-        pathsToDelete.forEach(path => {
-            this.updateQueue.delete(path);
-        });
-
-        // Schedule next run only if there are remaining delay entries
+        // If any delay entries remain, schedule the next run to fire
+        // when the earliest one matures (avoids perpetual polling)
         if (nextExecuteAt < Infinity) {
-            this.scheduleQueueProcessing(nextExecuteAt - Date.now());
+            this.scheduleQueueProcessing(nextExecuteAt - now);
         }
     };
 
+    /**
+     * Schedules a future run of the update queue processor.
+     *
+     * Sets a single timeout to fire {@link Context#updateQueueHandler} after
+     * the given delay. If a timer is already pending, it is replaced only when
+     * the new delay would fire sooner — ensuring the earliest queued entry is
+     * always processed on time without creating redundant timers.
+     *
+     * @param {number} delay - Milliseconds until the queue should be processed.
+     *                         Clamped to a minimum of 1ms to guarantee asynchronous execution.
+     * @returns {void}
+     */
     Context.prototype.scheduleQueueProcessing = function(delay) {
-        // Don't double-schedule
-        if (this._updateQueueTimer !== null) {
+        const self = this;
+        const clampedDelay = Math.max(delay, 1);
+        const fireAt = Date.now() + clampedDelay;
+
+        // If an existing timer already covers this deadline, keep it
+        if (this._updateQueueTimer !== null && this._updateQueueFireAt <= fireAt) {
             return;
         }
 
-        const self = this;
+        // Cancel the existing timer — the new one fires sooner
+        if (this._updateQueueTimer !== null) {
+            clearTimeout(this._updateQueueTimer);
+        }
+
+        // Run timeout
+        this._updateQueueFireAt = fireAt;
         this._updateQueueTimer = setTimeout(function() {
             self.updateQueueHandler();
-        }, Math.max(delay, 1));
+        }, clampedDelay);
     };
 
     /**
