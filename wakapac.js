@@ -1404,8 +1404,10 @@
                 if (MouseGestureRecognizer.gestureJustDispatched) {
                     MouseGestureRecognizer.gestureJustDispatched = false;
                     event.preventDefault();
+                    return;
                 }
 
+                // Dispatch MSG_RCLICK if no gesture recognized
                 const container = self.getContainerForEvent(MSG_RCLICK, event);
                 self.dispatchMouseMessage(MSG_RCLICK, event, container);
             });
