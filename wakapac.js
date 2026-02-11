@@ -1089,6 +1089,46 @@
         }
 
         /**
+         * Proxy deleteProperty trap handler.
+         * Fires a pac:change event when a reactive property is deleted,
+         * allowing the DOM to update in response.
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being deleted
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {boolean} True if deletion succeeded
+         */
+        function proxyDeleteHandler(target, prop, currentPath) {
+            // Property doesn't exist — nothing to do
+            if (!(prop in target)) {
+                return true;
+            }
+
+            // Non-reactive properties: delete silently
+            if (!shouldMakeReactive(prop)) {
+                delete target[prop];
+                return true;
+            }
+
+            // Capture old value before deletion for the change event
+            const oldValue = target[prop];
+            const propertyPath = currentPath.concat([prop]);
+
+            // Perform the actual deletion
+            delete target[prop];
+
+            // Notify the DOM that this property is gone
+            container.dispatchEvent(new CustomEvent("pac:change", {
+                detail: {
+                    path: propertyPath,
+                    oldValue: oldValue,
+                    newValue: undefined
+                }
+            }));
+
+            return true;
+        }
+
+        /**
          * Creates a reactive proxy for an object or array
          * @param {Object|Array} obj - The object to make reactive
          * @param {Array} currentPath - Current path in the data structure
@@ -1104,6 +1144,10 @@
 
                 set: function (target, prop, newValue) {
                     return proxySetHandler(target, prop, newValue, currentPath);
+                },
+
+                deleteProperty: function (target, prop) {
+                    return proxyDeleteHandler(target, prop, currentPath);
                 }
             });
         }
