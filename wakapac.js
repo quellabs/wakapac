@@ -3961,6 +3961,12 @@
 
         // Toggle DOM
         context.domUpdater.toggleNodeVisibility(element._pacIfChildren, shouldShow);
+
+        // Scan from the if-container so restored children (including
+        // foreach elements) are treated as children, not as parentElement
+        if (shouldShow) {
+            context.scanAndRegisterNewElements(element);
+        }
     };
 
     /**
@@ -4163,12 +4169,6 @@
 
                 if (placeholder && placeholder.parentNode) {
                     placeholder.parentNode.replaceChild(nodes[i], placeholder);
-                }
-            }
-
-            for (let i = 0; i < nodes.length; i++) {
-                if (nodes[i].nodeType === Node.ELEMENT_NODE) {
-                    this.context.scanAndRegisterNewElements(nodes[i]);
                 }
             }
         } else {
@@ -5787,6 +5787,15 @@
 
             // Toggle DOM
             this.domUpdater.toggleNodeVisibility(mappingData.content, shouldShow);
+
+            // Scan new nodes
+            if (shouldShow) {
+                mappingData.content.forEach(node => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        self.scanAndRegisterNewElements(node);
+                    }
+                });
+            }
         } catch (error) {
             console.warn('Error evaluating wp-if comment expression:', mappingData.expression, error);
         }
