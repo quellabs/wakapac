@@ -3931,16 +3931,27 @@
             return;
         }
 
-        // String syntax: "active disabled"
+        // String syntax: "active disabled" or single "active"
         if (typeof value === 'string') {
-            // Remove old dynamic class if it exists and differs
-            if (element._pacDynamicClass && element._pacDynamicClass !== value) {
-                element.classList.remove(element._pacDynamicClass);
+            // Parse new classes from the space-separated string
+            const newClasses = value.split(/\s+/).filter(Boolean);
+
+            // Remove old dynamic classes that aren't in the new set
+            if (element._pacDynamicClasses) {
+                for (let i = 0; i < element._pacDynamicClasses.length; i++) {
+                    if (newClasses.indexOf(element._pacDynamicClasses[i]) === -1) {
+                        element.classList.remove(element._pacDynamicClasses[i]);
+                    }
+                }
             }
 
-            // Add new class
-            element.classList.add(value);
-            element._pacDynamicClass = value;
+            // Add new classes
+            for (let i = 0; i < newClasses.length; i++) {
+                element.classList.add(newClasses[i]);
+            }
+
+            // Track current set for next update
+            element._pacDynamicClasses = newClasses;
         }
     };
 
