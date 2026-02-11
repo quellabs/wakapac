@@ -82,6 +82,12 @@
     // List of text input types
     const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
 
+    // Non-text input types that commit values via the change event.
+    const CHANGE_INPUT_TYPES = new Set([
+        'checkbox', 'radio', 'color', 'range',
+        'date', 'datetime-local', 'month', 'week', 'time'
+    ]);
+
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
      * Populated on first use to avoid repeated reflection on wakaPAC.
@@ -1089,6 +1095,46 @@
         }
 
         /**
+         * Proxy deleteProperty trap handler.
+         * Fires a pac:change event when a reactive property is deleted,
+         * allowing the DOM to update in response.
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being deleted
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {boolean} True if deletion succeeded
+         */
+        function proxyDeleteHandler(target, prop, currentPath) {
+            // Property doesn't exist — nothing to do
+            if (!(prop in target)) {
+                return true;
+            }
+
+            // Non-reactive properties: delete silently
+            if (!shouldMakeReactive(prop)) {
+                delete target[prop];
+                return true;
+            }
+
+            // Capture old value before deletion for the change event
+            const oldValue = target[prop];
+            const propertyPath = currentPath.concat([prop]);
+
+            // Perform the actual deletion
+            delete target[prop];
+
+            // Notify the DOM that this property is gone
+            container.dispatchEvent(new CustomEvent("pac:change", {
+                detail: {
+                    path: propertyPath,
+                    oldValue: oldValue,
+                    newValue: undefined
+                }
+            }));
+
+            return true;
+        }
+
+        /**
          * Creates a reactive proxy for an object or array
          * @param {Object|Array} obj - The object to make reactive
          * @param {Array} currentPath - Current path in the data structure
@@ -1104,6 +1150,10 @@
 
                 set: function (target, prop, newValue) {
                     return proxySetHandler(target, prop, newValue, currentPath);
+                },
+
+                deleteProperty: function (target, prop) {
+                    return proxyDeleteHandler(target, prop, currentPath);
                 }
             });
         }
@@ -1631,11 +1681,10 @@
 
                 // Identify supported control types
                 const isSelect = target.tagName === 'SELECT';
-                const isRadio = target.type === 'radio';
-                const isCheckbox = target.type === 'checkbox';
+                const isChangeInput = target.tagName === 'INPUT' && CHANGE_INPUT_TYPES.has(target.type);
 
                 // Only process relevant control changes
-                if (isSelect || isRadio || isCheckbox) {
+                if (isSelect || isChangeInput) {
                     // Resolve owning container and build change message payload
                     const container = self.getContainerForEvent(MSG_CHANGE, event);
                     const wParam = self.buildChangeWParam(event);
@@ -1705,16 +1754,16 @@
                 const target = event.target;
 
                 const isTextInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
+                const isRangeInput = target.tagName === 'INPUT' && target.type === 'range';
                 const isTextarea = target.tagName === 'TEXTAREA';
                 const isContentEditable = target.isContentEditable === true;
-                const supportsSelectionAPI = isTextInput || isTextarea;
 
-                if (isTextInput || isTextarea || isContentEditable) {
+                if (isTextInput || isRangeInput || isTextarea || isContentEditable) {
                     // Fetch container
                     const container = self.getContainerForEvent(MSG_INPUT_COMPLETE, event);
 
                     // Post-mutation value
-                    const value = supportsSelectionAPI ? target.value : (target.textContent ?? '');
+                    const value = isTextInput || isTextarea || isRangeInput ? target.value : (target.textContent ?? '');
 
                     // wParam: current value length (state indicator, mirrors MSG_CHANGE carrying control state)
                     const wParam = value.length;
@@ -2195,7 +2244,7 @@
         /**
          * Builds wParam for mouse messages following Win32 WM_LBUTTONDOWN format
          * Contains key state flags indicating which modifier keys and mouse buttons are pressed
-         * @param {MouseEvent} event - The mouse event
+         * @param {Event} event - The mouse event
          * @returns {number} wParam value with packed key state flags
          */
         getModifierState(event) {
@@ -3435,11 +3484,11 @@
                     const leftLogical = this.evaluate(parsedExpr.left, context, scopeResolver);
 
                     if (parsedExpr.operator === '&&') {
-                        return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : false;
+                        return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : leftLogical;
                     } else if (parsedExpr.operator === '||') {
-                        return leftLogical ? true : this.evaluate(parsedExpr.right, context, scopeResolver);
+                        return leftLogical ? leftLogical : this.evaluate(parsedExpr.right, context, scopeResolver);
                     } else {
-                        return false;
+                        return leftLogical;
                     }
                 }
 
@@ -3887,32 +3936,36 @@
     };
 
     /**
-     * If binding - Shows/hides element contents conditionally
+     * If binding — conditionally renders an element's child content.
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element with the if binding
+     * @param {*} value - Truthy = show, falsy = hide
      */
     BindingHandlers.if = function(context, element, value) {
+        // Convert value to boolean
         const shouldShow = !!value;
 
-        // Initialize tracking properties if not already set
-        if (element._pacOriginalHTML === undefined) {
-            element._pacOriginalHTML = element.innerHTML;
-            element._pacIsRendered = true; // Initially rendered
+        // First invocation: snapshot child nodes as live references
+        if (element._pacIfChildren === undefined) {
+            element._pacIfChildren = Array.from(element.childNodes);
+            element._pacIsVisible = true;
         }
 
-        // Show the element contents: restore original HTML
-        if (shouldShow && !element._pacIsRendered) {
-            element.innerHTML = element._pacOriginalHTML;
-            element._pacIsRendered = true;
+        // If already shown, do not change
+        if (shouldShow === element._pacIsVisible) {
+            return;
+        }
 
-            // Re-scan and register any bindings within the restored content
+        // Set new show flag
+        element._pacIsVisible = shouldShow;
+
+        // Toggle DOM
+        context.domUpdater.toggleNodeVisibility(element._pacIfChildren, shouldShow);
+
+        // Scan from the if-container so restored children (including
+        // foreach elements) are treated as children, not as parentElement
+        if (shouldShow) {
             context.scanAndRegisterNewElements(element);
-        }
-
-        // Hide the element contents: clear innerHTML
-        if (!shouldShow && element._pacIsRendered) {
-            // Update stored HTML before hiding in case content changed
-            element._pacOriginalHTML = element.innerHTML;
-            element.innerHTML = '';
-            element._pacIsRendered = false;
         }
     };
 
@@ -3933,16 +3986,27 @@
             return;
         }
 
-        // String syntax: "active disabled"
+        // String syntax: "active disabled" or single "active"
         if (typeof value === 'string') {
-            // Remove old dynamic class if it exists and differs
-            if (element._pacDynamicClass && element._pacDynamicClass !== value) {
-                element.classList.remove(element._pacDynamicClass);
+            // Parse new classes from the space-separated string
+            const newClasses = value.split(/\s+/).filter(Boolean);
+
+            // Remove old dynamic classes that aren't in the new set
+            if (element._pacDynamicClasses) {
+                for (let i = 0; i < element._pacDynamicClasses.length; i++) {
+                    if (newClasses.indexOf(element._pacDynamicClasses[i]) === -1) {
+                        element.classList.remove(element._pacDynamicClasses[i]);
+                    }
+                }
             }
 
-            // Add new class
-            element.classList.add(value);
-            element._pacDynamicClass = value;
+            // Add new classes
+            for (let i = 0; i < newClasses.length; i++) {
+                element.classList.add(newClasses[i]);
+            }
+
+            // Track current set for next update
+            element._pacDynamicClasses = newClasses;
         }
     };
 
@@ -4090,6 +4154,36 @@
         }
     };
 
+    /**
+     * Toggles visibility of a set of DOM nodes by swapping them with
+     * lightweight placeholder comments. Preserves all node state (event
+     * listeners, component instances, form values) across hide/show cycles.
+     * @param {Node[]} nodes - The DOM nodes to show or hide
+     * @param {boolean} show - True to restore nodes, false to replace with placeholders
+     * @returns {void}
+     */
+    DomUpdater.prototype.toggleNodeVisibility = function(nodes, show) {
+        if (show) {
+            for (let i = 0; i < nodes.length; i++) {
+                const placeholder = nodes[i]._pacIfPlaceholder;
+
+                if (placeholder && placeholder.parentNode) {
+                    placeholder.parentNode.replaceChild(nodes[i], placeholder);
+                }
+            }
+        } else {
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i].parentNode) {
+                    if (!nodes[i]._pacIfPlaceholder) {
+                        nodes[i]._pacIfPlaceholder = document.createComment('pac-if: hidden');
+                    }
+
+                    nodes[i].parentNode.replaceChild(nodes[i]._pacIfPlaceholder, nodes[i]);
+                }
+            }
+        }
+    };
+
     // ========================================================================
     // CONTEXT
     // ========================================================================
@@ -4119,8 +4213,8 @@
 
         // Add interval for checking updateQueue
         this.updateQueue = new Map();
-        this.updateQueueCallback = function() { self.updateQueueHandler(); };
-        this.updateQueueInterval = setInterval(this.updateQueueCallback, 10);
+        this._updateQueueTimer = null;
+        this._updateQueueFireAt = 0;
 
         // Handle click events
         this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
@@ -4188,9 +4282,11 @@
             this.debounceTimer = null;
         }
 
-        // Clear updateQueueCallback interval
-        clearInterval(this.updateQueueInterval);
-        this.updateQueueCallback = null;
+        // Clear updateQueueTimer
+        if (this._updateQueueTimer !== null) {
+            clearTimeout(this._updateQueueTimer);
+            this._updateQueueTimer = null;
+        }
 
         // Clear boundHandlePacEvent callback
         this.boundHandlePacEvent = null;
@@ -4525,52 +4621,105 @@
     };
 
     /**
-     * Processes queued updates that are ready for execution.
-     * Handles both delay-triggered and blur-triggered updates safely by avoiding
-     * Map modification during iteration and providing proper error handling.
+     * Processes pending delayed updates from the update queue.
+     *
+     * Iterates through queued entries in a single pass, immediately applying any
+     * whose scheduled time has elapsed and tracking the earliest future entry
+     * for rescheduling. Blur-triggered entries are skipped here since they are
+     * handled synchronously by {@link Context#handleDomBlur}.
+     *
+     * Deletion of processed entries is deferred to a separate pass to avoid
+     * mutating the Map during iteration.
+     *
      * @returns {void}
      */
     Context.prototype.updateQueueHandler = function() {
-        // Early exit if queue is empty for performance
+        // Clear timer reference — this callback is now executing
+        this._updateQueueTimer = null;
+        this._updateQueueFireAt = 0;
+
+        // Fast exit when nothing is queued
         if (this.updateQueue.size === 0) {
             return;
         }
 
         const now = Date.now();
-        const updatesToProcess = [];
+        let nextExecuteAt = Infinity;
+
+        // Paths whose entries have been applied and should be removed.
+        // Collected separately because deleting Map keys during forEach
+        // can cause unpredictable visitation order.
         const pathsToDelete = [];
 
-        // Step 1: Collect all expired updates without modifying the queue
-        // This prevents the race condition of modifying a Map during iteration
+        // Single-pass scan: apply expired delay entries, find nearest future one
         this.updateQueue.forEach((queueEntry, resolvedPath) => {
-            if (queueEntry.trigger === 'delay' && now >= queueEntry.executeAt) {
-                updatesToProcess.push({
-                    path: resolvedPath,
-                    value: queueEntry.value,
-                    trigger: queueEntry.trigger
-                });
+            // Skip non-delay entries (e.g. blur-triggered); those are
+            // processed event-driven in handleDomBlur
+            if (queueEntry.trigger !== 'delay') {
+                return;
+            }
+
+            if (now >= queueEntry.executeAt) {
+                // Entry has matured — apply the value directly to the
+                // reactive abstraction and mark the path for cleanup
                 pathsToDelete.push(resolvedPath);
+
+                try {
+                    Utils.setNestedProperty(resolvedPath, queueEntry.value, this.abstraction);
+                } catch (error) {
+                    console.warn(`Error applying queued update for path "${resolvedPath}":`, error);
+                }
+            } else if (queueEntry.executeAt < nextExecuteAt) {
+                // Track the earliest future entry so we can schedule
+                // the next processing pass at exactly the right time
+                nextExecuteAt = queueEntry.executeAt;
             }
         });
 
-        // Step 2: Process all collected updates
-        // Apply updates in batch to minimize reactive system overhead
-        updatesToProcess.forEach(update => {
-            try {
-                // Apply the property update to the reactive abstraction
-                // This will trigger any dependent DOM updates automatically
-                Utils.setNestedProperty(update.path, update.value, this.abstraction);
-            } catch (error) {
-                // Log error with context for debugging, but continue processing other updates
-                console.warn(`Error applying queued update for path "${update.path}":`, error);
-            }
-        });
+        // Remove processed entries after iteration is complete
+        for (let i = 0; i < pathsToDelete.length; i++) {
+            this.updateQueue.delete(pathsToDelete[i]);
+        }
 
-        // Step 3: Clean up processed entries from the queue
-        // Remove entries only after all processing is complete to maintain consistency
-        pathsToDelete.forEach(path => {
-            this.updateQueue.delete(path);
-        });
+        // If any delay entries remain, schedule the next run to fire
+        // when the earliest one matures (avoids perpetual polling)
+        if (nextExecuteAt < Infinity) {
+            this.scheduleQueueProcessing(nextExecuteAt - now);
+        }
+    };
+
+    /**
+     * Schedules a future run of the update queue processor.
+     *
+     * Sets a single timeout to fire {@link Context#updateQueueHandler} after
+     * the given delay. If a timer is already pending, it is replaced only when
+     * the new delay would fire sooner — ensuring the earliest queued entry is
+     * always processed on time without creating redundant timers.
+     *
+     * @param {number} delay - Milliseconds until the queue should be processed.
+     *                         Clamped to a minimum of 1ms to guarantee asynchronous execution.
+     * @returns {void}
+     */
+    Context.prototype.scheduleQueueProcessing = function(delay) {
+        const self = this;
+        const clampedDelay = Math.max(delay, 1);
+        const fireAt = Date.now() + clampedDelay;
+
+        // If an existing timer already covers this deadline, keep it
+        if (this._updateQueueTimer !== null && this._updateQueueFireAt <= fireAt) {
+            return;
+        }
+
+        // Cancel the existing timer — the new one fires sooner
+        if (this._updateQueueTimer !== null) {
+            clearTimeout(this._updateQueueTimer);
+        }
+
+        // Run timeout
+        this._updateQueueFireAt = fireAt;
+        this._updateQueueTimer = setTimeout(function() {
+            self.updateQueueHandler();
+        }, clampedDelay);
     };
 
     /**
@@ -4928,6 +5077,7 @@
                         executeAt: Date.now() + config.delay
                     });
 
+                    this.scheduleQueueProcessing(config.delay);
                     break;
 
                 case 'change':
@@ -5610,69 +5760,42 @@
     Context.prototype.updateCommentConditional = function(commentNode, mappingData) {
         const self = this;
 
-        // Create resolver context
         const scopeResolver = {
             resolveScopedPath: (path) => {
-                // For comment bindings, we need to check parent scope
-                // Find the nearest parent element to get proper scope
                 let parentElement = commentNode.parentNode;
+
                 while (parentElement && parentElement.nodeType !== Node.ELEMENT_NODE) {
                     parentElement = parentElement.parentNode;
                 }
+
                 return parentElement ? self.normalizePath(path, parentElement) : path;
             }
         };
 
         try {
-            // Parse and evaluate the expression (ExpressionCache handles caching)
             const parsed = ExpressionCache.parseExpression(mappingData.expression);
-            const value = ExpressionParser.evaluate(
-                parsed,
-                this.abstraction,
-                scopeResolver
-            );
-
+            const value = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
             const shouldShow = !!value;
 
-            // If state hasn't changed, do nothing
+            // Do not toggle node if visibility status did not change
             if (shouldShow === mappingData.isVisible) {
                 return;
             }
 
-            // Update visibility state
+            // Set new visible flag
             mappingData.isVisible = shouldShow;
 
-            if (shouldShow) {
-                // Show: Replace placeholder comments with actual content nodes
-                mappingData.content.forEach(node => {
-                    // Each node should have a corresponding placeholder
-                    const placeholder = node._wpIfPlaceholder;
-                    if (placeholder && placeholder.parentNode) {
-                        placeholder.parentNode.replaceChild(node, placeholder);
-                    }
-                });
+            // Toggle DOM
+            this.domUpdater.toggleNodeVisibility(mappingData.content, shouldShow);
 
-                // Re-scan and register any new elements in the content
+            // Scan new nodes
+            if (shouldShow) {
                 mappingData.content.forEach(node => {
                     if (node.nodeType === Node.ELEMENT_NODE) {
                         self.scanAndRegisterNewElements(node);
                     }
                 });
-
-            } else {
-                // Hide: Replace content nodes with placeholder comments
-                mappingData.content.forEach(node => {
-                    if (node.parentNode) {
-                        // Create placeholder comment if it doesn't exist
-                        if (!node._wpIfPlaceholder) {
-                            node._wpIfPlaceholder = document.createComment('wp-if: hidden');
-                        }
-                        // Replace node with its placeholder
-                        node.parentNode.replaceChild(node._wpIfPlaceholder, node);
-                    }
-                });
             }
-
         } catch (error) {
             console.warn('Error evaluating wp-if comment expression:', mappingData.expression, error);
         }
