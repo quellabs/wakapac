@@ -4119,8 +4119,7 @@
 
         // Add interval for checking updateQueue
         this.updateQueue = new Map();
-        this.updateQueueCallback = function() { self.updateQueueHandler(); };
-        this.updateQueueInterval = setInterval(this.updateQueueCallback, 10);
+        this._updateQueueTimer = null;
 
         // Handle click events
         this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
@@ -4188,9 +4187,11 @@
             this.debounceTimer = null;
         }
 
-        // Clear updateQueueCallback interval
-        clearInterval(this.updateQueueInterval);
-        this.updateQueueCallback = null;
+        // Clear updateQueueTimer
+        if (this._updateQueueTimer !== null) {
+            clearTimeout(this._updateQueueTimer);
+            this._updateQueueTimer = null;
+        }
 
         // Clear boundHandlePacEvent callback
         this.boundHandlePacEvent = null;
@@ -4531,7 +4532,9 @@
      * @returns {void}
      */
     Context.prototype.updateQueueHandler = function() {
-        // Early exit if queue is empty for performance
+        // Clear the reference — we're running now
+        this._updateQueueTimer = null;
+
         if (this.updateQueue.size === 0) {
             return;
         }
@@ -4539,38 +4542,55 @@
         const now = Date.now();
         const updatesToProcess = [];
         const pathsToDelete = [];
+        let nextExecuteAt = Infinity;
 
-        // Step 1: Collect all expired updates without modifying the queue
-        // This prevents the race condition of modifying a Map during iteration
+        // Collect expired updates and find earliest future one
         this.updateQueue.forEach((queueEntry, resolvedPath) => {
-            if (queueEntry.trigger === 'delay' && now >= queueEntry.executeAt) {
+            if (queueEntry.trigger !== 'delay') {
+                return; // blur entries are handled by handleDomBlur
+            }
+
+            if (now >= queueEntry.executeAt) {
                 updatesToProcess.push({
                     path: resolvedPath,
-                    value: queueEntry.value,
-                    trigger: queueEntry.trigger
+                    value: queueEntry.value
                 });
                 pathsToDelete.push(resolvedPath);
+            } else if (queueEntry.executeAt < nextExecuteAt) {
+                nextExecuteAt = queueEntry.executeAt;
             }
         });
 
-        // Step 2: Process all collected updates
-        // Apply updates in batch to minimize reactive system overhead
+        // Apply expired updates
         updatesToProcess.forEach(update => {
             try {
-                // Apply the property update to the reactive abstraction
-                // This will trigger any dependent DOM updates automatically
                 Utils.setNestedProperty(update.path, update.value, this.abstraction);
             } catch (error) {
-                // Log error with context for debugging, but continue processing other updates
                 console.warn(`Error applying queued update for path "${update.path}":`, error);
             }
         });
 
-        // Step 3: Clean up processed entries from the queue
-        // Remove entries only after all processing is complete to maintain consistency
+        // Clean up
         pathsToDelete.forEach(path => {
             this.updateQueue.delete(path);
         });
+
+        // Schedule next run only if there are remaining delay entries
+        if (nextExecuteAt < Infinity) {
+            this.scheduleQueueProcessing(nextExecuteAt - Date.now());
+        }
+    };
+
+    Context.prototype.scheduleQueueProcessing = function(delay) {
+        // Don't double-schedule
+        if (this._updateQueueTimer !== null) {
+            return;
+        }
+
+        const self = this;
+        this._updateQueueTimer = setTimeout(function() {
+            self.updateQueueHandler();
+        }, Math.max(delay, 1));
     };
 
     /**
@@ -4928,6 +4948,7 @@
                         executeAt: Date.now() + config.delay
                     });
 
+                    this.scheduleQueueProcessing(config.delay);
                     break;
 
                 case 'change':
