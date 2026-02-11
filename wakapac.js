@@ -3899,7 +3899,7 @@
         // First invocation: snapshot child nodes as live references
         if (element._pacIfChildren === undefined) {
             element._pacIfChildren = Array.from(element.childNodes);
-            element._pacIsRendered = true;
+            element._pacIsVisible = true;
         }
 
         // If already shown, do not change
