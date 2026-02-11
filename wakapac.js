@@ -82,6 +82,12 @@
     // List of text input types
     const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
 
+    // Non-text input types that commit values via the change event.
+    const CHANGE_INPUT_TYPES = new Set([
+        'checkbox', 'radio', 'color', 'range',
+        'date', 'datetime-local', 'month', 'week', 'time'
+    ]);
+
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
      * Populated on first use to avoid repeated reflection on wakaPAC.
@@ -1675,11 +1681,10 @@
 
                 // Identify supported control types
                 const isSelect = target.tagName === 'SELECT';
-                const isRadio = target.type === 'radio';
-                const isCheckbox = target.type === 'checkbox';
+                const isChangeInput = target.tagName === 'INPUT' && CHANGE_INPUT_TYPES.has(target.type);
 
                 // Only process relevant control changes
-                if (isSelect || isRadio || isCheckbox) {
+                if (isSelect || isChangeInput) {
                     // Resolve owning container and build change message payload
                     const container = self.getContainerForEvent(MSG_CHANGE, event);
                     const wParam = self.buildChangeWParam(event);
@@ -1749,16 +1754,16 @@
                 const target = event.target;
 
                 const isTextInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
+                const isRangeInput = target.tagName === 'INPUT' && target.type === 'range';
                 const isTextarea = target.tagName === 'TEXTAREA';
                 const isContentEditable = target.isContentEditable === true;
-                const supportsSelectionAPI = isTextInput || isTextarea;
 
-                if (isTextInput || isTextarea || isContentEditable) {
+                if (isTextInput || isRangeInput || isTextarea || isContentEditable) {
                     // Fetch container
                     const container = self.getContainerForEvent(MSG_INPUT_COMPLETE, event);
 
                     // Post-mutation value
-                    const value = supportsSelectionAPI ? target.value : (target.textContent ?? '');
+                    const value = isTextInput || isTextarea || isRangeInput ? target.value : (target.textContent ?? '');
 
                     // wParam: current value length (state indicator, mirrors MSG_CHANGE carrying control state)
                     const wParam = value.length;
@@ -2239,7 +2244,7 @@
         /**
          * Builds wParam for mouse messages following Win32 WM_LBUTTONDOWN format
          * Contains key state flags indicating which modifier keys and mouse buttons are pressed
-         * @param {MouseEvent} event - The mouse event
+         * @param {Event} event - The mouse event
          * @returns {number} wParam value with packed key state flags
          */
         getModifierState(event) {
