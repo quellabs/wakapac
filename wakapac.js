@@ -8593,6 +8593,17 @@
     };
 
     /**
+     * Extracts the Win32 repeat count from a keyboard lParam value.
+     * Bits 0–15 encode how many times the key message has repeated.
+     * @param {number} lParam - Encoded keyboard lParam
+     * @returns {number} Repeat count
+     */
+    wakaPAC.GET_REPEAT_COUNT_LPARAM = function(lParam) {
+        // Mask lower 16 bits where Win32 stores the repeat count
+        return lParam & 0xFFFF;
+    };
+
+    /**
      * Retrieves a string that represents the name of a key.
      * @param keyCode
      * @returns {string|null}
