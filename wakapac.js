@@ -1641,25 +1641,35 @@
             const self = this;
 
             document.addEventListener('dragenter', function (event) {
+                // Find container
                 const container = event.target.closest(CONTAINER_SEL);
 
+                // None found, abort
                 if (!container) {
                     return;
                 }
 
+                // Increment depth — child-boundary crossings fire dragenter
+                // without the cursor actually entering the container
                 const depth = (self._enterDepths.get(container) || 0) + 1;
                 self._enterDepths.set(container, depth);
 
+                // Already inside the container; ignore internal boundary noise
                 if (depth !== 1) {
                     return;
                 }
 
-                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
-                    MSG_DRAGENTER, event, 0, self.buildMouseLParam(event, container), {
-                        types:         Array.from(event.dataTransfer.types),
+                // Create the event
+                const lParam = self.buildMouseLParam(event, container);
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_DRAGENTER, event, 0, lParam, {
+                        types: Array.from(event.dataTransfer.types),
                         effectAllowed: event.dataTransfer.effectAllowed
                     }
-                ));
+                );
+
+                // Dispatch the event
+                self.dispatchToContainer(container, customEvent);
             });
         },
 
@@ -1691,8 +1701,9 @@
                 }
 
                 // Create event
+                const lParam = self.buildMouseLParam(event, container);
                 const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGLEAVE, event, 0, 0, {
+                    MSG_DRAGLEAVE, event, 0, lParam, {
                         types: Array.from(event.dataTransfer.types)
                     }
                 );
@@ -1746,12 +1757,14 @@
                 self._dropzoneTarget = dropTarget;
 
                 // Create the event
+                const lParam = self.buildMouseLParam(event, container);
                 const customEvent = self.wrapDomEventAsMessage(
                     MSG_DRAGOVER,
                     null,
                     0,
-                    self.buildMouseLParam(event, container),
+                    lParam,
                     {
+                        dropTarget: dropTarget,
                         types: Array.from(event.dataTransfer.types)
                     }
                 );
@@ -1778,7 +1791,9 @@
                 }
 
                 // Check if this is a valid drop target
-                if (!event.target.closest(DROP_TARGET_SEL)) {
+                const dropTarget = event.target.closest(DROP_TARGET_SEL);
+
+                if (!dropTarget) {
                     return;
                 }
 
@@ -1790,12 +1805,15 @@
 
                 // Create the event
                 const transfer = event.dataTransfer;
+                const lParam = self.buildMouseLParam(event, container);
+
                 const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DROP, event, 0, self.buildMouseLParam(event, container), {
-                        text:     transfer.getData('text/plain'),
-                        html:     transfer.getData('text/html'),
-                        uri:      transfer.getData('text/uri-list'),
-                        files:    self._extractFileMetadata(transfer.files),
+                    MSG_DROP, event, 0, lParam, {
+                        dropTarget: dropTarget,
+                        text: transfer.getData('text/plain'),
+                        html: transfer.getData('text/html'),
+                        uri: transfer.getData('text/uri-list'),
+                        files: self._extractFileMetadata(transfer.files),
                         rawFiles: transfer.files
                     }
                 );
