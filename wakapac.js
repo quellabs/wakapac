@@ -1612,6 +1612,9 @@
             /** @type {string} Selector for containers that accept drops */
             const DROP_TARGET_SEL = '[data-pac-drop-target]';
 
+            let lastOverContainer = null;
+            let lastOverLParam = -1;
+
             /**
              * Depth counter per container element.
              *
@@ -1692,22 +1695,27 @@
                     return;
                 }
 
-                // Always preventDefault synchronously so the browser accepts the
-                // drop. This cannot be deferred to the RAF callback — by then
-                // the native event has already resolved and the "not allowed"
-                // cursor would flash.
                 event.preventDefault();
 
-                // Only build and dispatch messages for designated drop targets
                 if (!event.target.closest(DROP_TARGET_SEL)) {
                     return;
                 }
 
-                // Capture dataTransfer properties synchronously; the transfer
-                // object is neutered once the event handler returns.
+                const lParam = self.buildMouseLParam(event, container);
+
+                // Skip if cursor hasn't moved and target hasn't changed
+                if (container === lastOverContainer && lParam === lastOverLParam) {
+                    return;
+                }
+
+                // Update immediately so the next event in the same
+                // position is suppressed without waiting for the RAF
+                lastOverContainer = container;
+                lastOverLParam = lParam;
+
                 pendingDragOver = {
                     container: container,
-                    lParam: self.buildMouseLParam(event, container),
+                    lParam: lParam,
                     types: Array.from(event.dataTransfer.types)
                 };
 
@@ -1724,6 +1732,7 @@
                         const data = pendingDragOver;
                         pendingDragOver = null;
 
+                        // Update last-dispatched state at dispatch time,
                         self.dispatchToContainer(data.container, self.wrapDomEventAsMessage(
                             MSG_DRAGOVER, null, 0, data.lParam, {
                                 types: data.types
