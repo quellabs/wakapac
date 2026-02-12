@@ -1542,7 +1542,7 @@
                 // Post-dispatch: check if msgProc wants to override clipboard contents
                 // If copyData was populated, prevent default copy and write custom data
                 // Format keys should be MIME types (e.g., 'text/plain', 'text/html')
-                if (customEvent.detail.copyData) {
+                if (customEvent.detail.copyData && !event.defaultPrevented) {
                     event.preventDefault();
 
                     for (const format in customEvent.detail.copyData) {
