@@ -126,6 +126,8 @@
     const MSG_SUBMIT = 0x0302;
     const MSG_INPUT = 0x0303;
     const MSG_INPUT_COMPLETE = 0x0304;
+    const MSG_COPY = 0x0305;
+    const MSG_PASTE = 0x0306;
     const MSG_SETFOCUS = 0x0007;
     const MSG_KILLFOCUS = 0x0008;
     const MSG_KEYDOWN = 0x0100;
@@ -1188,6 +1190,9 @@
         /** @private Shared resize observer */
         _resizeObserver: null,
 
+        // Keep track of key repeat count
+        _repeatCounts : new Map(),
+
         /**
          * Performs one-time initialization of the input/event subsystem.
          * @returns {void}
@@ -1313,6 +1318,7 @@
             this._setupMouseButtonEvents();
             this._setupMouseMoveEvent();
             this._setupMouseWheelEvent();
+            this._setupClipboardEvents();
             this._setupDragPrevention();
             this._setupDocumentLeave();
         },
@@ -1400,7 +1406,7 @@
             // Right click / context menu
             // Normalize context interactions and optionally suppress native menu
             document.addEventListener('contextmenu', function(event) {
-                // Prevent browser context menu if a gesture was just dispatched
+                // Prevent brwowser context menu if a gesture was just dispatched
                 if (MouseGestureRecognizer.gestureJustDispatched) {
                     MouseGestureRecognizer.gestureJustDispatched = false;
                     event.preventDefault();
@@ -1489,18 +1495,12 @@
 
             // Listen for wheel input at the document level
             document.addEventListener("wheel", function(event) {
-                // Resolve container responsible for handling this scroll interaction
+                // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
-
-                // Capture modifier key state present during the wheel event
                 const modifiers = self.getModifierState(event);
-
-                // Encode vertical scroll delta and modifiers into message parameters
                 const wParam = self.buildWheelWParam(event.deltaY, modifiers);
-
-                // Encode pointer position relative to the container
                 const lParam = self.buildMouseLParam(event, container);
-                
+
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
@@ -1511,6 +1511,78 @@
                 // Dispatch normalized wheel message
                 self.dispatchToContainer(container, customEvent);
             }, { passive: false }); // Allow preventDefault by consumers if needed
+        },
+
+        /**
+         * Registers clipboard event listeners and translates them into
+         * normalized clipboard messages for the container system.
+         * @private
+         * @returns {void}
+         */
+        _setupClipboardEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            // Copy event
+            // Fires when the user initiates a copy operation (Ctrl+C, context menu, etc.)
+            document.addEventListener("copy", function(event) {
+                // Resolve container responsible for the focused/selected element
+                const container = self.getContainerForEvent(MSG_COPY, event);
+                const selectedText = window.getSelection().toString();
+                const wParam = selectedText.length;
+                const lParam = self.getModifierState(event);
+
+                // Build clipboard message with mutable copyData struct
+                // msgProc can populate copyData to override clipboard contents
+                const customEvent = self.wrapDomEventAsMessage(MSG_COPY, event, wParam, lParam, {
+                    selectedText: selectedText,
+                    copyData: null
+                });
+
+                // Dispatch synchronously — msgProc runs before we continue
+                self.dispatchToContainer(container, customEvent);
+
+                // Post-dispatch: check if msgProc wants to override clipboard contents
+                // If copyData was populated, prevent default copy and write custom data
+                // Format keys should be MIME types (e.g., 'text/plain', 'text/html')
+                if (customEvent.detail.copyData && !event.defaultPrevented) {
+                    event.preventDefault();
+
+                    for (const format in customEvent.detail.copyData) {
+                        event.clipboardData.setData(format, customEvent.detail.copyData[format]);
+                    }
+                }
+            });
+
+            // Paste event
+            // Fires when the user initiates a paste operation (Ctrl+V, context menu, etc.)
+            document.addEventListener("paste", function(event) {
+                // Resolve container responsible for the focused element
+                const container = self.getContainerForEvent(MSG_PASTE, event);
+                const clipboardData = event.clipboardData;
+                const text = clipboardData.getData('text/plain');
+                const wParam = text.length;
+                const lParam = self.getModifierState(event);
+
+                // Extract file metadata for image/file paste operations (e.g., screenshot paste)
+                // Only captures metadata — file blobs are accessible via originalEvent.clipboardData.files
+                const files = Array.from(clipboardData.files).map(function(f) {
+                    return { name: f.name, size: f.size, type: f.type };
+                });
+
+                // Build clipboard message with all available paste data
+                // msgProc can return false to cancel the paste, which prevents
+                // subsequent MSG_INPUT/MSG_INPUT_COMPLETE from firing
+                const customEvent = self.wrapDomEventAsMessage(MSG_PASTE, event, wParam, lParam, {
+                    text: text,
+                    html: clipboardData.getData('text/html'),
+                    files: files
+                });
+
+                // Dispatch to container — no post-dispatch readback needed
+                // Paste is read-only from msgProc's perspective
+                self.dispatchToContainer(container, customEvent);
+            });
         },
 
         /**
@@ -1607,9 +1679,59 @@
             // Preserve instance reference for use inside DOM callbacks
             const self = this;
 
+            /**
+             * Clear keyboard repeat count on blur
+             */
+            window.addEventListener('blur', function() {
+                self._repeatCounts.clear();
+            });
+
+            // Key down (with MSG_CHAR for printable characters)
+            // Handles key press and optional character emission
+            document.addEventListener('keydown', function(event) {
+                // Increment repeat count
+                self._updateRepeatState(event);
+
+                // Resolve target container for keyboard input
+                const container = self.getContainerForEvent(MSG_KEYDOWN, event);
+
+                // Encode keyboard press state
+                const wParam = self.buildKeyboardWParam(event);
+                const lParam = self.buildKeyboardLParam(event);
+
+                // Wrap key-down message
+                const keyDownEvent = self.wrapDomEventAsMessage(MSG_KEYDOWN, event, wParam, lParam, {
+                    key: event.key,   // Logical key value
+                    code: event.code  // Physical key identifier
+                });
+
+                // Dispatch the key event
+                self.dispatchToContainer(container, keyDownEvent);
+
+                // Win32-style WM_CHAR: emit character message for printable input
+                if (event.key && event.key.length === 1) {
+                    // Convert character to numeric code representation
+                    const msgCharWparam = event.key.charCodeAt(0);
+
+                    // Wrap character event using same positional metadata
+                    const msgCharEvent = self.wrapDomEventAsMessage(
+                        MSG_CHAR,
+                        event,
+                        msgCharWparam,
+                        lParam
+                    );
+
+                    // Dispatch character message alongside key-down event
+                    self.dispatchToContainer(container, msgCharEvent);
+                }
+            });
+
             // Key up
             // Capture key release and forward normalized keyboard state
             document.addEventListener('keyup', function(event) {
+                // Clear repeat count
+                self._updateRepeatState(event);
+
                 // Resolve container responsible for handling this keyboard event
                 const container = self.getContainerForEvent(MSG_KEYUP, event);
 
@@ -1625,44 +1747,6 @@
 
                 // Dispatch normalized key-up message
                 self.dispatchToContainer(container, customEvent);
-            });
-
-            // Key down (with MSG_CHAR for printable characters)
-            // Handles key press and optional character emission
-            document.addEventListener('keydown', function(event) {
-                // Resolve target container for keyboard input
-                const container = self.getContainerForEvent(MSG_KEYDOWN, event);
-
-                // Encode keyboard press state
-                const keyDownWparam = self.buildKeyboardWParam(event);
-                const keyDownLparam = self.buildKeyboardLParam(event);
-
-                // Wrap and dispatch key-down message
-                const keyDownEvent = self.wrapDomEventAsMessage(
-                    MSG_KEYDOWN,
-                    event,
-                    keyDownWparam,
-                    keyDownLparam
-                );
-
-                self.dispatchToContainer(container, keyDownEvent);
-
-                // Win32-style WM_CHAR: emit character message for printable input
-                if (event.key && event.key.length === 1) {
-                    // Convert character to numeric code representation
-                    const msgCharWparam = event.key.charCodeAt(0);
-
-                    // Wrap character event using same positional metadata
-                    const msgCharEvent = self.wrapDomEventAsMessage(
-                        MSG_CHAR,
-                        event,
-                        msgCharWparam,
-                        keyDownLparam
-                    );
-
-                    // Dispatch character message alongside key-down event
-                    self.dispatchToContainer(container, msgCharEvent);
-                }
             });
         },
 
@@ -1761,16 +1845,10 @@
                 const isContentEditable = target.isContentEditable === true;
 
                 if (isTextInput || isRangeInput || isTextarea || isContentEditable) {
-                    // Fetch container
+                    // Fetch info
                     const container = self.getContainerForEvent(MSG_INPUT_COMPLETE, event);
-
-                    // Post-mutation value
                     const value = isTextInput || isTextarea || isRangeInput ? target.value : (target.textContent ?? '');
-
-                    // wParam: current value length (state indicator, mirrors MSG_CHANGE carrying control state)
                     const wParam = value.length;
-
-                    // lParam: modifier key state (consistent with MSG_INPUT)
                     const lParam = self.getModifierState(event);
 
                     // Create custom event
@@ -1990,6 +2068,69 @@
         },
 
         /**
+         * Updates the internal per-key repeat counter to emulate Win32 key repeat
+         * semantics. The counter represents how many keydown messages have occurred
+         * since the last keyup for a given physical key.
+         *
+         * Behavior:
+         * * First keydown → repeat count becomes 1
+         * * Auto-repeat keydown → repeat count increments
+         * * Keyup → repeat state is cleared for that key
+         *
+         * @param {KeyboardEvent} event - DOM keyboard event used to update repeat state
+         * @returns {void}
+         */
+        _updateRepeatState(event) {
+            // Fetch the key
+            const key = event.code;
+
+            // Reset repeat tracking when the key is released
+            if (event.type === 'keyup') {
+                this._repeatCounts.delete(key);
+                return;
+            }
+
+            // First key press initializes the repeat counter
+            if (!event.repeat) {
+                this._repeatCounts.set(key, 1);
+                return;
+            }
+
+            // Auto-repeat increments the existing counter
+            this._repeatCounts.set(key, this._getRepeatCount(event) + 1);
+        },
+
+        /**
+         * Retrieves the current Win32-style repeat count for a key based on the
+         * internal tracking state. This method is read-only and does not mutate state.
+         * @param {KeyboardEvent} event - DOM keyboard event identifying the key
+         * @returns {number} Current repeat count for the key
+         */
+        _getRepeatCount(event) {
+            // Fallback to 1 if tracking is unavailable or the key is not tracked
+            if (!this._repeatCounts) {
+                return 1;
+            }
+
+            return this._repeatCounts.get(event.code) || 1;
+        },
+
+        /**
+         * Determines the Win32-style "previous key state" for a keyboard event.
+         * @param {KeyboardEvent} event - DOM keyboard event identifying the key
+         * @returns {number} 1 if the key was previously down, otherwise 0
+         */
+        _getPreviousKeyState(event) {
+            // A key release implies the key was previously pressed
+            if (event.type === 'keyup') {
+                return 1;
+            }
+
+            // For keydown, the browser repeat flag indicates prior key state
+            return event.repeat ? 1 : 0;
+        },
+
+        /**
          * Start observing the container element for intersection and size changes
          * @param {HTMLElement} container
          * @returns {void}
@@ -2194,33 +2335,11 @@
          * @param extended
          */
         dispatchMouseMessage(msgType, domEvent, container, extended={}) {
-            const wParam = this.getModifierState(domEvent);
-            const lParam = this.buildMouseLParam(domEvent, container);
+            const wParam = this.buildMouseLParam(domEvent, container);
+            const lParam = this.getModifierState(domEvent);
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
+
             this.dispatchToContainer(container, customEvent);
-        },
-
-        /**
-         * Synchronously deliver a wakapac message directly to a container's message procedure.
-         */
-        sendToContainer(container, event) {
-            // No target container: nothing to deliver
-            if (!container) {
-                return;
-            }
-
-            // Each container may optionally expose a Win32-style message procedure.
-            // If none is present, the message is ignored.
-            const msgProc = container.msgProc;
-
-            if (typeof msgProc !== "function") {
-                return;
-            }
-
-            // Invoke the message procedure synchronously.
-            // No DOM dispatch, no bubbling, no cancellation semantics.
-            // This is a direct call into container behavior.
-            msgProc.call(container, event);
         },
 
         /**
@@ -2362,10 +2481,9 @@
         buildKeyboardLParam(event) {
             let lParam = 0;
 
-            // Bits 0-15: Repeat count (1 for single press, 2+ for held keys)
+            // Bits 0-15: Repeat count
             // Win32 increments this for each WM_KEYDOWN while key is held
-            const repeatCount = event.repeat ? 2 : 1;
-            lParam |= (repeatCount & 0xFFFF);
+            lParam |= (this._getRepeatCount(event) & 0xFFFF);
 
             // Bits 16-23: Scan code (hardware scan code)
             // Not available in JavaScript - would require platform-specific mapping
@@ -2397,9 +2515,9 @@
             }
 
             // Bit 30: Previous key state
-            // 1 if key was down before this message, 0 if key was up
-            // Would require tracking key states manually - not implemented
-            // Left as 0
+            if (this._getPreviousKeyState(event)) {
+                lParam |= (1 << 30);
+            }
 
             // Bit 31: Transition state (0 for keydown, 1 for keyup)
             if (event.type === 'keyup') {
@@ -2727,7 +2845,7 @@
                 const pacId = this._capturedContainer.getAttribute('data-pac-id');
                 
                 if (pacId !== null) {
-                    wakaPAC.postMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
+                    wakaPAC.sendMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
                 }
             }
 
@@ -4357,7 +4475,7 @@
 
         // Create interval that sends MSG_TIMER message to component
         const intervalId = setInterval(() => {
-            wakaPAC.postMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
+            wakaPAC.sendMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
         }, elapse);
 
         // Store mapping of timerId -> intervalId for later cleanup
@@ -4805,15 +4923,10 @@
             // Certain message types can prevent framework's default behavior by returning false
             // Similar to Win32: returning 0 from WndProc means "I handled this, skip default processing"
             const cancellableEvents = [
-                MSG_LBUTTONUP,
-                MSG_MBUTTONUP,
-                MSG_RBUTTONUP,
-                MSG_LCLICK,
-                MSG_MCLICK,
-                MSG_RCLICK,
-                MSG_SUBMIT,
-                MSG_CHANGE,
-                MSG_GESTURE
+                MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
+                MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
+                MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE,
+                MSG_COPY, MSG_PASTE
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
@@ -8269,7 +8382,7 @@
 
     /**
      * Send a message to a specific WakaPAC container by its data-pac-id
-     * Similar to Win32 SendMessage with a specific HWND
+     * Similar to Win32 PostMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
@@ -8291,7 +8404,11 @@
 
         // Dispatch the message through the DOM event system.
         // Delivery is asynchronous and follows normal event routing semantics.
-        DomUpdateTracker.dispatchToContainer(container, event);
+        setTimeout(function() {
+            if (container.isConnected) {
+                DomUpdateTracker.dispatchToContainer(container, event);
+            }
+        }, 0);
     };
 
     /**
@@ -8319,12 +8436,11 @@
 
         // Invoke the message procedure directly.
         // This call is synchronous and executes immediately in the current call stack.
-        DomUpdateTracker.sendToContainer(container, event);
+        DomUpdateTracker.dispatchToContainer(container, event);
     };
 
     /**
      * Broadcast a message to all WakaPAC containers
-     * Similar to Win32 PostMessage with HWND_BROADCAST
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
      * @param {number} lParam - Second message parameter (integer)
@@ -8475,6 +8591,17 @@
     };
 
     /**
+     * Extracts the Win32 repeat count from a keyboard lParam value.
+     * Bits 0–15 encode how many times the key message has repeated.
+     * @param {number} lParam - Encoded keyboard lParam
+     * @returns {number} Repeat count
+     */
+    wakaPAC.GET_REPEAT_COUNT_LPARAM = function(lParam) {
+        // Mask lower 16 bits where Win32 stores the repeat count
+        return lParam & 0xFFFF;
+    };
+
+    /**
      * Retrieves a string that represents the name of a key.
      * @param keyCode
      * @returns {string|null}
@@ -8612,8 +8739,8 @@
         MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
-        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
-        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
+        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_COPY,
+        MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
         MSG_CAPTURECHANGED,
 
         // Mouse modifier keys
