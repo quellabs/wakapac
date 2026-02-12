@@ -1672,22 +1672,33 @@
             const self = this;
 
             document.addEventListener('dragleave', function (event) {
+                // Find container
                 const container = event.target.closest(CONTAINER_SEL);
 
+                // If none found, abort
                 if (!container) {
                     return;
                 }
 
+                // Decrement depth — child-boundary crossings fire dragleave
+                // without the cursor actually leaving the container
                 const depth = (self._enterDepths.get(container) || 0) - 1;
                 self._enterDepths.set(container, depth);
 
+                // Still inside the container; ignore internal boundary noise
                 if (depth !== 0) {
                     return;
                 }
 
-                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
-                    MSG_DRAGLEAVE, event, 0, 0
-                ));
+                // Create event
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_DRAGLEAVE, event, 0, 0, {
+                        types: Array.from(event.dataTransfer.types)
+                    }
+                );
+
+                // Dispatch event
+                self.dispatchToContainer(container, customEvent);
             });
         },
 
