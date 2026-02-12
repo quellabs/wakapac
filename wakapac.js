@@ -2118,6 +2118,21 @@
         },
 
         /**
+         * Determines the Win32-style "previous key state" for a keyboard event.
+         * @param {KeyboardEvent} event - DOM keyboard event identifying the key
+         * @returns {number} 1 if the key was previously down, otherwise 0
+         */
+        _getPreviousKeyState(event) {
+            // A key release implies the key was previously pressed
+            if (event.type === 'keyup') {
+                return 1;
+            }
+
+            // For keydown, the browser repeat flag indicates prior key state
+            return event.repeat ? 1 : 0;
+        },
+
+        /**
          * Start observing the container element for intersection and size changes
          * @param {HTMLElement} container
          * @returns {void}
@@ -2502,9 +2517,9 @@
             }
 
             // Bit 30: Previous key state
-            // 1 if key was down before this message, 0 if key was up
-            // Would require tracking key states manually - not implemented
-            // Left as 0
+            if (this._getPreviousKeyState(event)) {
+                lParam |= (1 << 30);
+            }
 
             // Bit 31: Transition state (0 for keydown, 1 for keyup)
             if (event.type === 'keyup') {
