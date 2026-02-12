@@ -29,9 +29,6 @@
     /** @type {string} Selector for containers that accept drops */
     const DROP_TARGET_SEL = '[data-pac-drop-target]';
 
-    /** @type {string[]} List of valid drop effects */
-    const VALID_DROP_EFFECTS = ['none', 'copy', 'link', 'move'];
-
     /**
      * Matches handlebars-style interpolation: {{variable}}
      * Captures variable name/expression with global flag
@@ -471,7 +468,7 @@
             }
 
             // Find the closest PAC container ancestor (or self)
-            const immediateContainer = targetElement.closest('[data-pac-id]');
+            const immediateContainer = targetElement.closest(CONTAINER_SEL);
 
             // Element belongs to this container only if this container is its immediate PAC parent
             return immediateContainer === container;
@@ -1206,8 +1203,13 @@
         // Keep track of key repeat count
         _repeatCounts : new Map(),
 
-        // Used for drag/drop
+        /** @type {string[]} List of valid drop effects for drag/drop */
+        validDropEffects: ['none', 'copy', 'link', 'move'],
+
+        /** @type {WeakMap} Increment depth for drag/drop */
         _enterDepths: new WeakMap(),
+
+        /** @type {Element|null} Dropzone being targeted */
         _dropzoneTarget: null,
 
         /**
@@ -1751,7 +1753,7 @@
 
                 // Update the effect (mouse pointer)
                 const effect = dropTarget.getAttribute('data-pac-drop-target');
-                event.dataTransfer.dropEffect = VALID_DROP_EFFECTS.includes(effect) ? effect : 'copy';
+                event.dataTransfer.dropEffect = self.validDropEffects.includes(effect) ? effect : 'copy';
 
                 // Store the new dropzone
                 self._dropzoneTarget = dropTarget;
@@ -2529,7 +2531,7 @@
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            let container = originalEvent.target.closest('[data-pac-id]');
+            let container = originalEvent.target.closest(CONTAINER_SEL);
 
             if (this._captureActive && this.isCaptureAffected(msgType)) {
                 if (this._capturedContainer?.isConnected) {
@@ -7789,8 +7791,8 @@
                         // include the root node if it is a PAC container,
                         // followed by all nested PAC containers
                         const pacNodes = [
-                            ...(node.matches('[data-pac-id]') ? [node] : []),
-                            ...node.querySelectorAll('[data-pac-id]')
+                            ...(node.matches(CONTAINER_SEL) ? [node] : []),
+                            ...node.querySelectorAll(CONTAINER_SEL)
                         ];
 
                         // Destroy deepest nodes first to preserve parent/child teardown order
@@ -8346,7 +8348,7 @@
          * @returns {*} The associated PAC instance, or null if not found.
          */
         getByElement(element) {
-            const container = element.closest('[data-pac-id]');
+            const container = element.closest(CONTAINER_SEL);
             const pacId = container?.getAttribute('data-pac-id');
             return pacId ? this.get(pacId) : undefined;
         },
