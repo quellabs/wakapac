@@ -1706,11 +1706,14 @@
                     return;
                 }
 
-                event.preventDefault();
+                const dropTarget = event.target.closest(DROP_TARGET_SEL);
 
-                if (!event.target.closest(DROP_TARGET_SEL)) {
+                if (!dropTarget) {
                     return;
                 }
+
+                // Only prevent default (= allow drop) on valid drop targets
+                event.preventDefault();
 
                 if (event.target === self._lastOverTarget) {
                     return;
@@ -1758,6 +1761,12 @@
                 const container = event.target.closest(CONTAINER_SEL);
 
                 if (!container) {
+                    return;
+                }
+
+                const dropTarget = event.target.closest(DROP_TARGET_SEL);
+
+                if (!dropTarget) {
                     return;
                 }
 
