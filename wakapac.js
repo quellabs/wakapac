@@ -1696,16 +1696,14 @@
                 const container = self.getContainerForEvent(MSG_KEYDOWN, event);
 
                 // Encode keyboard press state
-                const keyDownWparam = self.buildKeyboardWParam(event);
-                const keyDownLparam = self.buildKeyboardLParam(event);
+                const wParam = self.buildKeyboardWParam(event);
+                const lParam = self.buildKeyboardLParam(event);
 
                 // Wrap key-down message
-                const keyDownEvent = self.wrapDomEventAsMessage(
-                    MSG_KEYDOWN,
-                    event,
-                    keyDownWparam,
-                    keyDownLparam
-                );
+                const keyDownEvent = self.wrapDomEventAsMessage(MSG_KEYDOWN, event, wParam, lParam, {
+                    key: event.key,   // Logical key value
+                    code: event.code  // Physical key identifier
+                });
 
                 // Dispatch the key event
                 self.dispatchToContainer(container, keyDownEvent);
@@ -1720,7 +1718,7 @@
                         MSG_CHAR,
                         event,
                         msgCharWparam,
-                        keyDownLparam
+                        lParam
                     );
 
                     // Dispatch character message alongside key-down event
@@ -8384,7 +8382,7 @@
 
     /**
      * Send a message to a specific WakaPAC container by its data-pac-id
-     * Similar to Win32 SendMessage with a specific HWND
+     * Similar to Win32 PostMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
