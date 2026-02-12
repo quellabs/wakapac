@@ -1644,7 +1644,7 @@
 
             document.addEventListener('dragenter', function (event) {
                 // Find container
-                const container = event.target.closest(CONTAINER_SEL);
+                const container = self.getContainerForEvent(MSG_DRAGENTER, event);
 
                 // None found, abort
                 if (!container) {
@@ -1685,7 +1685,7 @@
 
             document.addEventListener('dragleave', function (event) {
                 // Find container
-                const container = event.target.closest(CONTAINER_SEL);
+                const container = self.getContainerForEvent(MSG_DRAGLEAVE, event);
 
                 // If none found, abort
                 if (!container) {
@@ -1726,7 +1726,7 @@
 
             document.addEventListener('dragover', function (event) {
                 // Fetch the container
-                const container = event.target.closest(CONTAINER_SEL);
+                const container = self.getContainerForEvent(MSG_DRAGOVER, event);
 
                 // If none found, abort
                 if (!container) {
@@ -1762,7 +1762,7 @@
                 const lParam = self.buildMouseLParam(event, container);
                 const customEvent = self.wrapDomEventAsMessage(
                     MSG_DRAGOVER,
-                    null,
+                    event,
                     0,
                     lParam,
                     {
@@ -1786,7 +1786,7 @@
 
             document.addEventListener('drop', function (event) {
                 // Fetch container
-                const container = event.target.closest(CONTAINER_SEL);
+                const container = self.getContainerForEvent(MSG_DROP, event);
 
                 if (!container) {
                     return;
