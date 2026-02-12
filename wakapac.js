@@ -1495,9 +1495,9 @@
                 // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
                 const modifiers = self.getModifierState(event);
-                const wParam = self.buildWheelWParam(event.deltaY, modifiers);
-                const lParam = self.buildMouseLParam(event, container);
-                
+                const wParam = self.buildMouseLParam(event, container);
+                const lParam = self.buildWheelWParam(event.deltaY, modifiers);
+
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
@@ -1830,16 +1830,10 @@
                 const isContentEditable = target.isContentEditable === true;
 
                 if (isTextInput || isRangeInput || isTextarea || isContentEditable) {
-                    // Fetch container
+                    // Fetch info
                     const container = self.getContainerForEvent(MSG_INPUT_COMPLETE, event);
-
-                    // Post-mutation value
                     const value = isTextInput || isTextarea || isRangeInput ? target.value : (target.textContent ?? '');
-
-                    // wParam: current value length (state indicator, mirrors MSG_CHANGE carrying control state)
                     const wParam = value.length;
-
-                    // lParam: modifier key state (consistent with MSG_INPUT)
                     const lParam = self.getModifierState(event);
 
                     // Create custom event
@@ -2263,8 +2257,8 @@
          * @param extended
          */
         dispatchMouseMessage(msgType, domEvent, container, extended={}) {
-            const wParam = this.getModifierState(domEvent);
-            const lParam = this.buildMouseLParam(domEvent, container);
+            const lParam = this.getModifierState(domEvent);
+            const wParam = this.buildMouseLParam(domEvent, container);
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
 
             this.dispatchToContainer(container, customEvent);
