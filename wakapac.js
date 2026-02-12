@@ -1665,8 +1665,7 @@
                 const lParam = self.buildMouseLParam(event, container);
                 const customEvent = self.wrapDomEventAsMessage(
                     MSG_DRAGENTER, event, 0, lParam, {
-                        types: Array.from(event.dataTransfer.types),
-                        effectAllowed: event.dataTransfer.effectAllowed
+                        types: Array.from(event.dataTransfer.types)
                     }
                 );
 
