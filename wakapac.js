@@ -1682,7 +1682,7 @@
             /**
              * Clear keyboard repeat count on blur
              */
-            window.addEventListener('blur', function(event) {
+            window.addEventListener('blur', function() {
                 self._repeatCounts.clear();
             });
 
