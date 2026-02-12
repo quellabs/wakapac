@@ -23,6 +23,12 @@
     // CONSTANTS AND CONFIGURATION
     // =============================================================================
 
+    /** @type {string} Selector for PAC-managed containers */
+    const CONTAINER_SEL = '[data-pac-id]';
+
+    /** @type {string} Selector for containers that accept drops */
+    const DROP_TARGET_SEL = '[data-pac-drop-target]';
+
     /**
      * Matches handlebars-style interpolation: {{variable}}
      * Captures variable name/expression with global flag
@@ -1197,6 +1203,12 @@
         // Keep track of key repeat count
         _repeatCounts : new Map(),
 
+        // Used for drag/drop
+        _enterDepths: new WeakMap(),
+        _lastOverTarget: null,
+        _pendingDragOver: null,
+        _rafScheduled: false,
+
         /**
          * Performs one-time initialization of the input/event subsystem.
          * @returns {void}
@@ -1591,187 +1603,16 @@
         },
 
         /**
-         * Sets up document-level drag-and-drop event delegation for PAC containers.
-         *
-         * All drag events are captured at the document level and dispatched to the
-         * nearest ancestor with a `[data-pac-id]` attribute. A depth-counting
-         * strategy (via WeakMap) eliminates the enter/leave flicker that browsers
-         * produce when the cursor crosses child-element boundaries.
-         *
-         * Dragover events are coalesced to one dispatch per animation frame to
-         * avoid flooding message handlers on high-frequency pointer movement.
-         *
+         * Sets up document-level drag-and-drop event delegation for PAC
+         * containers. All drag events are captured at the document level
+         * and dispatched to the nearest ancestor with a `[data-pac-id]` attribute.
          * @private
          */
         _setupDragDropEvents() {
-            const self = this;
-
-            /** @type {string} Selector for PAC-managed containers */
-            const CONTAINER_SEL = '[data-pac-id]';
-
-            /** @type {string} Selector for containers that accept drops */
-            const DROP_TARGET_SEL = '[data-pac-drop-target]';
-
-            let lastOverTarget = null;
-
-            /**
-             * Depth counter per container element.
-             *
-             * Every child-boundary crossing fires a paired dragleave+dragenter
-             * without the cursor actually leaving the container. Counting entries
-             * lets us distinguish real boundary crossings from internal noise.
-             *
-             * WeakMap ensures counters are garbage-collected when elements leave
-             * the DOM — no manual cleanup required for elements that get removed
-             * mid-drag.
-             *
-             * @type {WeakMap<Element, number>}
-             */
-            const enterDepths = new WeakMap();
-
-            /**
-             * Dragover coalescing state.
-             *
-             * `dragover` fires at pointer-move frequency (60-120+ Hz). We capture
-             * the latest event data synchronously (dataTransfer is only accessible
-             * during the native event) and defer the actual dispatch to the next
-             * animation frame, dropping intermediate events.
-             *
-             * @type {{ container: Element, lParam: number, types: string[] } | null}
-             */
-            let pendingDragOver = null;
-            let rafScheduled = false;
-
-            document.addEventListener('dragenter', function (event) {
-                const container = event.target.closest(CONTAINER_SEL);
-
-                if (!container) {
-                    return;
-                }
-
-                // Only dispatch on the first real entry, not child crossings
-                const depth = (enterDepths.get(container) || 0) + 1;
-                enterDepths.set(container, depth);
-
-                if (depth !== 1) {
-                    return;
-                }
-
-                const lParam = self.buildMouseLParam(event, container);
-
-                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
-                    MSG_DRAGENTER, event, 0, lParam, {
-                        types: Array.from(event.dataTransfer.types),
-                        effectAllowed: event.dataTransfer.effectAllowed
-                    }
-                ));
-            });
-
-            document.addEventListener('dragleave', function (event) {
-                const container = event.target.closest(CONTAINER_SEL);
-
-                if (!container) {
-                    return;
-                }
-
-                // Only dispatch when cursor has fully exited the container
-                const depth = (enterDepths.get(container) || 0) - 1;
-                enterDepths.set(container, depth);
-
-                if (depth !== 0) {
-                    return;
-                }
-
-                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
-                    MSG_DRAGLEAVE, event, 0, 0
-                ));
-            });
-
-            document.addEventListener('dragover', function (event) {
-                const container = event.target.closest(CONTAINER_SEL);
-
-                if (!container) {
-                    return;
-                }
-
-                event.preventDefault();
-
-                if (!event.target.closest(DROP_TARGET_SEL)) {
-                    return;
-                }
-
-                if (event.target === lastOverTarget) {
-                    return;
-                }
-
-                lastOverTarget = event.target;
-
-                pendingDragOver = {
-                    container: container,
-                    lParam: self.buildMouseLParam(event, container),
-                    types: Array.from(event.dataTransfer.types)
-                };
-
-                if (!rafScheduled) {
-                    rafScheduled = true;
-
-                    requestAnimationFrame(function () {
-                        rafScheduled = false;
-
-                        if (!pendingDragOver) {
-                            return;
-                        }
-
-                        const data = pendingDragOver;
-                        pendingDragOver = null;
-
-                        self.dispatchToContainer(data.container, self.wrapDomEventAsMessage(
-                            MSG_DRAGOVER, null, 0, data.lParam, {
-                                types: data.types
-                            }
-                        ));
-                    });
-                }
-            });
-
-            document.addEventListener('drop', function (event) {
-                const container = event.target.closest(CONTAINER_SEL);
-
-                if (!container) {
-                    return;
-                }
-
-                // Prevent browser default (e.g. navigating to a dropped file/URL)
-                event.preventDefault();
-
-                // Drag sequence is complete — discard the depth counter.
-                // Stale counters for containers the drag passed through are
-                // harmless: WeakMap entries are GC'd with the element, and a
-                // new drag sequence will overwrite any leftover count on the
-                // first dragenter.
-                enterDepths.delete(container);
-
-                // Cancel any pending dragover dispatch — the drop supersedes it
-                pendingDragOver = null;
-
-                const lParam = self.buildMouseLParam(event, container);
-                const transfer = event.dataTransfer;
-
-                // Extract file metadata (same shape as MSG_PASTE / form submit)
-                const files = Array.from(transfer.files).map(function (f) {
-                    return { name: f.name, size: f.size, type: f.type };
-                });
-
-                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
-                    MSG_DROP, event, 0, lParam, {
-                        text: transfer.getData('text/plain'),
-                        html: transfer.getData('text/html'),
-                        uri:  transfer.getData('text/uri-list'),
-                        files: files,
-                        rawFiles: transfer.files
-                    }
-                ));
-            });
+            this._onDragEnter();
+            this._onDragLeave();
+            this._onDragOver();
+            this._onDrop();
         },
 
         /**
@@ -1787,6 +1628,169 @@
                 if (this.hasCapture()) {
                     event.preventDefault();
                 }
+            });
+        },
+
+        /**
+         * Dispatches MSG_DRAGENTER only on the first real entry into a
+         * container, ignoring child-boundary crossings.
+         * @private
+         */
+        _onDragEnter() {
+            const self = this;
+
+            document.addEventListener('dragenter', function (event) {
+                const container = event.target.closest(CONTAINER_SEL);
+
+                if (!container) {
+                    return;
+                }
+
+                const depth = (self._enterDepths.get(container) || 0) + 1;
+                self._enterDepths.set(container, depth);
+
+                if (depth !== 1) {
+                    return;
+                }
+
+                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
+                    MSG_DRAGENTER, event, 0, self.buildMouseLParam(event, container), {
+                        types:         Array.from(event.dataTransfer.types),
+                        effectAllowed: event.dataTransfer.effectAllowed
+                    }
+                ));
+            });
+        },
+
+        /**
+         * Dispatches MSG_DRAGLEAVE only when the cursor has fully exited
+         * the container (depth counter drops back to zero).
+         * @private
+         */
+        _onDragLeave() {
+            const self = this;
+
+            document.addEventListener('dragleave', function (event) {
+                const container = event.target.closest(CONTAINER_SEL);
+
+                if (!container) {
+                    return;
+                }
+
+                const depth = (self._enterDepths.get(container) || 0) - 1;
+                self._enterDepths.set(container, depth);
+
+                if (depth !== 0) {
+                    return;
+                }
+
+                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
+                    MSG_DRAGLEAVE, event, 0, 0
+                ));
+            });
+        },
+
+        /**
+         * Coalesces high-frequency dragover events into a single dispatch
+         * per animation frame.  Only fires for valid drop targets whose
+         * element has actually changed.
+         * @private
+         */
+        _onDragOver() {
+            const self = this;
+
+            document.addEventListener('dragover', function (event) {
+                const container = event.target.closest(CONTAINER_SEL);
+
+                if (!container) {
+                    return;
+                }
+
+                event.preventDefault();
+
+                if (!event.target.closest(DROP_TARGET_SEL)) {
+                    return;
+                }
+
+                if (event.target === self._lastOverTarget) {
+                    return;
+                }
+
+                self._lastOverTarget = event.target;
+
+                // Capture synchronously — dataTransfer is only live during the event
+                self._pendingDragOver = {
+                    container: container,
+                    lParam:    self.buildMouseLParam(event, container),
+                    types:     Array.from(event.dataTransfer.types)
+                };
+
+                if (!self._rafScheduled) {
+                    self._rafScheduled = true;
+
+                    requestAnimationFrame(function () {
+                        self._rafScheduled = false;
+
+                        if (!self._pendingDragOver) {
+                            return;
+                        }
+
+                        const data = self._pendingDragOver;
+                        self._pendingDragOver = null;
+
+                        self.dispatchToContainer(data.container, self.wrapDomEventAsMessage(
+                            MSG_DRAGOVER, null, 0, data.lParam, { types: data.types }
+                        ));
+                    });
+                }
+            });
+        },
+
+        /**
+         * Handles the drop: prevents the browser default, resets tracking
+         * state, extracts transfer payload, and dispatches MSG_DROP.
+         * @private
+         */
+        _onDrop() {
+            const self = this;
+
+            document.addEventListener('drop', function (event) {
+                const container = event.target.closest(CONTAINER_SEL);
+
+                if (!container) {
+                    return;
+                }
+
+                event.preventDefault();
+
+                // Drag sequence complete — clean up tracking state
+                self._enterDepths.delete(container);
+                self._pendingDragOver = null;
+
+                const transfer = event.dataTransfer;
+
+                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
+                    MSG_DROP, event, 0, self.buildMouseLParam(event, container), {
+                        text:     transfer.getData('text/plain'),
+                        html:     transfer.getData('text/html'),
+                        uri:      transfer.getData('text/uri-list'),
+                        files:    self._extractFileMetadata(transfer.files),
+                        rawFiles: transfer.files
+                    }
+                ));
+            });
+        },
+
+        /**
+         * Extracts serializable metadata from a FileList.
+         * Same shape as MSG_PASTE / form-submit payloads.
+         * @private
+         * @param   {FileList} fileList
+         * @returns {Array<{name: string, size: number, type: string}>}
+         */
+        _extractFileMetadata(fileList) {
+            return Array.from(fileList).map(function (f) {
+                return { name: f.name, size: f.size, type: f.type };
             });
         },
 
