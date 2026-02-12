@@ -121,6 +121,10 @@
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
     const MSG_CAPTURECHANGED = 0x0215;
+    const MSG_DRAGENTER = 0x0231;
+    const MSG_DRAGOVER  = 0x0232;
+    const MSG_DRAGLEAVE = 0x0233;
+    const MSG_DROP      = 0x0234;
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
@@ -1319,6 +1323,7 @@
             this._setupMouseMoveEvent();
             this._setupMouseWheelEvent();
             this._setupClipboardEvents();
+            this._setupDragDropEvents();
             this._setupDragPrevention();
             this._setupDocumentLeave();
         },
@@ -1582,6 +1587,189 @@
                 // Dispatch to container — no post-dispatch readback needed
                 // Paste is read-only from msgProc's perspective
                 self.dispatchToContainer(container, customEvent);
+            });
+        },
+
+        /**
+         * Sets up document-level drag-and-drop event delegation for PAC containers.
+         *
+         * All drag events are captured at the document level and dispatched to the
+         * nearest ancestor with a `[data-pac-id]` attribute. A depth-counting
+         * strategy (via WeakMap) eliminates the enter/leave flicker that browsers
+         * produce when the cursor crosses child-element boundaries.
+         *
+         * Dragover events are coalesced to one dispatch per animation frame to
+         * avoid flooding message handlers on high-frequency pointer movement.
+         *
+         * @private
+         */
+        _setupDragDropEvents() {
+            const self = this;
+
+            /** @type {string} Selector for PAC-managed containers */
+            const CONTAINER_SEL = '[data-pac-id]';
+
+            /** @type {string} Selector for containers that accept drops */
+            const DROP_TARGET_SEL = '[data-pac-drop-target]';
+
+            /**
+             * Depth counter per container element.
+             *
+             * Every child-boundary crossing fires a paired dragleave+dragenter
+             * without the cursor actually leaving the container. Counting entries
+             * lets us distinguish real boundary crossings from internal noise.
+             *
+             * WeakMap ensures counters are garbage-collected when elements leave
+             * the DOM — no manual cleanup required for elements that get removed
+             * mid-drag.
+             *
+             * @type {WeakMap<Element, number>}
+             */
+            const enterDepths = new WeakMap();
+
+            /**
+             * Dragover coalescing state.
+             *
+             * `dragover` fires at pointer-move frequency (60-120+ Hz). We capture
+             * the latest event data synchronously (dataTransfer is only accessible
+             * during the native event) and defer the actual dispatch to the next
+             * animation frame, dropping intermediate events.
+             *
+             * @type {{ container: Element, lParam: number, types: string[] } | null}
+             */
+            let pendingDragOver = null;
+            let rafScheduled = false;
+
+            document.addEventListener('dragenter', function (event) {
+                const container = event.target.closest(CONTAINER_SEL);
+
+                if (!container) {
+                    return;
+                }
+
+                // Only dispatch on the first real entry, not child crossings
+                const depth = (enterDepths.get(container) || 0) + 1;
+                enterDepths.set(container, depth);
+
+                if (depth !== 1) {
+                    return;
+                }
+
+                const lParam = self.buildMouseLParam(event, container);
+
+                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
+                    MSG_DRAGENTER, event, 0, lParam, {
+                        types: Array.from(event.dataTransfer.types),
+                        effectAllowed: event.dataTransfer.effectAllowed
+                    }
+                ));
+            });
+
+            document.addEventListener('dragleave', function (event) {
+                const container = event.target.closest(CONTAINER_SEL);
+
+                if (!container) {
+                    return;
+                }
+
+                // Only dispatch when cursor has fully exited the container
+                const depth = (enterDepths.get(container) || 0) - 1;
+                enterDepths.set(container, depth);
+
+                if (depth !== 0) {
+                    return;
+                }
+
+                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
+                    MSG_DRAGLEAVE, event, 0, 0
+                ));
+            });
+
+            document.addEventListener('dragover', function (event) {
+                const container = event.target.closest(CONTAINER_SEL);
+
+                if (!container) {
+                    return;
+                }
+
+                // Always preventDefault synchronously so the browser accepts the
+                // drop. This cannot be deferred to the RAF callback — by then
+                // the native event has already resolved and the "not allowed"
+                // cursor would flash.
+                event.preventDefault();
+
+                // Only build and dispatch messages for designated drop targets
+                if (!event.target.closest(DROP_TARGET_SEL)) {
+                    return;
+                }
+
+                // Capture dataTransfer properties synchronously; the transfer
+                // object is neutered once the event handler returns.
+                pendingDragOver = {
+                    container: container,
+                    lParam: self.buildMouseLParam(event, container),
+                    types: Array.from(event.dataTransfer.types)
+                };
+
+                if (!rafScheduled) {
+                    rafScheduled = true;
+
+                    requestAnimationFrame(function () {
+                        rafScheduled = false;
+
+                        if (!pendingDragOver) {
+                            return;
+                        }
+
+                        const data = pendingDragOver;
+                        pendingDragOver = null;
+
+                        self.dispatchToContainer(data.container, self.wrapDomEventAsMessage(
+                            MSG_DRAGOVER, null, 0, data.lParam, {
+                                types: data.types
+                            }
+                        ));
+                    });
+                }
+            });
+
+            document.addEventListener('drop', function (event) {
+                const container = event.target.closest(CONTAINER_SEL);
+
+                if (!container) {
+                    return;
+                }
+
+                // Prevent browser default (e.g. navigating to a dropped file/URL)
+                event.preventDefault();
+
+                // Drag sequence is complete — discard the depth counter.
+                // Stale counters for containers the drag passed through are
+                // harmless: WeakMap entries are GC'd with the element, and a
+                // new drag sequence will overwrite any leftover count on the
+                // first dragenter.
+                enterDepths.delete(container);
+
+                // Cancel any pending dragover dispatch — the drop supersedes it
+                pendingDragOver = null;
+
+                const lParam = self.buildMouseLParam(event, container);
+                const transfer = event.dataTransfer;
+
+                // Extract file metadata (same shape as MSG_PASTE / form submit)
+                const files = Array.from(transfer.files).map(function (f) {
+                    return { name: f.name, size: f.size, type: f.type };
+                });
+
+                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
+                    MSG_DROP, event, 0, lParam, {
+                        text: transfer.getData('text/plain'),
+                        html: transfer.getData('text/html'),
+                        uri:  transfer.getData('text/uri-list'),
+                        files: files,
+                        rawFiles: transfer.files
+                    }
+                ));
             });
         },
 
@@ -8741,7 +8929,7 @@
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_COPY,
         MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
-        MSG_CAPTURECHANGED,
+        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
