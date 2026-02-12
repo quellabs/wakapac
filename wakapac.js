@@ -126,6 +126,8 @@
     const MSG_SUBMIT = 0x0302;
     const MSG_INPUT = 0x0303;
     const MSG_INPUT_COMPLETE = 0x0304;
+    const MSG_COPY = 0x0305;
+    const MSG_PASTE = 0x0306;
     const MSG_SETFOCUS = 0x0007;
     const MSG_KILLFOCUS = 0x0008;
     const MSG_KEYDOWN = 0x0100;
@@ -1313,6 +1315,7 @@
             this._setupMouseButtonEvents();
             this._setupMouseMoveEvent();
             this._setupMouseWheelEvent();
+            this._setupClipboardEvents();
             this._setupDragPrevention();
             this._setupDocumentLeave();
         },
@@ -1400,7 +1403,7 @@
             // Right click / context menu
             // Normalize context interactions and optionally suppress native menu
             document.addEventListener('contextmenu', function(event) {
-                // Prevent browser context menu if a gesture was just dispatched
+                // Prevent brwowser context menu if a gesture was just dispatched
                 if (MouseGestureRecognizer.gestureJustDispatched) {
                     MouseGestureRecognizer.gestureJustDispatched = false;
                     event.preventDefault();
@@ -1489,16 +1492,10 @@
 
             // Listen for wheel input at the document level
             document.addEventListener("wheel", function(event) {
-                // Resolve container responsible for handling this scroll interaction
+                // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
-
-                // Capture modifier key state present during the wheel event
                 const modifiers = self.getModifierState(event);
-
-                // Encode vertical scroll delta and modifiers into message parameters
                 const wParam = self.buildWheelWParam(event.deltaY, modifiers);
-
-                // Encode pointer position relative to the container
                 const lParam = self.buildMouseLParam(event, container);
                 
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
@@ -1511,6 +1508,78 @@
                 // Dispatch normalized wheel message
                 self.dispatchToContainer(container, customEvent);
             }, { passive: false }); // Allow preventDefault by consumers if needed
+        },
+
+        /**
+         * Registers clipboard event listeners and translates them into
+         * normalized clipboard messages for the container system.
+         * @private
+         * @returns {void}
+         */
+        _setupClipboardEvents() {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            // Copy event
+            // Fires when the user initiates a copy operation (Ctrl+C, context menu, etc.)
+            document.addEventListener("copy", function(event) {
+                // Resolve container responsible for the focused/selected element
+                const container = self.getContainerForEvent(MSG_COPY, event);
+                const selectedText = window.getSelection().toString();
+                const wParam = selectedText.length;
+                const lParam = self.getModifierState(event);
+
+                // Build clipboard message with mutable copyData struct
+                // msgProc can populate copyData to override clipboard contents
+                const customEvent = self.wrapDomEventAsMessage(MSG_COPY, event, wParam, lParam, {
+                    selectedText: selectedText,
+                    copyData: null
+                });
+
+                // Dispatch synchronously — msgProc runs before we continue
+                self.dispatchToContainer(container, customEvent);
+
+                // Post-dispatch: check if msgProc wants to override clipboard contents
+                // If copyData was populated, prevent default copy and write custom data
+                // Format keys should be MIME types (e.g., 'text/plain', 'text/html')
+                if (customEvent.detail.copyData) {
+                    event.preventDefault();
+
+                    for (const format in customEvent.detail.copyData) {
+                        event.clipboardData.setData(format, customEvent.detail.copyData[format]);
+                    }
+                }
+            });
+
+            // Paste event
+            // Fires when the user initiates a paste operation (Ctrl+V, context menu, etc.)
+            document.addEventListener("paste", function(event) {
+                // Resolve container responsible for the focused element
+                const container = self.getContainerForEvent(MSG_PASTE, event);
+                const clipboardData = event.clipboardData;
+                const text = clipboardData.getData('text/plain');
+                const wParam = text.length;
+                const lParam = self.getModifierState(event);
+
+                // Extract file metadata for image/file paste operations (e.g., screenshot paste)
+                // Only captures metadata — file blobs are accessible via originalEvent.clipboardData.files
+                const files = Array.from(clipboardData.files).map(function(f) {
+                    return { name: f.name, size: f.size, type: f.type };
+                });
+
+                // Build clipboard message with all available paste data
+                // msgProc can return false to cancel the paste, which prevents
+                // subsequent MSG_INPUT/MSG_INPUT_COMPLETE from firing
+                const customEvent = self.wrapDomEventAsMessage(MSG_PASTE, event, wParam, lParam, {
+                    text: text,
+                    html: clipboardData.getData('text/html'),
+                    files: files
+                });
+
+                // Dispatch to container — no post-dispatch readback needed
+                // Paste is read-only from msgProc's perspective
+                self.dispatchToContainer(container, customEvent);
+            });
         },
 
         /**
@@ -2197,30 +2266,8 @@
             const wParam = this.getModifierState(domEvent);
             const lParam = this.buildMouseLParam(domEvent, container);
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
+
             this.dispatchToContainer(container, customEvent);
-        },
-
-        /**
-         * Synchronously deliver a wakapac message directly to a container's message procedure.
-         */
-        sendToContainer(container, event) {
-            // No target container: nothing to deliver
-            if (!container) {
-                return;
-            }
-
-            // Each container may optionally expose a Win32-style message procedure.
-            // If none is present, the message is ignored.
-            const msgProc = container.msgProc;
-
-            if (typeof msgProc !== "function") {
-                return;
-            }
-
-            // Invoke the message procedure synchronously.
-            // No DOM dispatch, no bubbling, no cancellation semantics.
-            // This is a direct call into container behavior.
-            msgProc.call(container, event);
         },
 
         /**
@@ -2727,7 +2774,7 @@
                 const pacId = this._capturedContainer.getAttribute('data-pac-id');
                 
                 if (pacId !== null) {
-                    wakaPAC.postMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
+                    wakaPAC.sendMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
                 }
             }
 
@@ -4357,7 +4404,7 @@
 
         // Create interval that sends MSG_TIMER message to component
         const intervalId = setInterval(() => {
-            wakaPAC.postMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
+            wakaPAC.sendMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
         }, elapse);
 
         // Store mapping of timerId -> intervalId for later cleanup
@@ -4805,15 +4852,10 @@
             // Certain message types can prevent framework's default behavior by returning false
             // Similar to Win32: returning 0 from WndProc means "I handled this, skip default processing"
             const cancellableEvents = [
-                MSG_LBUTTONUP,
-                MSG_MBUTTONUP,
-                MSG_RBUTTONUP,
-                MSG_LCLICK,
-                MSG_MCLICK,
-                MSG_RCLICK,
-                MSG_SUBMIT,
-                MSG_CHANGE,
-                MSG_GESTURE
+                MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
+                MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
+                MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE,
+                MSG_COPY, MSG_PASTE
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
@@ -8291,7 +8333,11 @@
 
         // Dispatch the message through the DOM event system.
         // Delivery is asynchronous and follows normal event routing semantics.
-        DomUpdateTracker.dispatchToContainer(container, event);
+        setTimeout(function() {
+            if (container.isConnected) {
+                DomUpdateTracker.dispatchToContainer(container, event);
+            }
+        }, 0);
     };
 
     /**
@@ -8319,7 +8365,7 @@
 
         // Invoke the message procedure directly.
         // This call is synchronous and executes immediately in the current call stack.
-        DomUpdateTracker.sendToContainer(container, event);
+        DomUpdateTracker.dispatchToContainer(container, event);
     };
 
     /**
@@ -8612,8 +8658,8 @@
         MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
-        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
-        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
+        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_COPY,
+        MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
         MSG_CAPTURECHANGED,
 
         // Mouse modifier keys
