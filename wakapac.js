@@ -1498,8 +1498,8 @@
                 // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
                 const modifiers = self.getModifierState(event);
-                const wParam = self.buildMouseLParam(event, container);
-                const lParam = self.buildWheelWParam(event.deltaY, modifiers);
+                const wParam = self.buildWheelWParam(event.deltaY, modifiers);
+                const lParam = self.buildMouseLParam(event, container);
 
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
