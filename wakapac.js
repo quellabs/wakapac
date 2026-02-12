@@ -1612,8 +1612,7 @@
             /** @type {string} Selector for containers that accept drops */
             const DROP_TARGET_SEL = '[data-pac-drop-target]';
 
-            let lastOverContainer = null;
-            let lastOverLParam = -1;
+            let lastOverTarget = null;
 
             /**
              * Depth counter per container element.
@@ -1701,21 +1700,15 @@
                     return;
                 }
 
-                const lParam = self.buildMouseLParam(event, container);
-
-                // Skip if cursor hasn't moved and target hasn't changed
-                if (container === lastOverContainer && lParam === lastOverLParam) {
+                if (event.target === lastOverTarget) {
                     return;
                 }
 
-                // Update immediately so the next event in the same
-                // position is suppressed without waiting for the RAF
-                lastOverContainer = container;
-                lastOverLParam = lParam;
+                lastOverTarget = event.target;
 
                 pendingDragOver = {
                     container: container,
-                    lParam: lParam,
+                    lParam: self.buildMouseLParam(event, container),
                     types: Array.from(event.dataTransfer.types)
                 };
 
@@ -1732,7 +1725,6 @@
                         const data = pendingDragOver;
                         pendingDragOver = null;
 
-                        // Update last-dispatched state at dispatch time,
                         self.dispatchToContainer(data.container, self.wrapDomEventAsMessage(
                             MSG_DRAGOVER, null, 0, data.lParam, {
                                 types: data.types
