@@ -8370,7 +8370,6 @@
 
     /**
      * Broadcast a message to all WakaPAC containers
-     * Similar to Win32 PostMessage with HWND_BROADCAST
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
      * @param {number} lParam - Second message parameter (integer)
