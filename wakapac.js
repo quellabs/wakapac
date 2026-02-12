@@ -2711,7 +2711,6 @@
          * Builds lParam for keyboard messages following Win32 WM_KEYDOWN/WM_KEYUP format
          * Encodes keyboard state information in various bit fields
          * Note: Bits 16-23 (scan code) are not available in JavaScript and remain 0
-         * Note: Bit 30 (previous key state) would require manual tracking and is not implemented
          * @param {KeyboardEvent} event - The keyboard event
          * @returns {number} lParam value with keyboard state information
          */
