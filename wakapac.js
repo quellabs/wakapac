@@ -2337,8 +2337,8 @@
          * @param extended
          */
         dispatchMouseMessage(msgType, domEvent, container, extended={}) {
-            const lParam = this.getModifierState(domEvent);
             const wParam = this.buildMouseLParam(domEvent, container);
+            const lParam = this.getModifierState(domEvent);
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
 
             this.dispatchToContainer(container, customEvent);
