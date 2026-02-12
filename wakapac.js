@@ -29,6 +29,9 @@
     /** @type {string} Selector for containers that accept drops */
     const DROP_TARGET_SEL = '[data-pac-drop-target]';
 
+    /** @type {string[]} List of valid drop effects */
+    const VALID_DROP_EFFECTS = ['none', 'copy', 'link', 'move'];
+
     /**
      * Matches handlebars-style interpolation: {{variable}}
      * Captures variable name/expression with global flag
@@ -1205,9 +1208,7 @@
 
         // Used for drag/drop
         _enterDepths: new WeakMap(),
-        _lastOverTarget: null,
-        _pendingDragOver: null,
-        _rafScheduled: false,
+        _dropzoneTarget: null,
 
         /**
          * Performs one-time initialization of the input/event subsystem.
@@ -1700,52 +1701,52 @@
             const self = this;
 
             document.addEventListener('dragover', function (event) {
+                // Fetch the container
                 const container = event.target.closest(CONTAINER_SEL);
 
+                // If none found, abort
                 if (!container) {
                     return;
                 }
 
+                // Find the drop target
                 const dropTarget = event.target.closest(DROP_TARGET_SEL);
 
+                // If none found, abort
                 if (!dropTarget) {
+                    event.dataTransfer.dropEffect = 'none';
                     return;
                 }
 
-                // Only prevent default (= allow drop) on valid drop targets
+                // Prevent default on valid drop target.
+                // For drag/drop operations this means: allow drop
                 event.preventDefault();
 
-                if (event.target === self._lastOverTarget) {
+                // If we are already hovering over the drop target, do not send new 'over' event
+                if (event.target === self._dropzoneTarget) {
                     return;
                 }
 
-                self._lastOverTarget = event.target;
+                // Update the effect (mouse pointer)
+                const effect = dropTarget.getAttribute('data-pac-drop-target');
+                event.dataTransfer.dropEffect = VALID_DROP_EFFECTS.includes(effect) ? effect : 'copy';
 
-                // Capture synchronously — dataTransfer is only live during the event
-                self._pendingDragOver = {
-                    container: container,
-                    lParam:    self.buildMouseLParam(event, container),
-                    types:     Array.from(event.dataTransfer.types)
-                };
+                // Store the new dropzone
+                self._dropzoneTarget = dropTarget;
 
-                if (!self._rafScheduled) {
-                    self._rafScheduled = true;
+                // Create the event
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_DRAGOVER,
+                    null,
+                    0,
+                    self.buildMouseLParam(event, container),
+                    {
+                        types: Array.from(event.dataTransfer.types)
+                    }
+                );
 
-                    requestAnimationFrame(function () {
-                        self._rafScheduled = false;
-
-                        if (!self._pendingDragOver) {
-                            return;
-                        }
-
-                        const data = self._pendingDragOver;
-                        self._pendingDragOver = null;
-
-                        self.dispatchToContainer(data.container, self.wrapDomEventAsMessage(
-                            MSG_DRAGOVER, null, 0, data.lParam, { types: data.types }
-                        ));
-                    });
-                }
+                // Dispatch the event
+                self.dispatchToContainer(container, customEvent);
             });
         },
 
@@ -1758,27 +1759,27 @@
             const self = this;
 
             document.addEventListener('drop', function (event) {
+                // Fetch container
                 const container = event.target.closest(CONTAINER_SEL);
 
                 if (!container) {
                     return;
                 }
 
-                const dropTarget = event.target.closest(DROP_TARGET_SEL);
-
-                if (!dropTarget) {
+                // Check if this is a valid drop target
+                if (!event.target.closest(DROP_TARGET_SEL)) {
                     return;
                 }
 
+                // Mark the target as valid by calling preventDefault on it
                 event.preventDefault();
 
                 // Drag sequence complete — clean up tracking state
                 self._enterDepths.delete(container);
-                self._pendingDragOver = null;
 
+                // Create the event
                 const transfer = event.dataTransfer;
-
-                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
+                const customEvent = self.wrapDomEventAsMessage(
                     MSG_DROP, event, 0, self.buildMouseLParam(event, container), {
                         text:     transfer.getData('text/plain'),
                         html:     transfer.getData('text/html'),
@@ -1786,7 +1787,10 @@
                         files:    self._extractFileMetadata(transfer.files),
                         rawFiles: transfer.files
                     }
-                ));
+                );
+
+                // Dispatch event
+                self.dispatchToContainer(container, customEvent);
             });
         },
 
