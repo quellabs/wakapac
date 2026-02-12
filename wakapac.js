@@ -1190,6 +1190,9 @@
         /** @private Shared resize observer */
         _resizeObserver: null,
 
+        // Keep track of key repeat count
+        _repeatCounts : new Map(),
+
         /**
          * Performs one-time initialization of the input/event subsystem.
          * @returns {void}
@@ -1676,29 +1679,19 @@
             // Preserve instance reference for use inside DOM callbacks
             const self = this;
 
-            // Key up
-            // Capture key release and forward normalized keyboard state
-            document.addEventListener('keyup', function(event) {
-                // Resolve container responsible for handling this keyboard event
-                const container = self.getContainerForEvent(MSG_KEYUP, event);
-
-                // Encode keyboard state into message parameters
-                const wParam = self.buildKeyboardWParam(event);
-                const lParam = self.buildKeyboardLParam(event);
-
-                // Wrap DOM event with additional key metadata for consumers
-                const customEvent = self.wrapDomEventAsMessage(MSG_KEYUP, event, wParam, lParam, {
-                    key: event.key,   // Logical key value
-                    code: event.code  // Physical key identifier
-                });
-
-                // Dispatch normalized key-up message
-                self.dispatchToContainer(container, customEvent);
+            /**
+             * Clear keyboard repeat count on blur
+             */
+            window.addEventListener('blur', function(event) {
+                self._repeatCounts.clear();
             });
 
             // Key down (with MSG_CHAR for printable characters)
             // Handles key press and optional character emission
             document.addEventListener('keydown', function(event) {
+                // Increment repeat count
+                self._updateRepeatState(event);
+
                 // Resolve target container for keyboard input
                 const container = self.getContainerForEvent(MSG_KEYDOWN, event);
 
@@ -1706,7 +1699,7 @@
                 const keyDownWparam = self.buildKeyboardWParam(event);
                 const keyDownLparam = self.buildKeyboardLParam(event);
 
-                // Wrap and dispatch key-down message
+                // Wrap key-down message
                 const keyDownEvent = self.wrapDomEventAsMessage(
                     MSG_KEYDOWN,
                     event,
@@ -1714,6 +1707,7 @@
                     keyDownLparam
                 );
 
+                // Dispatch the key event
                 self.dispatchToContainer(container, keyDownEvent);
 
                 // Win32-style WM_CHAR: emit character message for printable input
@@ -1732,6 +1726,29 @@
                     // Dispatch character message alongside key-down event
                     self.dispatchToContainer(container, msgCharEvent);
                 }
+            });
+
+            // Key up
+            // Capture key release and forward normalized keyboard state
+            document.addEventListener('keyup', function(event) {
+                // Clear repeat count
+                self._updateRepeatState(event);
+
+                // Resolve container responsible for handling this keyboard event
+                const container = self.getContainerForEvent(MSG_KEYUP, event);
+
+                // Encode keyboard state into message parameters
+                const wParam = self.buildKeyboardWParam(event);
+                const lParam = self.buildKeyboardLParam(event);
+
+                // Wrap DOM event with additional key metadata for consumers
+                const customEvent = self.wrapDomEventAsMessage(MSG_KEYUP, event, wParam, lParam, {
+                    key: event.key,   // Logical key value
+                    code: event.code  // Physical key identifier
+                });
+
+                // Dispatch normalized key-up message
+                self.dispatchToContainer(container, customEvent);
             });
         },
 
@@ -2050,6 +2067,54 @@
                     }
                 });
             });
+        },
+
+        /**
+         * Updates the internal per-key repeat counter to emulate Win32 key repeat
+         * semantics. The counter represents how many keydown messages have occurred
+         * since the last keyup for a given physical key.
+         *
+         * Behavior:
+         * * First keydown → repeat count becomes 1
+         * * Auto-repeat keydown → repeat count increments
+         * * Keyup → repeat state is cleared for that key
+         *
+         * @param {KeyboardEvent} event - DOM keyboard event used to update repeat state
+         * @returns {void}
+         */
+        _updateRepeatState(event) {
+            // Fetch the key
+            const key = event.code;
+
+            // Reset repeat tracking when the key is released
+            if (event.type === 'keyup') {
+                this._repeatCounts.delete(key);
+                return;
+            }
+
+            // First key press initializes the repeat counter
+            if (!event.repeat) {
+                this._repeatCounts.set(key, 1);
+                return;
+            }
+
+            // Auto-repeat increments the existing counter
+            this._repeatCounts.set(key, this._getRepeatCount(event) + 1);
+        },
+
+        /**
+         * Retrieves the current Win32-style repeat count for a key based on the
+         * internal tracking state. This method is read-only and does not mutate state.
+         * @param {KeyboardEvent} event - DOM keyboard event identifying the key
+         * @returns {number} Current repeat count for the key
+         */
+        _getRepeatCount(event) {
+            // Fallback to 1 if tracking is unavailable or the key is not tracked
+            if (!this._repeatCounts) {
+                return 1;
+            }
+
+            return this._repeatCounts.get(event.code) || 1;
         },
 
         /**
@@ -2403,10 +2468,9 @@
         buildKeyboardLParam(event) {
             let lParam = 0;
 
-            // Bits 0-15: Repeat count (1 for single press, 2+ for held keys)
+            // Bits 0-15: Repeat count
             // Win32 increments this for each WM_KEYDOWN while key is held
-            const repeatCount = event.repeat ? 2 : 1;
-            lParam |= (repeatCount & 0xFFFF);
+            lParam |= (this._getRepeatCount(event) & 0xFFFF);
 
             // Bits 16-23: Scan code (hardware scan code)
             // Not available in JavaScript - would require platform-specific mapping
