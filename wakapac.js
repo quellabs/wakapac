@@ -5705,11 +5705,8 @@
             return;
         }
 
-        // This method only handles indirect dependencies — cases where a property
-        // change affects a computed/filtered foreach (e.g., filter → filteredTodos).
-        // Direct array assignments are fully handled by handleArrayChange via
-        // the pac:array-change event, so we only need to proceed if computed
-        // properties depend on the changed property.
+        // Only handles computed/filtered foreach dependencies (e.g., filter → filteredTodos).
+        // Direct array assignments go through handleArrayChange via pac:array-change.
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
 
@@ -6531,9 +6528,11 @@
     };
 
     /**
-     * After a foreach rebuild, checks if the affected element is (or is inside) a <select>.
-     * If so, reads the browser's reconciled .value and writes it back into the abstraction.
-     * The proxy will fire a pac:change event, keeping all dependent bindings in sync.
+     * Syncs a <select> element's DOM value back into the model after its
+     * child <option> elements were rebuilt by a foreach. The browser reconciles
+     * the selection against the new option set; this method reads the resulting
+     * .value and writes it into the abstraction so the proxy fires a pac:change
+     * event and dependent bindings stay in sync.
      * @param {Element} foreachElement - The element whose foreach just rebuilt
      */
     Context.prototype.syncSelectAfterForeach = function(foreachElement) {
@@ -6559,7 +6558,7 @@
         // Read what the browser settled on after the options were replaced
         const domValue = selectElement.value;
 
-        // Resolve the bound property path (e.g., "selectedSubcategory")
+        // Resolve the bound property path and write the DOM value into the abstraction
         const valueBinding = selectMappingData.bindings.value;
         const resolvedPath = this.normalizePath(valueBinding.target, selectElement);
 
