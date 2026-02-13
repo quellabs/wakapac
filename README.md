@@ -1,14 +1,21 @@
-# WakaPAC
+## WakaPAC
 
-A reactive UI library with a centralized desktop-style event engine — in a single ~60KB drop-in script. No build tools, no CLI, no node_modules.
+A tiny reactive UI runtime with a desktop-style event pipeline ---
+delivered as a single ~70KB drop-in script. No build tools, no CLI, no
+node_modules.
 
 ## Why WakaPAC?
 
-Most reactive libraries stop at data binding. WakaPAC adds a **centralized message pipeline** inspired by desktop UI frameworks — mouse input, keyboard events, timers, and gestures all flow through a single `msgProc` handler with normalized event objects. The result is reactive DOM updates *and* structured interaction logic in one lightweight runtime.
+Most reactive libraries stop at data binding. WakaPAC routes **all
+interaction through a centralized message pipeline**, inspired by
+desktop UI frameworks. Instead of scattering event listeners, timers, and gesture logic across
+your code, everything flows through a single `msgProc` handler with
+normalized events. You get reactive DOM updates *and* predictable
+interaction logic in one lightweight runtime.
 
 ## Quick Start
 
-```html
+``` html
 <script src="https://cdn.jsdelivr.net/gh/quellabs/wakapac@main/wakapac.min.js"></script>
 
 <div id="app">
@@ -27,9 +34,10 @@ Two-way binding, reactive updates, zero configuration.
 
 ## The Message Pipeline
 
-Where WakaPAC diverges from other reactive libraries: all browser events are normalized and delivered as messages to your component.
+WakaPAC unifies browser input, timers, and system events into a single
+component handler:
 
-```javascript
+``` javascript
 wakaPAC('#app', {
     ticks: 0,
     _timerId: null,
@@ -42,31 +50,43 @@ wakaPAC('#app', {
         if (event.message === wakaPAC.MSG_TIMER && event.wParam === this._timerId) {
             this.ticks++;
         }
-        
+
         return true;
     }
 });
 ```
 
-Mouse capture, gesture recognition, keyboard handling, and timer delivery all work through this same pipeline.
+Mouse input, keyboard events, timers, and gestures are normalized and
+delivered through the same pipeline --- simplifying complex UI behavior.
 
 ## Features
 
-- Declarative bindings, two-way inputs, computed properties, watchers
-- Deep reactive objects and arrays
-- Parent–child component messaging
-- Central `msgProc` message pipeline for all input and system events
-- Normalized event objects with message constants (wParam/lParam model)
-- Built-in mouse gesture recognition
-- Built-in clipboard support (copy/paste)
-- Built-in drag & drop support wrapping HTML5 Drag and Drop API
-- Integrated timer system with message delivery
-- Mouse capture support for drag-style interactions
-- No build tooling required
+**Core architecture**
+
+-   Centralized message pipeline for all UI and system events
+-   Normalized desktop-style event model
+-   Parent--child component messaging
+
+**Reactive system**
+
+-   Declarative bindings with two-way inputs
+-   Computed properties and watchers
+-   Deep reactive objects and arrays
+
+**Interaction primitives**
+
+-   Integrated timers with message delivery
+-   Mouse capture for drag-style interactions
+-   Built-in gesture recognition
+-   Clipboard integration
+-   HTML5 drag & drop with normalized behavior
+
+No build tooling required.
 
 ## Documentation
 
-Full docs, guides, and API reference: **[wakapac.com/docs](https://www.wakapac.com/docs)**
+Full docs, guides, and API reference:
+**[wakapac.com/docs](https://www.wakapac.com/docs)**
 
 ## License
 
