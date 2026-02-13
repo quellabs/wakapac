@@ -1,17 +1,14 @@
 ## WakaPAC
 
-A tiny reactive UI runtime with a desktop-style event pipeline ---
+A compact reactive UI runtime with a desktop-style event pipeline ---
 delivered as a single ~70KB drop-in script. No build tools, no CLI, no
 node_modules.
 
 ## Why WakaPAC?
 
-Most reactive libraries stop at data binding. WakaPAC routes **all
-interaction through a centralized message pipeline**, inspired by
-desktop UI frameworks. Instead of scattering event listeners, timers, and gesture logic across
-your code, everything flows through a single `msgProc` handler with
-normalized events. You get reactive DOM updates *and* predictable
-interaction logic in one lightweight runtime.
+Most reactive libraries stop at data binding. WakaPAC routes **all interaction through a centralized message pipeline**, inspired by desktop UI frameworks.
+Instead of scattering event listeners, timers, and gesture logic across your code, everything flows through a single `msgProc` handler with normalized events.
+You get reactive DOM updates *and* predictable interaction logic in one lightweight runtime.
 
 ## Quick Start
 
