@@ -6497,10 +6497,9 @@
                 hashMap.set(contentHash, originalIndex);
 
                 // Build the HTML for this item
-                completeHTML +=
-                    `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
-                    mappingData.template + // Original template with bindings like {{item}}
-                    `<!-- /pac-foreach-item -->`;
+                completeHTML += self.buildForeachItemHTML(
+                    mappingData.foreachId, mappingData.template, originalIndex, renderIndex
+                );
             });
 
             // Set the complete HTML at once - this preserves comment structure
@@ -7329,6 +7328,21 @@
     }
 
     /**
+     * Builds the HTML string for a single foreach item, wrapped in boundary comments.
+     * Used by both renderForeach (full rebuild) and addItems (incremental insert).
+     * @param {string} foreachId - The unique identifier for this foreach loop
+     * @param {string} template - The raw HTML template for one iteration
+     * @param {number} originalIndex - The item's index in the source array
+     * @param {number} renderIndex - The item's position in the rendered output
+     * @returns {string} Comment-delimited HTML string for one foreach iteration
+     */
+    Context.prototype.buildForeachItemHTML = function(foreachId, template, originalIndex, renderIndex) {
+        return `<!-- pac-foreach-item: ${foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
+            template +
+            `<!-- /pac-foreach-item -->`;
+    }
+
+    /**
      * Classifies changes between old and new arrays based on content hashes.
      * This function enables efficient DOM diffing by identifying what items were
      * added, removed, moved, or remained unchanged between array renders.
@@ -7664,10 +7678,9 @@
             const originalIndex = this.findOriginalIndex(item, sourceArray, index);
 
             // Create HTML with proper comments
-            const itemHTML =
-                `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${index} -->` +
-                mappingData.template +
-                `<!-- /pac-foreach-item -->`;
+            const itemHTML = this.buildForeachItemHTML(
+                mappingData.foreachId, mappingData.template, originalIndex, index
+            );
 
             // Create appropriate container based on parent element type
             const tempContainer = this.createTemporaryContainer(element);
