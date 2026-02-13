@@ -1549,8 +1549,8 @@
                 // Resolve container responsible for the focused/selected element
                 const container = self.getContainerForEvent(MSG_COPY, event);
                 const selectedText = window.getSelection().toString();
-                const wParam = selectedText.length;
-                const lParam = self.getModifierState(event);
+                const wParam = self.getModifierState(event);
+                const lParam = selectedText.length;
 
                 // Build clipboard message with mutable copyData struct
                 // msgProc can populate copyData to override clipboard contents
@@ -1581,8 +1581,8 @@
                 const container = self.getContainerForEvent(MSG_PASTE, event);
                 const clipboardData = event.clipboardData;
                 const text = clipboardData.getData('text/plain');
-                const wParam = text.length;
-                const lParam = self.getModifierState(event);
+                const wParam = self.getModifierState(event);
+                const lParam = text.length;
 
                 // Extract file metadata for image/file paste operations (e.g., screenshot paste)
                 // Only captures metadata — file blobs are accessible via originalEvent.clipboardData.files
