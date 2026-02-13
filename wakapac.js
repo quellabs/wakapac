@@ -1518,8 +1518,8 @@
                 // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
                 const modifiers = self.getModifierState(event);
-                const wParam = self.buildWheelWParam(event.deltaY, modifiers);
-                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.buildMouseWParam(event, container);
+                const lParam = self.buildWheelLParam(event.deltaY, modifiers);
 
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
@@ -1662,9 +1662,9 @@
                 }
 
                 // Create the event
-                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.buildMouseWParam(event, container);
                 const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGENTER, event, 0, lParam, {
+                    MSG_DRAGENTER, event, wParam, 0, {
                         types: Array.from(event.dataTransfer.types)
                     }
                 );
@@ -1702,9 +1702,9 @@
                 }
 
                 // Create event
-                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.buildMouseWParam(event, container);
                 const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGLEAVE, event, 0, lParam, {
+                    MSG_DRAGLEAVE, event, wParam, 0, {
                         types: Array.from(event.dataTransfer.types)
                     }
                 );
@@ -1758,12 +1758,12 @@
                 self._dropzoneTarget = dropTarget;
 
                 // Create the event
-                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.buildMouseWParam(event, container);
                 const customEvent = self.wrapDomEventAsMessage(
                     MSG_DRAGOVER,
                     event,
+                    wParam,
                     0,
-                    lParam,
                     {
                         dropTarget: dropTarget,
                         types: Array.from(event.dataTransfer.types)
@@ -1806,10 +1806,10 @@
 
                 // Create the event
                 const transfer = event.dataTransfer;
-                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.buildMouseWParam(event, container);
 
                 const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DROP, event, 0, lParam, {
+                    MSG_DROP, event, wParam, 0, {
                         dropTarget: dropTarget,
                         text: transfer.getData('text/plain'),
                         html: transfer.getData('text/html'),
@@ -2273,8 +2273,8 @@
                         }
 
                         // Message parameters encode size state and dimensions
-                        const wParam = sizeType;
-                        const lParam = self.makeLParam(width, height);
+                        const wParam = self.makeWParam(width, height);
+                        const lParam = sizeType;
 
                         // Build structured resize message including raw observer data
                         const customEvent = self.wrapDomEventAsMessage(
@@ -2571,7 +2571,7 @@
          * @param extended
          */
         dispatchMouseMessage(msgType, domEvent, container, extended={}) {
-            const wParam = this.buildMouseLParam(domEvent, container);
+            const wParam = this.buildMouseWParam(domEvent, container);
             const lParam = this.getModifierState(domEvent);
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
 
@@ -2599,58 +2599,58 @@
         },
 
         /**
-         * Builds wParam for mouse messages following Win32 WM_LBUTTONDOWN format
+         * Builds lParam for mouse messages following Win32 WM_LBUTTONDOWN format
          * Contains key state flags indicating which modifier keys and mouse buttons are pressed
          * @param {Event} event - The mouse event
-         * @returns {number} wParam value with packed key state flags
+         * @returns {number} lParam value with packed key state flags
          */
         getModifierState(event) {
-            let wParam = 0;
+            let lParam = 0;
 
             if (event.ctrlKey) {
-                wParam |= MK_CONTROL;
+                lParam |= MK_CONTROL;
             }
 
             if (event.shiftKey) {
-                wParam |= MK_SHIFT;
+                lParam |= MK_SHIFT;
             }
 
             if (event.altKey) {
-                wParam |= MK_ALT;
+                lParam |= MK_ALT;
             }
 
             if (event.buttons !== undefined) {
                 // Real mouse event
                 if (event.buttons & 1) {
-                    wParam |= MK_LBUTTON;
+                    lParam |= MK_LBUTTON;
                 }
 
                 if (event.buttons & 2) {
-                    wParam |= MK_RBUTTON;
+                    lParam |= MK_RBUTTON;
                 }
 
                 if (event.buttons & 4) {
-                    wParam |= MK_MBUTTON;
+                    lParam |= MK_MBUTTON;
                 }
             } else if (event.touches && event.touches.length > 0) {
                 // Touch event with active touches = simulate left button
-                wParam |= MK_LBUTTON;
+                lParam |= MK_LBUTTON;
             }
 
-            return wParam;
+            return lParam;
         },
 
         /**
-         * Builds lParam for mouse messages following Win32 format
+         * Builds wParam for mouse messages following Win32 format
          * Packs x,y coordinates into a single 32-bit value
          * Coordinates are relative to the container element (client-area relative)
          * LOWORD (bits 0-15) = x-coordinate, HIWORD (bits 16-31) = y-coordinate
          * @param {MouseEvent|TouchEvent} event - The mouse event
          * @param {Element} container - The PAC container element with data-pac-id
-         * @returns {number} lParam value with packed container-relative coordinates
+         * @returns {number} wParam value with packed container-relative coordinates
          */
-        buildMouseLParam(event, container) {
-            // Skip lParam if container not set
+        buildMouseWParam(event, container) {
+            // Skip wParam if container not set
             if (!container) {
                 return 0;
             }
@@ -2670,16 +2670,16 @@
             const relativeY = clientY - rect.top;
 
             // Get container's bounding rectangle to calculate relative coordinates
-            return this.makeLParam(relativeX, relativeY);
+            return this.makeWParam(relativeX, relativeY);
         },
 
         /**
-         * Build a Win32-style LPARAM value by converting page coordinates into a single 32-bit integer.
+         * Build a Win32-style wParam value by converting page coordinates into a single 32-bit integer.
          * @param {number} x
          * @param {number} y
          * @returns {number}
          */
-        makeLParam(x, y) {
+        makeWParam(x, y) {
             // Round to integers and clamp into an unsigned 16-bit range
             // so they are safe to pack into a single LPARAM value.
             const transformedX = Math.max(0, Math.min(0xFFFF, Math.round(x)));
@@ -2698,7 +2698,7 @@
          * @param {number} modifiers - Bitmask of MK_* flags
          * @returns {number} Packed wParam value
          */
-        buildWheelWParam(delta, modifiers) {
+        buildWheelLParam(delta, modifiers) {
             // Normalize delta to ±120 per notch (Win32 standard)
             const normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
 
@@ -8302,9 +8302,9 @@
             });
 
             // Standard Win32-style message properties
-            customEvent.message = MSG_GESTURE;                  // Message type identifier
-            customEvent.wParam = 0;                             // Not used for gestures
-            customEvent.lParam = (centerY << 16) | centerX;     // Packed center coordinates
+            customEvent.message = MSG_GESTURE;                   // Message type identifier
+            customEvent.wParam = (centerY << 16) | centerX;      // Packed center coordinates
+            customEvent.lParam = 0;                              // Not used for gestures
             customEvent.timestamp = now;                         // Event timestamp
             customEvent.originalEvent = originalEvent;           // Access to native mouseup event
 
@@ -8822,37 +8822,37 @@
     };
 
     /**
-     * Extracts the low-order word (x coordinate) from lParam
+     * Extracts the low-order word (x coordinate) from wParam
      * Equivalent to Win32 LOWORD macro - gets bits 0-15
      * Coordinates are container-relative (client-area relative in Win32 terms)
-     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * @param {number} wParam - Packed mouse coordinates from event.lParam
      * @returns {number} X coordinate relative to container's left edge
      */
-    wakaPAC.LOWORD = function(lParam) {
-        return lParam & 0xFFFF;
+    wakaPAC.LOWORD = function(wParam) {
+        return wParam & 0xFFFF;
     };
 
     /**
-     * Extracts the high-order word (y coordinate) from lParam
+     * Extracts the high-order word (y coordinate) from wParam
      * Equivalent to Win32 HIWORD macro - gets bits 16-31
      * Coordinates are container-relative (client-area relative in Win32 terms)
-     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * @param {number} wParam - Packed mouse coordinates from event.lParam
      * @returns {number} Y coordinate relative to container's top edge
      */
-    wakaPAC.HIWORD = function(lParam) {
-        return (lParam >> 16) & 0xFFFF;
+    wakaPAC.HIWORD = function(wParam) {
+        return (wParam >> 16) & 0xFFFF;
     };
 
     /**
-     * Extracts both x and y coordinates from lParam
-     * Equivalent to Win32 MAKEPOINTS macro - converts lParam to POINTS structure
-     * @param {number} lParam - Packed mouse coordinates from event.lParam
+     * Extracts both x and y coordinates from wParam
+     * Equivalent to Win32 MAKEPOINTS macro - converts wParam to POINTS structure
+     * @param {number} wParam - Packed mouse coordinates from event.lParam
      * @returns {{x: number, y: number}} Object containing container-relative x and y coordinates
      */
-    wakaPAC.MAKEPOINTS = function(lParam) {
+    wakaPAC.MAKEPOINTS = function(wParam) {
         return {
-            x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
-            y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
+            x: wParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
+            y: (wParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
         };
     };
 
@@ -8880,12 +8880,12 @@
     /**
      * Extracts the Win32 repeat count from a keyboard lParam value.
      * Bits 0–15 encode how many times the key message has repeated.
-     * @param {number} lParam - Encoded keyboard lParam
+     * @param {number} wParam - Encoded keyboard lParam
      * @returns {number} Repeat count
      */
-    wakaPAC.GET_REPEAT_COUNT_LPARAM = function(lParam) {
+    wakaPAC.GET_REPEAT_COUNT_LPARAM = function(wParam) {
         // Mask lower 16 bits where Win32 stores the repeat count
-        return lParam & 0xFFFF;
+        return wParam & 0xFFFF;
     };
 
     /**
