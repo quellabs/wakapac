@@ -1663,8 +1663,10 @@
 
                 // Create the event
                 const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.getModifierState(event);
+
                 const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGENTER, event, 0, lParam, {
+                    MSG_DRAGENTER, event, wParam, lParam, {
                         types: Array.from(event.dataTransfer.types)
                     }
                 );
@@ -1703,8 +1705,10 @@
 
                 // Create event
                 const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.getModifierState(event);
+
                 const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGLEAVE, event, 0, lParam, {
+                    MSG_DRAGLEAVE, event, wParam, lParam, {
                         types: Array.from(event.dataTransfer.types)
                     }
                 );
@@ -1759,10 +1763,12 @@
 
                 // Create the event
                 const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.getModifierState(event);
+
                 const customEvent = self.wrapDomEventAsMessage(
                     MSG_DRAGOVER,
                     event,
-                    0,
+                    wParam,
                     lParam,
                     {
                         dropTarget: dropTarget,
@@ -1807,9 +1813,10 @@
                 // Create the event
                 const transfer = event.dataTransfer;
                 const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.getModifierState(event);
 
                 const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DROP, event, 0, lParam, {
+                    MSG_DROP, event, wParam, lParam, {
                         dropTarget: dropTarget,
                         text: transfer.getData('text/plain'),
                         html: transfer.getData('text/html'),
