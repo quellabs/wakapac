@@ -5705,13 +5705,15 @@
             return;
         }
 
-        // Fast exit: property is not an array and no computed properties depend on it,
-        // so no foreach could possibly need a rebuild
+        // This method only handles indirect dependencies — cases where a property
+        // change affects a computed/filtered foreach (e.g., filter → filteredTodos).
+        // Direct array assignments are fully handled by handleArrayChange via
+        // the pac:array-change event, so we only need to proceed if computed
+        // properties depend on the changed property.
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
-        const isArray = Array.isArray(this.abstraction[changedProp]);
 
-        if (!isArray && !dependents) {
+        if (!dependents) {
             return;
         }
 
@@ -5723,21 +5725,12 @@
                 continue;
             }
 
-            // Direct match: the changed property is an array and this foreach is bound to it
             const expr = mappingData.foreachExpr;
             const source = mappingData.sourceArray;
 
-            if (isArray && (expr === changedProp || source === changedProp)) {
-                if (this.shouldRebuildForeach(element)) {
-                    this.renderForeach(element);
-                }
-
-                continue;
-            }
-
             // Indirect match: this foreach is bound to a computed property
             // that depends on the changed property (e.g., filter → filteredTodos)
-            if (dependents && (dependents.indexOf(expr) !== -1 || dependents.indexOf(source) !== -1)) {
+            if (dependents.indexOf(expr) !== -1 || dependents.indexOf(source) !== -1) {
                 if (this.shouldRebuildForeach(element)) {
                     this.renderForeach(element);
                 }
