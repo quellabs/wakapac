@@ -121,7 +121,7 @@
 
         msgProc(event) {
             // Get container-relative coordinates
-            const pos = wakaPAC.MAKEPOINTS(event.wParam);
+            const pos = wakaPAC.MAKEPOINTS(event.lParam);
 
             // Calculate canvas-relative coordinates
             const canvasRect = this._canvas.getBoundingClientRect();
@@ -161,7 +161,7 @@
                     this.mouseY = Math.round(canvasY);
 
                     // Paint if left button is held
-                    if (event.lParam & wakaPAC.MK_LBUTTON) {
+                    if (event.wParam & wakaPAC.MK_LBUTTON) {
                         this.drawStroke(this._lastX, this._lastY, canvasX, canvasY);
                         this._lastX = canvasX;
                         this._lastY = canvasY;

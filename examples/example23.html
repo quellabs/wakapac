@@ -278,7 +278,7 @@
 
             if (event.message === wakaPAC.MSG_LBUTTONUP) {
                 if (this.dragItem) {
-                    const pt = wakaPAC.MAKEPOINTS(event.wParam);
+                    const pt = wakaPAC.MAKEPOINTS(event.lParam);
                     const viewportPt = this.containerToViewport(pt.x, pt.y);
 
                     if (wakaPAC.ptInElement(viewportPt.x, viewportPt.y, document.querySelector('#targetBroken .box'))) {
@@ -345,7 +345,7 @@
             if (event.message === wakaPAC.MSG_LBUTTONUP) {
                 if (this.dragItem) {
                     // Check if over target
-                    const pt = wakaPAC.MAKEPOINTS(event.wParam);
+                    const pt = wakaPAC.MAKEPOINTS(event.lParam);
                     const viewportPt = this.containerToViewport(pt.x, pt.y);
 
                     if (wakaPAC.ptInElement(viewportPt.x, viewportPt.y, document.querySelector('#targetWorking .box'))) {
