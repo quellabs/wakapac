@@ -17,10 +17,10 @@
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 
-(function() {
+(function () {
     "use strict";
 
-    const VERSION = '1.1.0';
+    const VERSION = '1.3.0';
 
     /**
      * WakaSync - Advanced HTTP Client
@@ -30,7 +30,8 @@
         // Request tracking for grouping and cancellation
         this._requestGroups = new Map();
 
-        // Interceptors
+        // Interceptors with id tracking for eject support
+        this._interceptorId = 0;
         this.interceptors = {
             request: [],
             response: []
@@ -41,17 +42,85 @@
             timeout: 30000,
             retries: 0,
             retryDelay: 1000,
-            validateStatus: function(response) { return response.ok; },
+            retryBackoff: 'exponential',      // 'fixed', 'exponential', or 'linear'
+            retryBackoffMax: 30000,            // Cap for exponential backoff
+            validateStatus: function (response) {
+                return response.ok;
+            },
             responseType: 'auto',
-            headers: {
-                'User-Agent': `WakaSync/${VERSION}`
-            }
+            headers: {}
         };
     }
 
     WakaSync.prototype = {
+        // Restore constructor reference (prototype assignment destroys it)
+        constructor: WakaSync,
+
         /**
-         * Makes an HTTP request with advanced options
+         * Adds a request interceptor. Interceptors may be sync or async.
+         * Returns an unsubscribe function to remove the interceptor.
+         *
+         * @public
+         * @param {Function} fn - Interceptor function(config) => config
+         * @returns {Function} Unsubscribe function
+         */
+        addRequestInterceptor(fn) {
+            if (typeof fn !== 'function') {
+                throw new Error('Interceptor must be a function');
+            }
+
+            const entry = {id: ++this._interceptorId, fn};
+            this.interceptors.request.push(entry);
+
+            return () => {
+                const idx = this.interceptors.request.indexOf(entry);
+                if (idx !== -1) {
+                    this.interceptors.request.splice(idx, 1);
+                }
+            };
+        },
+
+        /**
+         * Adds a response interceptor. Interceptors may be sync or async.
+         * Returns an unsubscribe function to remove the interceptor.
+         *
+         * Response interceptors receive (data, config, timing) where timing
+         * contains { startTime, endTime, duration } in milliseconds.
+         *
+         * @public
+         * @param {Function} fn - Interceptor function(data, config, timing) => data
+         * @returns {Function} Unsubscribe function
+         */
+        addResponseInterceptor(fn) {
+            if (typeof fn !== 'function') {
+                throw new Error('Interceptor must be a function');
+            }
+
+            const entry = {
+                id: ++this._interceptorId,
+                fn
+            };
+
+            this.interceptors.response.push(entry);
+
+            return () => {
+                const idx = this.interceptors.response.indexOf(entry);
+
+                if (idx !== -1) {
+                    this.interceptors.response.splice(idx, 1);
+                }
+            };
+        },
+
+        /**
+         * Makes an HTTP request with advanced options.
+         *
+         * NOTE on callbacks vs promises: If both onSuccess/onError callbacks and
+         * promise handling (.then/.catch) are used, the callback fires first as a
+         * side effect. The promise still resolves/rejects normally. This allows
+         * callbacks for side effects (e.g. logging) while using promises for
+         * control flow.
+         *
          * @param {string} url - The URL to request
          * @param {Object} opts - Request options
          * @param {string} [opts.method='GET'] - HTTP method
@@ -60,8 +129,8 @@
          * @param {string} [opts.groupKey] - Group key for request cancellation
          * @param {boolean} [opts.latestOnly] - Use URL as groupKey automatically
          * @param {boolean} [opts.ignoreAbort] - Suppress AbortError when cancelled
-         * @param {Function} [opts.onSuccess] - Success callback
-         * @param {Function} [opts.onError] - Error callback
+         * @param {Function} [opts.onSuccess] - Success callback (fires before promise resolves)
+         * @param {Function} [opts.onError] - Error callback (fires before promise rejects)
          * @param {number} [opts.timeout=30000] - Request timeout in milliseconds
          * @param {Function} [opts.validateStatus] - Custom status validation function
          * @param {string} [opts.responseType='auto'] - Response type: 'json', 'text', 'blob', 'response', 'auto'
@@ -76,157 +145,215 @@
          * @param {string} [opts.priority] - Fetch priority option
          * @param {string} [opts.baseUrl] - Base URL for URL normalization
          * @param {number} [opts.retries=0] - Number of retry attempts
-         * @param {number} [opts.retryDelay=1000] - Delay between retries in milliseconds
+         * @param {number} [opts.retryDelay=1000] - Base delay between retries in milliseconds
+         * @param {string} [opts.retryBackoff='exponential'] - Backoff strategy: 'fixed', 'exponential', 'linear'
+         * @param {number} [opts.retryBackoffMax=30000] - Maximum backoff delay in milliseconds
          * @param {Function} [opts.shouldRetry] - Custom retry logic
+         * @public
          * @returns {Promise} Promise that resolves with response data
          */
-        request(url, opts = {}) {
-            // Extract and validate configuration
-            // Apply request interceptors
+        async request(url, opts = {}) {
+            const startTime = Date.now();
+
+            // Extract and validate configuration, apply request interceptors
             let interceptedConfig = this.validateAndNormalizeConfig(url, opts);
 
-            for (const interceptor of this.interceptors.request) {
+            // Apply request interceptors (supports async interceptors)
+            // Tolerates both raw functions and { id, fn } entries for backward compatibility
+            for (const entry of this.interceptors.request) {
                 try {
-                    interceptedConfig = interceptor(interceptedConfig) || interceptedConfig;
+                    const fn = typeof entry === 'function' ? entry : entry.fn;
+                    const result = await fn(interceptedConfig);
+                    interceptedConfig = result !== undefined ? result : interceptedConfig;
                 } catch (e) {
                     const error = new Error('Request interceptor failed');
                     error.code = 'INTERCEPTOR_ERROR';
                     error.originalError = e;
-                    return Promise.reject(error);
+                    throw error;
                 }
-            }
-
-            // Initialize request tracking
-            if (!this._requestGroups) {
-                this._requestGroups = new Map();
             }
 
             // Setup request state and immediately register to prevent race conditions
             const requestState = this.setupRequestState(interceptedConfig);
 
-            // Create timeout promise for request timeout handling
-            const timeoutPromise = interceptedConfig.timeout > 0 ?
-                this.createTimeoutPromise(interceptedConfig.timeout, requestState.controller) :
-                null;
+            // Setup timeout that aborts the controller directly
+            let timeoutId = null;
 
-            // Create the main fetch promise with retry logic
-            const self = this;
-            const fetchPromise = this.executeWithRetry(interceptedConfig, requestState)
-                .then(function(response) {
-                    return self.processResponse(response, interceptedConfig, requestState);
-                })
-                .then(function(data) {
-                    // Apply response interceptors
-                    let interceptedData = data;
-                    for (const interceptor of self.interceptors.response) {
-                        try {
-                            interceptedData = interceptor(interceptedData, interceptedConfig) || interceptedData;
-                        } catch (e) {
-                            const error = new Error('Response interceptor failed');
-                            error.code = 'INTERCEPTOR_ERROR';
-                            error.originalError = e;
-                            throw error;
-                        }
+            if (interceptedConfig.timeout > 0) {
+                timeoutId = setTimeout(() => {
+                    if (!requestState.controller.signal.aborted) {
+                        requestState.timedOut = true;
+                        requestState.controller.abort();
                     }
-                    return interceptedData;
-                })
-                .then(function(data) {
-                    return self.handleSuccess(data, interceptedConfig, requestState);
-                })
-                .catch(function(error) {
-                    return self.handleError(error, interceptedConfig);
-                });
+                }, interceptedConfig.timeout);
 
-            // Race between fetch and timeout (if timeout is enabled)
-            const finalPromise = timeoutPromise ?
-                Promise.race([fetchPromise, timeoutPromise]) :
-                fetchPromise;
+                // Clear timeout if controller is aborted by something else
+                requestState.controller.signal.addEventListener('abort', () => {
+                    clearTimeout(timeoutId);
+                }, {once: true});
+            }
 
-            return finalPromise.finally(function() {
-                self.cleanupRequest(interceptedConfig.groupKey, requestState.token);
-            });
+            try {
+                let response = await this.executeWithRetry(interceptedConfig, requestState);
+                let data = await this.processResponse(response, interceptedConfig, requestState);
+
+                // Build timing metadata
+                const endTime = Date.now();
+                const timing = {
+                    startTime,
+                    endTime,
+                    duration: endTime - startTime
+                };
+
+                // Apply response interceptors (supports async interceptors)
+                // Tolerates both raw functions and { id, fn } entries for backward compatibility
+                for (const entry of this.interceptors.response) {
+                    try {
+                        const fn = typeof entry === 'function' ? entry : entry.fn;
+                        const result = await fn(data, interceptedConfig, timing);
+                        data = result !== undefined ? result : data;
+                    } catch (e) {
+                        const error = new Error('Response interceptor failed');
+                        error.code = 'INTERCEPTOR_ERROR';
+                        error.originalError = e;
+                        throw error;
+                    }
+                }
+
+                return this.handleSuccess(data, interceptedConfig, requestState);
+            } catch (error) {
+                // Convert generic abort into timeout error if timeout triggered it.
+                // Check both AbortError (from fetch) and CancellationError (from
+                // delayWithAbortCheck during retries).
+                if (requestState.timedOut && (error.name === 'AbortError' || error.name === 'CancellationError')) {
+                    const timeoutError = this.createTaggedCancellationError(
+                        `Request timeout after ${interceptedConfig.timeout}ms`,
+                        'timeout'
+                    );
+                    return this.handleError(timeoutError, interceptedConfig);
+                }
+
+                return this.handleError(error, interceptedConfig);
+            } finally {
+                if (timeoutId !== null) {
+                    clearTimeout(timeoutId);
+                }
+
+                this.cleanupRequest(interceptedConfig.groupKey, requestState.token);
+            }
         },
 
         /**
          * Convenience method for GET requests
+         * @public
          * @param {string} url - Request URL
          * @param {Object} opts - Request options
          * @returns {Promise} Promise that resolves with response data
          */
         get(url, opts = {}) {
-            return this.request(url, { ...opts, method: 'GET' });
+            return this.request(url, {...opts, method: 'GET'});
         },
 
         /**
          * Convenience method for POST requests
+         * @public
          * @param {string} url - Request URL
          * @param {*} data - Request body data
          * @param {Object} opts - Request options
          * @returns {Promise} Promise that resolves with response data
          */
         post(url, data, opts = {}) {
-            return this.request(url, { ...opts, method: 'POST', data });
+            return this.request(url, {...opts, method: 'POST', data});
         },
 
         /**
          * Convenience method for PUT requests
+         * @public
          * @param {string} url - Request URL
          * @param {*} data - Request body data
          * @param {Object} opts - Request options
          * @returns {Promise} Promise that resolves with response data
          */
         put(url, data, opts = {}) {
-            return this.request(url, { ...opts, method: 'PUT', data });
+            return this.request(url, {...opts, method: 'PUT', data});
         },
 
         /**
          * Convenience method for DELETE requests
+         * @public
          * @param {string} url - Request URL
          * @param {Object} opts - Request options
          * @returns {Promise} Promise that resolves with response data
          */
         delete(url, opts = {}) {
-            return this.request(url, { ...opts, method: 'DELETE' });
+            return this.request(url, {...opts, method: 'DELETE'});
         },
 
         /**
          * Convenience method for PATCH requests
+         * @public
          * @param {string} url - Request URL
          * @param {*} data - Request body data
          * @param {Object} opts - Request options
          * @returns {Promise} Promise that resolves with response data
          */
         patch(url, data, opts = {}) {
-            return this.request(url, { ...opts, method: 'PATCH', data });
+            return this.request(url, {...opts, method: 'PATCH', data});
         },
 
         /**
          * Convenience method for HEAD requests
+         * @public
          * @param {string} url - Request URL
          * @param {Object} opts - Request options
          * @returns {Promise} Promise that resolves with response data
          */
         head(url, opts = {}) {
-            return this.request(url, { ...opts, method: 'HEAD' });
+            return this.request(url, {...opts, method: 'HEAD'});
         },
 
         /**
-         * Creates a new WakaSync instance with default configuration
+         * Creates a new WakaSync instance with default configuration.
+         * Interceptors are NOT inherited by default — pass copyInterceptors: true
+         * to carry them over.
+         *
+         * @public
          * @param {Object} defaultConfig - Default configuration to apply
+         * @param {Object} options - Creation options
+         * @param {boolean} [options.copyInterceptors=false] - Copy interceptors from parent
          * @returns {WakaSync} New WakaSync instance
          */
-        create(defaultConfig = {}) {
+        create(defaultConfig = {}, options = {}) {
             const instance = new WakaSync();
-            instance.config = { ...this.config, ...defaultConfig };
+
+            // Deep merge headers so defaults aren't lost
+            instance.config = {
+                ...this.config,
+                ...defaultConfig,
+                headers: {
+                    ...this.config.headers,
+                    ...(defaultConfig.headers || {})
+                }
+            };
+
+            // Optionally copy interceptors (shallow copy of entry references)
+            if (options.copyInterceptors) {
+                instance.interceptors = {
+                    request: [...this.interceptors.request],
+                    response: [...this.interceptors.response]
+                };
+            }
+
             return instance;
         },
 
         /**
          * Cancels all requests in a group
+         * @public
          * @param {string} groupKey - Group key to cancel
          */
         cancelGroup(groupKey) {
-            if (!groupKey || !this._requestGroups) {
+            if (!groupKey) {
                 return;
             }
 
@@ -238,13 +365,10 @@
 
         /**
          * Cancels all active requests
+         * @public
          */
         cancelAll() {
-            if (!this._requestGroups) {
-                return;
-            }
-
-            this._requestGroups.forEach(function(group) {
+            this._requestGroups.forEach(function (group) {
                 if (group.controller && !group.controller.signal.aborted) {
                     group.controller.abort();
                 }
@@ -255,15 +379,13 @@
 
         /**
          * Gets the number of active requests
+         * @public
          * @returns {number} Number of active requests
          */
         getActiveRequestCount() {
-            if (!this._requestGroups) {
-                return 0;
-            }
-
             let count = 0;
-            this._requestGroups.forEach(function(group) {
+
+            this._requestGroups.forEach(function (group) {
                 if (group.controller && !group.controller.signal.aborted) {
                     count++;
                 }
@@ -286,18 +408,25 @@
                 throw error;
             }
 
-            // Merge with instance config and provided options
-            const merged = { ...this.config, ...opts };
+            // Merge with instance config and provided options (deep merge headers)
+            const merged = {
+                ...this.config,
+                ...opts,
+                headers: {
+                    ...this.config.headers,
+                    ...(opts.headers || {})
+                }
+            };
 
             // Validate callback functions
             this.validateCallbacks(merged);
             this.validateAbortControls(merged);
 
             // Process method and body
-            const { method, body } = this.normalizeMethodAndBody(merged);
+            const {method, body, bodyIsJson} = this.normalizeMethodAndBody(merged);
 
             // Build headers
-            const headers = this.buildHeaders(merged, body);
+            const headers = this.buildHeaders(merged, body, bodyIsJson);
 
             // Build fetch options
             const fetchOptions = this.buildFetchPassthrough(merged);
@@ -322,6 +451,8 @@
                 abortController: merged.abortController,
                 retries: Math.max(0, parseInt(merged.retries) || 0),
                 retryDelay: Math.max(0, parseInt(merged.retryDelay) || 1000),
+                retryBackoff: merged.retryBackoff || 'exponential',
+                retryBackoffMax: Math.max(0, parseInt(merged.retryBackoffMax) || 30000),
                 shouldRetry: merged.shouldRetry,
                 urlNormalizer: merged.urlNormalizer,
                 baseUrl: merged.baseUrl
@@ -341,7 +472,7 @@
                 ['shouldRetry', opts.shouldRetry]
             ];
 
-            validators.forEach(function(validator) {
+            validators.forEach(function (validator) {
                 const name = validator[0];
                 const fn = validator[1];
 
@@ -366,9 +497,11 @@
         },
 
         /**
-         * Normalizes HTTP method and body
+         * Normalizes HTTP method and body.
+         * Returns a bodyIsJson flag so buildHeaders can set the correct Content-Type.
+         *
          * @param {Object} opts - Request options
-         * @returns {Object} Object with method and body
+         * @returns {Object} Object with method, body, and bodyIsJson
          */
         normalizeMethodAndBody(opts) {
             const method = (opts.method || 'GET').toUpperCase();
@@ -378,11 +511,13 @@
                 if (opts.data !== undefined) {
                     console.warn(`Method ${method} should not have a body. Data will be ignored.`);
                 }
-                return { method };
+                return {method, body: undefined, bodyIsJson: false};
             }
 
             // Process body data for other methods
             let body;
+            let bodyIsJson = false;
+
             if (opts.data !== undefined) {
                 if (typeof opts.data === 'string' ||
                     opts.data instanceof FormData ||
@@ -391,35 +526,39 @@
                     body = opts.data;
                 } else {
                     body = JSON.stringify(opts.data);
+                    bodyIsJson = true;
                 }
             }
 
-            return { method, body };
+            return {method, body, bodyIsJson};
         },
 
         /**
          * Builds headers object
          * @param {Object} opts - Request options
          * @param {*} body - Request body
+         * @param {boolean} bodyIsJson - Whether body was auto-serialized from a JS object
          * @returns {Headers} Headers object
          */
-        buildHeaders(opts, body) {
+        buildHeaders(opts, body, bodyIsJson) {
             const headers = new Headers();
 
-            // Add default headers
+            // Add default tracking headers
             headers.set('X-WakaSync-Request', 'true');
             headers.set('X-WakaSync-Version', VERSION);
 
             // Add content type based on body
             if (body !== undefined) {
                 if (body instanceof FormData) {
-                    // Don't set Content-Type for FormData
+                    // Don't set Content-Type for FormData — browser sets boundary automatically
                 } else if (body instanceof Blob || body instanceof ArrayBuffer) {
                     headers.set('Content-Type', 'application/octet-stream');
-                } else if (typeof body === 'string') {
-                    headers.set('Content-Type', 'text/plain; charset=utf-8');
-                } else {
+                } else if (bodyIsJson) {
+                    // Body was auto-serialized from a JS object via JSON.stringify
                     headers.set('Content-Type', 'application/json; charset=utf-8');
+                } else {
+                    // Plain string body
+                    headers.set('Content-Type', 'text/plain; charset=utf-8');
                 }
             }
 
@@ -475,7 +614,10 @@
         },
 
         /**
-         * Normalizes URL for grouping
+         * Normalizes URL for grouping by sorting query parameter keys.
+         * Multi-valued parameter order within a key is preserved (server may
+         * treat ?color=red&color=blue differently from ?color=blue&color=red).
+         *
          * @param {string} url - URL to normalize
          * @param {string} baseUrl - Base URL
          * @returns {string} Normalized URL
@@ -492,12 +634,13 @@
                 const urlObj = new URL(url, defaultBase);
                 urlObj.hash = '';
 
-                // Sort query parameters
+                // Sort query parameter keys, but preserve value order within each key
                 const params = new URLSearchParams(urlObj.search);
                 const sortedParams = new URLSearchParams();
 
-                [...params.keys()].sort().forEach(key => {
-                    params.getAll(key).sort().forEach(value => {
+                [...new Set(params.keys())].sort().forEach(key => {
+                    // Preserve original insertion order of values for this key
+                    params.getAll(key).forEach(value => {
                         sortedParams.append(key, value);
                     });
                 });
@@ -513,7 +656,11 @@
         },
 
         /**
-         * Sets up request state and handles grouping
+         * Sets up request state and handles grouping.
+         * When a user-provided abortController is present, creates a combined
+         * internal controller so both user abort and group/timeout abort work
+         * independently.
+         *
          * @param {Object} config - Request configuration
          * @returns {Object} Request state
          */
@@ -533,51 +680,62 @@
                     token = 1;
                 }
 
-                this._requestGroups.set(config.groupKey, { token, controller });
+                this._requestGroups.set(config.groupKey, {token, controller});
             }
 
-            return { token, controller, groupKey: config.groupKey };
+            return {token, controller, groupKey: config.groupKey, timedOut: false};
         },
 
         /**
-         * Creates combined controller
+         * Creates a combined abort controller that responds to both internal
+         * cancellation (groups, timeout) and an optional user-provided controller.
+         *
          * @param {Object} config - Request configuration
-         * @returns {AbortController} Controller
+         * @returns {AbortController} Combined controller
          */
         createCombinedController(config) {
-            if (config.abortController) {
-                return config.abortController;
-            } else {
-                return new AbortController();
+            const internal = new AbortController();
+
+            if (!config.abortController) {
+                return internal;
             }
-        },
 
-        /**
-         * Creates timeout promise
-         * @param {number} timeout - Timeout in milliseconds
-         * @param {AbortController} controller - Abort controller
-         * @returns {Promise} Timeout promise
-         */
-        createTimeoutPromise(timeout, controller) {
-            const self = this;
+            // If AbortSignal.any is supported, combine signals
+            if (typeof AbortSignal.any === 'function') {
+                const combined = new AbortController();
+                const anySignal = AbortSignal.any([
+                    internal.signal,
+                    config.abortController.signal
+                ]);
 
-            return new Promise(function(_, reject) {
-                if (controller.signal.aborted) {
-                    reject(self.createTaggedCancellationError('Request was cancelled before timeout', 'timeout'));
-                    return;
-                }
-
-                const timeoutId = setTimeout(function() {
-                    if (!controller.signal.aborted) {
-                        controller.abort();
-                        reject(self.createTaggedCancellationError(`Request timeout after ${timeout}ms`, 'timeout'));
+                anySignal.addEventListener('abort', () => {
+                    if (!combined.signal.aborted) {
+                        combined.abort(anySignal.reason);
                     }
-                }, timeout);
+                }, {once: true});
 
-                controller.signal.addEventListener('abort', function() {
-                    clearTimeout(timeoutId);
-                }, { once: true });
-            });
+                // Preserve the internal abort method so group cancellation works
+                const originalAbort = combined.abort.bind(combined);
+                combined.abort = function (reason) {
+                    internal.abort(reason);
+                    originalAbort(reason);
+                };
+
+                return combined;
+            }
+
+            // Fallback: wire up user controller to internal
+            if (config.abortController.signal.aborted) {
+                internal.abort();
+            } else {
+                config.abortController.signal.addEventListener('abort', () => {
+                    if (!internal.signal.aborted) {
+                        internal.abort();
+                    }
+                }, {once: true});
+            }
+
+            return internal;
         },
 
         /**
@@ -610,14 +768,68 @@
                         throw error;
                     }
 
-                    // Wait before retry, but check for abort during delay
-                    if (config.retryDelay > 0) {
-                        await this.delayWithAbortCheck(config.retryDelay, requestState.controller);
+                    // Calculate delay with backoff strategy
+                    const delay = this.calculateRetryDelay(config, attempt, error);
+
+                    if (delay > 0) {
+                        await this.delayWithAbortCheck(delay, requestState.controller);
                     }
                 }
             }
 
             throw lastError;
+        },
+
+        /**
+         * Calculates the delay before the next retry attempt.
+         * Respects Retry-After headers for 429 responses, then falls back
+         * to the configured backoff strategy.
+         *
+         * @param {Object} config - Request configuration
+         * @param {number} attempt - Current attempt number (1-based)
+         * @param {Error} error - The error that triggered the retry
+         * @returns {number} Delay in milliseconds
+         */
+        calculateRetryDelay(config, attempt, error) {
+            // Respect Retry-After header from 429 responses
+            if (error.response && error.response.status === 429) {
+                const retryAfter = error.response.headers.get('Retry-After');
+
+                if (retryAfter) {
+                    const seconds = parseInt(retryAfter, 10);
+
+                    if (!isNaN(seconds)) {
+                        return Math.min(seconds * 1000, config.retryBackoffMax);
+                    }
+
+                    // Retry-After can also be an HTTP-date
+                    const date = Date.parse(retryAfter);
+
+                    if (!isNaN(date)) {
+                        const delay = date - Date.now();
+                        return Math.min(Math.max(0, delay), config.retryBackoffMax);
+                    }
+                }
+            }
+
+            // Apply backoff strategy
+            const base = config.retryDelay;
+
+            switch (config.retryBackoff) {
+                case 'linear':
+                    return Math.min(base * attempt, config.retryBackoffMax);
+
+                case 'fixed':
+                    return base;
+
+                case 'exponential':
+                default: {
+                    // Exponential with jitter to prevent thundering herd
+                    const exponential = base * Math.pow(2, attempt - 1);
+                    const jitter = exponential * 0.1 * Math.random();
+                    return Math.min(exponential + jitter, config.retryBackoffMax);
+                }
+            }
         },
 
         /**
@@ -649,11 +861,7 @@
             }
 
             // Retry 429 (Too Many Requests)
-            if (error.response && error.response.status === 429) {
-                return true;
-            }
-
-            return false;
+            return error.response && error.response.status === 429;
         },
 
         /**
@@ -664,35 +872,20 @@
          */
         delayWithAbortCheck(ms, controller) {
             const self = this;
-            return new Promise(function(resolve, reject) {
+            return new Promise(function (resolve, reject) {
                 if (controller.signal.aborted) {
                     reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
                     return;
                 }
 
-                const timeoutId = setTimeout(function() {
-                    if (controller.signal.aborted) {
-                        reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
-                    } else {
-                        resolve();
-                    }
+                const timeoutId = setTimeout(function () {
+                    resolve();
                 }, ms);
 
-                controller.signal.addEventListener('abort', function() {
+                controller.signal.addEventListener('abort', function () {
                     clearTimeout(timeoutId);
                     reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
-                }, { once: true });
-            });
-        },
-
-        /**
-         * Creates a delay promise
-         * @param {number} ms - Milliseconds to delay
-         * @returns {Promise} Delay promise
-         */
-        delay(ms) {
-            return new Promise(function(resolve) {
-                setTimeout(resolve, ms);
+                }, {once: true});
             });
         },
 
@@ -813,16 +1006,59 @@
         },
 
         /**
-         * Safely gets response text for errors
+         * Safely gets a limited amount of response text for error messages.
+         * Uses a streaming approach to avoid reading entire large bodies into memory.
+         *
          * @param {Response} response - Fetch response
-         * @returns {Promise} Response text or null
+         * @param {number} [maxBytes=512] - Maximum bytes to read
+         * @returns {Promise<string|null>} Response text excerpt or null
          */
-        async safeGetResponseText(response) {
+        async safeGetResponseText(response, maxBytes = 512) {
             try {
                 if (response.bodyUsed) {
                     return null;
                 }
+
                 const clone = response.clone();
+
+                // Use streaming reader to avoid reading entire body
+                if (clone.body && typeof clone.body.getReader === 'function') {
+                    const reader = clone.body.getReader();
+                    const chunks = [];
+                    let totalBytes = 0;
+
+                    try {
+                        while (totalBytes < maxBytes) {
+                            const {done, value} = await reader.read();
+
+                            if (done) {
+                                break;
+                            }
+
+                            const remaining = maxBytes - totalBytes;
+
+                            if (value.length > remaining) {
+                                chunks.push(value.slice(0, remaining));
+                                totalBytes += remaining;
+                            } else {
+                                chunks.push(value);
+                                totalBytes += value.length;
+                            }
+                        }
+                    } finally {
+                        await reader.cancel();
+                    }
+
+                    if (chunks.length === 0) {
+                        return null;
+                    }
+
+                    const decoder = new TextDecoder('utf-8', {fatal: false});
+                    const text = chunks.map(c => decoder.decode(c, {stream: true})).join('');
+                    return text.slice(0, 200);
+                }
+
+                // Fallback for environments without ReadableStream
                 const text = await clone.text();
                 return text.slice(0, 200);
             } catch {
@@ -858,7 +1094,10 @@
         },
 
         /**
-         * Handles request errors
+         * Handles request errors.
+         * NOTE: onError callback fires as a side-effect before the promise rejects.
+         * This allows using callbacks for logging/UI while using promises for flow control.
+         *
          * @param {Error} error - Request error
          * @param {Object} config - Request configuration
          * @returns {*} Error handling result
@@ -897,6 +1136,7 @@
 
         /**
          * Checks if error is cancellation
+         * @public
          * @param {Error} error - Error to check
          * @returns {boolean} True if cancellation error
          */
@@ -942,8 +1182,15 @@
     // Create default instance
     const wakaSync = new WakaSync();
 
-    // Export to global scope
-    if (typeof window !== 'undefined') {
+    /* globals module, define */
+    // UMD export: CommonJS, AMD, and browser global
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = {WakaSync, wakaSync};
+    } else if (typeof define === 'function' && define.amd) {
+        define(function () {
+            return {WakaSync, wakaSync};
+        });
+    } else if (typeof window !== 'undefined') {
         window.WakaSync = WakaSync;
         window.wakaSync = wakaSync;
     }
