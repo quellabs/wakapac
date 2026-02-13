@@ -6524,11 +6524,55 @@
             // will now have proper parent context available for successful rendering
             this.scanAndRegisterNewElements(foreachElement);
 
+            // After rebuilding children, sync <select> DOM state back to the model.
+            // When a foreach replaces <option> elements inside a <select>, the browser
+            // reconciles the selection against the new option set. The resulting .value
+            // is the source of truth — push it into the abstraction so the proxy fires
+            // a change event and all dependent bindings update naturally.
+            this.syncSelectAfterForeach(foreachElement);
+
         } catch (error) {
             console.error(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
             // Don't clear innerHTML on error during initial scan - preserve template
             // The error might resolve itself when parent context becomes available
         }
+    };
+
+    /**
+     * After a foreach rebuild, checks if the affected element is (or is inside) a <select>.
+     * If so, reads the browser's reconciled .value and writes it back into the abstraction.
+     * The proxy will fire a pac:change event, keeping all dependent bindings in sync.
+     * @param {Element} foreachElement - The element whose foreach just rebuilt
+     */
+    Context.prototype.syncSelectAfterForeach = function(foreachElement) {
+        let selectElement = null;
+        let selectMappingData = null;
+
+        // Case 1: the foreach element itself is a <select>
+        if (foreachElement.tagName === 'SELECT') {
+            selectElement = foreachElement;
+            selectMappingData = this.interpolationMap.get(foreachElement);
+        }
+
+        // Case 2: the foreach element's immediate parent is a <select>
+        else if (foreachElement.parentElement && foreachElement.parentElement.tagName === 'SELECT') {
+            selectElement = foreachElement.parentElement;
+            selectMappingData = this.interpolationMap.get(selectElement);
+        }
+
+        if (!selectElement || !selectMappingData || !selectMappingData.bindings.value) {
+            return;
+        }
+
+        // Read what the browser settled on after the options were replaced
+        const domValue = selectElement.value;
+
+        // Resolve the bound property path (e.g., "selectedSubcategory")
+        const valueBinding = selectMappingData.bindings.value;
+        const resolvedPath = this.normalizePath(valueBinding.target, selectElement);
+
+        // Write the DOM value into the abstraction — the proxy handles the change event
+        Utils.setNestedProperty(resolvedPath, domValue, this.abstraction);
     };
 
     /**
@@ -7437,6 +7481,9 @@
 
         // Store new array
         element._pacPreviousArray = newArray;
+
+        // Sync <select> DOM state back to model after child elements changed
+        this.syncSelectAfterForeach(element);
     };
 
     /**
