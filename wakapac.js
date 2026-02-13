@@ -23,6 +23,12 @@
     // CONSTANTS AND CONFIGURATION
     // =============================================================================
 
+    /** @type {string} Selector for PAC-managed containers */
+    const CONTAINER_SEL = '[data-pac-id]';
+
+    /** @type {string} Selector for containers that accept drops */
+    const DROP_TARGET_SEL = '[data-pac-drop-target]';
+
     /**
      * Matches handlebars-style interpolation: {{variable}}
      * Captures variable name/expression with global flag
@@ -121,6 +127,10 @@
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
     const MSG_CAPTURECHANGED = 0x0215;
+    const MSG_DRAGENTER = 0x0231;
+    const MSG_DRAGOVER  = 0x0232;
+    const MSG_DRAGLEAVE = 0x0233;
+    const MSG_DROP      = 0x0234;
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
@@ -458,7 +468,7 @@
             }
 
             // Find the closest PAC container ancestor (or self)
-            const immediateContainer = targetElement.closest('[data-pac-id]');
+            const immediateContainer = targetElement.closest(CONTAINER_SEL);
 
             // Element belongs to this container only if this container is its immediate PAC parent
             return immediateContainer === container;
@@ -1193,6 +1203,15 @@
         // Keep track of key repeat count
         _repeatCounts : new Map(),
 
+        /** @type {string[]} List of valid drop effects for drag/drop */
+        validDropEffects: ['none', 'copy', 'link', 'move'],
+
+        /** @type {WeakMap} Increment depth for drag/drop */
+        _enterDepths: new WeakMap(),
+
+        /** @type {Element|null} Dropzone being targeted */
+        _dropzoneTarget: null,
+
         /**
          * Performs one-time initialization of the input/event subsystem.
          * @returns {void}
@@ -1319,6 +1338,7 @@
             this._setupMouseMoveEvent();
             this._setupMouseWheelEvent();
             this._setupClipboardEvents();
+            this._setupDragDropEvents();
             this._setupDragPrevention();
             this._setupDocumentLeave();
         },
@@ -1529,8 +1549,8 @@
                 // Resolve container responsible for the focused/selected element
                 const container = self.getContainerForEvent(MSG_COPY, event);
                 const selectedText = window.getSelection().toString();
-                const wParam = selectedText.length;
-                const lParam = self.getModifierState(event);
+                const wParam = self.getModifierState(event);
+                const lParam = selectedText.length;
 
                 // Build clipboard message with mutable copyData struct
                 // msgProc can populate copyData to override clipboard contents
@@ -1561,8 +1581,8 @@
                 const container = self.getContainerForEvent(MSG_PASTE, event);
                 const clipboardData = event.clipboardData;
                 const text = clipboardData.getData('text/plain');
-                const wParam = text.length;
-                const lParam = self.getModifierState(event);
+                const wParam = self.getModifierState(event);
+                const lParam = text.length;
 
                 // Extract file metadata for image/file paste operations (e.g., screenshot paste)
                 // Only captures metadata — file blobs are accessible via originalEvent.clipboardData.files
@@ -1586,6 +1606,19 @@
         },
 
         /**
+         * Sets up document-level drag-and-drop event delegation for PAC
+         * containers. All drag events are captured at the document level
+         * and dispatched to the nearest ancestor with a `[data-pac-id]` attribute.
+         * @private
+         */
+        _setupDragDropEvents() {
+            this._onDragEnter();
+            this._onDragLeave();
+            this._onDragOver();
+            this._onDrop();
+        },
+
+        /**
          * Registers a dragstart handler that suppresses the browser’s native
          * drag behavior while the system has pointer capture.
          * @private
@@ -1598,6 +1631,216 @@
                 if (this.hasCapture()) {
                     event.preventDefault();
                 }
+            });
+        },
+
+        /**
+         * Dispatches MSG_DRAGENTER only on the first real entry into a
+         * container, ignoring child-boundary crossings.
+         * @private
+         */
+        _onDragEnter() {
+            const self = this;
+
+            document.addEventListener('dragenter', function (event) {
+                // Find container
+                const container = self.getContainerForEvent(MSG_DRAGENTER, event);
+
+                // None found, abort
+                if (!container) {
+                    return;
+                }
+
+                // Increment depth — child-boundary crossings fire dragenter
+                // without the cursor actually entering the container
+                const depth = (self._enterDepths.get(container) || 0) + 1;
+                self._enterDepths.set(container, depth);
+
+                // Already inside the container; ignore internal boundary noise
+                if (depth !== 1) {
+                    return;
+                }
+
+                // Create the event
+                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.getModifierState(event);
+
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_DRAGENTER, event, wParam, lParam, {
+                        types: Array.from(event.dataTransfer.types)
+                    }
+                );
+
+                // Dispatch the event
+                self.dispatchToContainer(container, customEvent);
+            });
+        },
+
+        /**
+         * Dispatches MSG_DRAGLEAVE only when the cursor has fully exited
+         * the container (depth counter drops back to zero).
+         * @private
+         */
+        _onDragLeave() {
+            const self = this;
+
+            document.addEventListener('dragleave', function (event) {
+                // Find container
+                const container = self.getContainerForEvent(MSG_DRAGLEAVE, event);
+
+                // If none found, abort
+                if (!container) {
+                    return;
+                }
+
+                // Decrement depth — child-boundary crossings fire dragleave
+                // without the cursor actually leaving the container
+                const depth = (self._enterDepths.get(container) || 0) - 1;
+                self._enterDepths.set(container, depth);
+
+                // Still inside the container; ignore internal boundary noise
+                if (depth !== 0) {
+                    return;
+                }
+
+                // Create event
+                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.getModifierState(event);
+
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_DRAGLEAVE, event, wParam, lParam, {
+                        types: Array.from(event.dataTransfer.types)
+                    }
+                );
+
+                // Dispatch event
+                self.dispatchToContainer(container, customEvent);
+            });
+        },
+
+        /**
+         * Coalesces high-frequency dragover events into a single dispatch
+         * per animation frame.  Only fires for valid drop targets whose
+         * element has actually changed.
+         * @private
+         */
+        _onDragOver() {
+            const self = this;
+
+            document.addEventListener('dragover', function (event) {
+                // Fetch the container
+                const container = self.getContainerForEvent(MSG_DRAGOVER, event);
+
+                // If none found, abort
+                if (!container) {
+                    return;
+                }
+
+                // Find the drop target
+                const dropTarget = event.target.closest(DROP_TARGET_SEL);
+
+                // If none found, abort
+                if (!dropTarget) {
+                    event.dataTransfer.dropEffect = 'none';
+                    return;
+                }
+
+                // Prevent default on valid drop target.
+                // For drag/drop operations this means: allow drop
+                event.preventDefault();
+
+                // If we are already hovering over the drop target, do not send new 'over' event
+                if (event.target === self._dropzoneTarget) {
+                    return;
+                }
+
+                // Update the effect (mouse pointer)
+                const effect = dropTarget.getAttribute('data-pac-drop-target');
+                event.dataTransfer.dropEffect = self.validDropEffects.includes(effect) ? effect : 'copy';
+
+                // Store the new dropzone
+                self._dropzoneTarget = dropTarget;
+
+                // Create the event
+                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.getModifierState(event);
+
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_DRAGOVER,
+                    event,
+                    wParam,
+                    lParam,
+                    {
+                        dropTarget: dropTarget,
+                        types: Array.from(event.dataTransfer.types)
+                    }
+                );
+
+                // Dispatch the event
+                self.dispatchToContainer(container, customEvent);
+            });
+        },
+
+        /**
+         * Handles the drop: prevents the browser default, resets tracking
+         * state, extracts transfer payload, and dispatches MSG_DROP.
+         * @private
+         */
+        _onDrop() {
+            const self = this;
+
+            document.addEventListener('drop', function (event) {
+                // Fetch container
+                const container = self.getContainerForEvent(MSG_DROP, event);
+
+                if (!container) {
+                    return;
+                }
+
+                // Check if this is a valid drop target
+                const dropTarget = event.target.closest(DROP_TARGET_SEL);
+
+                if (!dropTarget) {
+                    return;
+                }
+
+                // Mark the target as valid by calling preventDefault on it
+                event.preventDefault();
+
+                // Drag sequence complete — clean up tracking state
+                self._enterDepths.delete(container);
+
+                // Create the event
+                const transfer = event.dataTransfer;
+                const lParam = self.buildMouseLParam(event, container);
+                const wParam = self.getModifierState(event);
+
+                const customEvent = self.wrapDomEventAsMessage(
+                    MSG_DROP, event, wParam, lParam, {
+                        dropTarget: dropTarget,
+                        text: transfer.getData('text/plain'),
+                        html: transfer.getData('text/html'),
+                        uri: transfer.getData('text/uri-list'),
+                        files: self._extractFileMetadata(transfer.files),
+                        rawFiles: transfer.files
+                    }
+                );
+
+                // Dispatch event
+                self.dispatchToContainer(container, customEvent);
+            });
+        },
+
+        /**
+         * Extracts serializable metadata from a FileList.
+         * Same shape as MSG_PASTE / form-submit payloads.
+         * @private
+         * @param   {FileList} fileList
+         * @returns {Array<{name: string, size: number, type: string}>}
+         */
+        _extractFileMetadata(fileList) {
+            return Array.from(fileList).map(function (f) {
+                return { name: f.name, size: f.size, type: f.type };
             });
         },
 
@@ -2294,7 +2537,7 @@
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            let container = originalEvent.target.closest('[data-pac-id]');
+            let container = originalEvent.target.closest(CONTAINER_SEL);
 
             if (this._captureActive && this.isCaptureAffected(msgType)) {
                 if (this._capturedContainer?.isConnected) {
@@ -2335,8 +2578,8 @@
          * @param extended
          */
         dispatchMouseMessage(msgType, domEvent, container, extended={}) {
-            const wParam = this.buildMouseLParam(domEvent, container);
-            const lParam = this.getModifierState(domEvent);
+            const wParam = this.getModifierState(domEvent);
+            const lParam = this.buildMouseLParam(domEvent, container);
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
 
             this.dispatchToContainer(container, customEvent);
@@ -2438,14 +2681,14 @@
         },
 
         /**
-         * Build a Win32-style LPARAM value by converting page coordinates into a single 32-bit integer.
+         * Build a Win32-style lParam value by converting page coordinates into a single 32-bit integer.
          * @param {number} x
          * @param {number} y
          * @returns {number}
          */
         makeLParam(x, y) {
             // Round to integers and clamp into an unsigned 16-bit range
-            // so they are safe to pack into a single LPARAM value.
+            // so they are safe to pack into a single lParam value.
             const transformedX = Math.max(0, Math.min(0xFFFF, Math.round(x)));
             const transformedY = Math.max(0, Math.min(0xFFFF, Math.round(y)));
 
@@ -2474,7 +2717,6 @@
          * Builds lParam for keyboard messages following Win32 WM_KEYDOWN/WM_KEYUP format
          * Encodes keyboard state information in various bit fields
          * Note: Bits 16-23 (scan code) are not available in JavaScript and remain 0
-         * Note: Bit 30 (previous key state) would require manual tracking and is not implemented
          * @param {KeyboardEvent} event - The keyboard event
          * @returns {number} lParam value with keyboard state information
          */
@@ -5470,13 +5712,12 @@
             return;
         }
 
-        // Fast exit: property is not an array and no computed properties depend on it,
-        // so no foreach could possibly need a rebuild
+        // Only handles computed/filtered foreach dependencies (e.g., filter → filteredTodos).
+        // Direct array assignments go through handleArrayChange via pac:array-change.
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
-        const isArray = Array.isArray(this.abstraction[changedProp]);
 
-        if (!isArray && !dependents) {
+        if (!dependents) {
             return;
         }
 
@@ -5488,21 +5729,12 @@
                 continue;
             }
 
-            // Direct match: the changed property is an array and this foreach is bound to it
             const expr = mappingData.foreachExpr;
             const source = mappingData.sourceArray;
 
-            if (isArray && (expr === changedProp || source === changedProp)) {
-                if (this.shouldRebuildForeach(element)) {
-                    this.renderForeach(element);
-                }
-
-                continue;
-            }
-
             // Indirect match: this foreach is bound to a computed property
             // that depends on the changed property (e.g., filter → filteredTodos)
-            if (dependents && (dependents.indexOf(expr) !== -1 || dependents.indexOf(source) !== -1)) {
+            if (dependents.indexOf(expr) !== -1 || dependents.indexOf(source) !== -1) {
                 if (this.shouldRebuildForeach(element)) {
                     this.renderForeach(element);
                 }
@@ -6269,10 +6501,9 @@
                 hashMap.set(contentHash, originalIndex);
 
                 // Build the HTML for this item
-                completeHTML +=
-                    `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
-                    mappingData.template + // Original template with bindings like {{item}}
-                    `<!-- /pac-foreach-item -->`;
+                completeHTML += self.buildForeachItemHTML(
+                    mappingData.foreachId, mappingData.template, originalIndex, renderIndex
+                );
             });
 
             // Set the complete HTML at once - this preserves comment structure
@@ -6289,11 +6520,57 @@
             // will now have proper parent context available for successful rendering
             this.scanAndRegisterNewElements(foreachElement);
 
+            // After rebuilding children, sync <select> DOM state back to the model.
+            // When a foreach replaces <option> elements inside a <select>, the browser
+            // reconciles the selection against the new option set. The resulting .value
+            // is the source of truth — push it into the abstraction so the proxy fires
+            // a change event and all dependent bindings update naturally.
+            this.syncSelectAfterForeach(foreachElement);
+
         } catch (error) {
             console.error(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
             // Don't clear innerHTML on error during initial scan - preserve template
             // The error might resolve itself when parent context becomes available
         }
+    };
+
+    /**
+     * Syncs a <select> element's DOM value back into the model after its
+     * child <option> elements were rebuilt by a foreach. The browser reconciles
+     * the selection against the new option set; this method reads the resulting
+     * .value and writes it into the abstraction so the proxy fires a pac:change
+     * event and dependent bindings stay in sync.
+     * @param {Element} foreachElement - The element whose foreach just rebuilt
+     */
+    Context.prototype.syncSelectAfterForeach = function(foreachElement) {
+        let selectElement = null;
+        let selectMappingData = null;
+
+        // Case 1: the foreach element itself is a <select>
+        if (foreachElement.tagName === 'SELECT') {
+            selectElement = foreachElement;
+            selectMappingData = this.interpolationMap.get(foreachElement);
+        }
+
+        // Case 2: the foreach element's immediate parent is a <select>
+        else if (foreachElement.parentElement && foreachElement.parentElement.tagName === 'SELECT') {
+            selectElement = foreachElement.parentElement;
+            selectMappingData = this.interpolationMap.get(selectElement);
+        }
+
+        if (!selectElement || !selectMappingData || !selectMappingData.bindings.value) {
+            return;
+        }
+
+        // Read what the browser settled on after the options were replaced
+        const domValue = selectElement.value;
+
+        // Resolve the bound property path and write the DOM value into the abstraction
+        const valueBinding = selectMappingData.bindings.value;
+        const resolvedPath = this.normalizePath(valueBinding.target, selectElement);
+
+        // Write the DOM value into the abstraction — the proxy handles the change event
+        Utils.setNestedProperty(resolvedPath, domValue, this.abstraction);
     };
 
     /**
@@ -7057,6 +7334,21 @@
     }
 
     /**
+     * Builds the HTML string for a single foreach item, wrapped in boundary comments.
+     * Used by both renderForeach (full rebuild) and addItems (incremental insert).
+     * @param {string} foreachId - The unique identifier for this foreach loop
+     * @param {string} template - The raw HTML template for one iteration
+     * @param {number} originalIndex - The item's index in the source array
+     * @param {number} renderIndex - The item's position in the rendered output
+     * @returns {string} Comment-delimited HTML string for one foreach iteration
+     */
+    Context.prototype.buildForeachItemHTML = function(foreachId, template, originalIndex, renderIndex) {
+        return `<!-- pac-foreach-item: ${foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
+            template +
+            `<!-- /pac-foreach-item -->`;
+    }
+
+    /**
      * Classifies changes between old and new arrays based on content hashes.
      * This function enables efficient DOM diffing by identifying what items were
      * added, removed, moved, or remained unchanged between array renders.
@@ -7202,6 +7494,9 @@
 
         // Store new array
         element._pacPreviousArray = newArray;
+
+        // Sync <select> DOM state back to model after child elements changed
+        this.syncSelectAfterForeach(element);
     };
 
     /**
@@ -7389,10 +7684,9 @@
             const originalIndex = this.findOriginalIndex(item, sourceArray, index);
 
             // Create HTML with proper comments
-            const itemHTML =
-                `<!-- pac-foreach-item: ${mappingData.foreachId}, index=${originalIndex}, renderIndex=${index} -->` +
-                mappingData.template +
-                `<!-- /pac-foreach-item -->`;
+            const itemHTML = this.buildForeachItemHTML(
+                mappingData.foreachId, mappingData.template, originalIndex, index
+            );
 
             // Create appropriate container based on parent element type
             const tempContainer = this.createTemporaryContainer(element);
@@ -7554,8 +7848,8 @@
                         // include the root node if it is a PAC container,
                         // followed by all nested PAC containers
                         const pacNodes = [
-                            ...(node.matches('[data-pac-id]') ? [node] : []),
-                            ...node.querySelectorAll('[data-pac-id]')
+                            ...(node.matches(CONTAINER_SEL) ? [node] : []),
+                            ...node.querySelectorAll(CONTAINER_SEL)
                         ];
 
                         // Destroy deepest nodes first to preserve parent/child teardown order
@@ -8015,9 +8309,9 @@
             });
 
             // Standard Win32-style message properties
-            customEvent.message = MSG_GESTURE;                  // Message type identifier
-            customEvent.wParam = 0;                             // Not used for gestures
-            customEvent.lParam = (centerY << 16) | centerX;     // Packed center coordinates
+            customEvent.message = MSG_GESTURE;                   // Message type identifier
+            customEvent.wParam = 0;                              // Not used for gestures
+            customEvent.lParam = (centerY << 16) | centerX;      // Packed center coordinates
             customEvent.timestamp = now;                         // Event timestamp
             customEvent.originalEvent = originalEvent;           // Access to native mouseup event
 
@@ -8111,7 +8405,7 @@
          * @returns {*} The associated PAC instance, or null if not found.
          */
         getByElement(element) {
-            const container = element.closest('[data-pac-id]');
+            const container = element.closest(CONTAINER_SEL);
             const pacId = container?.getAttribute('data-pac-id');
             return pacId ? this.get(pacId) : undefined;
         },
@@ -8741,7 +9035,7 @@
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_COPY,
         MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
-        MSG_CAPTURECHANGED,
+        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
