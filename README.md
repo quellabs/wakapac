@@ -52,14 +52,16 @@ Mouse capture, gesture recognition, keyboard handling, and timer delivery all wo
 
 ## Features
 
-- Central `msgProc` message pipeline for all input and system events
-- Normalized event objects with message constants (wParam/lParam model)
-- Built-in mouse gesture recognition
-- Mouse capture support for drag-style interactions
-- Integrated timer system with message delivery
 - Declarative bindings, two-way inputs, computed properties, watchers
 - Deep reactive objects and arrays
 - Parent–child component messaging
+- Central `msgProc` message pipeline for all input and system events
+- Normalized event objects with message constants (wParam/lParam model)
+- Built-in mouse gesture recognition
+- Built-in clipboard support (copy/paste)
+- Built-in drag & drop support wrapping HTML5 Drag and Drop API
+- Integrated timer system with message delivery
+- Mouse capture support for drag-style interactions
 - No build tooling required
 
 ## Documentation
