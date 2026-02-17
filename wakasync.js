@@ -158,10 +158,6 @@
 
             /**
              * Creates a component-scoped HTTP handle with optional per-component defaults.
-             *
-             * Request options are layered in order of precedence:
-             *   wakaSync.config → component defaults → per-request opts
-             *
              * @param {string} pacId - Component's data-pac-id
              * @param {Object} [defaults] - Per-component default options from wakaPAC config
              * @returns {Object} Bound handle with get, post, put, patch, delete, head, cancel
@@ -295,6 +291,30 @@
         },
 
         /**
+         * Registers an interceptor on the given list.
+         * Returns an unsubscribe function to remove it.
+         * @private
+         * @param {Array} list - Interceptor list (request or response)
+         * @param {Function} fn - Interceptor function
+         * @returns {Function} Unsubscribe function
+         */
+        _addInterceptor(list, fn) {
+            if (typeof fn !== 'function') {
+                throw new Error('Interceptor must be a function');
+            }
+
+            const entry = {id: ++this._interceptorId, fn};
+            list.push(entry);
+
+            return () => {
+                const idx = list.indexOf(entry);
+                if (idx !== -1) {
+                    list.splice(idx, 1);
+                }
+            };
+        },
+
+        /**
          * Adds a request interceptor. Interceptors may be sync or async.
          * Returns an unsubscribe function to remove the interceptor.
          * @public
@@ -302,51 +322,18 @@
          * @returns {Function} Unsubscribe function
          */
         addRequestInterceptor(fn) {
-            if (typeof fn !== 'function') {
-                throw new Error('Interceptor must be a function');
-            }
-
-            const entry = {id: ++this._interceptorId, fn};
-            this.interceptors.request.push(entry);
-
-            return () => {
-                const idx = this.interceptors.request.indexOf(entry);
-                if (idx !== -1) {
-                    this.interceptors.request.splice(idx, 1);
-                }
-            };
+            return this._addInterceptor(this.interceptors.request, fn);
         },
 
         /**
          * Adds a response interceptor. Interceptors may be sync or async.
          * Returns an unsubscribe function to remove the interceptor.
-         *
-         * Response interceptors receive (data, config, timing) where timing
-         * contains { startTime, endTime, duration } in milliseconds.
-         *
          * @public
          * @param {Function} fn - Interceptor function(data, config, timing) => data
          * @returns {Function} Unsubscribe function
          */
         addResponseInterceptor(fn) {
-            if (typeof fn !== 'function') {
-                throw new Error('Interceptor must be a function');
-            }
-
-            const entry = {
-                id: ++this._interceptorId,
-                fn
-            };
-
-            this.interceptors.response.push(entry);
-
-            return () => {
-                const idx = this.interceptors.response.indexOf(entry);
-
-                if (idx !== -1) {
-                    this.interceptors.response.splice(idx, 1);
-                }
-            };
+            return this._addInterceptor(this.interceptors.response, fn);
         },
 
         /**
@@ -594,7 +581,6 @@
             }
 
             const group = this._requestGroups.get(groupKey);
-
             if (group && group.controller && !group.controller.signal.aborted) {
                 group.controller.abort();
             }
@@ -852,7 +838,7 @@
 
         /**
          * Normalizes URL for grouping by sorting query parameter keys.
-         * Multivalued parameter order within a key is preserved (server may
+         * Multi-valued parameter order within a key is preserved (server may
          * treat ?color=red&color=blue differently from ?color=blue&color=red).
          * @param {string} url - URL to normalize
          * @param {string} baseUrl - Base URL
@@ -861,6 +847,7 @@
         normalizeUrlForGrouping(url, baseUrl) {
             try {
                 let defaultBase;
+
                 if (typeof globalThis !== 'undefined' && globalThis.location) {
                     defaultBase = baseUrl || globalThis.location.origin;
                 } else {
@@ -988,7 +975,7 @@
                     // Check if we should retry
                     const shouldRetry = config.shouldRetry ?
                         config.shouldRetry(error, attempt, maxAttempts) :
-                        this.defaultShouldRetry(error, attempt, maxAttempts);
+                        this.defaultShouldRetry(error);
 
                     if (!shouldRetry || attempt === maxAttempts) {
                         throw error;
@@ -1059,6 +1046,8 @@
 
         /**
          * Default retry logic.
+         * NOTE: The caller (executeWithRetry) already guards against attempt === maxAttempts,
+         * so this function only needs to decide based on error characteristics.
          * @param {Error} error - Error that occurred
          * @returns {boolean} Whether to retry
          */
@@ -1141,6 +1130,7 @@
                     networkError.originalError = e;
                     throw networkError;
                 }
+
                 throw e;
             }
         },
@@ -1284,8 +1274,7 @@
                     }
 
                     const decoder = new TextDecoder('utf-8', {fatal: false});
-                    const text = chunks.map(c => decoder.decode(c, {stream: true})).join('')
-                        + decoder.decode();  // flush any remaining bytes
+                    const text = chunks.map(c => decoder.decode(c, {stream: true})).join('') + decoder.decode();  // flush any remaining bytes
                     return text.slice(0, 200);
                 }
 
@@ -1326,6 +1315,8 @@
 
         /**
          * Handles request errors.
+         * NOTE: onError callback fires as a side-effect before the promise rejects.
+         * This allows using callbacks for logging/UI while using promises for flow control.
          * @param {Error} error - Request error
          * @param {Object} config - Request configuration
          * @returns {*} Error handling result
