@@ -30,6 +30,14 @@
     const DROP_TARGET_SEL = '[data-pac-drop-target]';
 
     /**
+     * Installed plugins. Each entry is the descriptor object returned
+     * by a library's createPacPlugin() method, containing lifecycle
+     * hooks (install, onComponentCreated, onComponentDestroyed).
+     * @type {Array<Object>}
+     */
+    const _plugins = [];
+
+    /**
      * Matches handlebars-style interpolation: {{variable}}
      * Captures variable name/expression with global flag
      * @type {RegExp}
@@ -9090,6 +9098,38 @@
         }
 
         return hitElement.closest("[data-pac-id]");
+    };
+
+    /**
+     * Registers an external library as a wakaPAC plugin.
+     *
+     * The target must implement a createPacPlugin(pac) method that
+     * receives the wakaPAC object and returns a plugin descriptor
+     * with lifecycle hooks:
+     *
+     *   install(pac)                          — called once during registration
+     *   onComponentCreated(abstraction, id)   — called for each new component
+     *   onComponentDestroyed(id)              — called when a component is removed
+     *
+     * All hooks are optional. Duplicate registrations are silently ignored.
+     *
+     * @param {Object} target - Library to integrate (e.g. wakaSync)
+     * @throws {Error} If target does not implement createPacPlugin()
+     */
+    wakaPAC.use = function(target) {
+        // Prevent duplicate registration
+        if (_plugins.indexOf(target) !== -1) {
+            return;
+        }
+
+        // The target library must expose a factory method that returns
+        // a plugin descriptor. wakaPAC passes itself as the argument,
+        // so the library never needs a hard reference to wakaPAC.
+        if (typeof target.createPacPlugin !== 'function') {
+            throw new Error('wakaPAC.use(): target must implement createPacPlugin()');
+        }
+
+        _plugins.push(target.createPacPlugin(wakaPAC));
     };
 
     // ========================================================================
