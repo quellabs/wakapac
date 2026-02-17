@@ -88,6 +88,11 @@
     // List of text input types
     const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
 
+    /**
+     * List of tags that are interactive. Used primarily for MSG_MOUSEENTER_DESCENDANT and MSG_MOUSELEAVE_DESCENDANT
+     */
+    const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'DETAILS', 'INPUT', 'LABEL', 'SELECT', 'SUMMARY', 'TEXTAREA',]);
+
     // Non-text input types that commit values via the change event.
     const CHANGE_INPUT_TYPES = new Set([
         'checkbox', 'radio', 'color', 'range',
@@ -123,6 +128,8 @@
     const MSG_MBUTTONUP = 0x0208;
     const MSG_MOUSEENTER = 0x020B;
     const MSG_MOUSELEAVE = 0x020C;
+    const MSG_MOUSEENTER_DESCENDANT = 0x020D;
+    const MSG_MOUSELEAVE_DESCENDANT = 0x020E;
     const MSG_LCLICK = 0x0210;
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
@@ -1191,6 +1198,9 @@
         /** @private {HTMLElement|null} The container that currently has the pointer inside it */
         _hoveredContainer: null,
 
+        /** @private {HTMLElement|null} The descendant element that currently has the pointer inside it */
+        _hoveredDescendant: null,
+
         /** @private {HTMLElement|null} The container element that has captured mouse input */
         _capturedContainer: null,
 
@@ -1449,54 +1459,78 @@
         },
 
         /**
-         * Configures throttled mousemove event handling. Dispatches enter/leave/move
-         * messages to containers based on pointer position. Optionally feeds raw
-         * coordinates to gesture recognizer when recording is active.
+         * Sets up the mousemove event handler with coalesced (throttled) delivery.
          * @private
-         * @returns {void}
          */
         _setupMouseMoveEvent() {
             const self = this;
 
-            // Throttle mousemove events to configured FPS limit
             this.setupMoveCoalescer(
                 'mousemove',
                 wakaPAC.mouseMoveThrottleFps,
-                (event) => {
-                    // Feed raw coordinates to gesture recognizer if active
+                function (event) {
+                    // Feed the gesture recognizer before anything else
                     if (MouseGestureRecognizer.isRecording) {
                         MouseGestureRecognizer.recordPoint(event);
                     }
 
-                    // Determine which container is under the pointer
-                    const previousContainer = self._hoveredContainer;
+                    // Fetch container info
                     const currentContainer = self.getContainerForEvent(MSG_MOUSEMOVE, event);
+                    const captured = self.hasCapture();
 
-                    // Handle container transitions. Suppress when mouse capture is enabled
-                    if (previousContainer !== currentContainer) {
-                        if (!self.hasCapture()) {
-                            // Mouse left the container
-                            if (previousContainer) {
-                                self.dispatchMouseMessage(MSG_MOUSELEAVE, event, previousContainer);
+                    // ----- Container transition -----
+                    // When the cursor crosses from one container to another,
+                    // dispatch leave/enter events and reset descendant tracking.
+                    // Transitions are suppressed during capture to keep events
+                    // locked to the capturing container.
+                    if (self._hoveredContainer !== currentContainer) {
+                        if (!captured) {
+                            // Leaving old container
+                            if (self._hoveredContainer) {
+                                // Clean up any lingering descendant hover first
+                                if (self._hoveredDescendant) {
+                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer);
+                                }
+
+                                self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
                             }
 
-                            // Mouse entered the container
+                            // Entering new container
                             if (currentContainer) {
                                 self.dispatchMouseMessage(MSG_MOUSEENTER, event, currentContainer);
                             }
                         }
 
-                        // Update tracked hover state
                         self._hoveredContainer = currentContainer;
+                        self._hoveredDescendant = null;
                     }
 
-                    // Dispatch move event to current container
+                    // Within the current container, track which child element the
+                    // cursor is over. Fires enter/leave events when that element
+                    // changes, enabling per-element hover effects without requiring
+                    // each child to register its own listeners.
+                    if (currentContainer && !captured) {
+                        // Resolve the descendant: any element other than the
+                        // container root itself is a hovered child
+                        const currentDescendant = self.findInteractiveDescendant(event.target, currentContainer);
+
+                        if (self._hoveredDescendant !== currentDescendant) {
+                            if (self._hoveredDescendant) {
+                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer);
+                            }
+
+                            if (currentDescendant) {
+                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer);
+                            }
+
+                            self._hoveredDescendant = currentDescendant;
+                        }
+                    }
+
+                    // Unconditionally dispatch the move event to the current
+                    // container (if any), regardless of capture state.
                     if (currentContainer) {
-                        self.dispatchMouseMessage(
-                            MSG_MOUSEMOVE,
-                            event,
-                            currentContainer
-                        );
+                        self.dispatchMouseMessage(MSG_MOUSEMOVE, event, currentContainer);
                     }
                 }
             );
@@ -2548,6 +2582,43 @@
             }
 
             return container;
+        },
+
+        /**
+         * Walks up from a target element to find the nearest interactive
+         * descendant within a container, mimicking Win32's child window
+         * hit-testing. Returns null if the target is plain content (text
+         * nodes, layout divs, etc.) that wouldn't be a "control".
+         *
+         * An element is considered interactive if it:
+         * - Is a native form/link element (input, button, select, etc.)
+         * - Has a [data-pac-hoverable] attribute
+         * - Has a tabindex (making it focusable/interactive by convention)
+         *
+         * @param {Element} target - The DOM element that received the event
+         * @param {Element} container - The container root to stop walking at
+         * @returns {Element|null} The nearest interactive ancestor of target, or null
+         * @private
+         */
+        findInteractiveDescendant(target, container) {
+            let el = target;
+
+            // Walk up the DOM tree from the event target, stopping at
+            // the container boundary. The first interactive element we
+            // encounter is the logical "child window" being hovered.
+            while (el && el !== container) {
+                if (INTERACTIVE_TAGS.has(el.tagName) ||
+                    el.hasAttribute('data-pac-hoverable') ||
+                    el.hasAttribute('tabindex')) {
+                    return el;
+                }
+
+                el = el.parentElement;
+            }
+
+            // Target is either the container itself or plain
+            // non-interactive content — no descendant to report
+            return null;
         },
 
         /**
@@ -9035,7 +9106,8 @@
         MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_COPY,
         MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
-        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
+        MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED,
+        MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
