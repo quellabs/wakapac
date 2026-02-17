@@ -59,12 +59,6 @@
         /**
          * Creates a wakaPAC plugin descriptor for message-driven HTTP integration.
          *
-         * NOTE: This method deliberately uses ES5-style function declarations and
-         * Object.assign instead of arrow functions and spread syntax. The plugin
-         * bridge may be loaded in environments with stricter compatibility
-         * requirements than the main WakaSync API (which already requires fetch
-         * and AbortController). Do not "modernize" without considering consumers.
-         *
          * When registered via wakaPAC.use(wakaSync), this method is called
          * automatically. The returned descriptor hooks into component lifecycle
          * to provide each component with a scoped HTTP handle (this._http) and
