@@ -1876,8 +1876,9 @@
         },
 
         /**
-         * Registers document-level mouseleave to handle pointer leaving viewport
-         * Ensures MSG_MOUSELEAVE is dispatched when pointer exits the document
+         * Registers document-level mouseleave to handle pointer leaving viewport.
+         * Ensures MSG_MOUSELEAVE_DESCENDANT and MSG_MOUSELEAVE are dispatched
+         * when the pointer exits the document.
          * @private
          * @returns {void}
          */
@@ -1897,6 +1898,12 @@
 
                 // Dispatch leave to whatever container was last hovered
                 if (self._hoveredContainer) {
+                    // Clean up any lingering descendant hover first
+                    if (self._hoveredDescendant) {
+                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer);
+                        self._hoveredDescendant = null;
+                    }
+
                     // Dispatch mouse leave event
                     self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
 
