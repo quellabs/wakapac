@@ -3,367 +3,200 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WakaSync + WakaPAC Integration Demo</title>
+    <title>WakaSync — search demo</title>
 
-    <!--
-        Load both libraries. Order matters: both must be loaded
-        before any wakaPAC.use() call or component initialization.
-    -->
     <script src="../wakapac.js"></script>
     <script src="../wakasync.js"></script>
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap');
 
         :root {
-            --bg: #fafafa;
-            --surface: #ffffff;
-            --border: #e2e2e2;
             --text: #1a1a1a;
-            --text-muted: #777;
+            --muted: #888;
+            --border: #e0e0e0;
             --accent: #2563eb;
-            --success: #16a34a;
-            --error: #dc2626;
-            --warn: #ca8a04;
+            --green: #16a34a;
+            --red: #dc2626;
+            --amber: #b45309;
             --mono: 'IBM Plex Mono', monospace;
             --sans: 'DM Sans', sans-serif;
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: var(--sans), serif;
-            background: var(--bg);
+            font-family: var(--sans);
             color: var(--text);
-            min-height: 100vh;
-            padding: 2rem;
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 3rem 1.5rem;
         }
 
-        h1 {
-            font-size: 1.35rem;
-            font-weight: 700;
-            margin-bottom: 0.15rem;
-        }
+        h1 { font-size: 1.25rem; font-weight: 700; }
+        h1 span { color: var(--accent); }
+        .subtitle { color: var(--muted); font-size: 0.8rem; margin: 0.25rem 0 1.5rem; }
 
-        h1 span {
-            color: var(--accent);
-        }
+        /* ── Search input ─────────────────────── */
 
-        .subtitle {
-            color: var(--text-muted);
-            font-size: 0.8125rem;
-            margin-bottom: 1.75rem;
-        }
-
-        .panels {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            max-width: 960px;
-        }
-
-        .panel {
-            background: var(--surface);
+        input[type="text"] {
+            width: 100%;
+            font-family: var(--sans);
+            font-size: 0.9375rem;
+            padding: 0.6rem 0.75rem;
             border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .panel-header {
-            padding: 0.75rem 1rem;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .panel-title {
-            font-family: var(--mono), serif;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: var(--text-muted);
-        }
-
-        .panel-body {
-            padding: 1rem;
-        }
-
-        .btn-row {
-            display: flex;
-            gap: 0.375rem;
-        }
-
-        button {
-            font-family: var(--mono), serif;
-            font-size: 0.7rem;
-            font-weight: 500;
-            padding: 0.375rem 0.75rem;
-            border-radius: 5px;
-            border: 1px solid var(--border);
-            background: var(--surface);
-            color: var(--text);
-            cursor: pointer;
+            border-radius: 6px;
+            outline: none;
             transition: border-color 0.15s;
         }
 
-        button:hover {
-            border-color: var(--accent);
-            color: var(--accent);
+        input[type="text"]:focus { border-color: var(--accent); }
+
+        /* ── Status ───────────────────────────── */
+
+        .status {
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            color: var(--muted);
+            margin: 0.5rem 0;
+            min-height: 1.2em;
         }
 
-        button:active {
-            transform: scale(0.97);
-        }
-
-        button.primary {
+        .status .dot {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
             background: var(--accent);
-            border-color: var(--accent);
-            color: #fff;
+            margin-right: 0.3rem;
+            vertical-align: middle;
+            animation: pulse 0.8s infinite;
         }
 
-        button.primary:hover {
-            background: #1d4ed8;
-            border-color: #1d4ed8;
-            color: #fff;
+        @keyframes pulse { 50% { opacity: 0.25; } }
+
+        /* ── Results ──────────────────────────── */
+
+        .results { margin-top: 0.25rem; }
+
+        .result {
+            display: block;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid #f0f0f0;
+            text-decoration: none;
+            color: inherit;
         }
 
-        button.danger {
-            border-color: var(--error);
-            color: var(--error);
+        .result:hover .result-title { color: var(--accent); }
+        .result-title { font-weight: 600; font-size: 0.875rem; transition: color 0.1s; }
+        .result-desc { font-size: 0.8rem; color: var(--muted); margin-top: 0.1rem; }
+
+        .empty {
+            text-align: center;
+            color: var(--muted);
+            font-size: 0.8rem;
+            padding: 2rem 0;
         }
 
-        button.danger:hover {
-            background: var(--error);
-            color: #fff;
+        /* ── Activity log ─────────────────────── */
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 2rem;
+            padding-bottom: 0.375rem;
+            border-bottom: 1px solid var(--border);
         }
+
+        .log-header span {
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--muted);
+        }
+
+        .log-header button {
+            font-family: var(--mono);
+            font-size: 0.65rem;
+            padding: 0.2rem 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: #fff;
+            color: var(--muted);
+            cursor: pointer;
+        }
+
+        .log-header button:hover { border-color: var(--accent); color: var(--accent); }
 
         .log {
-            font-family: var(--mono), serif;
-            font-size: 0.7rem;
-            line-height: 1.75;
-            max-height: 280px;
+            font-family: var(--mono);
+            font-size: 0.675rem;
+            line-height: 1.9;
+            max-height: 220px;
             overflow-y: auto;
         }
 
-        .log-entry {
-            padding: 0.2rem 0;
-            border-bottom: 1px solid #f0f0f0;
-            display: flex;
-            gap: 0.5rem;
-            align-items: baseline;
-        }
-
-        .log-time {
-            color: var(--text-muted);
-            white-space: nowrap;
-        }
-
-        .log-tag {
-            font-weight: 600;
-            padding: 0.0625rem 0.3rem;
-            border-radius: 3px;
-            font-size: 0.65rem;
-            white-space: nowrap;
-        }
-
-        .log-tag.success {
-            color: var(--success);
-            background: #dcfce7;
-        }
-
-        .log-tag.error {
-            color: var(--error);
-            background: #fee2e2;
-        }
-
-        .log-tag.abort {
-            color: var(--warn);
-            background: #fef9c3;
-        }
-
-        .log-tag.info {
-            color: var(--accent);
-            background: #dbeafe;
-        }
-
-        .log-msg {
-            color: var(--text);
-            word-break: break-word;
-        }
-
-        .user-card {
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 0.75rem 0.875rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .user-card .name {
-            font-weight: 600;
-            font-size: 0.875rem;
-        }
-
-        .user-card .email {
-            font-family: var(--mono), serif;
-            font-size: 0.7rem;
-            color: var(--accent);
-        }
-
-        .user-card .company {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            margin-top: 0.125rem;
-        }
-
-        .empty-state {
-            text-align: center;
-            color: var(--text-muted);
-            padding: 1.75rem 1rem;
-            font-size: 0.8125rem;
-        }
-
-        .status-dot {
-            display: inline-block;
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            margin-right: 0.3rem;
-            vertical-align: middle;
-        }
-
-        .status-dot.idle {
-            background: #ccc;
-        }
-
-        .status-dot.loading {
-            background: var(--accent);
-            animation: pulse 1s infinite;
-        }
-
-        .status-dot.success {
-            background: var(--success);
-        }
-
-        .status-dot.error {
-            background: var(--error);
-        }
-
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.3;
-            }
-        }
-
-        .full-width {
-            grid-column: 1 / -1;
-        }
+        .log-line { display: flex; gap: 0.5rem; align-items: baseline; }
+        .log-time { color: #bbb; }
+        .log-label { font-weight: 600; }
+        .log-label.get   { color: var(--accent); }
+        .log-label.ok    { color: var(--green); }
+        .log-label.abort { color: var(--amber); }
+        .log-label.err   { color: var(--red); }
+        .log-msg { color: var(--text); }
     </style>
 </head>
 <body>
 
-<h1>waka<span>Sync</span> + wakaPAC</h1>
-<p class="subtitle">HTTP requests delivered as Win32-style messages to reactive components</p>
+<!--
+    Single component. After wakaPAC.use(wakaSync), every component
+    receives this._http — a scoped handle whose requests share a
+    groupKey equal to the component's pacId.
 
-<div class="panels">
+    When a new request fires in the same group, wakaSync auto-cancels
+    the previous one. The cancelled request delivers MSG_HTTP_ABORT
+    to msgProc; the new one delivers MSG_HTTP_SUCCESS or MSG_HTTP_ERROR.
+    On component destroy, all in-flight requests are cancelled automatically.
+-->
+<div id="wiki-search" data-pac-id="wiki-search">
 
-    <!-- ═══════════════════════════════════════════════
-         Panel 1: User list component
-         Fetches /users from JSONPlaceholder and shows
-         results. Demonstrates GET + msgProc handling.
-    ════════════════════════════════════════════════ -->
-    <div class="panel" id="user-list" data-pac-id="user-list">
-        <div class="panel-header">
-            <span class="panel-title">
-                <span data-pac-bind="class: status === 'loading' ? 'status-dot loading' : status === 'error' ? 'status-dot error' : status === 'success' ? 'status-dot success' : 'status-dot idle'"></span>
-                Users
-                <span data-pac-bind="if: status === 'loading'"> — fetching…</span>
-            </span>
-            <div class="btn-row">
-                <button class="primary" data-pac-bind="click: loadUsers">Fetch users</button>
-                <button class="danger" data-pac-bind="click: cancelRequest">Cancel</button>
-            </div>
+    <h1>waka<span>Sync</span> demo</h1>
+    <p class="subtitle">Search-as-you-type — watch the activity log to see message-driven HTTP in action</p>
+
+    <input type="text"
+           data-pac-bind="value: query"
+           placeholder="Search Wikipedia…"
+           autocomplete="off"
+           spellcheck="false">
+
+    <div class="status">
+        <span data-pac-bind="if: loading"><span class="dot"></span> searching…</span>
+    </div>
+
+    <div class="results">
+        <div data-pac-bind="if: results.length === 0 && !loading && hasSearched">
+            <div class="empty">No results</div>
         </div>
-        <div class="panel-body">
-            <div data-pac-bind="if: users.length === 0 && status !== 'loading'">
-                <div class="empty-state">
-                    Click <strong>Fetch users</strong> to load data via wakaSync
-                </div>
-            </div>
-            <div data-pac-bind="foreach: users" data-pac-item="user">
-                <div class="user-card">
-                    <div class="name">{{ user.name }}</div>
-                    <div class="email">{{ user.email }}</div>
-                    <div class="company">🏢 {{ user.company.name }}</div>
-                </div>
-            </div>
+        <div data-pac-bind="foreach: results" data-pac-item="item">
+            <a class="result" data-pac-bind="href: item.url" target="_blank">
+                <div class="result-title">{{ item.title }}</div>
+                <div class="result-desc">{{ item.description }}</div>
+            </a>
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════
-         Panel 2: Create post component
-         Demonstrates POST with body, and shows how
-         different request IDs can be correlated in
-         msgProc via event.wParam.
-    ════════════════════════════════════════════════ -->
-    <div class="panel" id="post-lookup" data-pac-id="post-lookup">
-        <div class="panel-header">
-            <span class="panel-title">
-                <span data-pac-bind="class: status === 'loading' ? 'status-dot loading' : status === 'error' ? 'status-dot error' : status === 'success' ? 'status-dot success' : 'status-dot idle'"></span>
-                Create Post
-            </span>
-            <div class="btn-row">
-                <button class="primary" data-pac-bind="click: createPost">Submit</button>
-            </div>
-        </div>
-        <div class="panel-body">
-            <div data-pac-bind="if: !result">
-                <div class="empty-state">
-                    Click <strong>Submit</strong> to POST new data and receive the response as a message
-                </div>
-            </div>
-            <div data-pac-bind="if: result">
-                <div class="user-card">
-                    <div class="name">Post #{{ result.id }}</div>
-                    <div class="email">{{ result.title }}</div>
-                    <div class="company">{{ result.body }}</div>
-                </div>
-            </div>
-        </div>
+    <div class="log-header">
+        <span>Activity</span>
+        <button data-pac-bind="click: clearLog">clear</button>
     </div>
-
-    <!-- ═══════════════════════════════════════════════
-         Panel 3: Message log
-         A separate wakaPAC component that receives
-         custom log messages to show the full
-         message flow visually.
-    ════════════════════════════════════════════════ -->
-    <div class="panel full-width" id="msg-log" data-pac-id="msg-log">
-        <div class="panel-header">
-            <span class="panel-title">Message Log</span>
-            <button data-pac-bind="click: clear">Clear</button>
-        </div>
-        <div class="panel-body">
-            <div class="log">
-                <div data-pac-bind="if: entries.length === 0">
-                    <div class="empty-state">Messages will appear here as wakaSync delivers HTTP results to msgProc
-                    </div>
-                </div>
-                <div data-pac-bind="foreach: entries" data-pac-item="entry">
-                    <div class="log-entry">
-                        <span class="log-time">{{ entry.time }}</span>
-                        <span data-pac-bind="class: 'log-tag ' + entry.type">{{ entry.tag }}</span>
-                        <span class="log-msg">{{ entry.msg }}</span>
-                    </div>
-                </div>
+    <div class="log">
+        <div data-pac-bind="foreach: log" data-pac-item="entry">
+            <div class="log-line">
+                <span class="log-time">{{ entry.time }}</span>
+                <span data-pac-bind="class: 'log-label ' + entry.type">{{ entry.label }}</span>
+                <span class="log-msg">{{ entry.msg }}</span>
             </div>
         </div>
     </div>
@@ -371,222 +204,120 @@
 </div>
 
 <script>
-    // ════════════════════════════════════════════════════════════════
-    // STEP 1: Register wakaSync as a wakaPAC plugin.
-    //
-    // This calls wakaSync.createPacPlugin(wakaPAC), which:
-    //   - Derives MSG_HTTP_SUCCESS/ERROR/ABORT from wakaPAC.MSG_USER
-    //   - Attaches those constants to the wakaPAC object
-    //   - Returns lifecycle hooks (onComponentCreated, onComponentDestroyed)
-    //
-    // After this call, every new wakaPAC component automatically
-    // receives a this._http handle scoped to its pacId.
-    // ════════════════════════════════════════════════════════════════
+    // ── Register the plugin ──────────────────────────────────────
+    // wakaSync.createPacPlugin(wakaPAC) derives message constants
+    // from MSG_USER and returns lifecycle hooks. After this call
+    // every new component gets this._http automatically.
     wakaPAC.use(wakaSync);
 
-    // Helper: post a log entry to the msg-log component via postMessage
-    const MSG_LOG = wakaPAC.MSG_USER + 0x200;
+    // ── The component ────────────────────────────────────────────
+    wakaPAC('#wiki-search', {
 
-    function logMessage(type, tag, msg) {
-        const now = new Date();
-        const time = [now.getHours(), now.getMinutes(), now.getSeconds()]
-                .map(n => String(n).padStart(2, '0')).join(':')
-            + '.' + String(now.getMilliseconds()).padStart(3, '0');
+        // Reactive state
+        query: '',
+        results: [],
+        loading: false,
+        hasSearched: false,
+        log: [],
 
-        wakaPAC.postMessage('msg-log', MSG_LOG, 0, 0, {
-            time: time,
-            type: type,
-            tag: tag,
-            msg: msg
-        });
-    }
+        // Internal (non-rendered)
+        _debounceTimer: null,
 
-    // ════════════════════════════════════════════════════════════════
-    // STEP 2: Initialize the log viewer FIRST.
-    //
-    // This component does NOT use wakaSync — it receives custom
-    // MSG_LOG messages via wakaPAC.postMessage(). Must be registered
-    // before the other components, because their init() hooks call
-    // logMessage() which targets this pacId.
-    // ════════════════════════════════════════════════════════════════
-    wakaPAC('#msg-log', {
-        entries: [],
+        // ─── Actions ─────────────────────────────────────────
 
-        clear() {
-            this.entries = [];
-        },
+        search() {
+            const q = this.query.trim();
 
-        msgProc(event) {
-            if (event.message === MSG_LOG) {
-                this.entries.push(event.detail);
+            if (q.length < 2) {
+                this.results = [];
+                this.loading = false;
+                return;
             }
-        }
-    });
 
-    // ════════════════════════════════════════════════════════════════
-    // STEP 3: Define the "User List" component.
-    //
-    // After wakaPAC initializes this component, the wakaSync plugin's
-    // onComponentCreated hook injects this._http with methods:
-    //   get(url, opts), post(url, data, opts), put(), patch(),
-    //   delete(), head(), cancel()
-    //
-    // Each method returns a numeric requestId. The HTTP result is
-    // delivered asynchronously to msgProc as a message, not as a
-    // promise. This keeps the component's control flow message-driven.
-    // ════════════════════════════════════════════════════════════════
-    wakaPAC('#user-list', {
-        // ── Reactive state ──
-        users: [],
-        status: 'idle',           // idle | loading | success | error
-        pendingRequestId: null,   // track which request we're waiting for
+            // No need to call this._http.cancel() — wakaSync's groupKey
+            // system auto-cancels the previous in-flight request when a
+            // new one fires from the same component (same groupKey = pacId).
+            this.loading = true;
 
-        // ── Lifecycle ──
-        init() {
-            logMessage('info', 'INIT', 'user-list component created — this._http is available');
+            const url = 'https://en.wikipedia.org/w/rest.php/v1/search/page?limit=6&q='
+                + encodeURIComponent(q);
+
+            const reqId = this._http.get(url);
+
+            this.addLog('get', 'GET', 'search=' + q + '  reqId=' + reqId);
         },
 
-        // ── Actions (triggered via data-pac-bind="click: ...") ──
-        loadUsers() {
-            this.users = [];
-            this.status = 'loading';
+        addLog(type, label, msg) {
+            const d = new Date();
+            const time = [d.getHours(), d.getMinutes(), d.getSeconds()]
+                .map(function(n) { return String(n).padStart(2, '0'); })
+                .join(':');
 
-            // Fire a GET request. The result comes back through msgProc,
-            // not through a .then() chain. The returned ID lets us
-            // correlate the response in msgProc via event.wParam.
-            this.pendingRequestId = this._http.get(
-                'https://jsonplaceholder.typicode.com/users'
-            );
+            this.log.push({ time: time, type: type, label: label, msg: msg });
 
-            logMessage('info', 'GET', 'Requesting /users  →  requestId=' + this.pendingRequestId);
-        },
-
-        cancelRequest() {
-            // Cancels all in-flight requests grouped under this component's
-            // pacId. wakaSync will deliver MSG_HTTP_ABORT to msgProc.
-            this._http.cancel();
-            logMessage('abort', 'CANCEL', 'Cancelled all requests for user-list');
-        },
-
-        // ── Message handler ──
-        // Every wakaPAC event (mouse, keyboard, timer, AND wakaSync
-        // HTTP results) flows through msgProc. The message constants
-        // MSG_HTTP_SUCCESS, MSG_HTTP_ERROR, MSG_HTTP_ABORT were
-        // attached to wakaPAC by the plugin registration.
-        msgProc(event) {
-            switch (event.message) {
-
-                case wakaPAC.MSG_HTTP_SUCCESS: {
-                    // event.wParam  = requestId (correlate with pendingRequestId)
-                    // event.lParam  = 0
-                    // event.detail  = { data, url, method, timing }
-                    const {data, timing} = event.detail;
-
-                    this.users = data;
-                    this.status = 'success';
-
-                    logMessage(
-                        'success', 'HTTP OK',
-                        'Received ' + data.length + ' users in ' + timing.duration + 'ms' +
-                        '  (requestId=' + event.wParam + ')'
-                    );
-                    break;
-                }
-
-                case wakaPAC.MSG_HTTP_ERROR: {
-                    // event.wParam  = requestId
-                    // event.lParam  = HTTP status code (e.g. 404, 500) or 0 if network error
-                    // event.detail  = { error, url, method, status, code }
-                    this.status = 'error';
-
-                    logMessage(
-                        'error', 'HTTP ERR',
-                        'Request failed: status=' + event.lParam +
-                        ' code=' + (event.detail.code || 'none') +
-                        '  (requestId=' + event.wParam + ')'
-                    );
-                    break;
-                }
-
-                case wakaPAC.MSG_HTTP_ABORT: {
-                    // event.wParam  = requestId
-                    // event.detail  = { error, url, method }
-                    this.status = 'idle';
-
-                    logMessage(
-                        'abort', 'ABORT',
-                        'Request aborted for ' + event.detail.url +
-                        '  (requestId=' + event.wParam + ')'
-                    );
-                    break;
-                }
+            if (this.log.length > 20) {
+                this.log = this.log.slice(-20);
             }
-        }
-    });
-
-    // ════════════════════════════════════════════════════════════════
-    // STEP 4: Define the "Create Post" component.
-    //
-    // Demonstrates this._http.post() with a JSON body.
-    // wakaSync serializes the data and sets Content-Type automatically.
-    // ════════════════════════════════════════════════════════════════
-    wakaPAC('#post-lookup', {
-        result: null,
-        status: 'idle',
-
-        init() {
-            logMessage('info', 'INIT', 'post-lookup component created');
         },
 
-        createPost() {
-            this.status = 'loading';
-            this.result = null;
-
-            // POST with a JSON body. The second argument is the payload.
-            const reqId = this._http.post(
-                'https://jsonplaceholder.typicode.com/posts',
-                {
-                    title: 'Message-driven HTTP with wakaSync',
-                    body: 'No promises in the component — results arrive via msgProc.',
-                    userId: 1
-                }
-            );
-
-            logMessage('info', 'POST', 'Creating post  →  requestId=' + reqId);
-        },
+        // ─── Message procedure ───────────────────────────────
+        //
+        // All events flow through msgProc: keyboard, mouse, timers,
+        // and — via the wakaSync plugin — HTTP results.
+        //
+        // MSG_HTTP_SUCCESS  wParam = requestId, detail.data = parsed body
+        // MSG_HTTP_ERROR    wParam = requestId, lParam = HTTP status
+        // MSG_HTTP_ABORT    wParam = requestId  (request was superseded)
 
         msgProc(event) {
             switch (event.message) {
 
+                // ── Debounced typing ─────────────────────────
+                // MSG_INPUT fires on every keystroke. We debounce
+                // here and let wakaSync handle the rest.
+                case wakaPAC.MSG_INPUT:
+                    clearTimeout(this._debounceTimer);
+                    this._debounceTimer = setTimeout(() => this.search(), 300);
+                    break;
+
+                // ── HTTP success ─────────────────────────────
+                // Wikipedia REST API returns:
+                //   { pages: [{ title, description, excerpt, key }] }
                 case wakaPAC.MSG_HTTP_SUCCESS: {
-                    const {data, timing} = event.detail;
+                    const raw = event.detail.data;
+                    const ms = event.detail.timing.duration;
 
-                    this.result = data;
-                    this.status = 'success';
+                    this.results = (raw.pages || []).map(function(page) {
+                        return {
+                            title: page.title,
+                            description: (page.description || page.excerpt || '').replace(/<[^>]*>/g, ''),
+                            url: 'https://en.wikipedia.org/wiki/' + encodeURIComponent(page.key)
+                        };
+                    });
 
-                    logMessage(
-                        'success', 'HTTP OK',
-                        'Post created: id=' + data.id + ' in ' + timing.duration + 'ms'
+                    this.loading = false;
+                    this.hasSearched = true;
+
+                    this.addLog('ok', 'OK',
+                        this.results.length + ' results in ' + ms + 'ms  reqId=' + event.wParam
                     );
                     break;
                 }
 
-                case wakaPAC.MSG_HTTP_ERROR: {
-                    this.status = 'error';
-
-                    logMessage(
-                        'error', 'HTTP ERR',
-                        'POST failed: ' + event.lParam
+                // ── HTTP error ───────────────────────────────
+                case wakaPAC.MSG_HTTP_ERROR:
+                    this.loading = false;
+                    this.addLog('err', 'ERR',
+                        'HTTP ' + event.lParam + '  reqId=' + event.wParam
                     );
                     break;
-                }
 
-                case wakaPAC.MSG_HTTP_ABORT: {
-                    this.status = 'idle';
-
-                    logMessage('abort', 'ABORT', 'POST request aborted');
+                // ── HTTP abort (superseded by newer request) ─
+                case wakaPAC.MSG_HTTP_ABORT:
+                    this.addLog('abort', 'ABORT',
+                        'superseded  reqId=' + event.wParam
+                    );
                     break;
-                }
             }
         }
     });

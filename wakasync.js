@@ -760,10 +760,6 @@
         buildHeaders(opts, body, bodyIsJson) {
             const headers = new Headers();
 
-            // Add default tracking headers
-            headers.set('X-WakaSync-Request', 'true');
-            headers.set('X-WakaSync-Version', VERSION);
-
             // Add content type based on body
             if (body !== undefined) {
                 if (body instanceof FormData) {
