@@ -2513,9 +2513,10 @@
          * @param {number} wParam - The wParam value (typically flags or primary data)
          * @param {number} lParam - The lParam value (typically coordinates or secondary data)
          * @param {Object} [extended={}] - Additional extended data to include in event.detail
+         * @param {HTMLElement|null} targetOverride
          * @returns {CustomEvent<{}>}
          */
-        wrapDomEventAsMessage(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}) {
+        wrapDomEventAsMessage(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}, targetOverride = null) {
             // Create custom event with extended data in detail (optional)
             const customEvent = new CustomEvent('pac:event', {
                 bubbles: true,
@@ -2533,7 +2534,7 @@
 
                 // Standard tracking fields
                 timestamp: { value: Date.now(), enumerable: true, configurable: true },
-                target: { value: originalEvent?.target, enumerable: true, configurable: true },
+                target: { value: targetOverride ?? originalEvent?.target, enumerable: true, configurable: true },
 
                 // Reference to the original DOM event for debugging/advanced usage
                 originalEvent: { value: originalEvent, enumerable: true, configurable: true }
@@ -2647,15 +2648,16 @@
 
         /**
          * Helper to dispatch mouse messages with proper wParam/lParam encoding
-         * @param msgType
-         * @param domEvent
-         * @param container
-         * @param extended
+         * @param {number} msgType
+         * @param {Event} domEvent
+         * @param {HTMLElement} container
+         * @param {Object} extended
          */
         dispatchMouseMessage(msgType, domEvent, container, extended={}) {
             const wParam = this.getModifierState(domEvent);
             const lParam = this.buildMouseLParam(domEvent, container);
-            const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended);
+            const targetOverride = (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) ? container : null;
+            const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended, targetOverride);
 
             this.dispatchToContainer(container, customEvent);
         },
