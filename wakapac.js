@@ -30,9 +30,17 @@
     const DROP_TARGET_SEL = '[data-pac-drop-target]';
 
     /**
-     * Installed plugins. Each entry is the descriptor object returned
-     * by a library's createPacPlugin() method, containing lifecycle
-     * hooks (install, onComponentCreated, onComponentDestroyed).
+     * Libraries passed to wakaPAC.use(). Tracked to prevent
+     * duplicate registration — the duplicate check compares
+     * against these original references.
+     * @type {Array<Object>}
+     */
+    const _registeredLibs = [];
+
+    /**
+     * Plugin descriptors returned by each library's createPacPlugin().
+     * Contains the lifecycle hooks (onComponentCreated, onComponentDestroyed)
+     * that wakaPAC invokes during component creation and cleanup.
      * @type {Array<Object>}
      */
     const _plugins = [];
@@ -7945,6 +7953,13 @@
                                 continue;
                             }
 
+                            // Cleanup plugins
+                            _plugins.forEach(function(plugin) {
+                                if (typeof plugin.onComponentDestroyed === 'function') {
+                                    plugin.onComponentDestroyed(pacId);
+                                }
+                            });
+
                             // Add to destroyed list
                             destroyed.add(pacId);
 
@@ -8686,6 +8701,13 @@
             // Register using pac-id as key (not selector)
             window.PACRegistry.register(pacId, context);
 
+            // Let plugins augment the component
+            _plugins.forEach(function(plugin) {
+                if (typeof plugin.onComponentCreated === 'function') {
+                    plugin.onComponentCreated(context.abstraction, pacId);
+                }
+            });
+
             // Call init() method if it exists after all setup is complete
             if (
                 context.abstraction.init &&
@@ -9103,33 +9125,36 @@
     /**
      * Registers an external library as a wakaPAC plugin.
      *
-     * The target must implement a createPacPlugin(pac) method that
+     * The library must implement a createPacPlugin(pac) method that
      * receives the wakaPAC object and returns a plugin descriptor
      * with lifecycle hooks:
      *
-     *   install(pac)                          — called once during registration
      *   onComponentCreated(abstraction, id)   — called for each new component
      *   onComponentDestroyed(id)              — called when a component is removed
      *
      * All hooks are optional. Duplicate registrations are silently ignored.
      *
-     * @param {Object} target - Library to integrate (e.g. wakaSync)
-     * @throws {Error} If target does not implement createPacPlugin()
+     * @param {Object} library - Library to integrate (e.g. wakaSync)
+     * @throws {Error} If lib does not implement createPacPlugin()
      */
-    wakaPAC.use = function(target) {
+    wakaPAC.use = function(library) {
         // Prevent duplicate registration
-        if (_plugins.indexOf(target) !== -1) {
+        if (_registeredLibs.indexOf(library) !== -1) {
             return;
         }
 
-        // The target library must expose a factory method that returns
+        // The library must expose a factory method that returns
         // a plugin descriptor. wakaPAC passes itself as the argument,
         // so the library never needs a hard reference to wakaPAC.
-        if (typeof target.createPacPlugin !== 'function') {
-            throw new Error('wakaPAC.use(): target must implement createPacPlugin()');
+        if (typeof library.createPacPlugin !== 'function') {
+            throw new Error('wakaPAC.use(): library must implement createPacPlugin()');
         }
 
-        _plugins.push(target.createPacPlugin(wakaPAC));
+        // Add to registered libs array to prevent duplicates
+        _registeredLibs.push(library);
+
+        // Create the plugin and store
+        _plugins.push(library.createPacPlugin(wakaPAC));
     };
 
     // ========================================================================

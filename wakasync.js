@@ -57,6 +57,153 @@
         constructor: WakaSync,
 
         /**
+         * Creates a wakaPAC plugin descriptor for message-driven HTTP integration.
+         *
+         * When registered via wakaPAC.use(wakaSync), this method is called
+         * automatically. The returned descriptor hooks into component lifecycle
+         * to provide each component with a scoped HTTP handle (this.http) and
+         * automatic request cancellation on destroy.
+         *
+         * WakaSync has no dependency on wakaPAC. The pac reference is received
+         * as an argument and used solely for postMessage delivery and reading
+         * the MSG_USER constant.
+         *
+         * Message contract delivered to msgProc:
+         *
+         *   MSG_HTTP_SUCCESS  wParam=requestId  lParam=0           detail={ data, url, method, timing }
+         *   MSG_HTTP_ERROR    wParam=requestId  lParam=httpStatus  detail={ error, url, method, status, code }
+         *   MSG_HTTP_ABORT    wParam=requestId  lParam=0           detail={ error, url, method }
+         *
+         * @param {Object} pac - The wakaPAC object, passed by wakaPAC.use()
+         * @returns {Object} Plugin descriptor with install, onComponentCreated, onComponentDestroyed
+         */
+        createPacPlugin(pac) {
+            const self = this;
+            let nextRequestId = 0;
+
+            // Derive message constants from the host's MSG_USER base.
+            // WakaSync never hardcodes these values.
+            const MSG_HTTP_SUCCESS = pac.MSG_USER + 0x100;
+            const MSG_HTTP_ERROR = pac.MSG_USER + 0x101;
+            const MSG_HTTP_ABORT = pac.MSG_USER + 0x102;
+
+            // Attach message constants so components can reference
+            // them as wakaPAC.MSG_HTTP_SUCCESS etc.
+            pac.MSG_HTTP_SUCCESS = MSG_HTTP_SUCCESS;
+            pac.MSG_HTTP_ERROR   = MSG_HTTP_ERROR;
+            pac.MSG_HTTP_ABORT   = MSG_HTTP_ABORT;
+
+            /**
+             * Initiates an HTTP request and delivers the result as a message
+             * to the specified component's msgProc.
+             * @param {string} pacId - Target component's data-pac-id
+             * @param {string} method - HTTP method
+             * @param {string} url - Request URL
+             * @param {Object} [opts] - WakaSync request options
+             * @returns {number} Request ID for correlation via event.wParam
+             */
+            function request(pacId, method, url, opts) {
+                opts = opts || {};
+
+                const requestId = ++nextRequestId;
+                const startTime = Date.now();
+                const groupKey = opts.groupKey !== undefined ? opts.groupKey : pacId;
+
+                self.request(url, Object.assign({}, opts, {
+                    method: method,
+                    groupKey: groupKey
+                })).then(function (data) {
+                    const endTime = Date.now();
+
+                    pac.postMessage(pacId, MSG_HTTP_SUCCESS, requestId, 0, {
+                        data: data,
+                        url: url,
+                        method: method,
+                        timing: {
+                            startTime: startTime,
+                            endTime: endTime,
+                            duration: endTime - startTime
+                        }
+                    });
+                }).catch(function (error) {
+                    if (self.isCancellationError(error)) {
+                        pac.postMessage(pacId, MSG_HTTP_ABORT, requestId, 0, {
+                            error: error,
+                            url: url,
+                            method: method
+                        });
+                    } else {
+                        const status = (error.response && error.response.status)
+                            ? error.response.status
+                            : 0;
+
+                        pac.postMessage(pacId, MSG_HTTP_ERROR, requestId, status, {
+                            error: error,
+                            url: url,
+                            method: method,
+                            status: status,
+                            code: error.code || null
+                        });
+                    }
+                });
+
+                return requestId;
+            }
+
+            /**
+             * Creates a component-scoped HTTP handle.
+             * @param {string} pacId - Component's data-pac-id
+             * @returns {Object} Bound handle with get, post, put, patch, delete, head, cancel
+             */
+            function createHandle(pacId) {
+                return {
+                    get: function (url, opts) {
+                        return request(pacId, 'GET', url, opts);
+                    },
+                    post: function (url, data, opts) {
+                        return request(pacId, 'POST', url, Object.assign({}, opts, { data: data }));
+                    },
+                    put: function (url, data, opts) {
+                        return request(pacId, 'PUT', url, Object.assign({}, opts, { data: data }));
+                    },
+                    patch: function (url, data, opts) {
+                        return request(pacId, 'PATCH', url, Object.assign({}, opts, { data: data }));
+                    },
+                    delete: function (url, opts) {
+                        return request(pacId, 'DELETE', url, opts);
+                    },
+                    head: function (url, opts) {
+                        return request(pacId, 'HEAD', url, opts);
+                    },
+                    cancel: function () {
+                        self.cancelGroup(pacId);
+                    }
+                };
+            }
+
+            return {
+                /**
+                 * Called for each new component after construction but before init().
+                 * Injects a scoped HTTP handle as this.http on the abstraction.
+                 * @param {Object} abstraction - The component's reactive abstraction
+                 * @param {string} pacId - The component's data-pac-id
+                 */
+                onComponentCreated: function (abstraction, pacId) {
+                    abstraction.http = createHandle(pacId);
+                },
+
+                /**
+                 * Called when a component is removed from the DOM.
+                 * Cancels all in-flight requests scoped to this component.
+                 * @param {string} pacId - The component's data-pac-id
+                 */
+                onComponentDestroyed: function (pacId) {
+                    self.cancelGroup(pacId);
+                }
+            };
+        },
+
+        /**
          * Adds a request interceptor. Interceptors may be sync or async.
          * Returns an unsubscribe function to remove the interceptor.
          *
