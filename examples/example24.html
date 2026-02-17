@@ -23,7 +23,11 @@
             --sans: 'DM Sans', sans-serif;
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
         body {
             font-family: var(--sans);
@@ -33,9 +37,20 @@
             padding: 3rem 1.5rem;
         }
 
-        h1 { font-size: 1.25rem; font-weight: 700; }
-        h1 span { color: var(--accent); }
-        .subtitle { color: var(--muted); font-size: 0.8rem; margin: 0.25rem 0 1.5rem; }
+        h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+
+        h1 span {
+            color: var(--accent);
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 0.8rem;
+            margin: 0.25rem 0 1.5rem;
+        }
 
         /* ── Search input ─────────────────────── */
 
@@ -50,7 +65,9 @@
             transition: border-color 0.15s;
         }
 
-        input[type="text"]:focus { border-color: var(--accent); }
+        input[type="text"]:focus {
+            border-color: var(--accent);
+        }
 
         /* ── Status ───────────────────────────── */
 
@@ -64,7 +81,8 @@
 
         .status .dot {
             display: inline-block;
-            width: 6px; height: 6px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
             background: var(--accent);
             margin-right: 0.3rem;
@@ -72,11 +90,17 @@
             animation: pulse 0.8s infinite;
         }
 
-        @keyframes pulse { 50% { opacity: 0.25; } }
+        @keyframes pulse {
+            50% {
+                opacity: 0.25;
+            }
+        }
 
         /* ── Results ──────────────────────────── */
 
-        .results { margin-top: 0.25rem; }
+        .results {
+            margin-top: 0.25rem;
+        }
 
         .result {
             display: block;
@@ -86,9 +110,21 @@
             color: inherit;
         }
 
-        .result:hover .result-title { color: var(--accent); }
-        .result-title { font-weight: 600; font-size: 0.875rem; transition: color 0.1s; }
-        .result-desc { font-size: 0.8rem; color: var(--muted); margin-top: 0.1rem; }
+        .result:hover .result-title {
+            color: var(--accent);
+        }
+
+        .result-title {
+            font-weight: 600;
+            font-size: 0.875rem;
+            transition: color 0.1s;
+        }
+
+        .result-desc {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-top: 0.1rem;
+        }
 
         .empty {
             text-align: center;
@@ -128,7 +164,10 @@
             cursor: pointer;
         }
 
-        .log-header button:hover { border-color: var(--accent); color: var(--accent); }
+        .log-header button:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
 
         .log {
             font-family: var(--mono);
@@ -138,47 +177,97 @@
             overflow-y: auto;
         }
 
-        .log-line { display: flex; gap: 0.5rem; align-items: baseline; }
-        .log-time { color: #bbb; }
-        .log-label { font-weight: 600; }
-        .log-label.get   { color: var(--accent); }
-        .log-label.ok    { color: var(--green); }
-        .log-label.abort { color: var(--amber); }
-        .log-label.err   { color: var(--red); }
-        .log-msg { color: var(--text); }
+        .log-line {
+            display: flex;
+            gap: 0.5rem;
+            align-items: baseline;
+        }
+
+        .log-time {
+            color: #bbb;
+        }
+
+        .log-label {
+            font-weight: 600;
+        }
+
+        .log-label.get {
+            color: var(--accent);
+        }
+
+        .log-label.ok {
+            color: var(--green);
+        }
+
+        .log-label.abort {
+            color: var(--amber);
+        }
+
+        .log-label.err {
+            color: var(--red);
+        }
+
+        .log-msg {
+            color: var(--text);
+        }
     </style>
 </head>
 <body>
 
 <!--
-    Single component. After wakaPAC.use(wakaSync), every component
-    receives this._http — a scoped handle whose requests share a
-    groupKey equal to the component's pacId.
-
-    When a new request fires in the same group, wakaSync auto-cancels
-    the previous one. The cancelled request delivers MSG_HTTP_ABORT
-    to msgProc; the new one delivers MSG_HTTP_SUCCESS or MSG_HTTP_ERROR.
-    On component destroy, all in-flight requests are cancelled automatically.
+    ┌─────────────────────────────────────────────────────────────┐
+    │  wakaSync search demo                                      │
+    │                                                            │
+    │  This example shows how wakaSync integrates with wakaPAC   │
+    │  to provide message-driven HTTP. Key concepts:             │
+    │                                                            │
+    │  1. Plugin registration                                    │
+    │     wakaPAC.use(wakaSync) installs the plugin. Every       │
+    │     component created after this call automatically        │
+    │     receives a this._http handle.                          │
+    │                                                            │
+    │  2. Scoped HTTP via groupKey                               │
+    │     Each component's _http handle is scoped to its pacId.  │
+    │     All requests from the same component share a groupKey. │
+    │     When a new request fires in the same group, wakaSync   │
+    │     auto-cancels the previous in-flight request — no       │
+    │     manual cancellation needed.                            │
+    │                                                            │
+    │  3. Message-based responses                                │
+    │     HTTP outcomes arrive as messages in msgProc:           │
+    │     • MSG_HTTP_SUCCESS — request completed successfully    │
+    │     • MSG_HTTP_ERROR   — server returned an error status   │
+    │     • MSG_HTTP_ABORT   — request was superseded            │
+    │                                                            │
+    │  4. Automatic cleanup                                      │
+    │     When a component is destroyed, all its in-flight       │
+    │     requests are cancelled automatically.                  │
+    └─────────────────────────────────────────────────────────────┘
 -->
 <div id="wiki-search" data-pac-id="wiki-search">
 
     <h1>waka<span>Sync</span> demo</h1>
     <p class="subtitle">Search-as-you-type — watch the activity log to see message-driven HTTP in action</p>
 
+    <!-- Two-way binding: typing updates this.query, which triggers MSG_INPUT in msgProc -->
     <input type="text"
            data-pac-bind="value: query"
            placeholder="Search Wikipedia…"
            autocomplete="off"
            spellcheck="false">
 
+    <!-- Conditional display: only visible while a request is in flight -->
     <div class="status">
         <span data-pac-bind="if: loading"><span class="dot"></span> searching…</span>
     </div>
 
     <div class="results">
+        <!-- Empty state: shown when a search has completed but returned nothing -->
         <div data-pac-bind="if: results.length === 0 && !loading && hasSearched">
             <div class="empty">No results</div>
         </div>
+
+        <!-- Result list: foreach creates one <a> per item in the results array -->
         <div data-pac-bind="foreach: results" data-pac-item="item">
             <a class="result" data-pac-bind="href: item.url" target="_blank">
                 <div class="result-title">{{ item.title }}</div>
@@ -187,6 +276,7 @@
         </div>
     </div>
 
+    <!-- Activity log: displays the HTTP message flow for educational purposes -->
     <div class="log-header">
         <span>Activity</span>
         <button data-pac-bind="click: clearLog">clear</button>
@@ -204,27 +294,51 @@
 </div>
 
 <script>
-    // ── Register the plugin ──────────────────────────────────────
-    // wakaSync.createPacPlugin(wakaPAC) derives message constants
-    // from MSG_USER and returns lifecycle hooks. After this call
-    // every new component gets this._http automatically.
+    /*
+     * Step 1 — Register the wakaSync plugin
+     *
+     * This single call does two things:
+     *   • Derives HTTP message constants (MSG_HTTP_SUCCESS, MSG_HTTP_ERROR,
+     *     MSG_HTTP_ABORT) from wakaPAC's MSG_USER base value.
+     *   • Installs lifecycle hooks so that every new component automatically
+     *     receives a this._http handle scoped to its pacId.
+     */
     wakaPAC.use(wakaSync);
 
-    // ── The component ────────────────────────────────────────────
+    /*
+     * Step 2 — Define the component
+     *
+     * The component uses this._http.get(url) to fire requests and handles
+     * all responses through msgProc. No callbacks, no promises — just
+     * messages. wakaSync's groupKey system (tied to the component's pacId)
+     * ensures that only the latest request in a group is active; older
+     * in-flight requests are automatically cancelled.
+     */
     wakaPAC('#wiki-search', {
 
-        // Reactive state
-        query: '',
-        results: [],
-        loading: false,
-        hasSearched: false,
-        log: [],
+        // ── Reactive state (drives the UI via data-pac-bind) ────────
 
-        // Internal (non-rendered)
+        query: '',           // bound to the search input
+        results: [],         // populated from Wikipedia API responses
+        loading: false,      // true while a request is in flight
+        hasSearched: false,  // flipped after the first completed search
+        log: [],             // activity log entries for the demo UI
+
+        // ── Internal state (not rendered) ───────────────────────────
+
         _debounceTimer: null,
 
-        // ─── Actions ─────────────────────────────────────────
+        // ── Actions ─────────────────────────────────────────────────
 
+        /**
+         * Fires a Wikipedia search. Called after the debounce delay.
+         *
+         * Note: there is no need to call this._http.cancel() before
+         * making a new request. wakaSync's groupKey system detects
+         * that a request is already in flight for this component and
+         * auto-cancels it, delivering MSG_HTTP_ABORT for the old
+         * request and MSG_HTTP_SUCCESS/ERROR for the new one.
+         */
         search() {
             const q = this.query.trim();
 
@@ -234,60 +348,87 @@
                 return;
             }
 
-            // No need to call this._http.cancel() — wakaSync's groupKey
-            // system auto-cancels the previous in-flight request when a
-            // new one fires from the same component (same groupKey = pacId).
             this.loading = true;
 
             const url = 'https://en.wikipedia.org/w/rest.php/v1/search/page?limit=6&q='
                 + encodeURIComponent(q);
 
+            // this._http.get() returns a numeric requestId that correlates
+            // with the wParam field in the resulting message.
             const reqId = this._http.get(url);
 
             this.addLog('get', 'GET', 'search=' + q + '  reqId=' + reqId);
         },
 
+        /**
+         * Appends a timestamped entry to the activity log.
+         * Keeps the log capped at 20 entries.
+         */
         addLog(type, label, msg) {
             const d = new Date();
             const time = [d.getHours(), d.getMinutes(), d.getSeconds()]
-                .map(function(n) { return String(n).padStart(2, '0'); })
+                .map(function (n) {
+                    return String(n).padStart(2, '0');
+                })
                 .join(':');
 
-            this.log.push({ time: time, type: type, label: label, msg: msg });
+            this.log.push({time: time, type: type, label: label, msg: msg});
 
             if (this.log.length > 20) {
                 this.log = this.log.slice(-20);
             }
         },
 
-        // ─── Message procedure ───────────────────────────────
+        /**
+         * Clears the activity log. Bound to the "clear" button via
+         * data-pac-bind="click: clearLog".
+         */
+        clearLog() {
+            this.log = [];
+        },
+
+        // ── Message procedure ───────────────────────────────────────
         //
-        // All events flow through msgProc: keyboard, mouse, timers,
-        // and — via the wakaSync plugin — HTTP results.
+        // All events flow through msgProc: keyboard input, mouse
+        // clicks, timers, and — via the wakaSync plugin — HTTP
+        // lifecycle messages.
         //
-        // MSG_HTTP_SUCCESS  wParam = requestId, detail.data = parsed body
-        // MSG_HTTP_ERROR    wParam = requestId, lParam = HTTP status
-        // MSG_HTTP_ABORT    wParam = requestId  (request was superseded)
+        // wakaSync delivers three message types:
+        //
+        //   MSG_HTTP_SUCCESS
+        //     wParam  = requestId
+        //     detail  = { data: <parsed JSON body>,
+        //                 timing: { duration: <ms> } }
+        //
+        //   MSG_HTTP_ERROR
+        //     wParam  = requestId
+        //     lParam  = HTTP status code (e.g. 404, 500)
+        //
+        //   MSG_HTTP_ABORT
+        //     wParam  = requestId
+        //     (no extra data — the request was superseded by a newer
+        //      one in the same group, or the component was destroyed)
 
         msgProc(event) {
             switch (event.message) {
 
-                // ── Debounced typing ─────────────────────────
-                // MSG_INPUT fires on every keystroke. We debounce
-                // here and let wakaSync handle the rest.
+                // ── Debounced typing ────────────────────────────
+                // MSG_INPUT fires on every keystroke in a bound
+                // input. We debounce for 300ms so that rapid typing
+                // produces only one HTTP request at the end.
                 case wakaPAC.MSG_INPUT:
                     clearTimeout(this._debounceTimer);
                     this._debounceTimer = setTimeout(() => this.search(), 300);
                     break;
 
-                // ── HTTP success ─────────────────────────────
+                // ── HTTP success ────────────────────────────────
                 // Wikipedia REST API returns:
                 //   { pages: [{ title, description, excerpt, key }] }
                 case wakaPAC.MSG_HTTP_SUCCESS: {
                     const raw = event.detail.data;
                     const ms = event.detail.timing.duration;
 
-                    this.results = (raw.pages || []).map(function(page) {
+                    this.results = (raw.pages || []).map(function (page) {
                         return {
                             title: page.title,
                             description: (page.description || page.excerpt || '').replace(/<[^>]*>/g, ''),
@@ -301,22 +442,31 @@
                     this.addLog('ok', 'OK',
                         this.results.length + ' results in ' + ms + 'ms  reqId=' + event.wParam
                     );
+
                     break;
                 }
 
-                // ── HTTP error ───────────────────────────────
+                // ── HTTP error ──────────────────────────────────
+                // The request completed but the server returned a
+                // non-2xx status code.
                 case wakaPAC.MSG_HTTP_ERROR:
                     this.loading = false;
                     this.addLog('err', 'ERR',
                         'HTTP ' + event.lParam + '  reqId=' + event.wParam
                     );
+
                     break;
 
-                // ── HTTP abort (superseded by newer request) ─
+                // ── HTTP abort ──────────────────────────────────
+                // This request was superseded by a newer request in
+                // the same group. This is the auto-cancel mechanism
+                // at work — no data is lost because the newer
+                // request will deliver the up-to-date results.
                 case wakaPAC.MSG_HTTP_ABORT:
                     this.addLog('abort', 'ABORT',
                         'superseded  reqId=' + event.wParam
                     );
+
                     break;
             }
         }
