@@ -61,7 +61,7 @@
          *
          * When registered via wakaPAC.use(wakaSync), this method is called
          * automatically. The returned descriptor hooks into component lifecycle
-         * to provide each component with a scoped HTTP handle (this.http) and
+         * to provide each component with a scoped HTTP handle (this._http) and
          * automatic request cancellation on destroy.
          *
          * WakaSync has no dependency on wakaPAC. The pac reference is received
@@ -151,30 +151,114 @@
             }
 
             /**
-             * Creates a component-scoped HTTP handle.
+             * Creates a component-scoped HTTP handle with optional per-component defaults.
+             *
+             * Request options are layered in order of precedence:
+             *   wakaSync.config → component defaults → per-request opts
+             *
              * @param {string} pacId - Component's data-pac-id
+             * @param {Object} [defaults] - Per-component default options from wakaPAC config
              * @returns {Object} Bound handle with get, post, put, patch, delete, head, cancel
              */
-            function createHandle(pacId) {
+            function createHandle(pacId, defaults) {
+                defaults = defaults || {};
+
+                /**
+                 * Merges component defaults with per-request options.
+                 * Per-request options take precedence over component defaults.
+                 * Headers are deep-merged so both layers contribute.
+                 * @param {Object} [opts] - Per-request options
+                 * @returns {Object} Merged options
+                 */
+                function mergeOpts(opts) {
+                    return Object.assign({}, defaults, opts, {
+                        headers: Object.assign({}, defaults.headers, opts && opts.headers)
+                    });
+                }
+
+                /**
+                 * Merges component defaults with per-request options,
+                 * adding a request body.
+                 * Headers are deep-merged so both layers contribute.
+                 * @param {*} data - Request body
+                 * @param {Object} [opts] - Per-request options
+                 * @returns {Object} Merged options with data
+                 */
+                function mergeOptsWithData(data, opts) {
+                    return Object.assign({}, defaults, opts, {
+                        headers: Object.assign({}, defaults.headers, opts && opts.headers),
+                        data: data
+                    });
+                }
+
                 return {
+                    /**
+                     * Sends a GET request.
+                     * @param {string} url - Request URL
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
                     get: function (url, opts) {
-                        return request(pacId, 'GET', url, opts);
+                        return request(pacId, 'GET', url, mergeOpts(opts));
                     },
+
+                    /**
+                     * Sends a POST request.
+                     * @param {string} url - Request URL
+                     * @param {*} data - Request body
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
                     post: function (url, data, opts) {
-                        return request(pacId, 'POST', url, Object.assign({}, opts, { data: data }));
+                        return request(pacId, 'POST', url, mergeOptsWithData(data, opts));
                     },
+
+                    /**
+                     * Sends a PUT request.
+                     * @param {string} url - Request URL
+                     * @param {*} data - Request body
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
                     put: function (url, data, opts) {
-                        return request(pacId, 'PUT', url, Object.assign({}, opts, { data: data }));
+                        return request(pacId, 'PUT', url, mergeOptsWithData(data, opts));
                     },
+
+                    /**
+                     * Sends a PATCH request.
+                     * @param {string} url - Request URL
+                     * @param {*} data - Request body
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
                     patch: function (url, data, opts) {
-                        return request(pacId, 'PATCH', url, Object.assign({}, opts, { data: data }));
+                        return request(pacId, 'PATCH', url, mergeOptsWithData(data, opts));
                     },
+
+                    /**
+                     * Sends a DELETE request.
+                     * @param {string} url - Request URL
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
                     delete: function (url, opts) {
-                        return request(pacId, 'DELETE', url, opts);
+                        return request(pacId, 'DELETE', url, mergeOpts(opts));
                     },
+
+                    /**
+                     * Sends a HEAD request.
+                     * @param {string} url - Request URL
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
                     head: function (url, opts) {
-                        return request(pacId, 'HEAD', url, opts);
+                        return request(pacId, 'HEAD', url, mergeOpts(opts));
                     },
+
+                    /**
+                     * Cancels all in-flight requests for this component.
+                     * Uses the default groupKey (pacId) set by the bridge.
+                     */
                     cancel: function () {
                         self.cancelGroup(pacId);
                     }
@@ -184,12 +268,13 @@
             return {
                 /**
                  * Called for each new component after construction but before init().
-                 * Injects a scoped HTTP handle as this.http on the abstraction.
+                 * Injects a scoped HTTP handle as this._http on the abstraction.
                  * @param {Object} abstraction - The component's reactive abstraction
                  * @param {string} pacId - The component's data-pac-id
+                 * @param config
                  */
-                onComponentCreated: function (abstraction, pacId) {
-                    abstraction.http = createHandle(pacId);
+                onComponentCreated: function (abstraction, pacId, config) {
+                    abstraction._http = createHandle(pacId, config.http);
                 },
 
                 /**
