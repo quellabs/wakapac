@@ -94,10 +94,7 @@
     const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'DETAILS', 'INPUT', 'LABEL', 'SELECT', 'SUMMARY', 'TEXTAREA',]);
 
     // Non-text input types that commit values via the change event.
-    const CHANGE_INPUT_TYPES = new Set([
-        'checkbox', 'radio', 'color', 'range',
-        'date', 'datetime-local', 'month', 'week', 'time'
-    ]);
+    const CHANGE_INPUT_TYPES = new Set(['checkbox', 'radio', 'color', 'range', 'date', 'datetime-local', 'month', 'week', 'time']);
 
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
