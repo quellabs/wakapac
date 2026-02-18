@@ -1207,6 +1207,8 @@
                 this._editor.style.width  = cellRect.width + "px";
                 this._editor.style.height = cellRect.height + "px";
 
+                this._editor.value = this._getRawValue();
+
                 this._editor.classList.add("active");
                 this._editor.focus();
 
