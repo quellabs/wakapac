@@ -643,7 +643,7 @@
                         this.selEndCol = null;
                         this.selEndRow = null;
 
-                        this._enterEditMode(null);
+                        this._enterEditMode();
 
                         return false;
                     }
@@ -748,7 +748,7 @@
                         }
 
                         if (event.wParam >= 32) {
-                            this._enterEditMode(String.fromCharCode(event.wParam));
+                            this._enterEditMode();
                         }
 
                         break;
@@ -925,7 +925,7 @@
                     }
 
                     case wakaPAC.VK_F2: {
-                        this._enterEditMode(null);
+                        this._enterEditMode();
                         event.preventDefault();
                         break;
                     }
@@ -1187,12 +1187,8 @@
 
             /**
              * Opens the inline cell editor over the active cell.
-             *
-             * @param {string|null} initialChar - If non-null, the editor starts
-             *     with this character (replacing cell contents). If null, the
-             *     editor loads the cell's existing raw value (F2 / double-click).
              */
-            _enterEditMode(initialChar) {
+            _enterEditMode() {
                 this.editing = true;
 
                 const cell = this._getCellElement(this.selCol, this.selRow);
@@ -1210,12 +1206,6 @@
                 this._editor.style.top    = (cellRect.top - areaRect.top + sa.scrollTop) + "px";
                 this._editor.style.width  = cellRect.width + "px";
                 this._editor.style.height = cellRect.height + "px";
-
-                if (initialChar !== null) {
-                    this._editor.value = initialChar;
-                } else {
-                    this._editor.value = this._getRawValue();
-                }
 
                 this._editor.classList.add("active");
                 this._editor.focus();
