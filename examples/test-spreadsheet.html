@@ -794,28 +794,6 @@
 
                         break;
                     }
-
-                    // ---------------------------------------------------------
-                    // Clipboard: copy selected cells as tab-delimited text.
-                    // Do NOT return false here — WakaPAC's post-dispatch
-                    // clipboard logic checks !event.defaultPrevented before
-                    // writing copyData to the system clipboard.
-                    // ---------------------------------------------------------
-                    case wakaPAC.MSG_COPY: {
-                        this._handleCopy(event);
-                        break;
-                    }
-
-                    // ---------------------------------------------------------
-                    // Clipboard: paste tab-delimited text into cells.
-                    // return false causes the framework to preventDefault on
-                    // the original DOM event, preventing native paste into
-                    // any focused input.
-                    // ---------------------------------------------------------
-                    case wakaPAC.MSG_PASTE: {
-                        this._handlePaste(event);
-                        break;
-                    }
                 }
             },
 
@@ -1322,63 +1300,6 @@
                 for (let r = range.minRow; r <= range.maxRow; r++) {
                     for (let c = range.minCol; c <= range.maxCol; c++) {
                         this._setCellData(c, r, "");
-                    }
-                }
-
-                this._updateSelectionUI();
-            },
-
-            // =================================================================
-            // CLIPBOARD
-            // =================================================================
-
-            /**
-             * Serializes the selected cells as tab-delimited text and writes
-             * it to the clipboard via WakaPAC's copyData mechanism.
-             * @param {CustomEvent} event - MSG_COPY event.
-             */
-            _handleCopy(event) {
-                const range = this._getSelectionRange();
-                const rows = [];
-
-                for (let r = range.minRow; r <= range.maxRow; r++) {
-                    const cols = [];
-
-                    for (let c = range.minCol; c <= range.maxCol; c++) {
-                        const data = this._getCellData(c, r);
-                        cols.push(data ? data.raw : "");
-                    }
-
-                    rows.push(cols.join("\t"));
-                }
-
-                // WakaPAC reads copyData after msgProc returns and writes
-                // it to the system clipboard
-                event.detail.copyData = { "text/plain": rows.join("\n") };
-            },
-
-            /**
-             * Parses tab-delimited clipboard text and writes it into cells
-             * starting at the active cell position.
-             * @param {CustomEvent} event - MSG_PASTE event.
-             */
-            _handlePaste(event) {
-                const text = event.detail?.text;
-                if (!text) {
-                    return;
-                }
-
-                const rows = text.split(/\r?\n/);
-
-                let r = this.selRow;
-
-                for (let ri = 0; ri < rows.length && r < NUM_ROWS; ri++, r++) {
-                    const cols = rows[ri].split("\t");
-
-                    let c = this.selCol;
-
-                    for (let ci = 0; ci < cols.length && c < NUM_COLS; ci++, c++) {
-                        this._setCellData(c, r, cols[ci]);
                     }
                 }
 
