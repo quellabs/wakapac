@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakaPAC Spreadsheet</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --cell-height: 28px;
+            --cell-min-width: 100px;
+            --header-bg: #f0f1f4;
+            --header-bg-active: #d3e3fd;
+            --header-text: #444746;
+            --header-text-active: #0b57d0;
+            --grid-border: #e1e3e6;
+            --cell-bg: #fff;
+            --select-border: #1a73e8;
+            --select-fill: rgba(26, 115, 232, 0.08);
+            --edit-shadow: 0 1px 4px rgba(0,0,0,0.18), 0 0 0 2px var(--select-border);
+            --formula-bar-height: 34px;
+            --toolbar-height: 38px;
+            --row-header-width: 46px;
+            --font-body: 'IBM Plex Sans', -apple-system, sans-serif;
+            --font-mono: 'IBM Plex Mono', monospace;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            font-family: var(--font-body);
+            font-size: 13px;
+            color: #202124;
+            background: #fff;
+        }
+
+        /* ── Toolbar ── */
+        .toolbar {
+            display: flex;
+            align-items: center;
+            height: var(--toolbar-height);
+            padding: 0 8px;
+            border-bottom: 1px solid var(--grid-border);
+            background: #f8f9fa;
+            gap: 2px;
+        }
+        .toolbar-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border: none;
+            background: transparent;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #444;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .toolbar-btn:hover { background: #e8eaed; }
+        .toolbar-sep { width: 1px; height: 20px; background: #dadce0; margin: 0 4px; }
+
+        /* ── PAC container — wraps formula bar + grid ── */
+        .spreadsheet-outer {
+            display: flex;
+            flex-direction: column;
+            height: calc(100% - var(--toolbar-height) - 24px);
+            outline: none;
+        }
+
+        /* ── Formula Bar (inside PAC container) ── */
+        .formula-bar {
+            display: flex;
+            align-items: center;
+            height: var(--formula-bar-height);
+            min-height: var(--formula-bar-height);
+            border-bottom: 1px solid var(--grid-border);
+            background: #fff;
+        }
+        .cell-name-box {
+            width: 80px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-right: 1px solid var(--grid-border);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--header-text);
+            background: var(--header-bg);
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .formula-input {
+            flex: 1;
+            height: 100%;
+            border: none;
+            outline: none;
+            padding: 0 10px;
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: #202124;
+        }
+        .formula-input:focus {
+            background: #e8f0fe;
+        }
+
+        /* ── Grid scroll area ── */
+        .grid-scroll-area {
+            flex: 1;
+            position: relative;
+            overflow: auto;
+        }
+
+        /* ── Table ── */
+        .grid-table {
+            border-collapse: collapse;
+            table-layout: fixed;
+            user-select: none;
+        }
+
+        .corner-header {
+            position: sticky;
+            top: 0;
+            left: 0;
+            z-index: 12;
+            width: var(--row-header-width);
+            min-width: var(--row-header-width);
+            height: var(--cell-height);
+            background: var(--header-bg);
+            border-right: 1px solid var(--grid-border);
+            border-bottom: 2px solid #c7c7cc;
+        }
+
+        .col-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            height: var(--cell-height);
+            min-width: var(--cell-min-width);
+            background: var(--header-bg);
+            border-right: 1px solid var(--grid-border);
+            border-bottom: 2px solid #c7c7cc;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--header-text);
+            padding: 0 4px;
+            vertical-align: middle;
+            overflow: hidden;
+        }
+        .col-header.active {
+            background: var(--header-bg-active);
+            color: var(--header-text-active);
+            font-weight: 600;
+        }
+
+        .row-header {
+            position: sticky;
+            left: 0;
+            z-index: 10;
+            width: var(--row-header-width);
+            min-width: var(--row-header-width);
+            background: var(--header-bg);
+            border-right: 1px solid var(--grid-border);
+            border-bottom: 1px solid var(--grid-border);
+            text-align: center;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--header-text);
+            vertical-align: middle;
+            overflow: hidden;
+        }
+        .row-header.active {
+            background: var(--header-bg-active);
+            color: var(--header-text-active);
+            font-weight: 600;
+        }
+
+        td.cell {
+            height: var(--cell-height);
+            min-width: var(--cell-min-width);
+            max-width: var(--cell-min-width);
+            background: var(--cell-bg);
+            border-right: 1px solid var(--grid-border);
+            border-bottom: 1px solid var(--grid-border);
+            padding: 0 5px;
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            vertical-align: middle;
+            cursor: cell;
+            position: relative;
+        }
+        td.cell.numeric { text-align: right; }
+
+        /* ── Overlays ── */
+        .selection-highlight {
+            position: absolute;
+            pointer-events: none;
+            z-index: 5;
+            border: 2px solid var(--select-border);
+            background: transparent;
+            display: none;
+        }
+        .selection-highlight.visible { display: block; }
+
+        .range-highlight {
+            position: absolute;
+            pointer-events: none;
+            z-index: 4;
+            background: var(--select-fill);
+            border: 1px solid var(--select-border);
+            display: none;
+        }
+        .range-highlight.visible { display: block; }
+
+        .cell-editor {
+            position: absolute;
+            z-index: 20;
+            display: none;
+            border: none;
+            outline: none;
+            padding: 0 4px;
+            font-family: var(--font-body);
+            font-size: 13px;
+            color: #202124;
+            background: #fff;
+            box-shadow: var(--edit-shadow);
+            min-width: var(--cell-min-width);
+        }
+        .cell-editor.active { display: block; }
+
+        /* ── Status Bar ── */
+        .status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            background: var(--header-bg);
+            border-top: 1px solid var(--grid-border);
+            font-size: 11px;
+            color: #5f6368;
+            z-index: 20;
+            gap: 20px;
+        }
+        .status-bar .status-section {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Toolbar (static UI — no interaction yet) -->
+<div class="toolbar">
+    <button class="toolbar-btn" title="Bold"><b>B</b></button>
+    <button class="toolbar-btn" title="Italic"><i>I</i></button>
+    <button class="toolbar-btn" title="Underline"><u>U</u></button>
+    <div class="toolbar-sep"></div>
+    <button class="toolbar-btn" title="Align Left">≡</button>
+    <button class="toolbar-btn" title="Align Center">≡</button>
+    <button class="toolbar-btn" title="Align Right">≡</button>
+    <div class="toolbar-sep"></div>
+    <button class="toolbar-btn" title="Delete cell contents">⌫</button>
+</div>
+
+<!--
+    Single PAC container. Formula bar, grid, editor, overlays
+    all live inside it. Zero addEventListener — msgProc only.
+-->
+<div class="spreadsheet-outer" id="spreadsheet" data-pac-id="spreadsheet" tabindex="0">
+    <div class="formula-bar">
+        <div class="cell-name-box" id="cellNameBox">A1</div>
+        <input class="formula-input" id="formulaInput" type="text" spellcheck="false" />
+    </div>
+    <div class="grid-scroll-area" id="gridScrollArea"></div>
+</div>
+
+<div class="status-bar">
+    <div class="status-section" id="statusInfo">Ready</div>
+    <div class="status-section" id="statusAgg"></div>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    (function () {
+        "use strict";
+
+        const NUM_COLS = 26;
+        const NUM_ROWS = 50;
+
+        function colToLetter(c)   { return String.fromCharCode(65 + c); }
+        function cellRef(c, r)    { return colToLetter(c) + (r + 1); }
+        function parseCellRef(ref) {
+            const m = ref.match(/^([A-Z])(\d+)$/);
+            if (!m) return null;
+            return { col: m[1].charCodeAt(0) - 65, row: parseInt(m[2], 10) - 1 };
+        }
+        function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+        function isNumeric(v)     { return v !== "" && v !== null && !isNaN(v); }
+
+        function buildGrid(scrollArea) {
+            const selDiv = document.createElement("div");
+            selDiv.className = "selection-highlight";
+            scrollArea.appendChild(selDiv);
+
+            const rangeDiv = document.createElement("div");
+            rangeDiv.className = "range-highlight";
+            scrollArea.appendChild(rangeDiv);
+
+            const editor = document.createElement("input");
+            editor.className = "cell-editor";
+            editor.type = "text";
+            editor.spellcheck = false;
+            editor.setAttribute("autocomplete", "off");
+            scrollArea.appendChild(editor);
+
+            const table = document.createElement("table");
+            table.className = "grid-table";
+
+            const thead = document.createElement("thead");
+            const headRow = document.createElement("tr");
+            const corner = document.createElement("th");
+            corner.className = "corner-header";
+            headRow.appendChild(corner);
+
+            for (let c = 0; c < NUM_COLS; c++) {
+                const th = document.createElement("th");
+                th.className = "col-header";
+                th.textContent = colToLetter(c);
+                th.dataset.col = c;
+                headRow.appendChild(th);
+            }
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement("tbody");
+            for (let r = 0; r < NUM_ROWS; r++) {
+                const tr = document.createElement("tr");
+                const rh = document.createElement("td");
+                rh.className = "row-header";
+                rh.textContent = r + 1;
+                rh.dataset.row = r;
+                tr.appendChild(rh);
+
+                for (let c = 0; c < NUM_COLS; c++) {
+                    const td = document.createElement("td");
+                    td.className = "cell";
+                    td.dataset.col = c;
+                    td.dataset.row = r;
+                    tr.appendChild(td);
+                }
+                tbody.appendChild(tr);
+            }
+            table.appendChild(tbody);
+            scrollArea.appendChild(table);
+
+            return { table, selDiv, rangeDiv, editor };
+        }
+
+        // ── Spreadsheet Component ──
+        wakaPAC("#spreadsheet", {
+
+            // State
+            cells: {},
+            selCol: 0,
+            selRow: 0,
+            selEndCol: null,
+            selEndRow: null,
+            editing: false,
+            _editingFormulaBar: false,
+            _dragging: false,
+            _wasDrag: false,
+
+            // DOM refs
+            _table: null,
+            _scrollArea: null,
+            _selDiv: null,
+            _rangeDiv: null,
+            _editor: null,
+            _formulaInput: null,
+            _cellNameBox: null,
+            _statusInfo: null,
+            _statusAgg: null,
+
+            // ── Lifecycle (no addEventListener) ──
+            init() {
+                this._scrollArea   = document.getElementById("gridScrollArea");
+                const dom          = buildGrid(this._scrollArea);
+                this._table        = dom.table;
+                this._selDiv       = dom.selDiv;
+                this._rangeDiv     = dom.rangeDiv;
+                this._editor       = dom.editor;
+                this._formulaInput = document.getElementById("formulaInput");
+                this._cellNameBox  = document.getElementById("cellNameBox");
+                this._statusInfo   = document.getElementById("statusInfo");
+                this._statusAgg    = document.getElementById("statusAgg");
+
+                this._updateSelectionUI();
+                this._focusGrid();
+            },
+
+            // ── Focus helpers ──
+            _focusedElement() {
+                const active = document.activeElement;
+                if (active === this._editor)       return "editor";
+                if (active === this._formulaInput) return "formulaBar";
+                return "grid";
+            },
+
+            _focusGrid() {
+                document.getElementById("spreadsheet").focus();
+            },
+
+            // ── Message Procedure ──
+            msgProc(event) {
+                switch (event.message) {
+
+                    case wakaPAC.MSG_LCLICK: {
+                        if (this._wasDrag) { this._wasDrag = false; break; }
+                        const hit = this._hitTest(event);
+                        if (!hit) break;
+                        if (this.editing) this._commitEdit();
+                        if (this._editingFormulaBar) this._commitFormulaBar();
+
+                        if (event.wParam & wakaPAC.MK_SHIFT) {
+                            this.selEndCol = hit.col;
+                            this.selEndRow = hit.row;
+                        } else {
+                            this.selCol = hit.col;
+                            this.selRow = hit.row;
+                            this.selEndCol = null;
+                            this.selEndRow = null;
+                        }
+                        this._updateSelectionUI();
+                        this._focusGrid();
+                        return false;
+                    }
+
+                    case wakaPAC.MSG_LBUTTONDBLCLK: {
+                        const hit = this._hitTest(event);
+                        if (!hit) break;
+                        this.selCol = hit.col;
+                        this.selRow = hit.row;
+                        this.selEndCol = null;
+                        this.selEndRow = null;
+                        this._enterEditMode(null);
+                        return false;
+                    }
+
+                    case wakaPAC.MSG_LBUTTONDOWN: {
+                        const hit = this._hitTest(event);
+                        if (!hit) break;
+                        if (this.editing) this._commitEdit();
+                        if (this._editingFormulaBar) this._commitFormulaBar();
+                        this.selCol = hit.col;
+                        this.selRow = hit.row;
+                        this.selEndCol = null;
+                        this.selEndRow = null;
+                        this._dragging = true;
+                        wakaPAC.setCapture(this.pacId);
+                        this._updateSelectionUI();
+                        break;
+                    }
+
+                    case wakaPAC.MSG_MOUSEMOVE: {
+                        if (!this._dragging) break;
+                        const oe = event.originalEvent;
+                        if (!oe) break;
+                        const hit = this._hitTestCoords(oe.clientX, oe.clientY);
+                        if (hit && (this.selEndCol !== hit.col || this.selEndRow !== hit.row)) {
+                            this.selEndCol = hit.col;
+                            this.selEndRow = hit.row;
+                            this._updateSelectionUI();
+                        }
+                        break;
+                    }
+
+                    case wakaPAC.MSG_LBUTTONUP: {
+                        if (!this._dragging) break;
+                        this._dragging = false;
+                        wakaPAC.releaseCapture();
+                        if (this.selEndCol === this.selCol && this.selEndRow === this.selRow) {
+                            this.selEndCol = null;
+                            this.selEndRow = null;
+                        }
+                        if (this.selEndCol !== null || this.selEndRow !== null) {
+                            this._wasDrag = true;
+                        }
+                        this._updateSelectionUI();
+                        break;
+                    }
+
+                    case wakaPAC.MSG_KEYDOWN: {
+                        this._handleKeyDown(event);
+                        break;
+                    }
+
+                    case wakaPAC.MSG_CHAR: {
+                        if (this._focusedElement() !== "grid") break;
+                        if (event.wParam >= 32) {
+                            this._enterEditMode(String.fromCharCode(event.wParam));
+                        }
+                        break;
+                    }
+
+                    case wakaPAC.MSG_INPUT_COMPLETE: {
+                        const focus = this._focusedElement();
+                        if (focus === "editor") {
+                            this._formulaInput.value = this._editor.value;
+                        }
+                        break;
+                    }
+
+                    case wakaPAC.MSG_SETFOCUS: {
+                        if (event.target === this._formulaInput) {
+                            this._editingFormulaBar = true;
+                        }
+                        break;
+                    }
+
+                    case wakaPAC.MSG_KILLFOCUS: {
+                        if (event.target === this._formulaInput) {
+                            this._editingFormulaBar = false;
+                        }
+                        break;
+                    }
+
+                    case wakaPAC.MSG_COPY: {
+                        this._handleCopy(event);
+                        return false;
+                    }
+
+                    case wakaPAC.MSG_PASTE: {
+                        this._handlePaste(event);
+                        return false;
+                    }
+                }
+            },
+
+            // ── Keyboard — dispatches by focus context ──
+            _handleKeyDown(event) {
+                const vk    = event.wParam;
+                const shift = !!(event.lParam & wakaPAC.KM_SHIFT);
+                const ctrl  = !!(event.lParam & wakaPAC.KM_CONTROL);
+                const focus = this._focusedElement();
+
+                // Cell editor focused
+                if (focus === "editor") {
+                    if (vk === wakaPAC.VK_RETURN) {
+                        this._commitEdit();
+                        this._moveSelection(0, shift ? -1 : 1);
+                        this._updateSelectionUI();
+                        this._focusGrid();
+                        event.originalEvent?.preventDefault?.();
+                    } else if (vk === wakaPAC.VK_TAB) {
+                        this._commitEdit();
+                        this._moveSelection(shift ? -1 : 1, 0);
+                        this._updateSelectionUI();
+                        this._focusGrid();
+                        event.originalEvent?.preventDefault?.();
+                    } else if (vk === wakaPAC.VK_ESCAPE) {
+                        this._cancelEdit();
+                        this._focusGrid();
+                        event.originalEvent?.preventDefault?.();
+                    }
+                    return;
+                }
+
+                // Formula bar focused
+                if (focus === "formulaBar") {
+                    if (vk === wakaPAC.VK_RETURN) {
+                        this._commitFormulaBar();
+                        this._focusGrid();
+                        event.originalEvent?.preventDefault?.();
+                    } else if (vk === wakaPAC.VK_ESCAPE) {
+                        this._formulaInput.value = this._getRawValue();
+                        this._editingFormulaBar = false;
+                        this._focusGrid();
+                        event.originalEvent?.preventDefault?.();
+                    }
+                    return;
+                }
+
+                // Grid focused — navigation
+
+                if (vk === wakaPAC.VK_UP || vk === wakaPAC.VK_DOWN ||
+                    vk === wakaPAC.VK_LEFT || vk === wakaPAC.VK_RIGHT) {
+                    const dc = vk === wakaPAC.VK_LEFT ? -1 : vk === wakaPAC.VK_RIGHT ? 1 : 0;
+                    const dr = vk === wakaPAC.VK_UP ? -1 : vk === wakaPAC.VK_DOWN ? 1 : 0;
+
+                    if (shift) {
+                        const ec = this.selEndCol !== null ? this.selEndCol : this.selCol;
+                        const er = this.selEndRow !== null ? this.selEndRow : this.selRow;
+                        this.selEndCol = clamp(ec + dc, 0, NUM_COLS - 1);
+                        this.selEndRow = clamp(er + dr, 0, NUM_ROWS - 1);
+                    } else {
+                        this._moveSelection(dc, dr);
+                    }
+                    this._updateSelectionUI();
+                    this._scrollToSelection();
+                    event.originalEvent?.preventDefault?.();
+                    return;
+                }
+
+                if (vk === wakaPAC.VK_TAB) {
+                    this._moveSelection(shift ? -1 : 1, 0);
+                    this._updateSelectionUI();
+                    this._scrollToSelection();
+                    event.originalEvent?.preventDefault?.();
+                    return;
+                }
+
+                if (vk === wakaPAC.VK_RETURN) {
+                    this._moveSelection(0, shift ? -1 : 1);
+                    this._updateSelectionUI();
+                    this._scrollToSelection();
+                    event.originalEvent?.preventDefault?.();
+                    return;
+                }
+
+                if (vk === wakaPAC.VK_DELETE || vk === wakaPAC.VK_BACK) {
+                    this._clearSelectedCells();
+                    event.originalEvent?.preventDefault?.();
+                    return;
+                }
+
+                if (vk === wakaPAC.VK_F2) {
+                    this._enterEditMode(null);
+                    event.originalEvent?.preventDefault?.();
+                    return;
+                }
+
+                if (vk === wakaPAC.VK_HOME) {
+                    if (ctrl) { this.selCol = 0; this.selRow = 0; }
+                    else      { this.selCol = 0; }
+                    this.selEndCol = null;
+                    this.selEndRow = null;
+                    this._updateSelectionUI();
+                    this._scrollToSelection();
+                    event.originalEvent?.preventDefault?.();
+                    return;
+                }
+
+                if (vk === wakaPAC.VK_END) {
+                    if (ctrl) { this.selCol = NUM_COLS - 1; this.selRow = this._getLastUsedRow(); }
+                    else      { this.selCol = NUM_COLS - 1; }
+                    this.selEndCol = null;
+                    this.selEndRow = null;
+                    this._updateSelectionUI();
+                    this._scrollToSelection();
+                    event.originalEvent?.preventDefault?.();
+                    return;
+                }
+
+                if (ctrl && vk === wakaPAC.VK_A) {
+                    this.selCol = 0;
+                    this.selRow = 0;
+                    this.selEndCol = NUM_COLS - 1;
+                    this.selEndRow = NUM_ROWS - 1;
+                    this._updateSelectionUI();
+                    event.originalEvent?.preventDefault?.();
+                    return;
+                }
+            },
+
+            // ── Cell data ──
+            _getCellData(col, row) {
+                return this.cells[cellRef(col, row)] || null;
+            },
+
+            _setCellData(col, row, raw) {
+                const ref = cellRef(col, row);
+                const trimmed = (raw || "").trim();
+                if (trimmed === "") {
+                    delete this.cells[ref];
+                } else {
+                    const value = isNumeric(trimmed) ? parseFloat(trimmed) : trimmed;
+                    this.cells[ref] = { raw: trimmed, value: value };
+                }
+                this._renderCell(col, row);
+                this._updateAggregates();
+            },
+
+            _getRawValue() {
+                const data = this._getCellData(this.selCol, this.selRow);
+                return data ? data.raw : "";
+            },
+
+            // ── Rendering ──
+            _getCellElement(col, row) {
+                return this._table.querySelector(`td.cell[data-col="${col}"][data-row="${row}"]`);
+            },
+
+            _renderCell(col, row) {
+                const el = this._getCellElement(col, row);
+                if (!el) return;
+                const data = this._getCellData(col, row);
+                if (data) {
+                    el.textContent = data.value;
+                    el.classList.toggle("numeric", typeof data.value === "number");
+                } else {
+                    el.textContent = "";
+                    el.classList.remove("numeric");
+                }
+            },
+
+            // ── Selection ──
+            _moveSelection(dc, dr) {
+                this.selCol = clamp(this.selCol + dc, 0, NUM_COLS - 1);
+                this.selRow = clamp(this.selRow + dr, 0, NUM_ROWS - 1);
+                this.selEndCol = null;
+                this.selEndRow = null;
+            },
+
+            _getSelectionRange() {
+                const c2 = this.selEndCol !== null ? this.selEndCol : this.selCol;
+                const r2 = this.selEndRow !== null ? this.selEndRow : this.selRow;
+                return {
+                    minCol: Math.min(this.selCol, c2), maxCol: Math.max(this.selCol, c2),
+                    minRow: Math.min(this.selRow, r2), maxRow: Math.max(this.selRow, r2)
+                };
+            },
+
+            _isRangeSelection() {
+                return this.selEndCol !== null && this.selEndRow !== null &&
+                    (this.selEndCol !== this.selCol || this.selEndRow !== this.selRow);
+            },
+
+            _updateSelectionUI() {
+                const sa = this._scrollArea;
+                const activeCell = this._getCellElement(this.selCol, this.selRow);
+                if (!activeCell) return;
+
+                this._cellNameBox.textContent = cellRef(this.selCol, this.selRow);
+                this._formulaInput.value = this._getRawValue();
+
+                const areaRect = sa.getBoundingClientRect();
+                const cellRect = activeCell.getBoundingClientRect();
+
+                this._selDiv.style.left   = (cellRect.left - areaRect.left + sa.scrollLeft - 1) + "px";
+                this._selDiv.style.top    = (cellRect.top - areaRect.top + sa.scrollTop - 1) + "px";
+                this._selDiv.style.width  = (cellRect.width + 1) + "px";
+                this._selDiv.style.height = (cellRect.height + 1) + "px";
+                this._selDiv.classList.add("visible");
+
+                if (this._isRangeSelection()) {
+                    const range = this._getSelectionRange();
+                    const tl = this._getCellElement(range.minCol, range.minRow);
+                    const br = this._getCellElement(range.maxCol, range.maxRow);
+                    if (tl && br) {
+                        const tlR = tl.getBoundingClientRect();
+                        const brR = br.getBoundingClientRect();
+                        this._rangeDiv.style.left   = (tlR.left - areaRect.left + sa.scrollLeft) + "px";
+                        this._rangeDiv.style.top    = (tlR.top - areaRect.top + sa.scrollTop) + "px";
+                        this._rangeDiv.style.width  = (brR.right - tlR.left) + "px";
+                        this._rangeDiv.style.height = (brR.bottom - tlR.top) + "px";
+                        this._rangeDiv.classList.add("visible");
+                    }
+                } else {
+                    this._rangeDiv.classList.remove("visible");
+                }
+
+                this._table.querySelectorAll(".col-header.active, .row-header.active").forEach(
+                    el => el.classList.remove("active")
+                );
+                const range = this._getSelectionRange();
+                for (let c = range.minCol; c <= range.maxCol; c++) {
+                    const h = this._table.querySelector(`.col-header[data-col="${c}"]`);
+                    if (h) h.classList.add("active");
+                }
+                for (let r = range.minRow; r <= range.maxRow; r++) {
+                    const h = this._table.querySelector(`.row-header[data-row="${r}"]`);
+                    if (h) h.classList.add("active");
+                }
+
+                this._updateAggregates();
+            },
+
+            _scrollToSelection() {
+                const cell = this._getCellElement(this.selCol, this.selRow);
+                if (cell) cell.scrollIntoView({ block: "nearest", inline: "nearest" });
+            },
+
+            // ── Edit mode ──
+            _enterEditMode(initialChar) {
+                this.editing = true;
+                const cell = this._getCellElement(this.selCol, this.selRow);
+                if (!cell) return;
+
+                const sa = this._scrollArea;
+                const areaRect = sa.getBoundingClientRect();
+                const cellRect = cell.getBoundingClientRect();
+
+                this._editor.style.left   = (cellRect.left - areaRect.left + sa.scrollLeft) + "px";
+                this._editor.style.top    = (cellRect.top - areaRect.top + sa.scrollTop) + "px";
+                this._editor.style.width  = cellRect.width + "px";
+                this._editor.style.height = cellRect.height + "px";
+
+                this._editor.value = initialChar !== null ? initialChar : this._getRawValue();
+                this._editor.classList.add("active");
+                this._editor.focus();
+
+                const len = this._editor.value.length;
+                this._editor.setSelectionRange(len, len);
+
+                this._formulaInput.value = this._editor.value;
+                this._statusInfo.textContent = "Edit";
+            },
+
+            _commitEdit() {
+                if (!this.editing) return;
+                this._editor.classList.remove("active");
+                this.editing = false;
+                this._setCellData(this.selCol, this.selRow, this._editor.value);
+                this._statusInfo.textContent = "Ready";
+            },
+
+            _cancelEdit() {
+                this._editor.classList.remove("active");
+                this.editing = false;
+                this._formulaInput.value = this._getRawValue();
+                this._statusInfo.textContent = "Ready";
+            },
+
+            _commitFormulaBar() {
+                this._editingFormulaBar = false;
+                this._setCellData(this.selCol, this.selRow, this._formulaInput.value);
+                this._updateSelectionUI();
+            },
+
+            // ── Hit testing ──
+            _hitTest(event) {
+                const target = event.target || event.originalEvent?.target;
+                if (!target || !target.classList?.contains("cell")) return null;
+                return { col: parseInt(target.dataset.col, 10), row: parseInt(target.dataset.row, 10) };
+            },
+
+            _hitTestCoords(clientX, clientY) {
+                const el = document.elementFromPoint(clientX, clientY);
+                if (!el || !el.classList?.contains("cell")) return null;
+                return { col: parseInt(el.dataset.col, 10), row: parseInt(el.dataset.row, 10) };
+            },
+
+            // ── Clear ──
+            _clearSelectedCells() {
+                const range = this._getSelectionRange();
+                for (let r = range.minRow; r <= range.maxRow; r++) {
+                    for (let c = range.minCol; c <= range.maxCol; c++) {
+                        this._setCellData(c, r, "");
+                    }
+                }
+                this._updateSelectionUI();
+            },
+
+            // ── Copy / Paste ──
+            _handleCopy(event) {
+                const range = this._getSelectionRange();
+                const rows = [];
+                for (let r = range.minRow; r <= range.maxRow; r++) {
+                    const cols = [];
+                    for (let c = range.minCol; c <= range.maxCol; c++) {
+                        const data = this._getCellData(c, r);
+                        cols.push(data ? data.raw : "");
+                    }
+                    rows.push(cols.join("\t"));
+                }
+                event.detail.copyData = { "text/plain": rows.join("\n") };
+            },
+
+            _handlePaste(event) {
+                const text = event.detail?.text;
+                if (!text) return;
+                const rows = text.split(/\r?\n/);
+                let r = this.selRow;
+                for (let ri = 0; ri < rows.length && r < NUM_ROWS; ri++, r++) {
+                    const cols = rows[ri].split("\t");
+                    let c = this.selCol;
+                    for (let ci = 0; ci < cols.length && c < NUM_COLS; ci++, c++) {
+                        this._setCellData(c, r, cols[ci]);
+                    }
+                }
+                this._updateSelectionUI();
+            },
+
+            // ── Aggregates ──
+            _updateAggregates() {
+                const range = this._getSelectionRange();
+                const values = [];
+                for (let r = range.minRow; r <= range.maxRow; r++) {
+                    for (let c = range.minCol; c <= range.maxCol; c++) {
+                        const data = this._getCellData(c, r);
+                        if (data && typeof data.value === "number") values.push(data.value);
+                    }
+                }
+                if (values.length > 1) {
+                    const sum = values.reduce((a, b) => a + b, 0);
+                    this._statusAgg.textContent =
+                        `Sum: ${sum}   Avg: ${(sum / values.length).toFixed(2)}   Count: ${values.length}`;
+                } else {
+                    this._statusAgg.textContent = "";
+                }
+            },
+
+            _getLastUsedRow() {
+                let maxRow = 0;
+                Object.keys(this.cells).forEach(ref => {
+                    const parsed = parseCellRef(ref);
+                    if (parsed && parsed.row > maxRow) maxRow = parsed.row;
+                });
+                return maxRow;
+            }
+        });
+
+    })();
+</script>
+</body>
+</html>
