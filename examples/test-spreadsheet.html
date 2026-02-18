@@ -747,6 +747,13 @@
                             break;
                         }
 
+                        // Ignore Ctrl/Alt modified characters — those are
+                        // keyboard shortcuts (Ctrl+C, Ctrl+V, etc.), not text input.
+                        // Without this guard, Ctrl+C would open the editor for 'c'.
+                        if (event.lParam & (wakaPAC.KM_CONTROL | wakaPAC.KM_ALT)) {
+                            break;
+                        }
+
                         if (event.wParam >= 32) {
                             this._enterEditMode();
                         }
@@ -789,19 +796,25 @@
                     }
 
                     // ---------------------------------------------------------
-                    // Clipboard: copy selected cells as tab-delimited text
+                    // Clipboard: copy selected cells as tab-delimited text.
+                    // Do NOT return false here — WakaPAC's post-dispatch
+                    // clipboard logic checks !event.defaultPrevented before
+                    // writing copyData to the system clipboard.
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_COPY: {
                         this._handleCopy(event);
-                        return false;
+                        break;
                     }
 
                     // ---------------------------------------------------------
-                    // Clipboard: paste tab-delimited text into cells
+                    // Clipboard: paste tab-delimited text into cells.
+                    // return false causes the framework to preventDefault on
+                    // the original DOM event, preventing native paste into
+                    // any focused input.
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_PASTE: {
                         this._handlePaste(event);
-                        return false;
+                        break;
                     }
                 }
             },
