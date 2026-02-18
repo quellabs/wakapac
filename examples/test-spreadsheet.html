@@ -436,7 +436,7 @@
 
             // Data rows with row headers
             const tbody = document.createElement("tbody");
-            
+
             for (let r = 0; r < NUM_ROWS; r++) {
                 const tr = document.createElement("tr");
                 const rh = document.createElement("td");
@@ -528,7 +528,9 @@
              */
             init() {
                 this._scrollArea   = document.getElementById("gridScrollArea");
+
                 const dom          = buildGrid(this._scrollArea);
+
                 this._table        = dom.table;
                 this._selDiv       = dom.selDiv;
                 this._rangeDiv     = dom.rangeDiv;
