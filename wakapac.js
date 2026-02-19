@@ -3220,6 +3220,7 @@
          */
         tokens: [],
         currentToken: 0,
+        functions: null,
 
         OPERATOR_PRECEDENCE: {
             '||': 1, '&&': 2,
@@ -3932,60 +3933,60 @@
 
         /**
          * Evaluates a parsed expression in the given context
-         * @param {Object} parsedExpr - Parsed expression object
+         * @param {Object} node - Parsed expression object
          * @param {Object} context - Evaluation context
-         * @param scopeResolver
+         * @param scope
          * @returns {*} Evaluated result
          */
-        evaluate(parsedExpr, context, scopeResolver = null) {
-            if (!parsedExpr) {
+        evaluate(node, context, scope = null) {
+            if (!node) {
                 return undefined;
             }
 
-            switch (parsedExpr.type) {
+            switch (node.type) {
                 case 'literal':
-                    return parsedExpr.value;
+                    return node.value;
 
                 case 'property':
-                    return this.getProperty(parsedExpr.path, context, scopeResolver);
+                    return this.getProperty(node.path, context, scope);
 
                 case 'identifier':
-                    return this.getProperty(parsedExpr.name, context, scopeResolver);
+                    return this.getProperty(node.name, context, scope);
 
                 case 'parentheses':
-                    return this.evaluate(parsedExpr.inner, context, scopeResolver);
+                    return this.evaluate(node.inner, context, scope);
 
                 case 'array':
-                    return this.evaluateArrayLiteral(parsedExpr, context, scopeResolver);
+                    return this.evaluateArrayLiteral(node, context, scope);
 
                 case 'object':
-                    return this.evaluateObjectLiteral(parsedExpr, context, scopeResolver);
+                    return this.evaluateObjectLiteral(node, context, scope);
 
                 case 'index': {
-                    if (scopeResolver) {
-                        return this.getProperty(this.astToPath(parsedExpr), context, scopeResolver);
+                    if (scope) {
+                        return this.getProperty(this.astToPath(node), context, scope);
                     }
 
-                    const obj = this.evaluate(parsedExpr.object, context, scopeResolver);
-                    const key = this.evaluate(parsedExpr.index, context, scopeResolver);
+                    const obj = this.evaluate(node.object, context, scope);
+                    const key = this.evaluate(node.index, context, scope);
                     return obj && obj[key];
                 }
 
                 case 'ternary': {
-                    const condition = this.evaluate(parsedExpr.condition, context, scopeResolver);
+                    const condition = this.evaluate(node.condition, context, scope);
 
                     return condition ?
-                        this.evaluate(parsedExpr.trueValue, context, scopeResolver) :
-                        this.evaluate(parsedExpr.falseValue, context, scopeResolver);
+                        this.evaluate(node.trueValue, context, scope) :
+                        this.evaluate(node.falseValue, context, scope);
                 }
 
                 case 'logical': {
-                    const leftLogical = this.evaluate(parsedExpr.left, context, scopeResolver);
+                    const leftLogical = this.evaluate(node.left, context, scope);
 
-                    if (parsedExpr.operator === '&&') {
-                        return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : leftLogical;
-                    } else if (parsedExpr.operator === '||') {
-                        return leftLogical ? leftLogical : this.evaluate(parsedExpr.right, context, scopeResolver);
+                    if (node.operator === '&&') {
+                        return leftLogical ? this.evaluate(node.right, context, scope) : leftLogical;
+                    } else if (node.operator === '||') {
+                        return leftLogical ? leftLogical : this.evaluate(node.right, context, scope);
                     } else {
                         return leftLogical;
                     }
@@ -3993,15 +3994,15 @@
 
                 case 'comparison':
                 case 'arithmetic': {
-                    const leftVal = this.evaluate(parsedExpr.left, context, scopeResolver);
-                    const rightVal = this.evaluate(parsedExpr.right, context, scopeResolver);
-                    return this.performOperation(leftVal, parsedExpr.operator, rightVal);
+                    const leftVal = this.evaluate(node.left, context, scope);
+                    const rightVal = this.evaluate(node.right, context, scope);
+                    return this.performOperation(leftVal, node.operator, rightVal);
                 }
 
                 case 'unary': {
-                    const operandValue = this.evaluate(parsedExpr.operand, context, scopeResolver);
+                    const operandValue = this.evaluate(node.operand, context, scope);
 
-                    switch (parsedExpr.operator) {
+                    switch (node.operator) {
                         case '!':
                             return !operandValue;
 
@@ -4017,21 +4018,21 @@
                 }
 
                 case 'member': {
-                    if (scopeResolver) {
-                        return this.getProperty(this.astToPath(parsedExpr), context, scopeResolver);
+                    if (scope) {
+                        return this.getProperty(this.astToPath(node), context, scope);
                     }
 
-                    const obj = this.evaluate(parsedExpr.object, context, scopeResolver);
-                    return obj && obj[parsedExpr.property];
+                    const obj = this.evaluate(node.object, context, scope);
+                    return obj && obj[node.property];
                 }
 
                 case 'methodCall': {
-                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
+                    const object = this.evaluate(node.object, context, scope);
 
                     // Handle array methods
                     if (Array.isArray(object)) {
-                        return this.evaluateArrayMethod(object, parsedExpr.method,
-                            parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver))
+                        return this.evaluateArrayMethod(object, node.method,
+                            node.arguments.map(arg => this.evaluate(arg, context, scope))
                         );
                     }
 
@@ -4040,27 +4041,45 @@
                     return undefined;
                 }
 
+                case 'call': {
+                    if (!this.functions || typeof this.functions[node.name] !== 'function') {
+                        throw new Error('Unknown function: ' + node.name);
+                    }
+
+                    const self = this;
+
+                    return this.functions[node.name](node.arguments, {
+                        compute(argNode) {
+                            return self.evaluate(argNode, context, scope);
+                        }
+                    });
+                }
+
                 default:
                     return undefined;
             }
         },
 
+        /**
+         * Evaluates a supported array method by name, acting as a safe dispatch
+         * layer that prevents arbitrary method execution on arrays.
+         * @param {Array} array - The array to invoke the method on.
+         * @param {string} methodName - The name of the array method to evaluate.
+         * @param {Array} args - The arguments to pass to the array method.
+         * @returns {*} The result of the array method, or undefined if the method is not supported.
+         */
         evaluateArrayMethod(array, methodName, args) {
             switch (methodName) {
                 case 'includes':
-                    // Check if array contains the value
                     return array.includes(args[0]);
 
                 case 'indexOf':
-                    // Find first index of value, -1 if not found
                     return array.indexOf(args[0]);
 
                 case 'length':
-                    // Array length (handled as method for consistency)
                     return array.length;
 
                 case 'join':
-                    // Join array elements with separator
                     return array.join(args[0] || ',');
 
                 default:
@@ -4069,7 +4088,17 @@
             }
         },
 
-        getProperty(path, obj, scopeResolver = null) {
+        /**
+         * Retrieves a value from a nested object using a dot/bracket notation path.
+         * Supports scope resolution for resolving aliased or scoped paths before traversal.
+         * @param {string} path - The property path to resolve (e.g. "user.address[0].street").
+         * @param {Object} obj - The source object to retrieve the value from.
+         * @param {Object|null} [scope=null] - Optional resolver with a `resolveScopedPath` method
+         *   that transforms the path before traversal. If the resolved path is a number, it is returned directly.
+         * @returns {*} The value at the resolved path, or `undefined` if the path is invalid
+         *   or any intermediate property is nullish.
+         */
+        getProperty(path, obj, scope = null) {
             if (!obj || !path) {
                 return undefined;
             }
@@ -4077,8 +4106,8 @@
             let resolvedPath = path;
 
             // Use context to resolve scoped paths if available
-            if (scopeResolver && scopeResolver.resolveScopedPath) {
-                resolvedPath = scopeResolver.resolveScopedPath(path);
+            if (scope && scope.resolveScopedPath) {
+                resolvedPath = scope.resolveScopedPath(path);
             }
 
             // If resolved path is a number, return it directly
@@ -4110,28 +4139,58 @@
             return current;
         },
 
+        /**
+         * Evaluates an array literal AST node into a JavaScript array by recursively
+         * evaluating each element expression.
+         * @param {Object} arrayExpr - The array literal AST node.
+         * @param {Object} arrayExpr.elements - The array of element expressions to evaluate.
+         * @param {Object} context - The evaluation context providing variable bindings.
+         * @param {Object|null} [resolverContext=null] - Optional scope resolver context
+         * @returns {Array<*>} The evaluated array, or an empty array if no elements are defined.
+         */
         evaluateArrayLiteral(arrayExpr, context, resolverContext = null) {
+            const self = this;
+
             if (!arrayExpr.elements) {
                 return [];
             }
 
-            return arrayExpr.elements.map(element =>
-                this.evaluate(element, context, resolverContext)
-            );
+            return arrayExpr.elements.map(function(element) {
+                return self.evaluate(element, context, resolverContext);
+            });
         },
 
-        evaluateObjectLiteral(objectExpr, context, resolverContext = null) {
+        /**
+         * Evaluates an object literal AST node into a plain JavaScript object by recursively
+         * evaluating each value expression.
+         * @param {Object} node - The object literal AST node.
+         * @param {Array<{key: string, value: Object}>} node.pairs - The key-value pairs to evaluate.
+         * @param {Object} context - The evaluation context providing variable bindings.
+         * @param {Object|null} [scope=null] - Optional scope resolver context
+         * @returns {Object} The evaluated plain object, or an empty object if no pairs are defined.
+         */
+        evaluateObjectLiteral: function(node, context, scope) {
+            const self = this;
             const result = {};
 
-            if (objectExpr.pairs) {
-                objectExpr.pairs.forEach(({key, value}) => {
-                    result[key] = this.evaluate(value, context, resolverContext);
+            if (node.pairs) {
+                node.pairs.forEach(function({key, value}) {
+                    result[key] = self.evaluate(value, context, scope);
                 });
             }
 
             return result;
         },
 
+        /**
+         * Performs a binary operation on two operands.
+         * Arithmetic operators (`-`, `*`, `/`, `%`) coerce operands to `Number`;
+         * `+` uses native addition (supporting both numeric addition and string concatenation).
+         * @param {*} left - The left-hand operand.
+         * @param {string} operator - The operator to apply.
+         * @param {*} right - The right-hand operand.
+         * @returns {number|boolean} The result of the operation, or `false` for unrecognized operators.
+         */
         performOperation(left, operator, right) {
             switch (operator) {
                 case '+':
@@ -4380,6 +4439,9 @@
 
     /**
      * Value binding - Updates form element values
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.value = function(context, element, value) {
         // Handle radio buttons specially - they should be checked/unchecked based on value match
@@ -4400,6 +4462,9 @@
 
     /**
      * Checked binding - Updates checkbox/radio checked state
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.checked = function(context, element, value) {
         if (element.type === 'checkbox' || element.type === 'radio') {
@@ -4414,6 +4479,9 @@
 
     /**
      * Visible binding - Shows/hides elements by managing display CSS
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.visible = function(context, element, value) {
         const shouldShow = !!value;
@@ -4441,7 +4509,7 @@
     /**
      * If binding — conditionally renders an element's child content.
      * @param {Context} context - The PAC component context
-     * @param {Element} element - The container element with the if binding
+     * @param {Element} element - The container element
      * @param {*} value - Truthy = show, falsy = hide
      */
     BindingHandlers.if = function(context, element, value) {
@@ -4474,6 +4542,9 @@
 
     /**
      * Class binding - Manages CSS classes (string or object syntax)
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.class = function(context, element, value) {
         // Object syntax: { active: true, disabled: false }
@@ -4515,6 +4586,9 @@
 
     /**
      * Style binding - Applies inline styles (object or string syntax)
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.style = function(context, element, value) {
         // Object syntax: { color: 'red', fontSize: '16px' }
@@ -4528,6 +4602,7 @@
                     }
                 }
             }
+
             return;
         }
 
