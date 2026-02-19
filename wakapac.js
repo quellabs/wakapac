@@ -1629,6 +1629,8 @@
                 const clipboardData = event.clipboardData;
                 const text = clipboardData.getData('text/plain');
                 const availableTypes = Array.from(clipboardData.types);
+                const uriList = clipboardData.getData('text/uri-list');
+                const uris = uriList ? uriList.split(/\r?\n/).filter(line => line && !line.startsWith('#')) : [];
                 const wParam = self.getModifierState(event);
                 const lParam = text.length;
 
@@ -1645,7 +1647,7 @@
                     text: text,
                     html: clipboardData.getData('text/html'),
                     rtf: clipboardData.getData('text/rtf'),
-                    uriList: clipboardData.getData('text/uri-list'),
+                    uris: uris,
                     files: files,
                     availableTypes: availableTypes
                 });
