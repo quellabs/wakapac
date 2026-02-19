@@ -1051,6 +1051,7 @@
                 }
 
                 const data = this._getCellData(col, row);
+
                 if (data) {
                     el.textContent = data.value;
                     el.classList.toggle("numeric", typeof data.value === "number");
@@ -1097,7 +1098,10 @@
              */
             _isRangeSelection() {
                 return this.selEndCol !== null && this.selEndRow !== null &&
-                    (this.selEndCol !== this.selCol || this.selEndRow !== this.selRow);
+                    (
+                        this.selEndCol !== this.selCol ||
+                        this.selEndRow !== this.selRow
+                    );
             },
 
             /**
@@ -1137,6 +1141,7 @@
                     if (tl && br) {
                         const tlR = tl.getBoundingClientRect();
                         const brR = br.getBoundingClientRect();
+
                         this._rangeDiv.style.left   = (tlR.left - areaRect.left + sa.scrollLeft) + "px";
                         this._rangeDiv.style.top    = (tlR.top - areaRect.top + sa.scrollTop) + "px";
                         this._rangeDiv.style.width  = (brR.right - tlR.left) + "px";
