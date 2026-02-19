@@ -3618,23 +3618,41 @@
          * @throws {Error} When expected tokens are missing (closing bracket, property name, closing parenthesis)
          */
         parsePostfixOperators(expr) {
+            // Continuously consume postfix operators left-to-right until none remain.
+            // Each iteration wraps `expr` in a new AST node, building an inside-out tree
+            // where the outermost node is the last operation in the chain.
             while (true) {
+                // Array/object indexing: expr[index]
+                // The index is a full expression (parsed via parseTernary) so
+                // computed access like obj[cond ? a : b] is supported.
                 if (this.match('LBRACKET')) {
-                    // Array/object indexing: expr[index]
                     const index = this.parseTernary();
+
                     this.consume('RBRACKET', 'Expected closing bracket');
+
                     expr = {
                         type: 'index',
                         object: expr,
                         index
                     };
-                } else if (this.match('DOT')) {
-                    // Property access or method call
+
+                    continue;
+                }
+
+                // Property access or method call: expr.name or expr.name(args)
+                // The token after the dot must be an identifier; anything else
+                // (e.g., a number literal or operator) is a syntax error.
+                if (this.match('DOT')) {
                     if (this.check('IDENTIFIER')) {
                         const property = this.advance().value;
 
-                        // Check for method call syntax
+                        // Distinguish between property access and method call by
+                        // looking ahead for an opening parenthesis.
                         if (this.match('LPAREN')) {
+                            // Method call: expr.name(args)
+                            // Arguments are comma-separated expressions parsed by
+                            // parseArgumentList, which returns an empty array for
+                            // zero-argument calls.
                             const args = this.parseArgumentList();
                             this.consume('RPAREN', 'Expected closing parenthesis');
 
@@ -3645,7 +3663,7 @@
                                 arguments: args
                             };
                         } else {
-                            // Regular property access
+                            // Regular property access: expr.name
                             expr = {
                                 type: 'member',
                                 object: expr,
@@ -3655,10 +3673,34 @@
                     } else {
                         throw new Error('Expected property name after "."');
                     }
-                } else {
-                    break;
+
+                    continue;
                 }
+
+                // Standalone function call: name(args)
+                // This branch only fires when the base expression is a bare
+                // identifier (not a member/index result), preventing expressions
+                // like (a + b)(args) from being misinterpreted as calls.
+                // Chained calls like foo()() are not matched here — the first
+                // call produces a 'call' node, and subsequent parentheses won't
+                // satisfy the expr.type === 'identifier' guard.
+                if (expr.type === 'identifier' && this.match('LPAREN')) {
+                    const args = this.parseArgumentList();
+                    this.consume('RPAREN', 'Expected closing parenthesis');
+
+                    expr = {
+                        type: 'call',
+                        name: expr.name,
+                        arguments: args
+                    };
+                    continue;
+                }
+
+                // No postfix operator found — exit the loop and return the
+                // fully-wrapped expression tree.
+                break;
             }
+
             return expr;
         },
 
