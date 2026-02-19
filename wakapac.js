@@ -3747,58 +3747,46 @@
          * @returns {Object} Property access AST node
          */
         parsePropertyAccess() {
-            let path = this.advance().value;
-
-            while (true) {
-                if (this.match('DOT')) {
-                    if (this.check('IDENTIFIER')) {
-                        path += '.' + this.advance().value;
-                    } else {
-                        throw new Error('Expected property name after "."');
-                    }
-                } else if (this.match('LBRACKET')) {
-                    const index = this.parseTernary();
-                    this.consume('RBRACKET', 'Expected closing bracket');
-
-                    // For simplicity, convert bracket notation to string
-                    if (index.type === 'literal') {
-                        path += '[' + JSON.stringify(index.value) + ']';
-                    } else {
-                        path += '[' + this.reconstructExpression(index) + ']';
-                    }
-                } else {
-                    break;
-                }
-            }
-
-            return {
-                type: 'property',
-                path
-            };
+            const node = { type: 'identifier', name: this.advance().value };
+            return this.parsePostfixOperators(node);
         },
 
         /**
-         * Helper method to reconstruct expression from AST (for bracket notation)
-         * @param {Object} node - AST node to reconstruct
-         * @returns {string} Reconstructed expression string
+         * Converts an AST node back to a dot/bracket path string
+         * for the reactive binding system's change tracking.
+         * @param {Object} node - AST node (identifier, member, or index)
+         * @returns {string} Path string (e.g. "foo.bar[0].baz")
          */
-        reconstructExpression(node) {
+        astToPath(node) {
             if (!node) {
                 return '';
             }
 
             switch (node.type) {
-                case 'literal':
-                    return typeof node.value === 'string' ? '"' + node.value + '"' : String(node.value);
+                case 'identifier':
+                    return node.name;
 
-                case 'property':
-                    return node.path;
+                case 'member':
+                    return this.astToPath(node.object) + '.' + node.property;
+
+                case 'index': {
+                    const obj = this.astToPath(node.object);
+
+                    if (node.index.type === 'literal') {
+                        return obj + '[' + JSON.stringify(node.index.value) + ']';
+                    }
+
+                    return obj + '[' + this.astToPath(node.index) + ']';
+                }
+
+                case 'literal':
+                    return JSON.stringify(node.value);
 
                 case 'arithmetic':
-                    return `${this.reconstructExpression(node.left)} ${node.operator} ${this.reconstructExpression(node.right)}`;
+                    return this.astToPath(node.left) + ' ' + node.operator + ' ' + this.astToPath(node.right);
 
                 default:
-                    return 'unknown';
+                    return '';
             }
         },
 
@@ -3918,6 +3906,9 @@
                 case 'property':
                     return this.getProperty(parsedExpr.path, context, scopeResolver);
 
+                case 'identifier':
+                    return this.getProperty(parsedExpr.name, context, scopeResolver);
+
                 case 'parentheses':
                     return this.evaluate(parsedExpr.inner, context, scopeResolver);
 
@@ -3928,9 +3919,13 @@
                     return this.evaluateObjectLiteral(parsedExpr, context, scopeResolver);
 
                 case 'index': {
-                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
-                    const index = this.evaluate(parsedExpr.index, context, scopeResolver);
-                    return object && object[index];
+                    if (scopeResolver) {
+                        return this.getProperty(this.astToPath(parsedExpr), context, scopeResolver);
+                    }
+
+                    const obj = this.evaluate(parsedExpr.object, context, scopeResolver);
+                    const key = this.evaluate(parsedExpr.index, context, scopeResolver);
+                    return obj && obj[key];
                 }
 
                 case 'ternary': {
@@ -3979,8 +3974,12 @@
                 }
 
                 case 'member': {
-                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
-                    return object && object[parsedExpr.property];
+                    if (scopeResolver) {
+                        return this.getProperty(this.astToPath(parsedExpr), context, scopeResolver);
+                    }
+
+                    const obj = this.evaluate(parsedExpr.object, context, scopeResolver);
+                    return obj && obj[parsedExpr.property];
                 }
 
                 case 'methodCall': {
