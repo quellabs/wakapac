@@ -1628,6 +1628,7 @@
                 const container = self.getContainerForEvent(MSG_PASTE, event);
                 const clipboardData = event.clipboardData;
                 const text = clipboardData.getData('text/plain');
+                const availableTypes = Array.from(clipboardData.types);
                 const wParam = self.getModifierState(event);
                 const lParam = text.length;
 
@@ -1643,7 +1644,10 @@
                 const customEvent = self.wrapDomEventAsMessage(MSG_PASTE, event, wParam, lParam, {
                     text: text,
                     html: clipboardData.getData('text/html'),
-                    files: files
+                    rtf: clipboardData.getData('text/rtf'),
+                    uriList: clipboardData.getData('text/uri-list'),
+                    files: files,
+                    availableTypes: availableTypes
                 });
 
                 // Dispatch to container — no post-dispatch readback needed
