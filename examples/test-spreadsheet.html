@@ -794,6 +794,18 @@
 
                         break;
                     }
+
+                    // ---------------------------------------------------------
+                    // Paste directly on grid cell
+                    // ---------------------------------------------------------
+                    case wakaPAC.MSG_PASTE: {
+                        if (this._focusedElement() === 'grid') {
+                            this._setCellData(this.selCol, this.selRow, event.detail.text);
+                            return false;
+                        }
+
+                        break;
+                    }
                 }
             },
 
