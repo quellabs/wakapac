@@ -30,6 +30,22 @@
     const DROP_TARGET_SEL = '[data-pac-drop-target]';
 
     /**
+     * Libraries passed to wakaPAC.use(). Tracked to prevent
+     * duplicate registration — the duplicate check compares
+     * against these original references.
+     * @type {Array<Object>}
+     */
+    const _registeredLibs = [];
+
+    /**
+     * Plugin descriptors returned by each library's createPacPlugin().
+     * Contains the lifecycle hooks (onComponentCreated, onComponentDestroyed)
+     * that wakaPAC invokes during component creation and cleanup.
+     * @type {Array<Object>}
+     */
+    const _plugins = [];
+
+    /**
      * Matches handlebars-style interpolation: {{variable}}
      * Captures variable name/expression with global flag
      * @type {RegExp}
@@ -1612,6 +1628,9 @@
                 const container = self.getContainerForEvent(MSG_PASTE, event);
                 const clipboardData = event.clipboardData;
                 const text = clipboardData.getData('text/plain');
+                const availableTypes = Array.from(clipboardData.types);
+                const uriList = clipboardData.getData('text/uri-list');
+                const uris = uriList ? uriList.split(/\r?\n/).filter(line => line && !line.startsWith('#')) : [];
                 const wParam = self.getModifierState(event);
                 const lParam = text.length;
 
@@ -1627,7 +1646,10 @@
                 const customEvent = self.wrapDomEventAsMessage(MSG_PASTE, event, wParam, lParam, {
                     text: text,
                     html: clipboardData.getData('text/html'),
-                    files: files
+                    rtf: clipboardData.getData('text/rtf'),
+                    uris: uris,
+                    files: files,
+                    availableTypes: availableTypes
                 });
 
                 // Dispatch to container — no post-dispatch readback needed
@@ -3198,6 +3220,7 @@
          */
         tokens: [],
         currentToken: 0,
+        functions: null,
 
         OPERATOR_PRECEDENCE: {
             '||': 1, '&&': 2,
@@ -3596,23 +3619,41 @@
          * @throws {Error} When expected tokens are missing (closing bracket, property name, closing parenthesis)
          */
         parsePostfixOperators(expr) {
+            // Continuously consume postfix operators left-to-right until none remain.
+            // Each iteration wraps `expr` in a new AST node, building an inside-out tree
+            // where the outermost node is the last operation in the chain.
             while (true) {
+                // Array/object indexing: expr[index]
+                // The index is a full expression (parsed via parseTernary) so
+                // computed access like obj[cond ? a : b] is supported.
                 if (this.match('LBRACKET')) {
-                    // Array/object indexing: expr[index]
                     const index = this.parseTernary();
+
                     this.consume('RBRACKET', 'Expected closing bracket');
+
                     expr = {
                         type: 'index',
                         object: expr,
                         index
                     };
-                } else if (this.match('DOT')) {
-                    // Property access or method call
+
+                    continue;
+                }
+
+                // Property access or method call: expr.name or expr.name(args)
+                // The token after the dot must be an identifier; anything else
+                // (e.g., a number literal or operator) is a syntax error.
+                if (this.match('DOT')) {
                     if (this.check('IDENTIFIER')) {
                         const property = this.advance().value;
 
-                        // Check for method call syntax
+                        // Distinguish between property access and method call by
+                        // looking ahead for an opening parenthesis.
                         if (this.match('LPAREN')) {
+                            // Method call: expr.name(args)
+                            // Arguments are comma-separated expressions parsed by
+                            // parseArgumentList, which returns an empty array for
+                            // zero-argument calls.
                             const args = this.parseArgumentList();
                             this.consume('RPAREN', 'Expected closing parenthesis');
 
@@ -3623,7 +3664,7 @@
                                 arguments: args
                             };
                         } else {
-                            // Regular property access
+                            // Regular property access: expr.name
                             expr = {
                                 type: 'member',
                                 object: expr,
@@ -3633,10 +3674,35 @@
                     } else {
                         throw new Error('Expected property name after "."');
                     }
-                } else {
-                    break;
+
+                    continue;
                 }
+
+                // Standalone function call: name(args)
+                // This branch only fires when the base expression is a bare
+                // identifier (not a member/index result), preventing expressions
+                // like (a + b)(args) from being misinterpreted as calls.
+                // Chained calls like foo()() are not matched here — the first
+                // call produces a 'call' node, and subsequent parentheses won't
+                // satisfy the expr.type === 'identifier' guard.
+                if (expr.type === 'identifier' && this.match('LPAREN')) {
+                    const args = this.parseArgumentList();
+                    this.consume('RPAREN', 'Expected closing parenthesis');
+
+                    expr = {
+                        type: 'call',
+                        name: expr.name,
+                        arguments: args
+                    };
+
+                    continue;
+                }
+
+                // No postfix operator found — exit the loop and return the
+                // fully-wrapped expression tree.
+                break;
             }
+
             return expr;
         },
 
@@ -3725,58 +3791,46 @@
          * @returns {Object} Property access AST node
          */
         parsePropertyAccess() {
-            let path = this.advance().value;
-
-            while (true) {
-                if (this.match('DOT')) {
-                    if (this.check('IDENTIFIER')) {
-                        path += '.' + this.advance().value;
-                    } else {
-                        throw new Error('Expected property name after "."');
-                    }
-                } else if (this.match('LBRACKET')) {
-                    const index = this.parseTernary();
-                    this.consume('RBRACKET', 'Expected closing bracket');
-
-                    // For simplicity, convert bracket notation to string
-                    if (index.type === 'literal') {
-                        path += '[' + JSON.stringify(index.value) + ']';
-                    } else {
-                        path += '[' + this.reconstructExpression(index) + ']';
-                    }
-                } else {
-                    break;
-                }
-            }
-
-            return {
-                type: 'property',
-                path
-            };
+            const node = { type: 'identifier', name: this.advance().value };
+            return this.parsePostfixOperators(node);
         },
 
         /**
-         * Helper method to reconstruct expression from AST (for bracket notation)
-         * @param {Object} node - AST node to reconstruct
-         * @returns {string} Reconstructed expression string
+         * Converts an AST node back to a dot/bracket path string
+         * for the reactive binding system's change tracking.
+         * @param {Object} node - AST node (identifier, member, or index)
+         * @returns {string} Path string (e.g. "foo.bar[0].baz")
          */
-        reconstructExpression(node) {
+        astToPath(node) {
             if (!node) {
                 return '';
             }
 
             switch (node.type) {
-                case 'literal':
-                    return typeof node.value === 'string' ? '"' + node.value + '"' : String(node.value);
+                case 'identifier':
+                    return node.name;
 
-                case 'property':
-                    return node.path;
+                case 'member':
+                    return this.astToPath(node.object) + '.' + node.property;
+
+                case 'index': {
+                    const obj = this.astToPath(node.object);
+
+                    if (node.index.type === 'literal') {
+                        return obj + '[' + JSON.stringify(node.index.value) + ']';
+                    }
+
+                    return obj + '[' + this.astToPath(node.index) + ']';
+                }
+
+                case 'literal':
+                    return JSON.stringify(node.value);
 
                 case 'arithmetic':
-                    return `${this.reconstructExpression(node.left)} ${node.operator} ${this.reconstructExpression(node.right)}`;
+                    return this.astToPath(node.left) + ' ' + node.operator + ' ' + this.astToPath(node.right);
 
                 default:
-                    return 'unknown';
+                    return '';
             }
         },
 
@@ -3879,53 +3933,60 @@
 
         /**
          * Evaluates a parsed expression in the given context
-         * @param {Object} parsedExpr - Parsed expression object
+         * @param {Object} node - Parsed expression object
          * @param {Object} context - Evaluation context
-         * @param scopeResolver
+         * @param scope
          * @returns {*} Evaluated result
          */
-        evaluate(parsedExpr, context, scopeResolver = null) {
-            if (!parsedExpr) {
+        evaluate(node, context, scope = null) {
+            if (!node) {
                 return undefined;
             }
 
-            switch (parsedExpr.type) {
+            switch (node.type) {
                 case 'literal':
-                    return parsedExpr.value;
+                    return node.value;
 
                 case 'property':
-                    return this.getProperty(parsedExpr.path, context, scopeResolver);
+                    return this.getProperty(node.path, context, scope);
+
+                case 'identifier':
+                    return this.getProperty(node.name, context, scope);
 
                 case 'parentheses':
-                    return this.evaluate(parsedExpr.inner, context, scopeResolver);
+                    return this.evaluate(node.inner, context, scope);
 
                 case 'array':
-                    return this.evaluateArrayLiteral(parsedExpr, context, scopeResolver);
+                    return this.evaluateArrayLiteral(node, context, scope);
 
                 case 'object':
-                    return this.evaluateObjectLiteral(parsedExpr, context, scopeResolver);
+                    return this.evaluateObjectLiteral(node, context, scope);
 
                 case 'index': {
-                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
-                    const index = this.evaluate(parsedExpr.index, context, scopeResolver);
-                    return object && object[index];
+                    if (scope) {
+                        return this.getProperty(this.astToPath(node), context, scope);
+                    }
+
+                    const obj = this.evaluate(node.object, context, scope);
+                    const key = this.evaluate(node.index, context, scope);
+                    return obj && obj[key];
                 }
 
                 case 'ternary': {
-                    const condition = this.evaluate(parsedExpr.condition, context, scopeResolver);
+                    const condition = this.evaluate(node.condition, context, scope);
 
                     return condition ?
-                        this.evaluate(parsedExpr.trueValue, context, scopeResolver) :
-                        this.evaluate(parsedExpr.falseValue, context, scopeResolver);
+                        this.evaluate(node.trueValue, context, scope) :
+                        this.evaluate(node.falseValue, context, scope);
                 }
 
                 case 'logical': {
-                    const leftLogical = this.evaluate(parsedExpr.left, context, scopeResolver);
+                    const leftLogical = this.evaluate(node.left, context, scope);
 
-                    if (parsedExpr.operator === '&&') {
-                        return leftLogical ? this.evaluate(parsedExpr.right, context, scopeResolver) : leftLogical;
-                    } else if (parsedExpr.operator === '||') {
-                        return leftLogical ? leftLogical : this.evaluate(parsedExpr.right, context, scopeResolver);
+                    if (node.operator === '&&') {
+                        return leftLogical ? this.evaluate(node.right, context, scope) : leftLogical;
+                    } else if (node.operator === '||') {
+                        return leftLogical ? leftLogical : this.evaluate(node.right, context, scope);
                     } else {
                         return leftLogical;
                     }
@@ -3933,15 +3994,15 @@
 
                 case 'comparison':
                 case 'arithmetic': {
-                    const leftVal = this.evaluate(parsedExpr.left, context, scopeResolver);
-                    const rightVal = this.evaluate(parsedExpr.right, context, scopeResolver);
-                    return this.performOperation(leftVal, parsedExpr.operator, rightVal);
+                    const leftVal = this.evaluate(node.left, context, scope);
+                    const rightVal = this.evaluate(node.right, context, scope);
+                    return this.performOperation(leftVal, node.operator, rightVal);
                 }
 
                 case 'unary': {
-                    const operandValue = this.evaluate(parsedExpr.operand, context, scopeResolver);
+                    const operandValue = this.evaluate(node.operand, context, scope);
 
-                    switch (parsedExpr.operator) {
+                    switch (node.operator) {
                         case '!':
                             return !operandValue;
 
@@ -3957,17 +4018,21 @@
                 }
 
                 case 'member': {
-                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
-                    return object && object[parsedExpr.property];
+                    if (scope) {
+                        return this.getProperty(this.astToPath(node), context, scope);
+                    }
+
+                    const obj = this.evaluate(node.object, context, scope);
+                    return obj && obj[node.property];
                 }
 
                 case 'methodCall': {
-                    const object = this.evaluate(parsedExpr.object, context, scopeResolver);
+                    const object = this.evaluate(node.object, context, scope);
 
                     // Handle array methods
                     if (Array.isArray(object)) {
-                        return this.evaluateArrayMethod(object, parsedExpr.method,
-                            parsedExpr.arguments.map(arg => this.evaluate(arg, context, scopeResolver))
+                        return this.evaluateArrayMethod(object, node.method,
+                            node.arguments.map(arg => this.evaluate(arg, context, scope))
                         );
                     }
 
@@ -3976,27 +4041,45 @@
                     return undefined;
                 }
 
+                case 'call': {
+                    if (!this.functions || typeof this.functions[node.name] !== 'function') {
+                        throw new Error('Unknown function: ' + node.name);
+                    }
+
+                    const self = this;
+
+                    return this.functions[node.name](node.arguments, {
+                        compute(argNode) {
+                            return self.evaluate(argNode, context, scope);
+                        }
+                    });
+                }
+
                 default:
                     return undefined;
             }
         },
 
+        /**
+         * Evaluates a supported array method by name, acting as a safe dispatch
+         * layer that prevents arbitrary method execution on arrays.
+         * @param {Array} array - The array to invoke the method on.
+         * @param {string} methodName - The name of the array method to evaluate.
+         * @param {Array} args - The arguments to pass to the array method.
+         * @returns {*} The result of the array method, or undefined if the method is not supported.
+         */
         evaluateArrayMethod(array, methodName, args) {
             switch (methodName) {
                 case 'includes':
-                    // Check if array contains the value
                     return array.includes(args[0]);
 
                 case 'indexOf':
-                    // Find first index of value, -1 if not found
                     return array.indexOf(args[0]);
 
                 case 'length':
-                    // Array length (handled as method for consistency)
                     return array.length;
 
                 case 'join':
-                    // Join array elements with separator
                     return array.join(args[0] || ',');
 
                 default:
@@ -4005,7 +4088,17 @@
             }
         },
 
-        getProperty(path, obj, scopeResolver = null) {
+        /**
+         * Retrieves a value from a nested object using a dot/bracket notation path.
+         * Supports scope resolution for resolving aliased or scoped paths before traversal.
+         * @param {string} path - The property path to resolve (e.g. "user.address[0].street").
+         * @param {Object} obj - The source object to retrieve the value from.
+         * @param {Object|null} [scope=null] - Optional resolver with a `resolveScopedPath` method
+         *   that transforms the path before traversal. If the resolved path is a number, it is returned directly.
+         * @returns {*} The value at the resolved path, or `undefined` if the path is invalid
+         *   or any intermediate property is nullish.
+         */
+        getProperty(path, obj, scope = null) {
             if (!obj || !path) {
                 return undefined;
             }
@@ -4013,8 +4106,8 @@
             let resolvedPath = path;
 
             // Use context to resolve scoped paths if available
-            if (scopeResolver && scopeResolver.resolveScopedPath) {
-                resolvedPath = scopeResolver.resolveScopedPath(path);
+            if (scope && scope.resolveScopedPath) {
+                resolvedPath = scope.resolveScopedPath(path);
             }
 
             // If resolved path is a number, return it directly
@@ -4046,28 +4139,58 @@
             return current;
         },
 
+        /**
+         * Evaluates an array literal AST node into a JavaScript array by recursively
+         * evaluating each element expression.
+         * @param {Object} arrayExpr - The array literal AST node.
+         * @param {Object} arrayExpr.elements - The array of element expressions to evaluate.
+         * @param {Object} context - The evaluation context providing variable bindings.
+         * @param {Object|null} [resolverContext=null] - Optional scope resolver context
+         * @returns {Array<*>} The evaluated array, or an empty array if no elements are defined.
+         */
         evaluateArrayLiteral(arrayExpr, context, resolverContext = null) {
+            const self = this;
+
             if (!arrayExpr.elements) {
                 return [];
             }
 
-            return arrayExpr.elements.map(element =>
-                this.evaluate(element, context, resolverContext)
-            );
+            return arrayExpr.elements.map(function(element) {
+                return self.evaluate(element, context, resolverContext);
+            });
         },
 
-        evaluateObjectLiteral(objectExpr, context, resolverContext = null) {
+        /**
+         * Evaluates an object literal AST node into a plain JavaScript object by recursively
+         * evaluating each value expression.
+         * @param {Object} node - The object literal AST node.
+         * @param {Array<{key: string, value: Object}>} node.pairs - The key-value pairs to evaluate.
+         * @param {Object} context - The evaluation context providing variable bindings.
+         * @param {Object|null} [scope=null] - Optional scope resolver context
+         * @returns {Object} The evaluated plain object, or an empty object if no pairs are defined.
+         */
+        evaluateObjectLiteral: function(node, context, scope) {
+            const self = this;
             const result = {};
 
-            if (objectExpr.pairs) {
-                objectExpr.pairs.forEach(({key, value}) => {
-                    result[key] = this.evaluate(value, context, resolverContext);
+            if (node.pairs) {
+                node.pairs.forEach(function({key, value}) {
+                    result[key] = self.evaluate(value, context, scope);
                 });
             }
 
             return result;
         },
 
+        /**
+         * Performs a binary operation on two operands.
+         * Arithmetic operators (`-`, `*`, `/`, `%`) coerce operands to `Number`;
+         * `+` uses native addition (supporting both numeric addition and string concatenation).
+         * @param {*} left - The left-hand operand.
+         * @param {string} operator - The operator to apply.
+         * @param {*} right - The right-hand operand.
+         * @returns {number|boolean} The result of the operation, or `false` for unrecognized operators.
+         */
         performOperation(left, operator, right) {
             switch (operator) {
                 case '+':
@@ -4316,6 +4439,9 @@
 
     /**
      * Value binding - Updates form element values
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.value = function(context, element, value) {
         // Handle radio buttons specially - they should be checked/unchecked based on value match
@@ -4336,6 +4462,9 @@
 
     /**
      * Checked binding - Updates checkbox/radio checked state
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.checked = function(context, element, value) {
         if (element.type === 'checkbox' || element.type === 'radio') {
@@ -4350,6 +4479,9 @@
 
     /**
      * Visible binding - Shows/hides elements by managing display CSS
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.visible = function(context, element, value) {
         const shouldShow = !!value;
@@ -4377,7 +4509,7 @@
     /**
      * If binding — conditionally renders an element's child content.
      * @param {Context} context - The PAC component context
-     * @param {Element} element - The container element with the if binding
+     * @param {Element} element - The container element
      * @param {*} value - Truthy = show, falsy = hide
      */
     BindingHandlers.if = function(context, element, value) {
@@ -4410,6 +4542,9 @@
 
     /**
      * Class binding - Manages CSS classes (string or object syntax)
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.class = function(context, element, value) {
         // Object syntax: { active: true, disabled: false }
@@ -4451,6 +4586,9 @@
 
     /**
      * Style binding - Applies inline styles (object or string syntax)
+     * @param {Context} context - The PAC component context
+     * @param {Element} element - The container element
+     * @param value - The evaluated expression
      */
     BindingHandlers.style = function(context, element, value) {
         // Object syntax: { color: 'red', fontSize: '16px' }
@@ -4464,6 +4602,7 @@
                     }
                 }
             }
+
             return;
         }
 
@@ -5245,7 +5384,7 @@
                 MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
                 MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
                 MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE,
-                MSG_COPY, MSG_PASTE
+                MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
@@ -7939,6 +8078,13 @@
                                 continue;
                             }
 
+                            // Cleanup plugins
+                            _plugins.forEach(function(plugin) {
+                                if (typeof plugin.onComponentDestroyed === 'function') {
+                                    plugin.onComponentDestroyed(pacId);
+                                }
+                            });
+
                             // Add to destroyed list
                             destroyed.add(pacId);
 
@@ -8680,6 +8826,13 @@
             // Register using pac-id as key (not selector)
             window.PACRegistry.register(pacId, context);
 
+            // Let plugins augment the component
+            _plugins.forEach(function(plugin) {
+                if (typeof plugin.onComponentCreated === 'function') {
+                    plugin.onComponentCreated(context.abstraction, pacId, config);
+                }
+            });
+
             // Call init() method if it exists after all setup is complete
             if (
                 context.abstraction.init &&
@@ -9092,6 +9245,41 @@
         }
 
         return hitElement.closest("[data-pac-id]");
+    };
+
+    /**
+     * Registers an external library as a wakaPAC plugin.
+     *
+     * The library must implement a createPacPlugin(pac) method that
+     * receives the wakaPAC object and returns a plugin descriptor
+     * with lifecycle hooks:
+     *
+     *   onComponentCreated(abstraction, id)   — called for each new component
+     *   onComponentDestroyed(id)              — called when a component is removed
+     *
+     * All hooks are optional. Duplicate registrations are silently ignored.
+     *
+     * @param {Object} library - Library to integrate (e.g. wakaSync)
+     * @throws {Error} If lib does not implement createPacPlugin()
+     */
+    wakaPAC.use = function(library) {
+        // Prevent duplicate registration
+        if (_registeredLibs.indexOf(library) !== -1) {
+            return;
+        }
+
+        // The library must expose a factory method that returns
+        // a plugin descriptor. wakaPAC passes itself as the argument,
+        // so the library never needs a hard reference to wakaPAC.
+        if (typeof library.createPacPlugin !== 'function') {
+            throw new Error('wakaPAC.use(): library must implement createPacPlugin()');
+        }
+
+        // Add to registered libs array to prevent duplicates
+        _registeredLibs.push(library);
+
+        // Create the plugin and store
+        _plugins.push(library.createPacPlugin(wakaPAC));
     };
 
     // ========================================================================

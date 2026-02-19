@@ -57,59 +57,277 @@
         constructor: WakaSync,
 
         /**
-         * Adds a request interceptor. Interceptors may be sync or async.
-         * Returns an unsubscribe function to remove the interceptor.
+         * Creates a wakaPAC plugin descriptor for message-driven HTTP integration.
          *
-         * @public
-         * @param {Function} fn - Interceptor function(config) => config
-         * @returns {Function} Unsubscribe function
+         * When registered via wakaPAC.use(wakaSync), this method is called
+         * automatically. The returned descriptor hooks into component lifecycle
+         * to provide each component with a scoped HTTP handle (this._http) and
+         * automatic request cancellation on destroy.
+         *
+         * WakaSync has no dependency on wakaPAC. The pac reference is received
+         * as an argument and used solely for postMessage delivery and reading
+         * the MSG_USER constant.
+         *
+         * Message contract delivered to msgProc:
+         *
+         *   MSG_HTTP_SUCCESS  wParam=requestId  lParam=0           detail={ data, url, method, timing }
+         *   MSG_HTTP_ERROR    wParam=requestId  lParam=httpStatus  detail={ error, url, method, status, code }
+         *   MSG_HTTP_ABORT    wParam=requestId  lParam=0           detail={ error, url, method }
+         *
+         * @param {Object} pac - The wakaPAC object, passed by wakaPAC.use()
+         * @returns {Object} Plugin descriptor with install, onComponentCreated, onComponentDestroyed
          */
-        addRequestInterceptor(fn) {
-            if (typeof fn !== 'function') {
-                throw new Error('Interceptor must be a function');
+        createPacPlugin(pac) {
+            const self = this;
+            let nextRequestId = 0;
+
+            // Derive message constants from the host's MSG_USER base.
+            // WakaSync never hardcodes these values.
+            const MSG_HTTP_SUCCESS = pac.MSG_USER + 0x100;
+            const MSG_HTTP_ERROR = pac.MSG_USER + 0x101;
+            const MSG_HTTP_ABORT = pac.MSG_USER + 0x102;
+
+            // Attach message constants so components can reference
+            // them as wakaPAC.MSG_HTTP_SUCCESS etc.
+            pac.MSG_HTTP_SUCCESS = MSG_HTTP_SUCCESS;
+            pac.MSG_HTTP_ERROR   = MSG_HTTP_ERROR;
+            pac.MSG_HTTP_ABORT   = MSG_HTTP_ABORT;
+
+            /**
+             * Initiates an HTTP request and delivers the result as a message
+             * to the specified component's msgProc.
+             * @param {string} pacId - Target component's data-pac-id
+             * @param {string} method - HTTP method
+             * @param {string} url - Request URL
+             * @param {Object} [opts] - WakaSync request options
+             * @returns {number} Request ID for correlation via event.wParam
+             */
+            function request(pacId, method, url, opts) {
+                opts = opts || {};
+
+                const requestId = ++nextRequestId;
+                const startTime = Date.now();
+                const groupKey = opts.groupKey !== undefined ? opts.groupKey : pacId;
+
+                self.request(url, Object.assign({}, opts, {
+                    method: method,
+                    groupKey: groupKey
+                })).then(function (data) {
+                    const endTime = Date.now();
+
+                    pac.postMessage(pacId, MSG_HTTP_SUCCESS, requestId, 0, {
+                        data: data,
+                        url: url,
+                        method: method,
+                        timing: {
+                            startTime: startTime,
+                            endTime: endTime,
+                            duration: endTime - startTime
+                        }
+                    });
+                }).catch(function (error) {
+                    if (self.isCancellationError(error)) {
+                        pac.postMessage(pacId, MSG_HTTP_ABORT, requestId, 0, {
+                            error: error,
+                            url: url,
+                            method: method
+                        });
+                    } else {
+                        const status = (error.response && error.response.status)
+                            ? error.response.status
+                            : 0;
+
+                        pac.postMessage(pacId, MSG_HTTP_ERROR, requestId, status, {
+                            error: error,
+                            url: url,
+                            method: method,
+                            status: status,
+                            code: error.code || null
+                        });
+                    }
+                });
+
+                return requestId;
             }
 
-            const entry = {id: ++this._interceptorId, fn};
-            this.interceptors.request.push(entry);
+            /**
+             * Creates a component-scoped HTTP handle with optional per-component defaults.
+             * @param {string} pacId - Component's data-pac-id
+             * @param {Object} [defaults] - Per-component default options from wakaPAC config
+             * @returns {Object} Bound handle with get, post, put, patch, delete, head, cancel
+             */
+            function createHandle(pacId, defaults) {
+                defaults = defaults || {};
 
-            return () => {
-                const idx = this.interceptors.request.indexOf(entry);
-                if (idx !== -1) {
-                    this.interceptors.request.splice(idx, 1);
+                /**
+                 * Merges component defaults with per-request options.
+                 * Per-request options take precedence over component defaults.
+                 * Headers are deep-merged so both layers contribute.
+                 * @param {Object} [opts] - Per-request options
+                 * @returns {Object} Merged options
+                 */
+                function mergeOpts(opts) {
+                    return Object.assign({}, defaults, opts, {
+                        headers: Object.assign({}, defaults.headers, opts && opts.headers)
+                    });
+                }
+
+                /**
+                 * Merges component defaults with per-request options,
+                 * adding a request body.
+                 * Headers are deep-merged so both layers contribute.
+                 * @param {*} data - Request body
+                 * @param {Object} [opts] - Per-request options
+                 * @returns {Object} Merged options with data
+                 */
+                function mergeOptsWithData(data, opts) {
+                    return Object.assign({}, defaults, opts, {
+                        headers: Object.assign({}, defaults.headers, opts && opts.headers),
+                        data: data
+                    });
+                }
+
+                return {
+                    /**
+                     * Sends a GET request.
+                     * @param {string} url - Request URL
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
+                    get: function (url, opts) {
+                        return request(pacId, 'GET', url, mergeOpts(opts));
+                    },
+
+                    /**
+                     * Sends a POST request.
+                     * @param {string} url - Request URL
+                     * @param {*} data - Request body
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
+                    post: function (url, data, opts) {
+                        return request(pacId, 'POST', url, mergeOptsWithData(data, opts));
+                    },
+
+                    /**
+                     * Sends a PUT request.
+                     * @param {string} url - Request URL
+                     * @param {*} data - Request body
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
+                    put: function (url, data, opts) {
+                        return request(pacId, 'PUT', url, mergeOptsWithData(data, opts));
+                    },
+
+                    /**
+                     * Sends a PATCH request.
+                     * @param {string} url - Request URL
+                     * @param {*} data - Request body
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
+                    patch: function (url, data, opts) {
+                        return request(pacId, 'PATCH', url, mergeOptsWithData(data, opts));
+                    },
+
+                    /**
+                     * Sends a DELETE request.
+                     * @param {string} url - Request URL
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
+                    delete: function (url, opts) {
+                        return request(pacId, 'DELETE', url, mergeOpts(opts));
+                    },
+
+                    /**
+                     * Sends a HEAD request.
+                     * @param {string} url - Request URL
+                     * @param {Object} [opts] - WakaSync request options
+                     * @returns {number} Request ID
+                     */
+                    head: function (url, opts) {
+                        return request(pacId, 'HEAD', url, mergeOpts(opts));
+                    },
+
+                    /**
+                     * Cancels all in-flight requests for this component.
+                     * Uses the default groupKey (pacId) set by the bridge.
+                     */
+                    cancel: function () {
+                        self.cancelGroup(pacId);
+                    }
+                };
+            }
+
+            return {
+                /**
+                 * Called for each new component after construction but before init().
+                 * Injects a scoped HTTP handle as this._http on the abstraction.
+                 * @param {Object} abstraction - The component's reactive abstraction
+                 * @param {string} pacId - The component's data-pac-id
+                 * @param config
+                 */
+                onComponentCreated: function (abstraction, pacId, config) {
+                    abstraction._http = createHandle(pacId, config.http);
+                },
+
+                /**
+                 * Called when a component is removed from the DOM.
+                 * Cancels all in-flight requests scoped to this component.
+                 * @param {string} pacId - The component's data-pac-id
+                 */
+                onComponentDestroyed: function (pacId) {
+                    self.cancelGroup(pacId);
                 }
             };
         },
 
         /**
+         * Registers an interceptor on the given list.
+         * Returns an unsubscribe function to remove it.
+         * @private
+         * @param {Array} list - Interceptor list (request or response)
+         * @param {Function} fn - Interceptor function
+         * @returns {Function} Unsubscribe function
+         */
+        _addInterceptor(list, fn) {
+            if (typeof fn !== 'function') {
+                throw new Error('Interceptor must be a function');
+            }
+
+            const entry = {id: ++this._interceptorId, fn};
+            list.push(entry);
+
+            return () => {
+                const idx = list.indexOf(entry);
+                if (idx !== -1) {
+                    list.splice(idx, 1);
+                }
+            };
+        },
+
+        /**
+         * Adds a request interceptor. Interceptors may be sync or async.
+         * Returns an unsubscribe function to remove the interceptor.
+         * @public
+         * @param {Function} fn - Interceptor function(config) => config
+         * @returns {Function} Unsubscribe function
+         */
+        addRequestInterceptor(fn) {
+            return this._addInterceptor(this.interceptors.request, fn);
+        },
+
+        /**
          * Adds a response interceptor. Interceptors may be sync or async.
          * Returns an unsubscribe function to remove the interceptor.
-         *
-         * Response interceptors receive (data, config, timing) where timing
-         * contains { startTime, endTime, duration } in milliseconds.
-         *
          * @public
          * @param {Function} fn - Interceptor function(data, config, timing) => data
          * @returns {Function} Unsubscribe function
          */
         addResponseInterceptor(fn) {
-            if (typeof fn !== 'function') {
-                throw new Error('Interceptor must be a function');
-            }
-
-            const entry = {
-                id: ++this._interceptorId,
-                fn
-            };
-
-            this.interceptors.response.push(entry);
-
-            return () => {
-                const idx = this.interceptors.response.indexOf(entry);
-
-                if (idx !== -1) {
-                    this.interceptors.response.splice(idx, 1);
-                }
-            };
+            return this._addInterceptor(this.interceptors.response, fn);
         },
 
         /**
@@ -316,7 +534,6 @@
          * Creates a new WakaSync instance with default configuration.
          * Interceptors are NOT inherited by default — pass copyInterceptors: true
          * to carry them over.
-         *
          * @public
          * @param {Object} defaultConfig - Default configuration to apply
          * @param {Object} options - Creation options
@@ -364,7 +581,10 @@
         },
 
         /**
-         * Cancels all active requests
+         * Cancels all active requests.
+         * The map is cleared immediately after aborting. In-flight requests
+         * will still reach their finally block, but cleanupRequest will
+         * no-op since the group entry is already gone.
          * @public
          */
         cancelAll() {
@@ -472,16 +692,13 @@
                 ['shouldRetry', opts.shouldRetry]
             ];
 
-            validators.forEach(function (validator) {
-                const name = validator[0];
-                const fn = validator[1];
-
+            for (const [name, fn] of validators) {
                 if (fn && typeof fn !== 'function') {
                     const error = new Error(`${name} must be a function`);
                     error.code = 'INVALID_CALLBACK';
                     throw error;
                 }
-            });
+            }
         },
 
         /**
@@ -499,7 +716,6 @@
         /**
          * Normalizes HTTP method and body.
          * Returns a bodyIsJson flag so buildHeaders can set the correct Content-Type.
-         *
          * @param {Object} opts - Request options
          * @returns {Object} Object with method, body, and bodyIsJson
          */
@@ -511,6 +727,7 @@
                 if (opts.data !== undefined) {
                     console.warn(`Method ${method} should not have a body. Data will be ignored.`);
                 }
+
                 return {method, body: undefined, bodyIsJson: false};
             }
 
@@ -542,10 +759,6 @@
          */
         buildHeaders(opts, body, bodyIsJson) {
             const headers = new Headers();
-
-            // Add default tracking headers
-            headers.set('X-WakaSync-Request', 'true');
-            headers.set('X-WakaSync-Version', VERSION);
 
             // Add content type based on body
             if (body !== undefined) {
@@ -617,7 +830,6 @@
          * Normalizes URL for grouping by sorting query parameter keys.
          * Multi-valued parameter order within a key is preserved (server may
          * treat ?color=red&color=blue differently from ?color=blue&color=red).
-         *
          * @param {string} url - URL to normalize
          * @param {string} baseUrl - Base URL
          * @returns {string} Normalized URL
@@ -625,6 +837,7 @@
         normalizeUrlForGrouping(url, baseUrl) {
             try {
                 let defaultBase;
+
                 if (typeof globalThis !== 'undefined' && globalThis.location) {
                     defaultBase = baseUrl || globalThis.location.origin;
                 } else {
@@ -638,7 +851,7 @@
                 const params = new URLSearchParams(urlObj.search);
                 const sortedParams = new URLSearchParams();
 
-                [...new Set(params.keys())].sort().forEach(key => {
+                Array.from(new Set(params.keys())).sort().forEach(key => {
                     // Preserve original insertion order of values for this key
                     params.getAll(key).forEach(value => {
                         sortedParams.append(key, value);
@@ -660,7 +873,6 @@
          * When a user-provided abortController is present, creates a combined
          * internal controller so both user abort and group/timeout abort work
          * independently.
-         *
          * @param {Object} config - Request configuration
          * @returns {Object} Request state
          */
@@ -689,9 +901,8 @@
         /**
          * Creates a combined abort controller that responds to both internal
          * cancellation (groups, timeout) and an optional user-provided controller.
-         *
          * @param {Object} config - Request configuration
-         * @returns {AbortController} Combined controller
+         * @returns {AbortController} Internal controller (also aborts when user controller fires)
          */
         createCombinedController(config) {
             const internal = new AbortController();
@@ -700,28 +911,20 @@
                 return internal;
             }
 
-            // If AbortSignal.any is supported, combine signals
+            // If AbortSignal.any is supported, combine signals cleanly
             if (typeof AbortSignal.any === 'function') {
-                const combined = new AbortController();
                 const anySignal = AbortSignal.any([
                     internal.signal,
                     config.abortController.signal
                 ]);
 
                 anySignal.addEventListener('abort', () => {
-                    if (!combined.signal.aborted) {
-                        combined.abort(anySignal.reason);
+                    if (!internal.signal.aborted) {
+                        internal.abort(anySignal.reason);
                     }
                 }, {once: true});
 
-                // Preserve the internal abort method so group cancellation works
-                const originalAbort = combined.abort.bind(combined);
-                combined.abort = function (reason) {
-                    internal.abort(reason);
-                    originalAbort(reason);
-                };
-
-                return combined;
+                return internal;
             }
 
             // Fallback: wire up user controller to internal
@@ -762,7 +965,7 @@
                     // Check if we should retry
                     const shouldRetry = config.shouldRetry ?
                         config.shouldRetry(error, attempt, maxAttempts) :
-                        this.defaultShouldRetry(error, attempt, maxAttempts);
+                        this.defaultShouldRetry(error);
 
                     if (!shouldRetry || attempt === maxAttempts) {
                         throw error;
@@ -784,7 +987,6 @@
          * Calculates the delay before the next retry attempt.
          * Respects Retry-After headers for 429 responses, then falls back
          * to the configured backoff strategy.
-         *
          * @param {Object} config - Request configuration
          * @param {number} attempt - Current attempt number (1-based)
          * @param {Error} error - The error that triggered the retry
@@ -833,18 +1035,13 @@
         },
 
         /**
-         * Default retry logic
+         * Default retry logic.
+         * NOTE: The caller (executeWithRetry) already guards against attempt === maxAttempts,
+         * so this function only needs to decide based on error characteristics.
          * @param {Error} error - Error that occurred
-         * @param {number} attempt - Current attempt number
-         * @param {number} maxAttempts - Maximum attempts
          * @returns {boolean} Whether to retry
          */
-        defaultShouldRetry(error, attempt, maxAttempts) {
-            // Don't retry if we've exhausted attempts
-            if (attempt >= maxAttempts) {
-                return false;
-            }
-
+        defaultShouldRetry(error) {
             // Don't retry cancellation errors
             if (this.isCancellationError(error)) {
                 return false;
@@ -872,20 +1069,24 @@
          */
         delayWithAbortCheck(ms, controller) {
             const self = this;
+
             return new Promise(function (resolve, reject) {
                 if (controller.signal.aborted) {
                     reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
                     return;
                 }
 
+                function onAbort() {
+                    clearTimeout(timeoutId);
+                    reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
+                }
+
                 const timeoutId = setTimeout(function () {
+                    controller.signal.removeEventListener('abort', onAbort);
                     resolve();
                 }, ms);
 
-                controller.signal.addEventListener('abort', function () {
-                    clearTimeout(timeoutId);
-                    reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
-                }, {once: true});
+                controller.signal.addEventListener('abort', onAbort, {once: true});
             });
         },
 
@@ -912,8 +1113,14 @@
                 return await fetch(config.url, fetchOptions);
             } catch (e) {
                 if (e.name === 'TypeError' && !requestState.controller.signal.aborted) {
-                    e.network = true;
+                    const networkError = new Error(e.message);
+                    networkError.name = 'NetworkError';
+                    networkError.code = 'NETWORK_ERROR';
+                    networkError.network = true;
+                    networkError.originalError = e;
+                    throw networkError;
                 }
+
                 throw e;
             }
         },
@@ -961,12 +1168,16 @@
                 switch (responseType) {
                     case 'json':
                         return await response.json();
+
                     case 'text':
                         return await response.text();
+
                     case 'blob':
                         return await response.blob();
+
                     case 'response':
                         return response;
+
                     default:
                         return this.autoParseResponse(response);
                 }
@@ -1008,7 +1219,6 @@
         /**
          * Safely gets a limited amount of response text for error messages.
          * Uses a streaming approach to avoid reading entire large bodies into memory.
-         *
          * @param {Response} response - Fetch response
          * @param {number} [maxBytes=512] - Maximum bytes to read
          * @returns {Promise<string|null>} Response text excerpt or null
@@ -1054,7 +1264,7 @@
                     }
 
                     const decoder = new TextDecoder('utf-8', {fatal: false});
-                    const text = chunks.map(c => decoder.decode(c, {stream: true})).join('');
+                    const text = chunks.map(c => decoder.decode(c, {stream: true})).join('') + decoder.decode();  // flush any remaining bytes
                     return text.slice(0, 200);
                 }
 
@@ -1097,7 +1307,6 @@
          * Handles request errors.
          * NOTE: onError callback fires as a side-effect before the promise rejects.
          * This allows using callbacks for logging/UI while using promises for flow control.
-         *
          * @param {Error} error - Request error
          * @param {Object} config - Request configuration
          * @returns {*} Error handling result

@@ -3,8 +3,10 @@
 <head>
     <title>Debug Foreach</title>
     <style>
-        body { font-family: Arial,serif; padding: 20px; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
         .test { border: 1px solid #ccc; margin: 10px 0; padding: 10px; }
+        button { margin-right: 8px; }
+        #side-effect-log { font-family: monospace; font-size: 0.9em; color: #555; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -20,26 +22,32 @@
     </div>
 
     <div class="test">
-        <h3>Test 2: Array modification in watcher</h3>
-        <input type="text" data-pac-bind="value: triggerValue">
-        <p>Trigger value: {{triggerValue}}</p>
-        <p>Watch log length: {{watchLog.length}}</p>
-        <div data-pac-bind="foreach: watchLog" data-pac-item="entry">
-            - {{entry}}<br>
-        </div>
+        <h3>Test 2: Watcher side effects (outside reactive system)</h3>
+        <p>Count: {{count}}</p>
+        <button data-pac-bind="click: increment">Increment</button>
+        <button data-pac-bind="click: decrement">Decrement</button>
+        <p>The watcher updates <code>document.title</code> and appends to a plain DOM element — neither goes through WakaPAC.</p>
+        <div id="side-effect-log"></div>
     </div>
 </div>
 
 <script src="../wakapac.js"></script>
 <script>
+    const log = document.getElementById('side-effect-log');
+
     const app = wakaPAC('#app', {
         items: ['Initial item'],
-        triggerValue: 'test',
-        watchLog: ['Initial watch log'],
+        count: 0,
 
         watch: {
-            triggerValue: function(newVal, oldVal) {
-                this.watchLog.unshift(`Changed: ${oldVal} → ${newVal}`);
+            count: function(newVal, oldVal) {
+                // Side effect 1: update browser tab title
+                document.title = `Count is ${newVal}`;
+
+                // Side effect 2: append to a plain DOM element, not reactive state
+                const line = document.createElement('div');
+                line.textContent = `[${new Date().toLocaleTimeString()}] count changed: ${oldVal} → ${newVal}`;
+                log.prepend(line);
             }
         },
 
@@ -51,6 +59,14 @@
             if (this.items.length > 1) {
                 this.items.pop();
             }
+        },
+
+        increment() {
+            this.count++;
+        },
+
+        decrement() {
+            this.count--;
         }
     });
 </script>
