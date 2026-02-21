@@ -2461,6 +2461,14 @@
          * @param {(event: Event) => void} dispatch - Callback to receive the coalesced event.
          */
         setupMoveCoalescer(domEventName, targetFps, dispatch) {
+            // Resolves a dotted event descriptor into a DOM target and event name
+            const resolved = this.resolveEventTarget(domEventName);
+
+            // If this is impossible to do, abort further processing
+            if (!resolved) {
+                return;
+            }
+
             // Timestamp of the last dispatched event
             let lastTime = 0;
 
@@ -2473,57 +2481,63 @@
             // Milliseconds between allowed dispatches (0 = uncapped)
             const interval = targetFps > 0 ? 1000 / targetFps : 0;
 
-            // Determine listening target
-            let target = document;
-            let event = domEventName;
-
-            if (domEventName.indexOf(".") !== -1) {
-                // Split target and event
-                const [targetName, eventName] = domEventName.split('.');
-
-                // Set event name
-                event = eventName;
-
-                // Map string to actual object
-                switch (targetName) {
-                    case 'window':
-                        target = window;
-                        break;
-
-                    case 'document':
-                        target = document;
-                        break;
-
-                    case 'body':
-                        target = document.body;
-                        break;
-
-                    default:
-                        // Unsupported target; optionally ignore or throw
-                        return;
-                }
-            }
-
             // Start listening
-            target.addEventListener(event, (ev) => {
+            resolved.target.addEventListener(resolved.event, (ev) => {
                 // Only keep the latest event until the next frame
                 pendingEvent = ev;
 
                 // Schedule a frame callback if none is pending
-                if (!scheduled) {
-                    scheduled = true;
-
-                    requestAnimationFrame((now) => {
-                        // Dispatch if uncapped or enough time elapsed
-                        if (interval === 0 || now - lastTime >= interval) {
-                            dispatch(pendingEvent);
-                            lastTime = now;
-                        }
-
-                        scheduled = false;
-                    });
+                if (scheduled) {
+                    return;
                 }
+
+                scheduled = true;
+
+                requestAnimationFrame(function onFrame(now) {
+                    // Interval not yet met — schedule another frame to
+                    // guarantee the pending event is eventually dispatched.
+                    // Without this, the final event in a burst can be lost
+                    // when no further DOM events arrive to re-trigger the loop.
+                    if (interval > 0 && now - lastTime < interval) {
+                        requestAnimationFrame(onFrame);
+                        return;
+                    }
+
+                    // Dispatch if uncapped or enough time elapsed
+                    dispatch(pendingEvent);
+                    lastTime = now;
+                    scheduled = false;
+                });
             });
+        },
+
+        /**
+         * Resolves a dotted event descriptor into a DOM target and event name.
+         * Supports "window.scroll", "document.click", "body.mousemove", or
+         * plain event names (which default to document).
+         * @param {string} domEventName - Event descriptor, optionally prefixed with target
+         * @returns {{ target: EventTarget, event: string } | null} Null if target is unrecognised
+         */
+        resolveEventTarget(domEventName) {
+            // Map of recognised target keywords to their corresponding DOM objects.
+            // "body" uses a getter because document.body may not exist at definition time.
+            const targetMap = { window, document, get body() { return document.body; } };
+
+            // Find the separator between the optional target prefix and the event name
+            const dotIndex = domEventName.indexOf(".");
+
+            // No dot found — treat the entire string as an event name on document
+            if (dotIndex === -1) {
+                return { target: document, event: domEventName };
+            }
+
+            // Extract the prefix and look it up in the target map
+            const target = targetMap[domEventName.slice(0, dotIndex)];
+
+            // Return the resolved target + event name, or null if the prefix was unrecognized
+            return target
+                ? { target, event: domEventName.slice(dotIndex + 1) }
+                : null;
         },
 
         /**
@@ -4527,11 +4541,11 @@
             return;
         }
 
-        // Set new show flag
-        element._pacIsVisible = shouldShow;
-
-        // Toggle DOM
+        // Toggle DOM first, then update flag
         context.domUpdater.toggleNodeVisibility(element._pacIfChildren, shouldShow);
+
+        // Set new show flag after successful DOM update
+        element._pacIsVisible = shouldShow;
 
         // Scan from the if-container so restored children (including
         // foreach elements) are treated as children, not as parentElement
@@ -6345,11 +6359,13 @@
                 return;
             }
 
-            // Set new visible flag
-            mappingData.isVisible = shouldShow;
-
-            // Toggle DOM
+            // Toggle DOM first, then update flag — ensures isVisible
+            // stays in sync with actual DOM state even if the DOM
+            // operation silently fails for some nodes.
             this.domUpdater.toggleNodeVisibility(mappingData.content, shouldShow);
+
+            // Set new visible flag after successful DOM update
+            mappingData.isVisible = shouldShow;
 
             // Scan new nodes
             if (shouldShow) {
