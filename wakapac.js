@@ -2628,12 +2628,24 @@
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            let container = originalEvent.target.closest(CONTAINER_SEL);
+            // originalEvent.target can be a TextNode when the cursor is over bare text content.
+            // TextNode does not implement Element and has no closest() — normalise to the
+            // nearest Element ancestor before querying the PAC container hierarchy.
+            const target = originalEvent.target instanceof Element
+                ? originalEvent.target
+                : originalEvent.target?.parentElement;
 
+            // Walk up the DOM to find the nearest [data-pac-id] ancestor (or self).
+            // Returns null if the event originated outside any registered container.
+            let container = target?.closest(CONTAINER_SEL) ?? null;
+
+            // Mouse capture overrides hit-testing: all affected mouse events are redirected
+            // to the capturing container regardless of cursor position — Win32 SetCapture() semantics.
             if (this._captureActive && this.isCaptureAffected(msgType)) {
                 if (this._capturedContainer?.isConnected) {
                     container = this._capturedContainer;
                 } else {
+                    // Capturing container was removed from the DOM — release and resume normal routing.
                     this.releaseCapture();
                 }
             }
