@@ -46,6 +46,22 @@
     const _plugins = [];
 
     /**
+     * Registered message hooks, installed via wakaPAC.installMessageHook().
+     * Each entry holds a handle (for removal) and the hook function.
+     * Hooks are invoked in registration order before the message reaches its container.
+     * @type {Array<{handle: number, fn: Function}>}
+     */
+    const _hooks = [];
+
+    /**
+     * Monotonically increasing counter used to generate unique hook handles.
+     * Returned by installMessageHook() and used by uninstallMessageHook() to
+     * identify which hook to remove. Equivalent to Win32 HHOOK.
+     * @type {number}
+     */
+    let _nextHookHandle = 1;
+
+    /**
      * Matches handlebars-style interpolation: {{variable}}
      * Captures variable name/expression with global flag
      * @type {RegExp}
@@ -2612,12 +2628,24 @@
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            let container = originalEvent.target.closest(CONTAINER_SEL);
+            // originalEvent.target can be a TextNode when the cursor is over bare text content.
+            // TextNode does not implement Element and has no closest() — normalise to the
+            // nearest Element ancestor before querying the PAC container hierarchy.
+            const target = originalEvent.target instanceof Element
+                ? originalEvent.target
+                : originalEvent.target?.parentElement;
 
+            // Walk up the DOM to find the nearest [data-pac-id] ancestor (or self).
+            // Returns null if the event originated outside any registered container.
+            let container = target?.closest(CONTAINER_SEL) ?? null;
+
+            // Mouse capture overrides hit-testing: all affected mouse events are redirected
+            // to the capturing container regardless of cursor position — Win32 SetCapture() semantics.
             if (this._captureActive && this.isCaptureAffected(msgType)) {
                 if (this._capturedContainer?.isConnected) {
                     container = this._capturedContainer;
                 } else {
+                    // Capturing container was removed from the DOM — release and resume normal routing.
                     this.releaseCapture();
                 }
             }
@@ -2663,23 +2691,73 @@
         },
 
         /**
-         * Dispatch event to the correct container
-         * @param {HTMLElement} container
-         * @param {CustomEvent} event
+         * Dispatches a PAC message to its target container, running it through the
+         * installed message hook chain before delivery to the container's msgProc.
+         * Equivalent to the Win32 DispatchMessage() path with WH_CALLWNDPROC hooks active.
+         * @param {HTMLElement} container - Target PAC container element
+         * @param {CustomEvent} event - PAC message event created by createPacMessage()
          */
         dispatchToContainer(container, event) {
-            // Exit early if no container is found - event cannot be properly tracked
+            // Bail out if no container was resolved
             if (!container) {
                 return;
             }
 
-            // Process event modifiers - return early if event should be filtered
+            // Apply event modifiers before entering the hook chain.
+            // processEventModifiers handles concerns like mouse capture routing and
+            // drag state filtering. Returning false means the event should be suppressed
+            // entirely — do not enter the hook chain at all.
             if (!this.processEventModifiers(event.target, event)) {
                 return;
             }
 
-            // Dispatch the custom event to the container
-            container.dispatchEvent(event);
+            // Stamp the container onto the event so hooks and handlers always know the pacId
+            Object.defineProperty(event, 'pacId', {
+                value: container.getAttribute('data-pac-id'),
+                enumerable: true,
+                configurable: true
+            });
+
+            // Snapshot the hook array at dispatch time. This prevents mutations to _hooks
+            // (installs or uninstalls that happen inside a hook function) from affecting
+            // the current dispatch chain — identical to how Win32 freezes the hook chain
+            // for the duration of a single message dispatch.
+            const hookFns = _hooks.map(h => h.fn);
+
+            // Index into hookFns tracking which hook fires next when callNextHookEx() is called
+            let index = 0;
+
+            // callNextHookEx advances the chain by one step. Each hook receives this function
+            // as its second argument and is responsible for calling it to continue delivery.
+            // If a hook omits the call, the message is swallowed — neither subsequent hooks
+            // nor the container's msgProc will receive it.
+            const callNextHookEx = () => {
+                if (index < hookFns.length) {
+                    // Advance the index before invoking so that if the hook calls
+                    // callNextHookEx() synchronously, it proceeds to the correct next entry
+                    const fn = hookFns[index++];
+
+                    try {
+                        fn(event, callNextHookEx);
+                    } catch(e) {
+                        // A throwing hook must not break message delivery for the container.
+                        // Log the error and continue the chain as if the hook called
+                        // callNextHookEx() itself — fault isolation over silent failure.
+                        console.warn('wakaPAC: message hook threw an error, continuing chain:', e);
+                        callNextHookEx();
+                    }
+                } else {
+                    // All hooks have been traversed — deliver the message to the container.
+                    // This triggers the 'pac:event' listener on the container element,
+                    // which routes to Context.handlePacEvent() and ultimately msgProc().
+                    container.dispatchEvent(event);
+                }
+            };
+
+            // Kick off the chain. If no hooks are installed this immediately falls through
+            // to container.dispatchEvent(), making the overhead a single function call and
+            // an index bounds check — negligible for high-frequency messages like MSG_MOUSEMOVE.
+            callNextHookEx();
         },
 
         /**
@@ -8996,6 +9074,39 @@
         window.PACRegistry.components.forEach((context) => {
             DomUpdateTracker.dispatchToContainer(context.container, event);
         });
+    };
+
+    /**
+     * Installs a message hook that intercepts all PAC messages before they reach
+     * their target container's msgProc. Hooks are called in registration order.
+     * @param {Function} fn - Hook function with signature (event, callNextHook) => void
+     * @returns {number} Hook handle (hookId) — pass to uninstallMessageHook() to remove
+     */
+    wakaPAC.installMessageHook = function(fn) {
+        // Assign the current counter value as the unique handle, then increment
+        // for the next registration. Handles are never reused.
+        const handle = _nextHookHandle++;
+
+        // Register the hook with its handle for later identification and removal
+        _hooks.push({ handle, fn });
+
+        // Return the handle so the caller can uninstall the hook later
+        return handle;
+    };
+
+    /**
+     * Uninstalls a previously installed message hook, removing it from the chain.
+     * After removal the hook function will no longer be called for any messages.
+     * @param {number} hookId - Hook handle returned by installMessageHook()
+     */
+    wakaPAC.uninstallMessageHook = function(hookId) {
+        // Locate the hook entry by its handle
+        const index = _hooks.findIndex(h => h.handle === hookId);
+
+        // Remove the hook if found — silently ignore unknown handles
+        if (index !== -1) {
+            _hooks.splice(index, 1);
+        }
     };
 
     /**
