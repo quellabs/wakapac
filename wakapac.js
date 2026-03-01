@@ -2699,6 +2699,13 @@
                 return;
             }
 
+            // Stamp the container onto the event so hooks and handlers always know the pacId
+            Object.defineProperty(event, 'pacId', {
+                value: container.getAttribute('data-pac-id'),
+                enumerable: true,
+                configurable: true
+            });
+
             // Snapshot the hook array at dispatch time. This prevents mutations to _hooks
             // (installs or uninstalls that happen inside a hook function) from affecting
             // the current dispatch chain — identical to how Win32 freezes the hook chain
