@@ -143,7 +143,7 @@
             </div>
             <div class="metric-row">
                 <span>Content Size:</span>
-                <span>{{containerScrollContentHeight}}px</span>
+                <span>{{containerContentHeight}}px</span>
             </div>
             <div class="metric-row">
                 <span>Visible Area:</span>
@@ -229,7 +229,7 @@
         items: [
             { title: 'Hierarchical Architecture', content: 'This example demonstrates proper WakaPAC component hierarchy with a wrapper container managing child communication.' },
             { title: 'Automatic Parent Detection', content: 'WakaPAC automatically detects parent-child relationships based on DOM nesting and establishes communication channels.' },
-            { title: 'Built-in Scroll Properties', content: 'This container uses the framework\'s native containerScrollY, containerScrollContentHeight, and other scroll properties.' },
+            { title: 'Built-in Scroll Properties', content: 'This container uses the framework\'s native containerScrollY, containerContentHeight, and other scroll properties.' },
             { title: 'Two-Way Binding', content: 'Scroll position can be read and written through reactive properties that sync with the DOM automatically.' },
             { title: 'Component Messaging', content: 'Commands from the control panel are routed through the parent app container to maintain proper encapsulation.' },
             { title: 'Computed Properties', content: 'Scroll percentage and position indicators are calculated automatically using computed properties.' },
@@ -245,7 +245,7 @@
 
         computed: {
             maxScrollY() {
-                return Math.max(0, this.containerScrollContentHeight - this.containerHeight);
+                return Math.max(0, this.containerContentHeight - this.containerHeight);
             },
 
             scrollPercent() {
@@ -288,7 +288,7 @@
                 }
             },
 
-            containerScrollContentHeight(newHeight, oldHeight) {
+            containerContentHeight(newHeight, oldHeight) {
                 console.log(`Content height changed: ${oldHeight}px → ${newHeight}px`);
             }
         },
@@ -342,7 +342,7 @@
         logMetrics() {
             console.log('Current scroll metrics:', {
                 scrollY: this.containerScrollY,
-                contentHeight: this.containerScrollContentHeight,
+                contentHeight: this.containerContentHeight,
                 visibleHeight: this.containerHeight,
                 maxScroll: this.maxScrollY,
                 scrollPercent: this.scrollPercentFormatted + '%',
