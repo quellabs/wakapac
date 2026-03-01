@@ -5040,8 +5040,8 @@
         // Update individual properties
         this.abstraction.containerScrollX = scrollX;
         this.abstraction.containerScrollY = scrollY;
-        this.abstraction.containerScrollContentWidth = scrollContentWidth;
-        this.abstraction.containerScrollContentHeight = scrollContentHeight;
+        this.abstraction.containerContentWidth = scrollContentWidth;
+        this.abstraction.containerContentHeight = scrollContentHeight;
         this.abstraction.containerIsScrollable = isScrollable;
 
         // Update scroll window object
@@ -6032,8 +6032,8 @@
                 // Update viewport dimensions and document size
                 this.abstraction.browserViewportWidth = stateData.viewportWidth;
                 this.abstraction.browserViewportHeight = stateData.viewportHeight;
-                this.abstraction.browserDocumentWidth = stateData.documentWidth;
-                this.abstraction.browserDocumentHeight = stateData.documentHeight;
+                this.abstraction.browserContentWidth = stateData.documentWidth;
+                this.abstraction.browserContentHeight = stateData.documentHeight;
 
                 // Update scroll position (resize can change scroll)
                 this.abstraction.browserScrollX = stateData.scrollX;
@@ -6602,15 +6602,15 @@
 
         // Initialize total document width/height including content outside the viewport
         // Useful for calculating scroll percentages or infinite scroll triggers
-        abstraction.browserDocumentWidth = document.documentElement.scrollWidth;
-        abstraction.browserDocumentHeight = document.documentElement.scrollHeight;
+        abstraction.browserContentWidth = document.documentElement.scrollWidth;
+        abstraction.browserContentHeight = document.documentElement.scrollHeight;
 
         // Container scroll properties
         abstraction.containerIsScrollable =  false;                               // Can scroll in any direction
         abstraction.containerScrollX = this.container.scrollLeft;                 // Current horizontal scroll position
         abstraction.containerScrollY = this.container.scrollTop;                  // Current vertical scroll position
-        abstraction.containerScrollContentWidth = this.container.scrollWidth;     // Total scrollable content width
-        abstraction.containerScrollContentHeight = this.container.scrollHeight;   // Total scrollable content height
+        abstraction.containerContentWidth = this.container.scrollWidth;     // Total scrollable content width
+        abstraction.containerContentHeight = this.container.scrollHeight;   // Total scrollable content height
         abstraction.containerScrollWindow = {
             top: 0,        // scrollTop
             left: 0,       // scrollLeft
