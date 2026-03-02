@@ -8618,42 +8618,33 @@
             const width = maxX - minX;  // Width/height are same in both coordinate systems
             const height = maxY - minY;
 
-            // Create custom event that mimics Win32 message structure
-            const customEvent = new CustomEvent('pac:event', {
-                bubbles: false,      // Don't propagate to parent containers
-                cancelable: true,    // Allow msgProc to preventDefault()
-                detail: {}
+            // lParam data: packed center coordinates (Y high word, X low word)
+            const lParam = (centerY << 16) | centerX; //
+
+            // Build the event using the standard factory
+            const customEvent = DomUpdateTracker.wrapDomEventAsMessage(MSG_GESTURE, originalEvent, 0, lParam, {
+                pattern,      // Matched pattern name (e.g. 'back') or raw direction string if unregistered
+                directions,   // Array of direction codes used in matching: ['R', 'D', 'L']
+                pointCount,   // Number of recorded points along the gesture path
+                startX,       // Where gesture started (container-relative)
+                startY,
+                endX,         // Where gesture ended (container-relative)
+                endY,
+                duration: now - this.startTime, // Milliseconds from mousedown to mouseup
+                bounds: {                        // Bounding box of the drawn path (DOMRect format)
+                    x: left,                     // Alias for left
+                    y: top,                      // Alias for top
+                    left,
+                    top,
+                    right: left + width,
+                    bottom: top + height,
+                    width,
+                    height,
+                },
             });
 
-            // Standard Win32-style message properties
-            customEvent.message = MSG_GESTURE;                   // Message type identifier
-            customEvent.wParam = 0;                              // Not used for gestures
-            customEvent.lParam = (centerY << 16) | centerX;      // Packed center coordinates
-            customEvent.timestamp = now;                         // Event timestamp
-            customEvent.originalEvent = originalEvent;           // Access to native mouseup event
-
-            // Gesture-specific properties
-            customEvent.pattern = pattern;                       // Matched pattern name or raw directions
-            customEvent.directions = directions;                 // Array of direction codes: ['R', 'D', 'L']
-            customEvent.pointCount = pointCount;                 // Number of recorded points
-            customEvent.gestureStartX = startX;                  // Where gesture started (container-relative)
-            customEvent.gestureStartY = startY;
-            customEvent.gestureEndX = endX;                      // Where gesture ended (container-relative)
-            customEvent.gestureEndY = endY;
-            customEvent.gestureDuration = now - this.startTime;  // Milliseconds from mousedown to mouseup
-            customEvent.gestureBounds = {                        // Bounding box (DOMRect format)
-                x: left,                                         // Alias for left
-                y: top,                                          // Alias for top
-                left,
-                top,
-                right: left + width,
-                bottom: top + height,
-                width,
-                height
-            };
-
             // Dispatch to the container where gesture was initiated
-            this.gestureContainer.dispatchEvent(customEvent);
+            DomUpdateTracker.dispatchToContainer(this.gestureContainer, customEvent);
         }
     };
 
