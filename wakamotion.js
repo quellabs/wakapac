@@ -520,7 +520,7 @@
 
                 setTimeout(function () {
                     detectAxis('y', applyResult, function () { setStep('timeout'); });
-                }, 2000);
+                }, 1000);
             }
 
             // ─── Detection sequence ───────────────────────────────────────────────
