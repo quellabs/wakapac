@@ -6194,7 +6194,12 @@
             }
 
             case 'motion': {
-
+                this.abstraction.motionAccelerationX = stateData.acceleration.x;
+                this.abstraction.motionAccelerationY = stateData.acceleration.y;
+                this.abstraction.motionAccelerationZ = stateData.acceleration.z;
+                this.abstraction.motionRotationAlpha = stateData.rotationRate.alpha;
+                this.abstraction.motionRotationBeta = stateData.rotationRate.beta;
+                this.abstraction.motionRotationGamma = stateData.rotationRate.gamma;
                 break;
             }
 
@@ -6773,6 +6778,14 @@
         abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
         abstraction.containerWidth = this.container.clientWidth;
         abstraction.containerHeight = this.container.clientHeight;
+
+        // Motion sensor data
+        abstraction.motionAccelerationX = null;
+        abstraction.motionAccelerationY = null;
+        abstraction.motionAccelerationZ = null;
+        abstraction.motionRotationAlpha = null;
+        abstraction.motionRotationBeta = null;
+        abstraction.motionRotationGamma = null;
     };
 
     /**
