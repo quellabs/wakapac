@@ -23,8 +23,8 @@
 <div id="notifications" data-pac-id="notifications">
     <button data-pac-bind="click: addNotification">Add notification</button>
     <button data-pac-bind="click: clearNotifications">Clear</button>
-    <ul>
-        <li data-pac-foreach="session.notifications">{{item.text}}</li>
+    <ul data-pac-bind="foreach: session.notifications">
+        <li>{{item.text}}</li>
     </ul>
 </div>
 
