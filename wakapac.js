@@ -1065,6 +1065,11 @@
 
             // If the value is an object/array and not already reactive, wrap it in a proxy
             if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+                // Return raw value if the data is already proxied
+                if (val._externalProxy) {
+                    return val;
+                }
+
                 const propertyPath = currentPath.concat([prop]);
                 const proxiedVal = createProxy(val, propertyPath);
                 proxiedVal._isReactive = true;
@@ -4214,6 +4219,12 @@
             // Ensure resolvedPath is a string for string operations
             resolvedPath = String(resolvedPath);
 
+            console.log('resolvedPath', resolvedPath);
+
+            if (resolvedPath === 'session.user.name') {
+                console.log('getProperty obj.session =', obj['session']);
+            }
+
             // Handle simple property access (no dots or brackets)
             if (resolvedPath.indexOf('.') === -1 && resolvedPath.indexOf('[') === -1) {
                 return (resolvedPath in obj) ? obj[resolvedPath] : undefined;
@@ -4221,14 +4232,18 @@
 
             // Split path by both dots and brackets, handling bracket notation correctly
             const parts = resolvedPath.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
-
             let current = obj;
+            console.log('current[parts[0]]', parts[0], current[parts[0]]);  // ← add this
+
             for (let i = 0; i < parts.length; i++) {
                 if (current == null) {
                     return undefined;
                 }
 
                 const part = parts[i];
+
+                console.log('navigating', part, '->', current[part]);
+
                 current = current[part];
             }
 
@@ -5818,6 +5833,8 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Context.prototype.handleReactiveChange = function (event) {
+        console.log('handleReactiveChange', event);
+
         this.updateElementBindings();
         this.updateTextInterpolations();
         this.updateCommentConditionals();
@@ -5930,6 +5947,10 @@
                     try {
                         const parsed = ExpressionCache.parseExpression(expression);
                         const result = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
+
+                        console.log('updateTextInterpolations', expression, result);
+
+
                         return result != null ? String(result) : '';
                     } catch (error) {
                         console.warn('Error evaluating text interpolation:', expression, error);
@@ -5983,6 +6004,12 @@
         // Don't trigger watchers for array element changes
         // Arrays are handled by foreach rebuilds, not watchers
         if (Array.isArray(newParentObject)) {
+            return;
+        }
+
+        // Cannot reconstruct old state for externally managed proxies
+        if (newParentObject && newParentObject._externalProxy) {
+            this.triggerWatcher(rootProperty, newParentObject, null);
             return;
         }
 

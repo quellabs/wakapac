@@ -10,9 +10,9 @@
  * ║                                                                                  ║
  * ║  WakaStore - Shared Reactive Store Plugin for wakaPAC                            ║
  * ║                                                                                  ║
- * ║  Provides a shared reactive state object that can be mounted on any              ║
- * ║  wakaPAC component abstraction under any property name. Changes to the           ║
- * ║  store propagate to all subscriber components automatically.                     ║
+ * ║  Provides a shared reactive state object that can be mounted on any             ║
+ * ║  wakaPAC component abstraction under any property name. Changes to the          ║
+ * ║  store propagate to all subscriber components automatically.                    ║
  * ║                                                                                  ║
  * ║  Usage:                                                                          ║
  * ║    wakaPAC.use(wakaStore);                                                       ║
@@ -38,24 +38,33 @@
     const VERSION = '1.0.0';
 
     /**
-     * The custom event name fired on document when a store mutation occurs.
-     * The plugin listens for this and handles all wakaPAC interaction,
-     * keeping the store proxy completely decoupled from wakaPAC internals.
+     * Event fired on document when any store mutation occurs.
+     * Carries the storeId and store-relative path of the change.
+     * No proxy objects in the payload — only the storeId and path are
+     * needed; subscribers re-render by reading through the store proxy.
      * @type {string}
      */
     const STORE_CHANGED_EVENT = 'pac:store-changed';
 
     /**
-     * Array methods that mutate in place — intercepted so that e.g.
-     * store.items.push(x) is detected and triggers propagation.
+     * Non-enumerable flag set on every store proxy (root and nested).
+     * wakaPAC's proxyGetHandler checks this flag and returns the value
+     * as-is instead of wrapping it in a second reactive proxy.
+     * The name is intentionally generic — it means "this object already
+     * manages its own reactivity; do not proxy it again".
+     * @type {string}
+     */
+    const EXTERNAL_PROXY_FLAG = '_externalProxy';
+
+    /**
+     * Array methods that mutate in place.
      * @type {string[]}
      */
     const MUTATING_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
 
     /**
      * Returns true if the property should trigger reactivity.
-     * Properties starting with _ or $ are non-reactive, matching wakaPAC's
-     * convention for internal/DOM-reference data.
+     * Properties starting with _ or $ are non-reactive.
      * @param {string|symbol} prop
      * @returns {boolean}
      */
@@ -68,19 +77,11 @@
      * @constructor
      */
     function WakaStore() {
-        /**
-         * Monotonically increasing counter for generating unique store IDs.
-         * @type {number}
-         */
+        /** @type {number} */
         this._nextStoreId = 1;
 
         /**
-         * Registry populated by the plugin's onComponentCreated hook.
          * Maps storeId -> Map<pacId, { key: string, container: Element }>
-         *
-         * key       = the abstraction property name the store is mounted under
-         * container = the component's DOM container
-         *
          * @type {Map<string, Map<string, { key: string, container: Element }>>}
          */
         this._registry = new Map();
@@ -92,35 +93,36 @@
         /**
          * Creates a wakaPAC plugin descriptor.
          *
-         * Two responsibilities:
+         * Architecture:
          *
-         * 1. onComponentCreated — scans the abstraction for store references and
-         *    registers the container + mounted key in the registry.
+         * The store proxy wraps initialState and intercepts all mutations.
+         * It is tagged with _externalProxy = true (non-enumerable) so that
+         * wakaPAC's proxyGetHandler recognises it and returns it as-is,
+         * never wrapping it in a second reactive proxy.
          *
-         * 2. document listener for STORE_CHANGED_EVENT — when the store proxy fires
-         *    this event, the listener finds all subscriber components, writes the
-         *    new store snapshot directly to context.originalAbstraction (bypassing
-         *    wakaPAC's reactive proxy entirely), then dispatches pac:change on the
-         *    container so wakaPAC re-renders from the updated raw data.
+         * On any mutation the store fires pac:store-changed on document with
+         * the storeId. The plugin listener dispatches pac:change on each
+         * subscriber container. wakaPAC re-renders by reading the abstraction,
+         * which returns the store proxy directly. Template reads go through
+         * the store proxy's get trap — pure reads, no writes, no re-notification.
          *
-         * The store proxy never touches wakaPAC's abstraction proxy. All wakaPAC
-         * interaction is handled here, where we have access to originalAbstraction.
+         * Required change in wakaPAC's proxyGetHandler:
          *
-         * @param {Object} pac - The wakaPAC instance, passed by wakaPAC.use()
+         *   if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+         *       if (val._externalProxy) { return val; }   // ← add this
+         *       // ... existing wrapping logic
+         *   }
+         *
          * @returns {Object} Plugin descriptor
          */
-        createPacPlugin(pac) {
+        createPacPlugin() {
             const registry = this._registry;
 
             /**
-             * Scans a raw abstraction object for store references.
-             * A store reference is any property whose value is tagged with a
-             * non-enumerable _wakaStoreId (set by createStore on initialState).
-             *
-             * We receive context.originalAbstraction here — the plain object
-             * before wakaPAC wraps it — so property reads are direct and safe.
-             *
-             * @param  {Object} rawAbstraction - context.originalAbstraction
+             * Scans the raw abstraction for store references.
+             * A store reference is any property whose value is tagged with
+             * a non-enumerable _wakaStoreId (set by createStore).
+             * @param {Object} rawAbstraction - context.originalAbstraction
              * @returns {Array<{key: string, storeId: string}>}
              */
             function findStoreReferences(rawAbstraction) {
@@ -129,7 +131,7 @@
                 for (const key of Object.keys(rawAbstraction)) {
                     const val = rawAbstraction[key];
 
-                    if (val && typeof val === 'object' && Object.prototype.hasOwnProperty.call(val, '_wakaStoreId')) {
+                    if (val && typeof val === 'object' && val._wakaStoreId) {
                         entries.push({ key, storeId: val._wakaStoreId });
                     }
                 }
@@ -140,57 +142,46 @@
             /**
              * Handles pac:store-changed events fired by store proxies.
              *
-             * For each subscriber of the changed store:
-             * 1. Retrieves the context from PACRegistry to get originalAbstraction
-             * 2. Writes the snapshot directly to originalAbstraction[key] —
-             *    a plain object write, no proxy involved
-             * 3. Dispatches pac:change on the container so wakaPAC re-renders
+             * Dispatches pac:change on each subscriber container so wakaPAC
+             * re-renders. The path in the event tells wakaPAC which bindings
+             * to update. No data is written here — wakaPAC reads the current
+             * value directly from the store proxy when it re-renders.
+             *
+             * newValue is intentionally omitted from the pac:change detail.
+             * Passing the store proxy as newValue would cause proxySetHandler
+             * to attempt wrapping it. wakaPAC's render methods read from
+             * this.abstraction directly and do not use event.detail.newValue
+             * for DOM updates.
              *
              * @param {CustomEvent} event
-             * @param {string} event.detail.storeId   - ID of the store that changed
-             * @param {Object} event.detail.snapshot  - Current raw store contents
              */
             function onStoreChanged(event) {
-                const { storeId, snapshot } = event.detail;
+                const { storeId, path, oldValue, newValue } = event.detail;
                 const subscribers = registry.get(storeId);
 
                 if (!subscribers || subscribers.size === 0) {
                     return;
                 }
 
-                subscribers.forEach(function({ key, container }, pacId) {
-                    // The store proxy already wrote the new value to initialState
-                    // (the raw object) before firing this event. originalAbstraction[key]
-                    // points to that same raw object, so wakaPAC's proxy already sees
-                    // the correct data when it reads through to re-render.
-                    // We only need to tell wakaPAC to re-render — no write needed here.
+                subscribers.forEach(function({ key, container }) {
+                    const translatedPath = [key].concat(path);
+
                     container.dispatchEvent(new CustomEvent('pac:change', {
                         detail: {
-                            path: [key],
-                            oldValue: null,
-                            newValue: null
+                            path: translatedPath,
+                            oldValue: oldValue,
+                            newValue: newValue
                         }
                     }));
                 });
             }
 
-            // Listen for store mutation events on document.
-            // The store proxy fires these without any knowledge of wakaPAC.
             document.addEventListener(STORE_CHANGED_EVENT, onStoreChanged);
 
             return {
                 /**
-                 * Called by wakaPAC after a component is created.
-                 *
-                 * Receives context.originalAbstraction (the raw plain object) as
-                 * the third argument via the plugin call in wakaPAC's source:
-                 *   plugin.onComponentCreated(context.abstraction, pacId, config)
-                 *
-                 * Since wakaPAC passes context.abstraction (the proxy) as the first
-                 * arg, we retrieve originalAbstraction from PACRegistry instead,
-                 * which is safe and guaranteed to be the plain object.
-                 *
-                 * @param {Object} abstraction - context.abstraction (wakaPAC proxy) — not used
+                 * Registers the component's store subscriptions.
+                 * @param {Object} abstraction - context.abstraction (proxy) — not used
                  * @param {string} pacId
                  */
                 onComponentCreated(abstraction, pacId) {
@@ -201,9 +192,8 @@
                     }
 
                     const storeEntries = findStoreReferences(context.originalAbstraction);
-                    const container = context.container;
 
-                    if (storeEntries.length === 0 || !container) {
+                    if (storeEntries.length === 0 || !context.container) {
                         return;
                     }
 
@@ -212,13 +202,12 @@
                             registry.set(storeId, new Map());
                         }
 
-                        registry.get(storeId).set(pacId, { key, container });
+                        registry.get(storeId).set(pacId, { key, container: context.container });
                     }
                 },
 
                 /**
-                 * Called by wakaPAC when a component is destroyed.
-                 * Removes the component from the registry.
+                 * Removes the component from all store subscriptions.
                  * @param {string} pacId
                  */
                 onComponentDestroyed(pacId) {
@@ -236,17 +225,15 @@
         /**
          * Creates a new reactive store from a plain object.
          *
-         * Returns a Proxy that intercepts all mutations — including nested
-         * property writes and array method calls. On any mutation:
-         * 1. The raw value is written to the target (plain object write)
-         * 2. A pac:store-changed event is fired on document
+         * Returns a Proxy tagged with _externalProxy = true so wakaPAC
+         * recognises it and skips re-wrapping. All nested objects and arrays
+         * are also wrapped in store proxies (lazily, via a WeakMap cache)
+         * so that deep mutations like store.user.name = 'Jan' are intercepted.
          *
-         * The store proxy has zero knowledge of wakaPAC. It never touches any
-         * wakaPAC abstraction proxy. All wakaPAC interaction is handled by the
-         * plugin's document listener, which writes to originalAbstraction directly
-         * before dispatching pac:change.
+         * On any mutation, fires pac:store-changed on document with the
+         * storeId and the store-relative path of the change.
          *
-         * @param {Object} initialState - Plain object representing initial store state
+         * @param {Object} initialState - Plain object representing initial state
          * @returns {Proxy} Store proxy for direct mutation
          */
         createStore(initialState) {
@@ -257,72 +244,112 @@
             const storeId = 'store-' + (this._nextStoreId++);
 
             /**
-             * Fires pac:store-changed on document with the current snapshot.
-             * This is the only thing the store proxy does to communicate a change.
+             * Marks obj and all nested objects with _externalProxy = true as a
+             * real non-enumerable own property. This is what wakaPAC's
+             * proxyGetHandler reads via target[prop]._externalProxy — it reads
+             * the raw object directly, not through the store proxy's get trap,
+             * so the flag must exist on the raw object itself.
+             * @param {Object|Array} obj
              */
-            function notifyChanged() {
-                document.dispatchEvent(new CustomEvent(STORE_CHANGED_EVENT, {
-                    detail: {
-                        storeId: storeId,
-                        snapshot: initialState
+            function markExternalProxy(obj) {
+                if (!obj || typeof obj !== 'object' || obj._externalProxy) {
+                    return;
+                }
+
+                Object.defineProperty(obj, '_externalProxy', {
+                    value: true,
+                    enumerable: false,
+                    writable: false,
+                    configurable: true
+                });
+
+                for (const key of Object.keys(obj)) {
+                    if (obj[key] && typeof obj[key] === 'object') {
+                        markExternalProxy(obj[key]);
                     }
+                }
+            }
+
+            /**
+             * Fires pac:store-changed with the store-relative path and old/new values.
+             * @param {string[]} path
+             * @param {*} oldValue
+             * @param {*} newValue
+             */
+            function notify(path, oldValue, newValue) {
+                document.dispatchEvent(new CustomEvent(STORE_CHANGED_EVENT, {
+                    detail: { storeId, path, oldValue, newValue }
                 }));
             }
 
             /**
-             * Cache of raw object -> proxy. Ensures the same raw object always
-             * returns the same Proxy instance. Without this, every get() call on
-             * a nested object returns a brand new Proxy, which wakaPAC treats as
-             * a changed value and tries to re-wrap — causing infinite recursion.
+             * WeakMap cache so the same raw object always returns the same
+             * proxy. Stable references prevent spurious change detection when
+             * wakaPAC or other code reads nested properties multiple times.
              * @type {WeakMap<Object, Proxy>}
              */
             const proxyCache = new WeakMap();
 
             /**
-             * Wraps an object or array in a store proxy, returning a cached
-             * instance if one already exists for this object.
-             * Nested objects are wrapped lazily on access so that deep mutations
-             * like store.user.address.city = 'Haarlem' are intercepted.
+             * Wraps obj in a store proxy, returning the cached instance if
+             * one already exists.
              * @param {Object|Array} obj
+             * @param {string[]} currentPath - Store-relative path to obj
              * @returns {Proxy}
              */
-            function createProxy(obj) {
+            function createProxy(obj, currentPath) {
                 if (proxyCache.has(obj)) {
                     return proxyCache.get(obj);
                 }
 
-                const proxy = new Proxy(obj, {
+                // Mark before creating the proxy so wakaPAC reads _externalProxy
+                // directly off the raw object and skips re-wrapping it.
+                markExternalProxy(obj);
 
+                const proxy = new Proxy(obj, {
                     get(target, prop) {
+                        // Expose _wakaStoreId on the root proxy so the plugin
+                        // can identify store references in originalAbstraction.
+                        if (prop === '_wakaStoreId') {
+                            return storeId;
+                        }
+
                         const val = target[prop];
 
-                        // Intercept mutating array methods so store.items.push(x)
-                        // triggers notification after the mutation completes.
+                        // Intercept mutating array methods
                         if (Array.isArray(target) && typeof val === 'function' && MUTATING_METHODS.includes(prop)) {
                             return function() {
+                                const oldArray = target.slice();
                                 const result = Array.prototype[prop].apply(target, arguments);
-                                notifyChanged();
+                                notify(currentPath, oldArray, target.slice());
                                 return result;
                             };
                         }
 
-                        // Lazily wrap nested objects/arrays so deep writes are caught.
+                        // Lazily wrap nested objects/arrays
                         if (isReactive(prop) && val && typeof val === 'object') {
-                            return createProxy(val);
+                            return createProxy(val, currentPath.concat([prop]));
                         }
 
                         return val;
                     },
 
                     set(target, prop, newValue) {
-                        if (target[prop] === newValue) {
+                        const oldValue = target[prop];
+
+                        if (oldValue === newValue) {
                             return true;
+                        }
+
+                        // Mark new object values so wakaPAC won't re-wrap them.
+                        if (newValue && typeof newValue === 'object') {
+                            markExternalProxy(newValue);
                         }
 
                         target[prop] = newValue;
 
                         if (isReactive(prop)) {
-                            notifyChanged();
+                            notify(currentPath.concat([prop]), oldValue, newValue);
                         }
 
                         return true;
@@ -333,10 +360,11 @@
                             return true;
                         }
 
+                        const oldValue = target[prop];
                         delete target[prop];
 
                         if (isReactive(prop)) {
-                            notifyChanged();
+                            notify(currentPath.concat([prop]), oldValue, undefined);
                         }
 
                         return true;
@@ -348,7 +376,7 @@
             }
 
             // Tag initialState so onComponentCreated can identify it when
-            // scanning the raw abstraction. Non-enumerable so it stays invisible
+            // scanning originalAbstraction. Non-enumerable so it is invisible
             // to template bindings and for..in loops.
             Object.defineProperty(initialState, '_wakaStoreId', {
                 value: storeId,
@@ -357,7 +385,7 @@
                 configurable: false
             });
 
-            return createProxy(initialState);
+            return createProxy(initialState, []);
         }
     };
 
