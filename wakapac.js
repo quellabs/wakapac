@@ -6911,7 +6911,9 @@
         // Axis inversion detection state.
         // motionAxisDetectionStep: 'idle' | 'tilt-x' | 'tilt-y' | 'done' | 'timeout'
         // motionAxisInversion: { x: 1|-1, y: 1|-1 } — current inversion multipliers
+        // motionAxisDetectionStepLabel: human-readable label for the current step
         abstraction.motionAxisDetectionStep = 'idle';
+        abstraction.motionAxisDetectionStepLabel = '';
         abstraction.motionAxisInversion = { x: 1, y: 1 };
     };
 
@@ -9698,7 +9700,10 @@
         // Guard against re-entrant calls (e.g. user triggers this twice in quick succession).
         // We check the current step on the first registered component as the canonical state.
         const currentStep = window.PACRegistry.components[0]?.abstraction?.motionAxisDetectionStep;
-        if (currentStep === 'tilt-x' || currentStep === 'tilt-y') return;
+
+        if (currentStep === 'tilt-x' || currentStep === 'tilt-y') {
+            return;
+        }
 
         // Accumulates the detected polarity for each axis.
         // Defaults to 1 (non-inverted); overwritten as each axis is confirmed.
@@ -9708,19 +9713,25 @@
          * Broadcast a detection step to all registered components.
          * This triggers any reactive UI that is watching motionAxisDetectionStep
          * (e.g. overlay prompts, progress indicators).
-         *
          * @param {'tilt-x'|'tilt-y'|'done'|'timeout'} step
          */
         function setStep(step) {
+            const labels = {
+                'tilt-x':  'Tilt the right edge of the device down',
+                'tilt-y':  'Tilt the bottom edge of the device down',
+                'done':    'Calibration complete',
+                'timeout': 'Timed out — please try again'
+            };
+
             window.PACRegistry.components.forEach(function(context) {
                 context.abstraction.motionAxisDetectionStep = step;
+                context.abstraction.motionAxisDetectionStepLabel = labels[step] ?? '';
             });
         }
 
         /**
          * Broadcast the final inversion result to all registered components.
          * Called only after both axes have been successfully detected.
-         *
          * @param {{ x: 1|-1, y: 1|-1 }} inversion
          */
         function setInversion(inversion) {
@@ -9753,11 +9764,15 @@
                 // Some browsers populate the event but leave accelerationIncludingGravity as null
                 // (notably some Android WebViews). Others return an object with undefined components.
                 // Both cases must be treated as unusable samples.
-                if (!gravity) return;
+                if (!gravity) {
+                    return;
+                }
 
                 const val = axis === 'x' ? gravity.x : gravity.y;
 
-                if (val == null || Math.abs(val) < threshold) return;
+                if (val == null || Math.abs(val) < threshold) {
+                    return;
+                }
 
                 // The first sample that clearly exceeds the threshold determines polarity.
                 // We do not average multiple samples — deliberate tilts are unambiguous at 4 m/s².
@@ -9781,40 +9796,45 @@
             }, timeout);
         }
 
+        /**
+         * Apply and broadcast the completed inversion result.
+         * Clears _lastDispatchedMotion so the next event bypasses the deduplication
+         * guard and immediately reflects corrected values.
+         */
+        function applyResult() {
+            const inversion = { x: result.x, y: result.y };
+
+            DomUpdateTracker._motionAxisInversion = inversion;
+            DomUpdateTracker._lastDispatchedMotion = null;
+
+            setInversion(inversion);
+            setStep('done');
+        }
+
+        /**
+         * Start Y axis detection after X has been confirmed.
+         * A short settling delay is required between steps — without it, the Y listener
+         * can be triggered by residual acceleration from the same X tilt gesture before
+         * the user has a chance to return the device to flat.
+         */
+        function detectYAxis() {
+            setStep('tilt-y');
+
+            // Wait for the device to settle before listening for Y.
+            // 800ms is enough time to set the device flat between gestures without
+            // feeling like an unresponsive pause.
+            setTimeout(function() {
+                detectAxis('y', applyResult, function() { setStep('timeout'); });
+            }, 1000);
+        }
+
         // ─── Detection sequence ───────────────────────────────────────────────────
 
         // Step 1: Prompt the user to tilt the right edge of the device downward.
         // A positive X value in accelerationIncludingGravity means gravity is pulling
         // toward the right — confirming the axis is non-inverted.
         setStep('tilt-x');
-
-        detectAxis('x', function() {
-
-            // Step 2: X axis confirmed. Prompt for the Y axis.
-            // A positive Y value means gravity is pulling toward the bottom edge — non-inverted.
-            setStep('tilt-y');
-
-            detectAxis('y', function() {
-
-                // Both axes detected. Publish the final inversion map.
-                const inversion = { x: result.x, y: result.y };
-
-                // Apply to DomUpdateTracker so that subsequent devicemotion events processed
-                // by the motion pipeline are immediately corrected without requiring a page reload.
-                // _lastDispatchedMotion is cleared so the next event is treated as a fresh sample
-                // rather than being suppressed by the "no change" deduplication guard.
-                DomUpdateTracker._motionAxisInversion = inversion;
-                DomUpdateTracker._lastDispatchedMotion = null;
-
-                // Broadcast to components so reactive bindings (e.g. {{ motionAxisInversion.x }})
-                // update immediately.
-                setInversion(inversion);
-
-                setStep('done');
-
-            }, function() { setStep('timeout'); });
-
-        }, function() { setStep('timeout'); });
+        detectAxis('x', detectYAxis, function() { setStep('timeout'); });
     };
 
     /**
