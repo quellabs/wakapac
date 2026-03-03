@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakaPAC Motion Demo</title>
+</head>
+<body>
+<div id="motion">
+    <h2>Browser Support</h2>
+    <p>DeviceMotionEvent: <strong>{{ motionSupported ? 'yes' : 'NO — not available' }}</strong></p>
+    <p>requestPermission (iOS): <strong>{{ motionPermissionRequired ? 'yes' : 'no' }}</strong></p>
+
+    <h2>Axis Inversion Detection</h2>
+    <p>{{ motionAxisDetectionStepLabel }}</p>
+    <button data-pac-bind="click: detectAxes">Detect Axis Inversion</button>
+
+    <h2>iOS Permission</h2>
+
+    <p data-pac-bind="visible: motionPermissionRequired">
+        <button data-pac-bind="click: requestPermission">Request Permission</button>
+    </p>
+
+    <p data-pac-bind="visible: !motionPermissionRequired">Not needed on this platform.</p>
+
+    <h2>Sensor Data</h2>
+    <p>motionAccelerationX: <strong>{{ motionAccelerationX }}</strong></p>
+    <p>motionAccelerationY: <strong>{{ motionAccelerationY }}</strong></p>
+    <p>motionAccelerationZ: <strong>{{ motionAccelerationZ }}</strong></p>
+    <p>motionRotationAlpha: <strong>{{ motionRotationAlpha }}</strong></p>
+    <p>motionRotationBeta:  <strong>{{ motionRotationBeta }}</strong></p>
+    <p>motionRotationGamma: <strong>{{ motionRotationGamma }}</strong></p>
+
+    <h2>Tilt Angles</h2>
+    <p>motionTiltX (left/right): <strong>{{ motionTiltX }}°</strong></p>
+    <p>motionTiltY (fwd/back):   <strong>{{ motionTiltY }}°</strong></p>
+</div>
+<script src="../wakapac.js"></script>
+<script src="../wakamotion.js"></script>
+<script>
+    wakaPAC.use(wakaMotion);
+    wakaPAC('#motion', {
+        detectAxes() {
+            wakaMotion.detectMotionAxisInversion({ threshold: 4, timeout: 8000 });
+        },
+        requestPermission() {
+            wakaMotion.requestMotionPermission();
+        }
+    });
+</script>
+</body>
+</html>
