@@ -1233,6 +1233,9 @@
         /** @private {boolean} Flag to enable motion sensor api */
         _enableMotion: false,
 
+        /** @private {boolean} Prevents attaching the devicemotion listener more than once */
+        _motionListenerAttached: false,
+
         /**
          * @private {number} Dead-zone threshold for motion sensor dispatch (in m/s² for acceleration,
          * deg/s for rotation). A new event is only dispatched when at least one axis changes by more
@@ -2336,19 +2339,33 @@
                 return;
             }
 
-            // iOS 13+ requires explicit permission before accessing motion sensors.
-            // requestPermission is not present on Android or desktop browsers.
+            // iOS 13+ requires DeviceMotionEvent.requestPermission() to be called
+            // from within a user gesture (tap). Calling it at page load causes a
+            // silent denial. On iOS we skip auto-setup here and rely on the app
+            // calling wakaPAC.requestMotionPermission() from a click handler instead.
             if (typeof DeviceMotionEvent.requestPermission === 'function') {
-                // Ask permission
-                const permission = await DeviceMotionEvent.requestPermission();
-
-                // Only attach the listener if the user granted access
-                if (permission !== 'granted') {
-                    return;
-                }
+                return;
             }
 
-            // Android, desktop, or iOS with permission granted: attach the listener
+            // Android, desktop: attach the listener directly — no permission needed
+            // devicemotion is a window event and does not propagate to document
+            this._attachMotionListener();
+        },
+
+        /**
+         * Attaches the devicemotion event listener and starts populating motion
+         * reactive properties. Called automatically on non-iOS, or after permission
+         * is granted on iOS via wakaPAC.requestMotionPermission().
+         * @private
+         */
+        _attachMotionListener() {
+            // Guard against double-registration
+            if (this._motionListenerAttached) {
+                return;
+            }
+
+            this._motionListenerAttached = true;
+
             window.addEventListener('devicemotion', (event) => {
                 // accelerationIncludingGravity is more reliable than acceleration,
                 // which is null on devices that cannot isolate gravity from motion.
@@ -9580,6 +9597,41 @@
      */
     wakaPAC.enableMotion = function(enable) {
         DomUpdateTracker._enableMotion = enable;
+    }
+
+    /**
+     * Request iOS motion sensor permission from within a user gesture (e.g. a button click).
+     * On iOS 13+, DeviceMotionEvent.requestPermission() must be called from a tap handler —
+     * calling it at page load causes a silent denial. On non-iOS this is a no-op.
+     * Returns a Promise that resolves to 'granted', 'denied', or 'error'.
+     *
+     * Usage:
+     *   wakaPAC('#app', {
+     *       requestMotion() {
+     *           wakaPAC.requestMotionPermission().then(result => {
+     *               this.permissionResult = result;
+     *           });
+     *       }
+     *   });
+     */
+    wakaPAC.requestMotionPermission = async function() {
+        if (typeof DeviceMotionEvent === 'undefined' ||
+            typeof DeviceMotionEvent.requestPermission !== 'function') {
+            // Not iOS — listener already attached at init, nothing to do
+            return 'granted';
+        }
+
+        try {
+            const result = await DeviceMotionEvent.requestPermission();
+
+            if (result === 'granted') {
+                DomUpdateTracker._attachMotionListener();
+            }
+
+            return result;
+        } catch (err) {
+            return 'error';
+        }
     }
 
     /**
