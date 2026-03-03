@@ -6886,6 +6886,16 @@
         abstraction.browserOrientationAngle = screen.orientation ? screen.orientation.angle : 0;
         abstraction.browserOrientationType = screen.orientation ? screen.orientation.type : 'unknown';
 
+        // True if the browser supports the DeviceMotion API at all.
+        abstraction.motionSupported = typeof DeviceMotionEvent !== 'undefined';
+
+        // True on iOS 13+ where DeviceMotionEvent.requestPermission() must be called
+        // from a user gesture before motion data becomes available.
+        // Use this to conditionally show a permission button in your UI.
+        abstraction.motionPermissionRequired =
+            typeof DeviceMotionEvent !== 'undefined' &&
+            typeof DeviceMotionEvent.requestPermission === 'function';
+
         // Motion sensor data
         abstraction.motionAccelerationX = null;
         abstraction.motionAccelerationY = null;
