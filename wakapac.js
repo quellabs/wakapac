@@ -1063,17 +1063,26 @@
                 return val;
             }
 
-            // CRITICAL FIX: Lazy wrapping of nested objects and arrays
             // If the value is an object/array and not already reactive, wrap it in a proxy
             if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+                // Return raw value if the data is already proxied
+                if (val._externalProxy) {
+                    return val;
+                }
+
                 const propertyPath = currentPath.concat([prop]);
                 const proxiedVal = createProxy(val, propertyPath);
                 proxiedVal._isReactive = true;
 
-                // Update the original object with the proxy
-                target[prop] = proxiedVal;
+                // Write directly to target without going through the proxy set trap.
+                // This caches the proxy without firing pac:change.
+                Object.defineProperty(target, prop, {
+                    value: proxiedVal,
+                    writable: true,
+                    enumerable: true,
+                    configurable: true
+                });
 
-                // Return proxiedVal
                 return proxiedVal;
             }
 
@@ -4217,14 +4226,15 @@
 
             // Split path by both dots and brackets, handling bracket notation correctly
             const parts = resolvedPath.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
-
             let current = obj;
+
             for (let i = 0; i < parts.length; i++) {
                 if (current == null) {
                     return undefined;
                 }
 
                 const part = parts[i];
+
                 current = current[part];
             }
 
@@ -5979,6 +5989,12 @@
         // Don't trigger watchers for array element changes
         // Arrays are handled by foreach rebuilds, not watchers
         if (Array.isArray(newParentObject)) {
+            return;
+        }
+
+        // Cannot reconstruct old state for externally managed proxies
+        if (newParentObject && newParentObject._externalProxy) {
+            this.triggerWatcher(rootProperty, newParentObject, null);
             return;
         }
 
