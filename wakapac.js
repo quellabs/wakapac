@@ -6232,6 +6232,8 @@
             }
 
             case 'motion': {
+                // Raw acceleration along each device axis (m/s², includes gravity).
+                // X = left/right, Y = up/down, Z = through the screen.
                 const ax = stateData.acceleration.x;
                 const ay = stateData.acceleration.y;
                 const az = stateData.acceleration.z;
@@ -6239,6 +6241,9 @@
                 this.abstraction.motionAccelerationX = ax;
                 this.abstraction.motionAccelerationY = ay;
                 this.abstraction.motionAccelerationZ = az;
+
+                // Rotation rate around each axis in degrees/second.
+                // Only available on devices with a gyroscope.
                 this.abstraction.motionRotationAlpha = stateData.rotationRate.alpha;
                 this.abstraction.motionRotationBeta = stateData.rotationRate.beta;
                 this.abstraction.motionRotationGamma = stateData.rotationRate.gamma;
@@ -6246,8 +6251,10 @@
                 // Tilt angles in degrees from horizontal using asin(axis / g).
                 // 0° = flat, +90° = that edge tilted fully upright.
                 // Range is -90° to +90° and is stable across all orientations.
+                // Clamped to [-1, 1] before asin to guard against sensor values
+                // slightly exceeding g due to noise, which would produce NaN.
                 const G = 9.81;
-                const toDeg = v => Math.round(v * (180 / Math.PI) * 10) / 10;
+                const toDeg = v => Math.round(v * (180 / Math.PI));
                 const clamp = v => Math.max(-1, Math.min(1, v));
                 this.abstraction.motionTiltX = ax != null ? toDeg(Math.asin(clamp(ax / G))) : null;
                 this.abstraction.motionTiltY = ay != null ? toDeg(Math.asin(clamp(ay / G))) : null;
