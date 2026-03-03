@@ -1233,6 +1233,16 @@
         /** @private {boolean} Flag to enable motion sensor api */
         _enableMotion: false,
 
+        /**
+         * @private {number} Dead-zone threshold for motion sensor dispatch (in m/s² for acceleration,
+         * deg/s for rotation). A new event is only dispatched when at least one axis changes by more
+         * than this amount from the last dispatched value. 0 = dispatch every event (default).
+         */
+        _motionThreshold: 0,
+
+        /** @private {object|null} Last dispatched motion values, used for threshold comparison */
+        _lastDispatchedMotion: null,
+
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
 
@@ -2325,13 +2335,41 @@
             }
 
             // Android, desktop, or iOS with permission granted: attach the listener
-            document.addEventListener('devicemotion', (event) => {
+            window.addEventListener('devicemotion', (event) => {
                 // accelerationIncludingGravity is more reliable than acceleration,
                 // which is null on devices that cannot isolate gravity from motion.
-                const { x, y, z } = event.accelerationIncludingGravity ?? {};
+                const raw = event.accelerationIncludingGravity ?? {};
+                const rot = event.rotationRate ?? {};
 
-                // rotationRate gives degrees/sec around each axis
-                const { alpha, beta, gamma } = event.rotationRate ?? {};
+                // Round to 2 decimal places to suppress floating point noise
+                const r2 = v => v != null ? Math.round(v * 100) / 100 : null;
+                const x = r2(raw.x), y = r2(raw.y), z = r2(raw.z);
+                const alpha = r2(rot.alpha), beta = r2(rot.beta), gamma = r2(rot.gamma);
+
+                // Skip dispatch if all axes are within the dead-zone threshold
+                if (this._motionThreshold > 0) {
+                    const t = this._motionThreshold;
+                    const last = this._lastDispatchedMotion;
+
+                    if (last) {
+                        const accChanged =
+                            Math.abs((x     ?? last.x) - last.x) > t ||
+                            Math.abs((y     ?? last.y) - last.y) > t ||
+                            Math.abs((z     ?? last.z) - last.z) > t;
+
+                        const rotChanged =
+                            Math.abs((alpha ?? last.alpha) - last.alpha) > t ||
+                            Math.abs((beta  ?? last.beta)  - last.beta)  > t ||
+                            Math.abs((gamma ?? last.gamma) - last.gamma) > t;
+
+                        if (!accChanged && !rotChanged) {
+                            return;
+                        }
+                    }
+
+                    // Record what we are about to dispatch
+                    this._lastDispatchedMotion = { x, y, z, alpha, beta, gamma };
+                }
 
                 // Dispatch data as a normalized browser state event
                 this.dispatchBrowserStateEvent('motion', {
@@ -6194,12 +6232,25 @@
             }
 
             case 'motion': {
-                this.abstraction.motionAccelerationX = stateData.acceleration.x;
-                this.abstraction.motionAccelerationY = stateData.acceleration.y;
-                this.abstraction.motionAccelerationZ = stateData.acceleration.z;
+                const ax = stateData.acceleration.x;
+                const ay = stateData.acceleration.y;
+                const az = stateData.acceleration.z;
+
+                this.abstraction.motionAccelerationX = ax;
+                this.abstraction.motionAccelerationY = ay;
+                this.abstraction.motionAccelerationZ = az;
                 this.abstraction.motionRotationAlpha = stateData.rotationRate.alpha;
                 this.abstraction.motionRotationBeta = stateData.rotationRate.beta;
                 this.abstraction.motionRotationGamma = stateData.rotationRate.gamma;
+
+                // Tilt angles in degrees from horizontal using asin(axis / g).
+                // 0° = flat, +90° = that edge tilted fully upright.
+                // Range is -90° to +90° and is stable across all orientations.
+                const G = 9.81;
+                const toDeg = v => Math.round(v * (180 / Math.PI) * 10) / 10;
+                const clamp = v => Math.max(-1, Math.min(1, v));
+                this.abstraction.motionTiltX = ax != null ? toDeg(Math.asin(clamp(ax / G))) : null;
+                this.abstraction.motionTiltY = ay != null ? toDeg(Math.asin(clamp(ay / G))) : null;
                 break;
             }
 
@@ -6786,6 +6837,10 @@
         abstraction.motionRotationAlpha = null;
         abstraction.motionRotationBeta = null;
         abstraction.motionRotationGamma = null;
+
+        // Tilt angles in degrees: X = left/right roll, Y = forward/back pitch
+        abstraction.motionTiltX = null;
+        abstraction.motionTiltY = null;
     };
 
     /**
@@ -9486,6 +9541,19 @@
      */
     wakaPAC.enableMotion = function(enable) {
         DomUpdateTracker._enableMotion = enable;
+    }
+
+    /**
+     * Set the dead-zone threshold for motion sensor dispatch.
+     * Events are suppressed unless at least one axis changes by more than this amount
+     * since the last dispatched event. Useful for tilt/orientation UIs to prevent
+     * constant re-renders from sensor noise while the device is stationary.
+     * @param {number} threshold - Minimum change in m/s² (acceleration) or deg/s (rotation)
+     *                             required to trigger a dispatch. Default is 0 (every event).
+     */
+    wakaPAC.setMotionThreshold = function(threshold) {
+        DomUpdateTracker._motionThreshold = Math.max(0, threshold);
+        DomUpdateTracker._lastDispatchedMotion = null;
     }
 
     // ========================================================================
