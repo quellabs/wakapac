@@ -25,15 +25,15 @@
  * ║  Reactive properties injected into every component:                              ║
  * ║    motionSupported             — true if DeviceMotion API is available           ║
  * ║    motionPermissionRequired    — true on iOS 13+ before permission granted       ║
- * ║    motionPermissionGranted     — true once iOS permission has been granted        ║
- * ║    motionAccelerationX/Y/Z     — raw acceleration incl. gravity (m/s²)          ║
- * ║    motionRotationAlpha/Beta/Gamma — rotation rate (deg/s, gyroscope required)   ║
- * ║    motionTiltX / motionTiltY   — tilt angles from horizontal in degrees         ║
- * ║    motionAxisInversion         — current axis inversion multipliers { x, y }    ║
- * ║    motionAxisDetectionStep     — calibration flow state                         ║
- * ║    motionHasAcceleration         — true if acceleration data is available      ║
- * ║    motionHasRotationRate         — true if gyroscope data is available         ║
- * ║    motionAxisDetectionStepLabel — human-readable calibration instruction        ║
+ * ║    motionPermissionGranted     — true once iOS permission has been granted       ║
+ * ║    motionAccelerationX/Y/Z     — raw acceleration incl. gravity (m/s²)           ║
+ * ║    motionRotationAlpha/Beta/Gamma — rotation rate (deg/s, gyroscope required)    ║
+ * ║    motionTiltX / motionTiltY   — tilt angles from horizontal in degrees          ║
+ * ║    motionAxisInversion         — current axis inversion multipliers { x, y }     ║
+ * ║    motionAxisDetectionStep     — calibration flow state                          ║
+ * ║    motionHasAcceleration         — true if acceleration data is available        ║
+ * ║    motionHasRotationRate         — true if gyroscope data is available           ║
+ * ║    motionAxisDetectionStepLabel — human-readable calibration instruction         ║
  * ║                                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -94,7 +94,10 @@
      * @param {*} value
      */
     function broadcast(prop, value) {
-        if (!window.PACRegistry || !window.PACRegistry.components) return;
+        if (!window.PACRegistry || !window.PACRegistry.components) {
+            return;
+        }
+
         window.PACRegistry.components.forEach(function (context) {
             context.abstraction[prop] = value;
         });
@@ -105,7 +108,10 @@
      * @param {object} props
      */
     function broadcastAll(props) {
-        if (!window.PACRegistry || !window.PACRegistry.components) return;
+        if (!window.PACRegistry || !window.PACRegistry.components) {
+            return;
+        }
+
         window.PACRegistry.components.forEach(function (context) {
             Object.assign(context.abstraction, props);
         });
@@ -132,7 +138,10 @@
             // Sensors can fire 60-100+ times/sec; without this every event would
             // trigger a full reactive broadcast even with threshold filtering.
             const now = Date.now();
-            if (now - _lastEventTime < MIN_DISPATCH_INTERVAL) return;
+            if (now - _lastEventTime < MIN_DISPATCH_INTERVAL) {
+                return;
+            }
+
             _lastEventTime = now;
 
             const raw = event.accelerationIncludingGravity ?? {};
@@ -293,14 +302,17 @@
         // ============================================================================
 
         /**
-         * Enable or disable motion sensor tracking. Must be called before wakaPAC().
-         * Motion is disabled by default to avoid unnecessary battery drain.
-         * @param {boolean} enable
+         * Attach the motion sensor listener at runtime, for example after a user opts in.
+         * On non-iOS this attaches the `devicemotion` listener immediately.
+         * On iOS the listener is deferred until {@link requestMotionPermission} is called
+         * from a user gesture, so passing `true` here has no effect on those devices.
+         * Passing `false` is currently a no-op — once attached, the listener is not removed.
+         * @param {boolean} active - Pass `true` to activate motion tracking.
          */
-        enable(enable) {
+        enable(active) {
             // On non-iOS, attach immediately if enabling.
             // On iOS the listener is deferred until requestMotionPermission() is called.
-            if (enable && typeof DeviceMotionEvent !== 'undefined' &&
+            if (active && typeof DeviceMotionEvent !== 'undefined' &&
                 typeof DeviceMotionEvent.requestPermission !== 'function') {
                 attachListener();
             }
@@ -310,7 +322,8 @@
          * Request iOS motion sensor permission from within a user gesture (e.g. a button click).
          * On iOS 13+, DeviceMotionEvent.requestPermission() must be called from a tap handler —
          * calling it at page load causes a silent denial. On non-iOS this is a no-op.
-         * Returns a Promise that resolves to 'granted', 'denied', or 'error'.
+         * @returns {Promise<'granted'|'denied'|'error'>} Resolves to the permission outcome.
+         *   Returns `'granted'` immediately on non-iOS devices.
          */
         async requestMotionPermission() {
             if (typeof DeviceMotionEvent === 'undefined' ||
@@ -360,6 +373,27 @@
         },
 
         /**
+         * Returns the current motion sensor capabilities of this device.
+         * `hasAcceleration` and `hasRotationRate` are null until the first devicemotion
+         * event arrives — call this after motion data has started flowing for reliable results.
+         *
+         * @returns {{
+         *   hasDeviceMotion:    boolean,
+         *   requiresPermission: boolean,
+         *   hasAcceleration:    boolean|null,
+         *   hasRotationRate:    boolean|null
+         * }}
+         */
+        getMotionCapabilities() {
+            return {
+                hasDeviceMotion:    typeof DeviceMotionEvent !== 'undefined',
+                requiresPermission: typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function',
+                hasAcceleration:    _hasAcceleration,
+                hasRotationRate:    _hasRotationRate
+            };
+        },
+
+        /**
          * Detect motion axis inversion by asking the user to perform two deliberate tilt gestures.
          *
          * The detection proceeds in two sequential steps:
@@ -378,38 +412,23 @@
          *
          * Safe to call once per session. Calling while detection is in progress is ignored.
          *
-         * @param {object} [options]
-         * @param {number} [options.threshold=4]  - Minimum acceleration in m/s² to register a tilt
-         * @param {number} [options.timeout=8000] - Ms to wait per axis before setting step to 'timeout'
+         * @param {object}  [options]
+         * @param {number}  [options.threshold=4]  - Minimum acceleration in m/s² to register a tilt
+         * @param {number}  [options.timeout=8000] - Ms to wait per axis before setting step to 'timeout'
+         * @returns {void}
          */
-        /**
-         * Returns the current motion sensor capabilities of this device.
-         * `hasAcceleration` and `hasRotationRate` are null until the first devicemotion
-         * event arrives — call this after motion data has started flowing for reliable results.
-         *
-         * @returns {{
-         *   hasDeviceMotion:   boolean,
-         *   requiresPermission: boolean,
-         *   hasAcceleration:   boolean|null,
-         *   hasRotationRate:   boolean|null
-         * }}
-         */
-        getMotionCapabilities() {
-            return {
-                hasDeviceMotion:    typeof DeviceMotionEvent !== 'undefined',
-                requiresPermission: typeof DeviceMotionEvent !== 'undefined' &&
-                    typeof DeviceMotionEvent.requestPermission === 'function',
-                hasAcceleration:    _hasAcceleration,
-                hasRotationRate:    _hasRotationRate
-            };
-        },
-
         detectMotionAxisInversion({ threshold = 4, timeout = 8000 } = {}) {
 
             // Guard against missing registry or re-entrant calls
-            if (!window.PACRegistry || !window.PACRegistry.components) return;
+            if (!window.PACRegistry || !window.PACRegistry.components) {
+                return;
+            }
+
+            // Fetch step
             const currentStep = window.PACRegistry.components[0]?.abstraction?.motionAxisDetectionStep;
-            if (currentStep === 'tilt-x' || currentStep === 'tilt-y') return;
+            if (currentStep === 'tilt-x' || currentStep === 'tilt-y') {
+                return;
+            }
 
             // Accumulates detected polarity; defaults to 1 (non-inverted)
             const result = { x: 1, y: 1 };
@@ -433,11 +452,17 @@
             }
 
             /**
-             * Broadcast the completed inversion result to all components.
-             * @param {{ x: 1|-1, y: 1|-1 }} inversion
+             * Apply and broadcast the completed inversion result.
+             * Clears _lastDispatched so the next event bypasses the deduplication guard.
              */
-            function setInversion(inversion) {
+            function applyResult() {
+                const inversion = { x: result.x, y: result.y };
+
+                _axisInversion = inversion;
+                _lastDispatched = null;
+
                 broadcast('motionAxisInversion', inversion);
+                setStep('done');
             }
 
             /**
@@ -455,11 +480,15 @@
                     const gravity = event.accelerationIncludingGravity;
 
                     // Guard against null or incomplete events from some Android WebViews
-                    if (!gravity) return;
+                    if (!gravity) {
+                        return;
+                    }
 
                     const val = axis === 'x' ? gravity.x : gravity.y;
 
-                    if (val == null || Math.abs(val) < threshold) return;
+                    if (val == null || Math.abs(val) < threshold) {
+                        return;
+                    }
 
                     // First sample exceeding threshold determines polarity
                     result[axis] = val > 0 ? 1 : -1;
@@ -479,20 +508,6 @@
                     cleanup();
                     onTimeout();
                 }, timeout);
-            }
-
-            /**
-             * Apply and broadcast the completed inversion result.
-             * Clears _lastDispatched so the next event bypasses the deduplication guard.
-             */
-            function applyResult() {
-                const inversion = { x: result.x, y: result.y };
-
-                _axisInversion = inversion;
-                _lastDispatched = null;
-
-                setInversion(inversion);
-                setStep('done');
             }
 
             /**
