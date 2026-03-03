@@ -285,15 +285,35 @@
             }
 
             /**
+             * Reentrancy guard. True while a notification is being dispatched.
+             * Prevents write-backs from wakaPAC's watcher reconstruction
+             * (which writes oldValue back through the store proxy to rebuild
+             * the pre-change state for watcher callbacks) from re-triggering
+             * notify and causing an infinite loop.
+             * @type {boolean}
+             */
+            let notifying = false;
+
+            /**
              * Fires pac:store-changed with the store-relative path and old/new values.
              * @param {string[]} path
              * @param {*} oldValue
              * @param {*} newValue
              */
             function notify(path, oldValue, newValue) {
-                document.dispatchEvent(new CustomEvent(STORE_CHANGED_EVENT, {
-                    detail: { storeId, path, oldValue, newValue }
-                }));
+                if (notifying) {
+                    return;
+                }
+
+                notifying = true;
+
+                try {
+                    document.dispatchEvent(new CustomEvent(STORE_CHANGED_EVENT, {
+                        detail: { storeId, path, oldValue, newValue }
+                    }));
+                } finally {
+                    notifying = false;
+                }
             }
 
             /**
