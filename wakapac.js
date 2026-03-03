@@ -6907,6 +6907,12 @@
         // Tilt angles in degrees: X = left/right roll, Y = forward/back pitch
         abstraction.motionTiltX = null;
         abstraction.motionTiltY = null;
+
+        // Axis inversion detection state.
+        // motionAxisDetectionStep: 'idle' | 'tilt-x' | 'tilt-y' | 'done' | 'timeout'
+        // motionAxisInversion: { x: 1|-1, y: 1|-1 } — current inversion multipliers
+        abstraction.motionAxisDetectionStep = 'idle';
+        abstraction.motionAxisInversion = { x: 1, y: 1 };
     };
 
     /**
@@ -9656,6 +9662,160 @@
         DomUpdateTracker._motionThreshold = Math.max(0, threshold);
         DomUpdateTracker._lastDispatchedMotion = null;
     }
+
+    /**
+     * Detect motion axis inversion by asking the user to perform two deliberate tilt gestures.
+     *
+     * The detection proceeds in two sequential steps:
+     *   1. Ask the user to tilt the right edge of the device downward  → detects X axis polarity
+     *   2. Ask the user to tilt the bottom edge of the device downward → detects Y axis polarity
+     *
+     * As detection progresses, the reactive properties `motionAxisDetectionStep` and
+     * `motionAxisInversion` are updated on all components registered in PACRegistry.
+     *
+     * `motionAxisDetectionStep` values:
+     *   'idle'    — not started (initial state, set externally)
+     *   'tilt-x'  — waiting for the user to tilt the right edge down
+     *   'tilt-y'  — waiting for the user to tilt the bottom edge down
+     *   'done'    — both axes detected; inversion values have been applied
+     *   'timeout' — the user did not perform a tilt within the allotted time
+     *
+     * `motionAxisInversion` is set to `{ x: 1|-1, y: 1|-1 }` when step reaches 'done'.
+     * A value of -1 means the physical axis is inverted relative to what the app expects.
+     *
+     * This function is safe to call once per session. Calling it while detection is already
+     * in progress will be silently ignored to prevent duplicate listeners and result corruption.
+     *
+     * @param {object} [options]
+     * @param {number} [options.threshold=4]  - Minimum acceleration magnitude in m/s² required
+     *                                          to count as a deliberate tilt (filters out noise
+     *                                          and incidental micro-movements)
+     * @param {number} [options.timeout=8000] - Milliseconds to wait for each axis gesture before
+     *                                          aborting and setting step to 'timeout'
+     */
+    wakaPAC.detectMotionAxisInversion = function({ threshold = 4, timeout = 8000 } = {}) {
+
+        // Guard against re-entrant calls (e.g. user triggers this twice in quick succession).
+        // We check the current step on the first registered component as the canonical state.
+        const currentStep = window.PACRegistry.components[0]?.abstraction?.motionAxisDetectionStep;
+        if (currentStep === 'tilt-x' || currentStep === 'tilt-y') return;
+
+        // Accumulates the detected polarity for each axis.
+        // Defaults to 1 (non-inverted); overwritten as each axis is confirmed.
+        const result = { x: 1, y: 1 };
+
+        /**
+         * Broadcast a detection step to all registered components.
+         * This triggers any reactive UI that is watching motionAxisDetectionStep
+         * (e.g. overlay prompts, progress indicators).
+         *
+         * @param {'tilt-x'|'tilt-y'|'done'|'timeout'} step
+         */
+        function setStep(step) {
+            window.PACRegistry.components.forEach(function(context) {
+                context.abstraction.motionAxisDetectionStep = step;
+            });
+        }
+
+        /**
+         * Broadcast the final inversion result to all registered components.
+         * Called only after both axes have been successfully detected.
+         *
+         * @param {{ x: 1|-1, y: 1|-1 }} inversion
+         */
+        function setInversion(inversion) {
+            window.PACRegistry.components.forEach(function(context) {
+                context.abstraction.motionAxisInversion = inversion;
+            });
+        }
+
+        /**
+         * Listen for a single deliberate tilt on the given axis, then call onDone or onTimeout.
+         *
+         * Uses `accelerationIncludingGravity` rather than `acceleration` because the former
+         * is available without requiring a separate permission grant on most browsers, and
+         * gravity provides a reliable DC component when the device is tilted.
+         *
+         * The sign of the acceleration value determines polarity:
+         *   positive → axis is oriented as expected (inversion factor = 1)
+         *   negative → axis is physically inverted    (inversion factor = -1)
+         *
+         * @param {'x'|'y'} axis       - Which axis to monitor
+         * @param {function} onDone    - Called after a threshold-crossing sample is received
+         * @param {function} onTimeout - Called if no qualifying sample arrives within `timeout` ms
+         */
+        function detectAxis(axis, onDone, onTimeout) {
+            let timer = null;
+
+            function handler(event) {
+                const gravity = event.accelerationIncludingGravity;
+
+                // Some browsers populate the event but leave accelerationIncludingGravity as null
+                // (notably some Android WebViews). Others return an object with undefined components.
+                // Both cases must be treated as unusable samples.
+                if (!gravity) return;
+
+                const val = axis === 'x' ? gravity.x : gravity.y;
+
+                if (val == null || Math.abs(val) < threshold) return;
+
+                // The first sample that clearly exceeds the threshold determines polarity.
+                // We do not average multiple samples — deliberate tilts are unambiguous at 4 m/s².
+                result[axis] = val > 0 ? 1 : -1;
+
+                cleanup();
+                onDone();
+            }
+
+            function cleanup() {
+                window.removeEventListener('devicemotion', handler);
+                clearTimeout(timer); // safe to call even if timer is null (no-op)
+            }
+
+            window.addEventListener('devicemotion', handler);
+
+            // If the user doesn't tilt within the timeout window, abort this axis and signal failure.
+            timer = setTimeout(function() {
+                cleanup();
+                onTimeout();
+            }, timeout);
+        }
+
+        // ─── Detection sequence ───────────────────────────────────────────────────
+
+        // Step 1: Prompt the user to tilt the right edge of the device downward.
+        // A positive X value in accelerationIncludingGravity means gravity is pulling
+        // toward the right — confirming the axis is non-inverted.
+        setStep('tilt-x');
+
+        detectAxis('x', function() {
+
+            // Step 2: X axis confirmed. Prompt for the Y axis.
+            // A positive Y value means gravity is pulling toward the bottom edge — non-inverted.
+            setStep('tilt-y');
+
+            detectAxis('y', function() {
+
+                // Both axes detected. Publish the final inversion map.
+                const inversion = { x: result.x, y: result.y };
+
+                // Apply to DomUpdateTracker so that subsequent devicemotion events processed
+                // by the motion pipeline are immediately corrected without requiring a page reload.
+                // _lastDispatchedMotion is cleared so the next event is treated as a fresh sample
+                // rather than being suppressed by the "no change" deduplication guard.
+                DomUpdateTracker._motionAxisInversion = inversion;
+                DomUpdateTracker._lastDispatchedMotion = null;
+
+                // Broadcast to components so reactive bindings (e.g. {{ motionAxisInversion.x }})
+                // update immediately.
+                setInversion(inversion);
+
+                setStep('done');
+
+            }, function() { setStep('timeout'); });
+
+        }, function() { setStep('timeout'); });
+    };
 
     /**
      * Set per-axis inversion multipliers for motion sensor data.
