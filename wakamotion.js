@@ -25,6 +25,7 @@
  * ║  Reactive properties injected into every component:                              ║
  * ║    motionSupported             — true if DeviceMotion API is available           ║
  * ║    motionPermissionRequired    — true on iOS 13+ before permission granted       ║
+ * ║    motionPermissionGranted     — true once iOS permission has been granted        ║
  * ║    motionAccelerationX/Y/Z     — raw acceleration incl. gravity (m/s²)          ║
  * ║    motionRotationAlpha/Beta/Gamma — rotation rate (deg/s, gyroscope required)   ║
  * ║    motionTiltX / motionTiltY   — tilt angles from horizontal in degrees         ║
@@ -247,6 +248,12 @@
                         typeof DeviceMotionEvent !== 'undefined' &&
                         typeof DeviceMotionEvent.requestPermission === 'function';
 
+                    // True once iOS permission has been explicitly granted via requestMotionPermission(),
+                    // or immediately if no permission is required (non-iOS devices).
+                    abstraction.motionPermissionGranted =
+                        typeof DeviceMotionEvent === 'undefined' ||
+                        typeof DeviceMotionEvent.requestPermission !== 'function';
+
                     // Raw acceleration along each device axis (m/s², includes gravity)
                     abstraction.motionAccelerationX = null;
                     abstraction.motionAccelerationY = null;
@@ -317,6 +324,7 @@
 
                 if (result === 'granted') {
                     attachListener();
+                    broadcast('motionPermissionGranted', true);
                 }
 
                 return result;
