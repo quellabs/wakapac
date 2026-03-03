@@ -30,6 +30,7 @@
  * ║    motionTiltX / motionTiltY   — tilt angles from horizontal in degrees         ║
  * ║    motionAxisInversion         — current axis inversion multipliers { x, y }    ║
  * ║    motionAxisDetectionStep     — calibration flow state                         ║
+ * ║    motionHasAcceleration         — true if acceleration data is available      ║
  * ║    motionHasRotationRate         — true if gyroscope data is available         ║
  * ║    motionAxisDetectionStepLabel — human-readable calibration instruction        ║
  * ║                                                                                  ║
@@ -69,8 +70,15 @@
     const MIN_DISPATCH_INTERVAL = 16;
 
     /**
+     * Whether the first devicemotion event confirmed acceleration data is available.
+     * null = not yet determined, true/false = confirmed on first event.
+     * @type {boolean|null}
+     */
+    let _hasAcceleration = null;
+
+    /**
      * Whether the first devicemotion event confirmed rotation rate data is available.
-     * null = not yet determined, true/false = confirmed.
+     * null = not yet determined, true/false = confirmed on first event.
      * @type {boolean|null}
      */
     let _hasRotationRate = null;
@@ -129,9 +137,15 @@
             const raw = event.accelerationIncludingGravity ?? {};
             const rot = event.rotationRate ?? {};
 
-            // Detect rotation rate capability on the first event.
-            // Some devices lack a gyroscope and always report null rotation values.
-            // We expose this as a stable reactive property so UI can adapt.
+            // Detect sensor capabilities on the first event.
+            // accelerationIncludingGravity can be null on some Android WebViews.
+            // rotationRate is null on devices without a gyroscope.
+            // Once determined these never change, so we only broadcast once.
+            if (_hasAcceleration === null) {
+                _hasAcceleration = raw.x != null || raw.y != null || raw.z != null;
+                broadcastAll({ motionHasAcceleration: _hasAcceleration });
+            }
+
             if (_hasRotationRate === null) {
                 _hasRotationRate = rot.alpha != null || rot.beta != null || rot.gamma != null;
                 broadcastAll({ motionHasRotationRate: _hasRotationRate });
@@ -247,8 +261,10 @@
                     abstraction.motionTiltX = null;
                     abstraction.motionTiltY = null;
 
-                    // Whether the device has a gyroscope. null until the first event arrives,
-                    // then true or false based on whether rotationRate data is present.
+                    // Capability flags — null until the first event arrives, then stable booleans.
+                    // motionHasAcceleration: false on some Android WebViews lacking accelerometer data.
+                    // motionHasRotationRate: false on devices without a gyroscope.
+                    abstraction.motionHasAcceleration = _hasAcceleration;
                     abstraction.motionHasRotationRate = _hasRotationRate;
 
                     // Axis inversion detection state
@@ -358,6 +374,28 @@
          * @param {number} [options.threshold=4]  - Minimum acceleration in m/s² to register a tilt
          * @param {number} [options.timeout=8000] - Ms to wait per axis before setting step to 'timeout'
          */
+        /**
+         * Returns the current motion sensor capabilities of this device.
+         * `hasAcceleration` and `hasRotationRate` are null until the first devicemotion
+         * event arrives — call this after motion data has started flowing for reliable results.
+         *
+         * @returns {{
+         *   hasDeviceMotion:   boolean,
+         *   requiresPermission: boolean,
+         *   hasAcceleration:   boolean|null,
+         *   hasRotationRate:   boolean|null
+         * }}
+         */
+        getMotionCapabilities() {
+            return {
+                hasDeviceMotion:    typeof DeviceMotionEvent !== 'undefined',
+                requiresPermission: typeof DeviceMotionEvent !== 'undefined' &&
+                    typeof DeviceMotionEvent.requestPermission === 'function',
+                hasAcceleration:    _hasAcceleration,
+                hasRotationRate:    _hasRotationRate
+            };
+        },
+
         detectMotionAxisInversion({ threshold = 4, timeout = 8000 } = {}) {
 
             // Guard against missing registry or re-entrant calls
