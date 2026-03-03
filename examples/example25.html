@@ -23,6 +23,8 @@
 <div id="notifications" data-pac-id="notifications">
     <button data-pac-bind="click: addNotification">Add notification</button>
     <button data-pac-bind="click: clearNotifications">Clear</button>
+    <button data-pac-bind="click: editFirst">Edit First</button>
+
     <ul data-pac-bind="foreach: session.notifications">
         <li>{{item.text}}</li>
     </ul>
@@ -70,6 +72,12 @@
 
         clearNotifications() {
             this.session.notifications.splice(0, this.session.notifications.length);
+        },
+
+        editFirst() {
+            if (this.session.notifications.length > 0) {
+                this.session.notifications[0].text = 'Edited!';
+            }
         }
     });
 </script>
