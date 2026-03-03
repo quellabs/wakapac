@@ -38,7 +38,9 @@
 <script src="../wakapac.js"></script>
 <script src="../wakamotion.js"></script>
 <script>
+    wakaMotion.setMotionThreshold(0.5)
     wakaPAC.use(wakaMotion);
+
     wakaPAC('#motion', {
         detectAxes() {
             wakaMotion.detectMotionAxisInversion({ threshold: 4, timeout: 8000 });
