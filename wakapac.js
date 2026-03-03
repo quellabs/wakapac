@@ -1243,6 +1243,9 @@
         /** @private {object|null} Last dispatched motion values, used for threshold comparison */
         _lastDispatchedMotion: null,
 
+        /** @private {object} Per-axis inversion multipliers for motion sensor data. 1 = normal, -1 = inverted. */
+        _motionAxisInversion: { x: 1, y: 1 },
+
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
 
@@ -1349,6 +1352,17 @@
                         online: navigator.onLine, // Current connectivity flag
                         networkType: Utils.getNetworkEffectiveType(),
                         networkQuality: Utils.detectNetworkQuality(),
+                    });
+                });
+            }
+
+            // Screen orientation changes
+            // Fires when the device is rotated and the screen orientation changes
+            if (screen.orientation) {
+                screen.orientation.addEventListener('change', function() {
+                    self.dispatchBrowserStateEvent('orientation', {
+                        angle: screen.orientation.angle,
+                        type: screen.orientation.type
                     });
                 });
             }
@@ -2371,9 +2385,15 @@
                     this._lastDispatchedMotion = { x, y, z, alpha, beta, gamma };
                 }
 
+                // Apply per-axis inversion multipliers (corrects for hardware/firmware bugs
+                // on devices that report an axis inverted relative to the W3C spec)
+                const inv = this._motionAxisInversion;
+                const ix = x != null ? x * inv.x : null;
+                const iy = y != null ? y * inv.y : null;
+
                 // Dispatch data as a normalized browser state event
                 this.dispatchBrowserStateEvent('motion', {
-                    acceleration: { x, y, z },
+                    acceleration: { x: ix, y: iy, z },
                     rotationRate: { alpha, beta, gamma }
                 });
             });
@@ -6231,6 +6251,14 @@
                 break;
             }
 
+            case 'orientation': {
+                // Screen orientation angle in degrees (0, 90, 180, 270)
+                // and type string e.g. 'portrait-primary', 'landscape-secondary'
+                this.abstraction.browserOrientationAngle = stateData.angle;
+                this.abstraction.browserOrientationType = stateData.type;
+                break;
+            }
+
             case 'motion': {
                 // Raw acceleration along each device axis (m/s², includes gravity).
                 // X = left/right, Y = up/down, Z = through the screen.
@@ -6836,6 +6864,10 @@
         abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
         abstraction.containerWidth = this.container.clientWidth;
         abstraction.containerHeight = this.container.clientHeight;
+
+        // Screen orientation
+        abstraction.browserOrientationAngle = screen.orientation ? screen.orientation.angle : 0;
+        abstraction.browserOrientationType = screen.orientation ? screen.orientation.type : 'unknown';
 
         // Motion sensor data
         abstraction.motionAccelerationX = null;
@@ -9561,6 +9593,20 @@
     wakaPAC.setMotionThreshold = function(threshold) {
         DomUpdateTracker._motionThreshold = Math.max(0, threshold);
         DomUpdateTracker._lastDispatchedMotion = null;
+    }
+
+    /**
+     * Set per-axis inversion multipliers for motion sensor data.
+     * Use -1 to invert an axis that your device reports opposite to the W3C spec
+     * (positive X should mean right edge down, positive Y should mean bottom edge down).
+     * @param {number} x - X axis multiplier: 1 (default) or -1 (inverted)
+     * @param {number} y - Y axis multiplier: 1 (default) or -1 (inverted)
+     */
+    wakaPAC.setMotionAxisInversion = function(x, y) {
+        DomUpdateTracker._motionAxisInversion = {
+            x: x >= 0 ? 1 : -1,
+            y: y >= 0 ? 1 : -1
+        };
     }
 
     // ========================================================================
