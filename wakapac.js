@@ -216,7 +216,7 @@
      * Hex values match Win32 API virtual key code identifiers
      * Reference: https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
      */
-    // Control keys
+        // Control keys
     const VK_BACK = 0x08;           // Backspace
     const VK_TAB = 0x09;            // Tab
     const VK_RETURN = 0x0D;         // Enter
@@ -1230,24 +1230,6 @@
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
-        /** @private {boolean} Flag to enable motion sensor api */
-        _enableMotion: false,
-
-        /** @private {boolean} Prevents attaching the devicemotion listener more than once */
-        _motionListenerAttached: false,
-
-        /**
-         * @private {number} Dead-zone threshold for motion sensor dispatch (in m/s² for acceleration,
-         * deg/s for rotation). A new event is only dispatched when at least one axis changes by more
-         * than this amount from the last dispatched value. 0 = dispatch every event (default).
-         */
-        _motionThreshold: 0,
-
-        /** @private {object|null} Last dispatched motion values, used for threshold comparison */
-        _lastDispatchedMotion: null,
-
-        /** @private {object} Per-axis inversion multipliers for motion sensor data. 1 = normal, -1 = inverted. */
-        _motionAxisInversion: { x: 1, y: 1 },
 
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
@@ -1300,7 +1282,6 @@
             this._setupKeyboardEvents();     // Keyboard input dispatch
             this._setupFormEvents();         // Form interaction tracking
             this._setupWindowEvents();       // Scroll/resize state updates
-            this._setupMotionEvents();       // Motion sensor
             this._setupObservers();          // Intersection/resize observers
         },
 
@@ -2327,96 +2308,6 @@
         },
 
         /**
-         * Setup motion sensor tracking. On iOS 13+, requests explicit user permission
-         * before attaching the listener. On Android and other platforms, attaches
-         * the listener directly as no permission prompt is required.
-         * @returns {void}
-         * @private
-         */
-        async _setupMotionEvents() {
-            // Do not listen when motion is disabled.
-            if (!this._enableMotion) {
-                return;
-            }
-
-            // iOS 13+ requires DeviceMotionEvent.requestPermission() to be called
-            // from within a user gesture (tap). Calling it at page load causes a
-            // silent denial. On iOS we skip auto-setup here and rely on the app
-            // calling wakaPAC.requestMotionPermission() from a click handler instead.
-            if (typeof DeviceMotionEvent.requestPermission === 'function') {
-                return;
-            }
-
-            // Android, desktop: attach the listener directly — no permission needed
-            // devicemotion is a window event and does not propagate to document
-            this._attachMotionListener();
-        },
-
-        /**
-         * Attaches the devicemotion event listener and starts populating motion
-         * reactive properties. Called automatically on non-iOS, or after permission
-         * is granted on iOS via wakaPAC.requestMotionPermission().
-         * @private
-         */
-        _attachMotionListener() {
-            // Guard against double-registration
-            if (this._motionListenerAttached) {
-                return;
-            }
-
-            this._motionListenerAttached = true;
-
-            window.addEventListener('devicemotion', (event) => {
-                // accelerationIncludingGravity is more reliable than acceleration,
-                // which is null on devices that cannot isolate gravity from motion.
-                const raw = event.accelerationIncludingGravity ?? {};
-                const rot = event.rotationRate ?? {};
-
-                // Round to 2 decimal places to suppress floating point noise
-                const r2 = v => v != null ? Math.round(v * 100) / 100 : null;
-                const x = r2(raw.x), y = r2(raw.y), z = r2(raw.z);
-                const alpha = r2(rot.alpha), beta = r2(rot.beta), gamma = r2(rot.gamma);
-
-                // Skip dispatch if all axes are within the dead-zone threshold
-                if (this._motionThreshold > 0) {
-                    const t = this._motionThreshold;
-                    const last = this._lastDispatchedMotion;
-
-                    if (last) {
-                        const accChanged =
-                            Math.abs((x     ?? last.x) - last.x) > t ||
-                            Math.abs((y     ?? last.y) - last.y) > t ||
-                            Math.abs((z     ?? last.z) - last.z) > t;
-
-                        const rotChanged =
-                            Math.abs((alpha ?? last.alpha) - last.alpha) > t ||
-                            Math.abs((beta  ?? last.beta)  - last.beta)  > t ||
-                            Math.abs((gamma ?? last.gamma) - last.gamma) > t;
-
-                        if (!accChanged && !rotChanged) {
-                            return;
-                        }
-                    }
-
-                    // Record what we are about to dispatch
-                    this._lastDispatchedMotion = { x, y, z, alpha, beta, gamma };
-                }
-
-                // Apply per-axis inversion multipliers (corrects for hardware/firmware bugs
-                // on devices that report an axis inverted relative to the W3C spec)
-                const inv = this._motionAxisInversion;
-                const ix = x != null ? x * inv.x : null;
-                const iy = y != null ? y * inv.y : null;
-
-                // Dispatch data as a normalized browser state event
-                this.dispatchBrowserStateEvent('motion', {
-                    acceleration: { x: ix, y: iy, z },
-                    rotationRate: { alpha, beta, gamma }
-                });
-            });
-        },
-
-        /**
          * Setup intersection and resize observers
          * @returns {void}
          * @private
@@ -3339,17 +3230,17 @@
          */
         isCaptureAffected(messageType) {
             return messageType === MSG_MOUSEMOVE ||
-                   messageType === MSG_MOUSEWHEEL ||
-                   messageType === MSG_LBUTTONDOWN ||
-                   messageType === MSG_LBUTTONUP ||
-                   messageType === MSG_LBUTTONDBLCLK ||
-                   messageType === MSG_RBUTTONDOWN ||
-                   messageType === MSG_RBUTTONUP ||
-                   messageType === MSG_MBUTTONDOWN ||
-                   messageType === MSG_MBUTTONUP ||
-                   messageType === MSG_LCLICK ||
-                   messageType === MSG_MCLICK ||
-                   messageType === MSG_RCLICK;
+                messageType === MSG_MOUSEWHEEL ||
+                messageType === MSG_LBUTTONDOWN ||
+                messageType === MSG_LBUTTONUP ||
+                messageType === MSG_LBUTTONDBLCLK ||
+                messageType === MSG_RBUTTONDOWN ||
+                messageType === MSG_RBUTTONUP ||
+                messageType === MSG_MBUTTONDOWN ||
+                messageType === MSG_MBUTTONUP ||
+                messageType === MSG_LCLICK ||
+                messageType === MSG_MCLICK ||
+                messageType === MSG_RCLICK;
         },
 
         /**
@@ -3406,7 +3297,7 @@
             // Send capture changed message to container losing the capture
             if (this._capturedContainer?.isConnected) {
                 const pacId = this._capturedContainer.getAttribute('data-pac-id');
-                
+
                 if (pacId !== null) {
                     wakaPAC.sendMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
                 }
@@ -6018,7 +5909,7 @@
                     if (!Utils.isEqual(previousValues[bindingType], currentValue)) {
                         // Update value
                         previousValues[bindingType] = currentValue;
-                        
+
                         // Update DOM — pass pre-computed value to avoid re-evaluating
                         // the same expression through a second normalizePath chain
                         domUpdater.updateAttributeBinding(element, bindingType, bindingData, currentValue);
@@ -6276,36 +6167,6 @@
                 break;
             }
 
-            case 'motion': {
-                // Raw acceleration along each device axis (m/s², includes gravity).
-                // X = left/right, Y = up/down, Z = through the screen.
-                const ax = stateData.acceleration.x;
-                const ay = stateData.acceleration.y;
-                const az = stateData.acceleration.z;
-
-                this.abstraction.motionAccelerationX = ax;
-                this.abstraction.motionAccelerationY = ay;
-                this.abstraction.motionAccelerationZ = az;
-
-                // Rotation rate around each axis in degrees/second.
-                // Only available on devices with a gyroscope.
-                this.abstraction.motionRotationAlpha = stateData.rotationRate.alpha;
-                this.abstraction.motionRotationBeta = stateData.rotationRate.beta;
-                this.abstraction.motionRotationGamma = stateData.rotationRate.gamma;
-
-                // Tilt angles in degrees from horizontal using asin(axis / g).
-                // 0° = flat, +90° = that edge tilted fully upright.
-                // Range is -90° to +90° and is stable across all orientations.
-                // Clamped to [-1, 1] before asin to guard against sensor values
-                // slightly exceeding g due to noise, which would produce NaN.
-                const G = 9.81;
-                const toDeg = v => Math.round(v * (180 / Math.PI));
-                const clamp = v => Math.max(-1, Math.min(1, v));
-                this.abstraction.motionTiltX = ax != null ? toDeg(Math.asin(clamp(ax / G))) : null;
-                this.abstraction.motionTiltY = ay != null ? toDeg(Math.asin(clamp(ay / G))) : null;
-                break;
-            }
-
             default:
                 console.warn('Unknown browser state message ' + stateType);
                 break;
@@ -6467,7 +6328,7 @@
                 template: element.innerHTML, // Capture clean template
                 itemVar: itemVar,
                 indexVar: indexVar,
-				depth: depth
+                depth: depth
             });
 
             interpolationMap.set(element, mappingData);
@@ -6886,35 +6747,6 @@
         abstraction.browserOrientationAngle = screen.orientation ? screen.orientation.angle : 0;
         abstraction.browserOrientationType = screen.orientation ? screen.orientation.type : 'unknown';
 
-        // True if the browser supports the DeviceMotion API at all.
-        abstraction.motionSupported = typeof DeviceMotionEvent !== 'undefined';
-
-        // True on iOS 13+ where DeviceMotionEvent.requestPermission() must be called
-        // from a user gesture before motion data becomes available.
-        // Use this to conditionally show a permission button in your UI.
-        abstraction.motionPermissionRequired =
-            typeof DeviceMotionEvent !== 'undefined' &&
-            typeof DeviceMotionEvent.requestPermission === 'function';
-
-        // Motion sensor data
-        abstraction.motionAccelerationX = null;
-        abstraction.motionAccelerationY = null;
-        abstraction.motionAccelerationZ = null;
-        abstraction.motionRotationAlpha = null;
-        abstraction.motionRotationBeta = null;
-        abstraction.motionRotationGamma = null;
-
-        // Tilt angles in degrees: X = left/right roll, Y = forward/back pitch
-        abstraction.motionTiltX = null;
-        abstraction.motionTiltY = null;
-
-        // Axis inversion detection state.
-        // motionAxisDetectionStep: 'idle' | 'tilt-x' | 'tilt-y' | 'done' | 'timeout'
-        // motionAxisInversion: { x: 1|-1, y: 1|-1 } — current inversion multipliers
-        // motionAxisDetectionStepLabel: human-readable label for the current step
-        abstraction.motionAxisDetectionStep = 'idle';
-        abstraction.motionAxisDetectionStepLabel = '';
-        abstraction.motionAxisInversion = { x: 1, y: 1 };
     };
 
     /**
@@ -9608,248 +9440,6 @@
         // Create the plugin and store
         _plugins.push(library.createPacPlugin(wakaPAC));
     };
-
-    /**
-     * Enable motion sensor api
-     * @param {Boolean} enable
-     */
-    wakaPAC.enableMotion = function(enable) {
-        DomUpdateTracker._enableMotion = enable;
-    }
-
-    /**
-     * Request iOS motion sensor permission from within a user gesture (e.g. a button click).
-     * On iOS 13+, DeviceMotionEvent.requestPermission() must be called from a tap handler —
-     * calling it at page load causes a silent denial. On non-iOS this is a no-op.
-     * Returns a Promise that resolves to 'granted', 'denied', or 'error'.
-     *
-     * Usage:
-     *   wakaPAC('#app', {
-     *       requestMotion() {
-     *           wakaPAC.requestMotionPermission().then(result => {
-     *               this.permissionResult = result;
-     *           });
-     *       }
-     *   });
-     */
-    wakaPAC.requestMotionPermission = async function() {
-        if (typeof DeviceMotionEvent === 'undefined' ||
-            typeof DeviceMotionEvent.requestPermission !== 'function') {
-            // Not iOS — listener already attached at init, nothing to do
-            return 'granted';
-        }
-
-        try {
-            const result = await DeviceMotionEvent.requestPermission();
-
-            if (result === 'granted') {
-                DomUpdateTracker._attachMotionListener();
-            }
-
-            return result;
-        } catch (err) {
-            return 'error';
-        }
-    }
-
-    /**
-     * Set the dead-zone threshold for motion sensor dispatch.
-     * Events are suppressed unless at least one axis changes by more than this amount
-     * since the last dispatched event. Useful for tilt/orientation UIs to prevent
-     * constant re-renders from sensor noise while the device is stationary.
-     * @param {number} threshold - Minimum change in m/s² (acceleration) or deg/s (rotation)
-     *                             required to trigger a dispatch. Default is 0 (every event).
-     */
-    wakaPAC.setMotionThreshold = function(threshold) {
-        DomUpdateTracker._motionThreshold = Math.max(0, threshold);
-        DomUpdateTracker._lastDispatchedMotion = null;
-    }
-
-    /**
-     * Detect motion axis inversion by asking the user to perform two deliberate tilt gestures.
-     *
-     * The detection proceeds in two sequential steps:
-     *   1. Ask the user to tilt the right edge of the device downward  → detects X axis polarity
-     *   2. Ask the user to tilt the bottom edge of the device downward → detects Y axis polarity
-     *
-     * As detection progresses, the reactive properties `motionAxisDetectionStep` and
-     * `motionAxisInversion` are updated on all components registered in PACRegistry.
-     *
-     * `motionAxisDetectionStep` values:
-     *   'idle'    — not started (initial state, set externally)
-     *   'tilt-x'  — waiting for the user to tilt the right edge down
-     *   'tilt-y'  — waiting for the user to tilt the bottom edge down
-     *   'done'    — both axes detected; inversion values have been applied
-     *   'timeout' — the user did not perform a tilt within the allotted time
-     *
-     * `motionAxisInversion` is set to `{ x: 1|-1, y: 1|-1 }` when step reaches 'done'.
-     * A value of -1 means the physical axis is inverted relative to what the app expects.
-     *
-     * This function is safe to call once per session. Calling it while detection is already
-     * in progress will be silently ignored to prevent duplicate listeners and result corruption.
-     *
-     * @param {object} [options]
-     * @param {number} [options.threshold=4]  - Minimum acceleration magnitude in m/s² required
-     *                                          to count as a deliberate tilt (filters out noise
-     *                                          and incidental micro-movements)
-     * @param {number} [options.timeout=8000] - Milliseconds to wait for each axis gesture before
-     *                                          aborting and setting step to 'timeout'
-     */
-    wakaPAC.detectMotionAxisInversion = function({ threshold = 4, timeout = 8000 } = {}) {
-
-        // Guard against re-entrant calls (e.g. user triggers this twice in quick succession).
-        // We check the current step on the first registered component as the canonical state.
-        const currentStep = window.PACRegistry.components[0]?.abstraction?.motionAxisDetectionStep;
-
-        if (currentStep === 'tilt-x' || currentStep === 'tilt-y') {
-            return;
-        }
-
-        // Accumulates the detected polarity for each axis.
-        // Defaults to 1 (non-inverted); overwritten as each axis is confirmed.
-        const result = { x: 1, y: 1 };
-
-        /**
-         * Broadcast a detection step to all registered components.
-         * This triggers any reactive UI that is watching motionAxisDetectionStep
-         * (e.g. overlay prompts, progress indicators).
-         * @param {'tilt-x'|'tilt-y'|'done'|'timeout'} step
-         */
-        function setStep(step) {
-            const labels = {
-                'tilt-x':  'Tilt the right edge of the device down',
-                'tilt-y':  'Tilt the bottom edge of the device down',
-                'done':    'Calibration complete',
-                'timeout': 'Timed out — please try again'
-            };
-
-            window.PACRegistry.components.forEach(function(context) {
-                context.abstraction.motionAxisDetectionStep = step;
-                context.abstraction.motionAxisDetectionStepLabel = labels[step] ?? '';
-            });
-        }
-
-        /**
-         * Broadcast the final inversion result to all registered components.
-         * Called only after both axes have been successfully detected.
-         * @param {{ x: 1|-1, y: 1|-1 }} inversion
-         */
-        function setInversion(inversion) {
-            window.PACRegistry.components.forEach(function(context) {
-                context.abstraction.motionAxisInversion = inversion;
-            });
-        }
-
-        /**
-         * Listen for a single deliberate tilt on the given axis, then call onDone or onTimeout.
-         *
-         * Uses `accelerationIncludingGravity` rather than `acceleration` because the former
-         * is available without requiring a separate permission grant on most browsers, and
-         * gravity provides a reliable DC component when the device is tilted.
-         *
-         * The sign of the acceleration value determines polarity:
-         *   positive → axis is oriented as expected (inversion factor = 1)
-         *   negative → axis is physically inverted    (inversion factor = -1)
-         *
-         * @param {'x'|'y'} axis       - Which axis to monitor
-         * @param {function} onDone    - Called after a threshold-crossing sample is received
-         * @param {function} onTimeout - Called if no qualifying sample arrives within `timeout` ms
-         */
-        function detectAxis(axis, onDone, onTimeout) {
-            let timer = null;
-
-            function handler(event) {
-                const gravity = event.accelerationIncludingGravity;
-
-                // Some browsers populate the event but leave accelerationIncludingGravity as null
-                // (notably some Android WebViews). Others return an object with undefined components.
-                // Both cases must be treated as unusable samples.
-                if (!gravity) {
-                    return;
-                }
-
-                const val = axis === 'x' ? gravity.x : gravity.y;
-
-                if (val == null || Math.abs(val) < threshold) {
-                    return;
-                }
-
-                // The first sample that clearly exceeds the threshold determines polarity.
-                // We do not average multiple samples — deliberate tilts are unambiguous at 4 m/s².
-                result[axis] = val > 0 ? 1 : -1;
-
-                cleanup();
-                onDone();
-            }
-
-            function cleanup() {
-                window.removeEventListener('devicemotion', handler);
-                clearTimeout(timer); // safe to call even if timer is null (no-op)
-            }
-
-            window.addEventListener('devicemotion', handler);
-
-            // If the user doesn't tilt within the timeout window, abort this axis and signal failure.
-            timer = setTimeout(function() {
-                cleanup();
-                onTimeout();
-            }, timeout);
-        }
-
-        /**
-         * Apply and broadcast the completed inversion result.
-         * Clears _lastDispatchedMotion so the next event bypasses the deduplication
-         * guard and immediately reflects corrected values.
-         */
-        function applyResult() {
-            const inversion = { x: result.x, y: result.y };
-
-            DomUpdateTracker._motionAxisInversion = inversion;
-            DomUpdateTracker._lastDispatchedMotion = null;
-
-            setInversion(inversion);
-            setStep('done');
-        }
-
-        /**
-         * Start Y axis detection after X has been confirmed.
-         * A short settling delay is required between steps — without it, the Y listener
-         * can be triggered by residual acceleration from the same X tilt gesture before
-         * the user has a chance to return the device to flat.
-         */
-        function detectYAxis() {
-            setStep('tilt-y');
-
-            // Wait for the device to settle before listening for Y.
-            // 800ms is enough time to set the device flat between gestures without
-            // feeling like an unresponsive pause.
-            setTimeout(function() {
-                detectAxis('y', applyResult, function() { setStep('timeout'); });
-            }, 1000);
-        }
-
-        // ─── Detection sequence ───────────────────────────────────────────────────
-
-        // Step 1: Prompt the user to tilt the right edge of the device downward.
-        // A positive X value in accelerationIncludingGravity means gravity is pulling
-        // toward the right — confirming the axis is non-inverted.
-        setStep('tilt-x');
-        detectAxis('x', detectYAxis, function() { setStep('timeout'); });
-    };
-
-    /**
-     * Set per-axis inversion multipliers for motion sensor data.
-     * Use -1 to invert an axis that your device reports opposite to the W3C spec
-     * (positive X should mean right edge down, positive Y should mean bottom edge down).
-     * @param {number} x - X axis multiplier: 1 (default) or -1 (inverted)
-     * @param {number} y - Y axis multiplier: 1 (default) or -1 (inverted)
-     */
-    wakaPAC.setMotionAxisInversion = function(x, y) {
-        DomUpdateTracker._motionAxisInversion = {
-            x: x >= 0 ? 1 : -1,
-            y: y >= 0 ? 1 : -1
-        };
-    }
 
     // ========================================================================
     // EXPORTS
