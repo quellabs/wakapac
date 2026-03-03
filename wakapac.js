@@ -1230,6 +1230,9 @@
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
+        /** @private {boolean} Flag to enable motion sensor api */
+        _enableMotion: false,
+
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
 
@@ -1281,6 +1284,7 @@
             this._setupKeyboardEvents();     // Keyboard input dispatch
             this._setupFormEvents();         // Form interaction tracking
             this._setupWindowEvents();       // Scroll/resize state updates
+            this._setupMotionEvents();       // Motion sensor
             this._setupObservers();          // Intersection/resize observers
         },
 
@@ -2291,6 +2295,48 @@
                     // Scroll offsets at time of resize (useful for layout consumers)
                     scrollX: window.scrollX,
                     scrollY: window.scrollY
+                });
+            });
+        },
+
+        /**
+         * Setup motion sensor tracking. On iOS 13+, requests explicit user permission
+         * before attaching the listener. On Android and other platforms, attaches
+         * the listener directly as no permission prompt is required.
+         * @returns {void}
+         * @private
+         */
+        async _setupMotionEvents() {
+            // Do not listen when motion is disabled.
+            if (!this._enableMotion) {
+                return;
+            }
+
+            // iOS 13+ requires explicit permission before accessing motion sensors.
+            // requestPermission is not present on Android or desktop browsers.
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                // Ask permission
+                const permission = await DeviceMotionEvent.requestPermission();
+
+                // Only attach the listener if the user granted access
+                if (permission !== 'granted') {
+                    return;
+                }
+            }
+
+            // Android, desktop, or iOS with permission granted: attach the listener
+            document.addEventListener('devicemotion', (event) => {
+                // accelerationIncludingGravity is more reliable than acceleration,
+                // which is null on devices that cannot isolate gravity from motion.
+                const { x, y, z } = event.accelerationIncludingGravity ?? {};
+
+                // rotationRate gives degrees/sec around each axis
+                const { alpha, beta, gamma } = event.rotationRate ?? {};
+
+                // Dispatch data as a normalized browser state event
+                this.dispatchBrowserStateEvent('motion', {
+                    acceleration: { x, y, z },
+                    rotationRate: { alpha, beta, gamma }
                 });
             });
         },
@@ -6147,6 +6193,11 @@
                 break;
             }
 
+            case 'motion': {
+
+                break;
+            }
+
             default:
                 console.warn('Unknown browser state message ' + stateType);
                 break;
@@ -9415,6 +9466,14 @@
         // Create the plugin and store
         _plugins.push(library.createPacPlugin(wakaPAC));
     };
+
+    /**
+     * Enable motion sensor api
+     * @param {Boolean} enable
+     */
+    wakaPAC.enableMotion = function(enable) {
+        DomUpdateTracker._enableMotion = enable;
+    }
 
     // ========================================================================
     // EXPORTS
