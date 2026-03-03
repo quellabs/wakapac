@@ -2,7 +2,7 @@
 <body>
 
 <div id="counter" tabindex="0" style="border: 1px solid #ccc; padding: 20px; outline: none;">
-    <p>Count: {{store.count}}</p>
+    <p>Count: {{count}}</p>
     <p>Count * 2: {{newCount}}</p>
     <p>Focus: {{containerFocusWithin ? 'YES' : 'NO'}}</p>
     <p>Viewport: {{browserViewportWidth}} x {{browserViewportHeight}}</p>
@@ -16,21 +16,15 @@
 </div>
 
 <script src="../wakapac.js"></script>
-<script src="../wakastore.js"></script>
-
 <script>
-    wakaPAC.use(wakaStore);
-
-    const store = wakaStore.createStore({ count: 0 });
-
     const counter = wakaPAC('#counter', {
-        store: store,
+        count: 0,
         timerCounter: 0,
         _timerId: null,
 
         computed: {
             newCount() {
-                return this.store.count * 2;
+                return this.count * 2;
             }
         },
 
@@ -64,11 +58,11 @@
         },
 
         increment() {
-            this.store.count++;
+            this.count++;
         },
 
         decrement() {
-            this.store.count--;
+            this.count--;
         }
     });
 

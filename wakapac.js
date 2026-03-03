@@ -1063,17 +1063,21 @@
                 return val;
             }
 
-            // CRITICAL FIX: Lazy wrapping of nested objects and arrays
             // If the value is an object/array and not already reactive, wrap it in a proxy
             if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
                 const propertyPath = currentPath.concat([prop]);
                 const proxiedVal = createProxy(val, propertyPath);
                 proxiedVal._isReactive = true;
 
-                // Update the original object with the proxy
-                target[prop] = proxiedVal;
+                // Write directly to target without going through the proxy set trap.
+                // This caches the proxy without firing pac:change.
+                Object.defineProperty(target, prop, {
+                    value: proxiedVal,
+                    writable: true,
+                    enumerable: true,
+                    configurable: true
+                });
 
-                // Return proxiedVal
                 return proxiedVal;
             }
 

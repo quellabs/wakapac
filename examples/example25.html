@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaStore Example</title>
+</head>
+<body>
+
+<!-- Component A: controls the store -->
+<div id="controls" data-pac-id="controls">
+    <p>Logged in as: <strong>{{session.user.name}}</strong> ({{session.user.role}})</p>
+    <button data-pac-bind="click: login">Login as Admin</button>
+    <button data-pac-bind="click: logout">Logout</button>
+</div>
+
+<!-- Component B: reads from the same store, mounted under a different key -->
+<div id="header" data-pac-id="header">
+    <p>Header sees: <strong>{{currentUser.user.name}}</strong></p>
+    <p data-pac-bind="hidden: !currentUser.user.name">Welcome back!</p>
+</div>
+
+<!-- Component C: array demo -->
+<div id="notifications" data-pac-id="notifications">
+    <button data-pac-bind="click: addNotification">Add notification</button>
+    <button data-pac-bind="click: clearNotifications">Clear</button>
+    <ul>
+        <li data-pac-foreach="session.notifications">{{item.text}}</li>
+    </ul>
+</div>
+
+<script src="../wakapac.js"></script>
+<script src="../wakastore.js"></script>
+
+<script>
+    wakaPAC.use(wakaStore);
+
+    const store = wakaStore.createStore({
+        user: { name: '', role: '' },
+        notifications: []
+    });
+
+    wakaPAC('#controls', {
+        session: store,
+
+        login() {
+            this.session.user.name = 'Floris';
+            this.session.user.role = 'admin';
+        },
+
+        logout() {
+            this.session.user.name = '';
+            this.session.user.role = '';
+        }
+    });
+
+    // Same store, different key name
+    wakaPAC('#header', {
+        currentUser: store
+    });
+
+    // Direct store mutation from outside any component
+    wakaPAC('#notifications', {
+        session: store,
+
+        addNotification() {
+            this.session.notifications.push({
+                text: 'Notification ' + (this.session.notifications.length + 1)
+            });
+        },
+
+        clearNotifications() {
+            this.session.notifications.splice(0, this.session.notifications.length);
+        }
+    });
+</script>
+
+</body>
+</html>

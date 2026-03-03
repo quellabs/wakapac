@@ -3,7 +3,7 @@
     "minify:wakapac": "terser wakapac.js -c passes=3,drop_console=true -m toplevel=true -o wakapac.min.js",
     "minify:wakasync": "terser wakasync.js -c passes=3,drop_console=true -m toplevel=true -o wakasync.min.js",
     "minify:wakastore": "terser wakastore.js -c passes=3,drop_console=true -m toplevel=true -o wakastore.min.js",
-    "minify": "npm run minify:wakapac && npm run minify:wakasync"
+    "minify": "npm run minify:wakapac && npm run minify:wakasync && npm run minify:wakastore"
   },
   "dependencies": {
     "jslint": "^0.12.1"
