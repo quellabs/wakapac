@@ -10,9 +10,9 @@
  * ║                                                                                  ║
  * ║  WakaStore - Shared Reactive Store Plugin for wakaPAC                            ║
  * ║                                                                                  ║
- * ║  Provides a shared reactive state object that can be mounted on any             ║
- * ║  wakaPAC component abstraction under any property name. Changes to the          ║
- * ║  store propagate to all subscriber components automatically.                    ║
+ * ║  Provides a shared reactive state object that can be mounted on any              ║
+ * ║  wakaPAC component abstraction under any property name. Changes to the           ║
+ * ║  store propagate to all subscriber components automatically.                     ║
  * ║                                                                                  ║
  * ║  Usage:                                                                          ║
  * ║    wakaPAC.use(wakaStore);                                                       ║
@@ -163,16 +163,30 @@
                     return;
                 }
 
+                const isArrayChange = Array.isArray(newValue);
+
                 subscribers.forEach(function({ key, container }) {
                     const translatedPath = [key].concat(path);
 
-                    container.dispatchEvent(new CustomEvent('pac:change', {
-                        detail: {
-                            path: translatedPath,
-                            oldValue: oldValue,
-                            newValue: newValue
-                        }
-                    }));
+                    if (isArrayChange) {
+                        // pac:array-change for foreach rebuilds.
+                        // handleArrayChange only reads detail.newValue — no write-back.
+                        container.dispatchEvent(new CustomEvent('pac:array-change', {
+                            detail: {
+                                path: translatedPath,
+                                oldValue: oldValue,
+                                newValue: newValue
+                            }
+                        }));
+                    } else {
+                        container.dispatchEvent(new CustomEvent('pac:change', {
+                            detail: {
+                                path: translatedPath,
+                                oldValue: oldValue,
+                                newValue: newValue
+                            }
+                        }));
+                    }
                 });
             }
 
@@ -256,7 +270,7 @@
                     return;
                 }
 
-                Object.defineProperty(obj, '_externalProxy', {
+                Object.defineProperty(obj, EXTERNAL_PROXY_FLAG, {
                     value: true,
                     enumerable: false,
                     writable: false,
