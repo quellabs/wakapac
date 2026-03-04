@@ -216,7 +216,7 @@
      * Hex values match Win32 API virtual key code identifiers
      * Reference: https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
      */
-    // Control keys
+        // Control keys
     const VK_BACK = 0x08;           // Backspace
     const VK_TAB = 0x09;            // Tab
     const VK_RETURN = 0x0D;         // Enter
@@ -1230,6 +1230,7 @@
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
+
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
 
@@ -1335,6 +1336,17 @@
                         online: navigator.onLine, // Current connectivity flag
                         networkType: Utils.getNetworkEffectiveType(),
                         networkQuality: Utils.detectNetworkQuality(),
+                    });
+                });
+            }
+
+            // Screen orientation changes
+            // Fires when the device is rotated and the screen orientation changes
+            if (screen.orientation) {
+                screen.orientation.addEventListener('change', function() {
+                    self.dispatchBrowserStateEvent('orientation', {
+                        angle: screen.orientation.angle,
+                        type: screen.orientation.type
                     });
                 });
             }
@@ -3218,17 +3230,17 @@
          */
         isCaptureAffected(messageType) {
             return messageType === MSG_MOUSEMOVE ||
-                   messageType === MSG_MOUSEWHEEL ||
-                   messageType === MSG_LBUTTONDOWN ||
-                   messageType === MSG_LBUTTONUP ||
-                   messageType === MSG_LBUTTONDBLCLK ||
-                   messageType === MSG_RBUTTONDOWN ||
-                   messageType === MSG_RBUTTONUP ||
-                   messageType === MSG_MBUTTONDOWN ||
-                   messageType === MSG_MBUTTONUP ||
-                   messageType === MSG_LCLICK ||
-                   messageType === MSG_MCLICK ||
-                   messageType === MSG_RCLICK;
+                messageType === MSG_MOUSEWHEEL ||
+                messageType === MSG_LBUTTONDOWN ||
+                messageType === MSG_LBUTTONUP ||
+                messageType === MSG_LBUTTONDBLCLK ||
+                messageType === MSG_RBUTTONDOWN ||
+                messageType === MSG_RBUTTONUP ||
+                messageType === MSG_MBUTTONDOWN ||
+                messageType === MSG_MBUTTONUP ||
+                messageType === MSG_LCLICK ||
+                messageType === MSG_MCLICK ||
+                messageType === MSG_RCLICK;
         },
 
         /**
@@ -3285,7 +3297,7 @@
             // Send capture changed message to container losing the capture
             if (this._capturedContainer?.isConnected) {
                 const pacId = this._capturedContainer.getAttribute('data-pac-id');
-                
+
                 if (pacId !== null) {
                     wakaPAC.sendMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
                 }
@@ -5897,7 +5909,7 @@
                     if (!Utils.isEqual(previousValues[bindingType], currentValue)) {
                         // Update value
                         previousValues[bindingType] = currentValue;
-                        
+
                         // Update DOM — pass pre-computed value to avoid re-evaluating
                         // the same expression through a second normalizePath chain
                         domUpdater.updateAttributeBinding(element, bindingType, bindingData, currentValue);
@@ -6147,6 +6159,14 @@
                 break;
             }
 
+            case 'orientation': {
+                // Screen orientation angle in degrees (0, 90, 180, 270)
+                // and type string e.g. 'portrait-primary', 'landscape-secondary'
+                this.abstraction.browserOrientationAngle = stateData.angle;
+                this.abstraction.browserOrientationType = stateData.type;
+                break;
+            }
+
             default:
                 console.warn('Unknown browser state message ' + stateType);
                 break;
@@ -6308,7 +6328,7 @@
                 template: element.innerHTML, // Capture clean template
                 itemVar: itemVar,
                 indexVar: indexVar,
-				depth: depth
+                depth: depth
             });
 
             interpolationMap.set(element, mappingData);
@@ -6722,6 +6742,11 @@
         abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
         abstraction.containerWidth = this.container.clientWidth;
         abstraction.containerHeight = this.container.clientHeight;
+
+        // Screen orientation
+        abstraction.browserOrientationAngle = screen.orientation ? screen.orientation.angle : 0;
+        abstraction.browserOrientationType = screen.orientation ? screen.orientation.type : 'unknown';
+
     };
 
     /**
