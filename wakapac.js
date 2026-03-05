@@ -163,6 +163,7 @@
     const MSG_LCLICK = 0x0210;
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
+    const MSG_CONTEXTMENU = 0x007B;
     const MSG_CAPTURECHANGED = 0x0215;
     const MSG_DRAGENTER = 0x0231;
     const MSG_DRAGOVER  = 0x0232;
@@ -1468,6 +1469,14 @@
                 // Resolve container and dispatch message
                 const container = self.getContainerForEvent(messageType, event);
                 self.dispatchMouseMessage(messageType, event, container);
+
+                // Synthesize MSG_RCLICK on right button release, parallel to how the
+                // browser's 'click' event synthesizes MSG_LCLICK on left button release.
+                // Guard against gesture: if a gesture was just recognized the contextmenu
+                // handler will suppress it, and we should not fire a click either.
+                if (event.button === 2 && !MouseGestureRecognizer.gestureJustDispatched) {
+                    self.dispatchMouseMessage(MSG_RCLICK, event, container);
+                }
             });
 
             // Left click
@@ -1484,19 +1493,22 @@
                 }
             });
 
-            // Right click / context menu
-            // Normalize context interactions and optionally suppress native menu
+            // Context menu
+            // Fires on right-click AND the keyboard context menu key.
+            // Dispatched as MSG_CONTEXTMENU so components can intercept and suppress
+            // the native browser menu via event.preventDefault().
             document.addEventListener('contextmenu', function(event) {
-                // Prevent brwowser context menu if a gesture was just dispatched
+                // Suppress native menu if a gesture was just dispatched
                 if (MouseGestureRecognizer.gestureJustDispatched) {
                     MouseGestureRecognizer.gestureJustDispatched = false;
                     event.preventDefault();
                     return;
                 }
 
-                // Dispatch MSG_RCLICK if no gesture recognized
-                const container = self.getContainerForEvent(MSG_RCLICK, event);
-                self.dispatchMouseMessage(MSG_RCLICK, event, container);
+                // Dispatch MSG_CONTEXTMENU — calling event.preventDefault() inside
+                // msgProc will suppress the native browser context menu
+                const container = self.getContainerForEvent(MSG_CONTEXTMENU, event);
+                self.dispatchMouseMessage(MSG_CONTEXTMENU, event, container);
             });
 
             // Double click (left button only)
@@ -3241,7 +3253,8 @@
                 messageType === MSG_MBUTTONUP ||
                 messageType === MSG_LCLICK ||
                 messageType === MSG_MCLICK ||
-                messageType === MSG_RCLICK;
+                messageType === MSG_RCLICK ||
+                messageType === MSG_CONTEXTMENU;
         },
 
         /**
@@ -5497,7 +5510,7 @@
             // Similar to Win32: returning 0 from WndProc means "I handled this, skip default processing"
             const cancellableEvents = [
                 MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
-                MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
+                MSG_LCLICK, MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU,
                 MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE,
                 MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP
             ];
@@ -9501,9 +9514,9 @@
         // Message types
         MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
-        MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
-        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_COPY,
-        MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
+        MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
+        MSG_INPUT_COMPLETE, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
+        MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
         MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED,
         MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
 
