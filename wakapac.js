@@ -5016,6 +5016,11 @@
         // Kill all timers for this component
         this.killAllTimers();
 
+        // Remove any accelerator table registered for this container
+        if (this.abstraction.pacId) {
+            _accelTables.delete(this.abstraction.pacId);
+        }
+
         // Call user's destroy hook
         // Note: Called after event listeners are removed to prevent the user's cleanup
         // code from accidentally triggering reactive updates during component teardown.
