@@ -8976,6 +8976,184 @@
     };
 
     // ========================================================================
+    // ACCELERATOR TABLES
+    // ========================================================================
+    /**
+     * Accelerator table registry.
+     * Keys are pac-id strings (or the sentinel value ACCEL_GLOBAL_KEY for the
+     * application-wide table).  Values are arrays of accelerator descriptors:
+     *   { vk, modifiers, cmdId }
+     *   vk        — Win32 virtual key code (number)
+     *   modifiers — bitmask of ACCEL_* flags (see below)
+     *   cmdId     — command identifier posted in wParam of MSG_ACCEL
+     * @type {Map<string|symbol, Array<{vk:number, modifiers:number, cmdId:number}>>}
+     */
+    const _accelTables = new Map();
+
+    /**
+     * Sentinel key used to store the application-wide (global) accelerator table.
+     * A global table fires regardless of which container currently has focus.
+     * Container-scoped tables take priority over the global table.
+     * @type {symbol}
+     */
+    const ACCEL_GLOBAL_KEY = Symbol('global');
+
+    /**
+     * Returns true if the currently focused element is a text-entry control
+     * (input[type=text/search/…], textarea, contenteditable).
+     * Bare-character accelerators (no Ctrl, no Alt) must not fire inside text
+     * fields — this matches Win32 TranslateAccelerator() behaviour.
+     * @returns {boolean}
+     * @private
+     */
+    function _focusIsInTextControl() {
+        const el = document.activeElement;
+
+        if (!el) {
+            return false;
+        }
+
+        if (el.isContentEditable) {
+            return true;
+        }
+
+        if (el.tagName === 'TEXTAREA') {
+            return true;
+        }
+
+        if (el.tagName === 'INPUT') {
+            const type = (el.type || 'text').toLowerCase();
+            return TEXT_INPUT_TYPES.has(type);
+        }
+
+        return false;
+    }
+
+    /**
+     * Translates a MSG_KEYDOWN event into MSG_ACCEL if the key combination
+     * matches a registered accelerator entry. Container-scoped tables are
+     * checked before the global table. Returns true and dispatches MSG_ACCEL
+     * on a match (suppressing the keydown); returns false otherwise.
+     *
+     * Bare-character shortcuts (no Ctrl, no Alt) are suppressed when focus
+     * is inside a text field.
+     *
+     * @param {CustomEvent}  pacEvent  — The MSG_KEYDOWN PAC event.
+     * @param {HTMLElement}  container — The target container element.
+     * @returns {boolean} True if the message was translated (caller should swallow it).
+     * @private
+     */
+    function _translateAccelerator(pacEvent, container) {
+        // Skip immediately if no tables are registered — common case when the
+        // feature is not in use.
+        if (_accelTables.size === 0) {
+            return false;
+        }
+
+        // wParam carries the virtual key code for keyboard messages
+        const vk        = pacEvent.wParam;
+
+        // Isolate the modifier bits from lParam — other bits carry repeat count,
+        // extended key flag, etc. and must not affect the comparison.
+        const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
+
+        // Bare-character shortcuts (no Ctrl, no Alt) must not fire inside text
+        // inputs — the character belongs to the field, not the application.
+        if ((modifiers & (KM_CONTROL | KM_ALT)) === 0 && _focusIsInTextControl()) {
+            return false;
+        }
+
+        const pacId = container.getAttribute('data-pac-id');
+
+        // Build the lookup order: container-scoped table first, global table as
+        // fallback. _accelTables.get() returns undefined for missing keys, which
+        // the loop body handles with the !table guard — no double lookup needed.
+        const tables = [
+            pacId && _accelTables.get(pacId),
+            _accelTables.get(ACCEL_GLOBAL_KEY)
+        ];
+
+        for (const table of tables) {
+            if (!table) continue;
+
+            for (const entry of table) {
+                // Both the key code and the exact modifier combination must match.
+                // Partial modifier matches are intentionally rejected — Ctrl+Shift+S
+                // must not trigger a Ctrl+S entry.
+                if (entry.vk === vk && entry.modifiers === modifiers) {
+                    wakaPAC.sendMessage(pacId, MSG_ACCEL, entry.cmdId, 0);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Parses a shortcut string into a { vk, modifiers } descriptor.
+     *
+     * Format: optional modifier tokens followed by a key name, joined by "+".
+     * Parsing is case-insensitive. Modifier tokens are "Ctrl", "Shift", "Alt".
+     * The key name is a VK_* constant with the "VK_" prefix omitted:
+     * "S" → VK_S, "F5" → VK_F5, "Delete" → VK_DELETE, "OEM_PLUS" → VK_OEM_PLUS
+     *
+     * @param {string} key - Shortcut string, e.g. "Ctrl+S", "Ctrl+Shift+Z", "F5"
+     * @returns {{ vk: number, modifiers: number }}
+     * @throws {TypeError} If the string is empty, the key name is missing or unknown,
+     *                     or more than one key name is present.
+     * @private
+     */
+    function _parseAcceleratorKey(key) {
+        // Reject early so the rest of the function can assume a non-empty string
+        if (typeof key !== 'string' || key.trim() === '') {
+            throw new TypeError(`wakaPAC: accelerator key must be a non-empty string, got: ${JSON.stringify(key)}`);
+        }
+
+        // Map the three recognised modifier names to their KM_* bitmask values
+        const MODIFIER_TOKENS = { CTRL: KM_CONTROL, SHIFT: KM_SHIFT, ALT: KM_ALT };
+
+        // Split on "+" and trim each token to tolerate "Ctrl + S" as well as "Ctrl+S"
+        const tokens = key.split('+').map(t => t.trim());
+
+        // Consume all but the last token as modifiers. Iterating up to length - 1
+        // means the final token is always treated as the key name, which makes
+        // the two phases structurally separate rather than distinguished by a flag.
+        let modifiers = 0;
+        let i = 0;
+
+        while (i < tokens.length - 1) {
+            const bit = MODIFIER_TOKENS[tokens[i].toUpperCase()];
+
+            // Any non-modifier token in this position is a mistake — the key name
+            // must come last, so an unknown token here can't be anything valid.
+            if (!bit) {
+                throw new TypeError(`wakaPAC: unknown token "${tokens[i]}" in accelerator key: ${JSON.stringify(key)}`);
+            }
+
+            modifiers |= bit;
+            i++;
+        }
+
+        // Whatever remains after the modifiers is the key name
+        const keyName = tokens[i];
+
+        if (!keyName) {
+            throw new TypeError(`wakaPAC: no key name found in accelerator key: ${JSON.stringify(key)}`);
+        }
+
+        // Look up the VK_* constant by prepending the prefix and uppercasing,
+        // so "s", "S", and "s" all resolve to VK_S
+        const vkName = 'VK_' + keyName.toUpperCase();
+
+        if (!(vkName in wakaPAC)) {
+            throw new TypeError(`wakaPAC: unknown key "${keyName}" in accelerator key: ${JSON.stringify(key)} (no constant ${vkName})`);
+        }
+
+        return { vk: wakaPAC[vkName], modifiers };
+    }
+
+    // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
 
@@ -9528,185 +9706,6 @@
         // Create the plugin and store
         _plugins.push(library.createPacPlugin(wakaPAC));
     };
-
-    // ========================================================================
-    // ACCELERATOR TABLES
-    // ========================================================================
-
-    /**
-     * Accelerator table registry.
-     * Keys are pac-id strings (or the sentinel value ACCEL_GLOBAL_KEY for the
-     * application-wide table).  Values are arrays of accelerator descriptors:
-     *   { vk, modifiers, cmdId }
-     *   vk        — Win32 virtual key code (number)
-     *   modifiers — bitmask of ACCEL_* flags (see below)
-     *   cmdId     — command identifier posted in wParam of MSG_ACCEL
-     * @type {Map<string|symbol, Array<{vk:number, modifiers:number, cmdId:number}>>}
-     */
-    const _accelTables = new Map();
-
-    /**
-     * Sentinel key used to store the application-wide (global) accelerator table.
-     * A global table fires regardless of which container currently has focus.
-     * Container-scoped tables take priority over the global table.
-     * @type {symbol}
-     */
-    const ACCEL_GLOBAL_KEY = Symbol('global');
-
-    /**
-     * Returns true if the currently focused element is a text-entry control
-     * (input[type=text/search/…], textarea, contenteditable).
-     * Bare-character accelerators (no Ctrl, no Alt) must not fire inside text
-     * fields — this matches Win32 TranslateAccelerator() behaviour.
-     * @returns {boolean}
-     * @private
-     */
-    function _focusIsInTextControl() {
-        const el = document.activeElement;
-
-        if (!el) {
-            return false;
-        }
-
-        if (el.isContentEditable) {
-            return true;
-        }
-
-        if (el.tagName === 'TEXTAREA') {
-            return true;
-        }
-
-        if (el.tagName === 'INPUT') {
-            const type = (el.type || 'text').toLowerCase();
-            return TEXT_INPUT_TYPES.has(type);
-        }
-
-        return false;
-    }
-
-    /**
-     * Translates a MSG_KEYDOWN event into MSG_ACCEL if the key combination
-     * matches a registered accelerator entry. Container-scoped tables are
-     * checked before the global table. Returns true and dispatches MSG_ACCEL
-     * on a match (suppressing the keydown); returns false otherwise.
-     * @param {CustomEvent}  pacEvent  — The MSG_KEYDOWN PAC event.
-     * @param {HTMLElement}  container — The target container element.
-     * @returns {boolean} True if the message was translated (caller should swallow it).
-     * @private
-     */
-    function _translateAccelerator(pacEvent, container) {
-        // Skip immediately if no tables are registered — common case when the
-        // feature is not in use.
-        if (_accelTables.size === 0) {
-            return false;
-        }
-
-        // wParam carries the virtual key code for keyboard messages
-        const vk        = pacEvent.wParam;
-
-        // Isolate the modifier bits from lParam — other bits carry repeat count,
-        // extended key flag, etc. and must not affect the comparison.
-        const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
-
-        // Bare-character shortcuts (no Ctrl, no Alt) must not fire inside text
-        // inputs — the character belongs to the field, not the application.
-        if ((modifiers & (KM_CONTROL | KM_ALT)) === 0 && _focusIsInTextControl()) {
-            return false;
-        }
-
-        // Fetch the pacId of the container
-        const pacId = container.getAttribute('data-pac-id');
-
-        // Build the lookup order: container-scoped table first, global table as
-        // fallback. _accelTables.get() returns undefined for missing keys, which
-        // the loop body handles with the !table guard — no double lookup needed.
-        const tables = [
-            pacId && _accelTables.get(pacId),
-            _accelTables.get(ACCEL_GLOBAL_KEY)
-        ];
-
-        for (const table of tables) {
-            if (!table) {
-                continue;
-            }
-
-            for (const entry of table) {
-                // Both the key code and the exact modifier combination must match.
-                // Partial modifier matches are intentionally rejected — Ctrl+Shift+S
-                // must not trigger a Ctrl+S entry.
-                if (entry.vk === vk && entry.modifiers === modifiers) {
-                    wakaPAC.sendMessage(pacId, MSG_ACCEL, entry.cmdId, 0);
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Parses a shortcut string into a { vk, modifiers } descriptor.
-     *
-     * Format: optional modifier tokens followed by a key name, joined by "+".
-     * Parsing is case-insensitive. Modifier tokens are "Ctrl", "Shift", "Alt".
-     * The key name is a VK_* constant with the "VK_" prefix omitted:
-     * "S" → VK_S, "F5" → VK_F5, "Delete" → VK_DELETE, "OEM_PLUS" → VK_OEM_PLUS
-     *
-     * @param {string} key - Shortcut string, e.g. "Ctrl+S", "Ctrl+Shift+Z", "F5"
-     * @returns {{ vk: number, modifiers: number }}
-     * @throws {TypeError} If the string is empty, the key name is missing or unknown,
-     *                     or more than one key name is present.
-     * @private
-     */
-    function _parseAcceleratorKey(key) {
-        // Reject early so the rest of the function can assume a non-empty string
-        if (typeof key !== 'string' || key.trim() === '') {
-            throw new TypeError(`wakaPAC: accelerator key must be a non-empty string, got: ${JSON.stringify(key)}`);
-        }
-
-        // Map the three recognized modifier names to their KM_* bitmask values
-        const MODIFIER_TOKENS = { CTRL: KM_CONTROL, SHIFT: KM_SHIFT, ALT: KM_ALT };
-
-        // Split on "+" and trim each token to tolerate "Ctrl + S" as well as "Ctrl+S"
-        const tokens = key.split('+').map(t => t.trim());
-
-        // Consume all but the last token as modifiers. Iterating up to length - 1
-        // means the final token is always treated as the key name, which makes
-        // the two phases structurally separate rather than distinguished by a flag.
-        let i = 0;
-        let modifiers = 0;
-
-        while (i < tokens.length - 1) {
-            const bit = MODIFIER_TOKENS[tokens[i].toUpperCase()];
-
-            // Any non-modifier token in this position is a mistake — the key name
-            // must come last, so an unknown token here can't be anything valid.
-            if (!bit) {
-                throw new TypeError(`wakaPAC: unknown token "${tokens[i]}" in accelerator key: ${JSON.stringify(key)}`);
-            }
-
-            modifiers |= bit;
-            ++i;
-        }
-
-        // Whatever remains after the modifiers is the key name
-        const keyName = tokens[i];
-
-        if (!keyName) {
-            throw new TypeError(`wakaPAC: no key name found in accelerator key: ${JSON.stringify(key)}`);
-        }
-
-        // Look up the VK_* constant by prepending the prefix and uppercasing,
-        // so "s", "S", and "s" all resolve to VK_S
-        const vkName = 'VK_' + keyName.toUpperCase();
-
-        if (!(vkName in wakaPAC)) {
-            throw new TypeError(`wakaPAC: unknown key "${keyName}" in accelerator key: ${JSON.stringify(key)} (no constant ${vkName})`);
-        }
-
-        // Return the result
-        return { vk: wakaPAC[vkName], modifiers };
-    }
 
     // ========================================================================
     // PUBLIC ACCELERATOR API
