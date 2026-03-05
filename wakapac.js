@@ -9288,6 +9288,22 @@
     };
 
     /**
+     * Returns the data-pac-id of the parent component of the given container, or null if it has none.
+     * Intended for use inside msgProc to forward messages up the hierarchy.
+     * @param {string} pacId - The data-pac-id of the child container
+     * @returns {string|null} The parent's data-pac-id, or null if no parent exists
+     */
+    wakaPAC.getParentPacId = function(pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context || !context.parent) {
+            return null;
+        }
+
+        return context.parent.container.getAttribute('data-pac-id');
+    };
+
+    /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 PostMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
