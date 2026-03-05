@@ -187,6 +187,28 @@
     const MSG_USER = 0x1000;
 
     /**
+     * Maps DOM event.button codes to their corresponding mousedown message types.
+     * Defined at module level to avoid per-event object allocation in _setupMouseButtonEvents().
+     * @type {Object<number, number>}
+     */
+    const MOUSE_DOWN_MAP = {
+        0: MSG_LBUTTONDOWN,
+        1: MSG_MBUTTONDOWN,
+        2: MSG_RBUTTONDOWN
+    };
+
+    /**
+     * Maps DOM event.button codes to their corresponding mouseup message types.
+     * Defined at module level to avoid per-event object allocation in _setupMouseButtonEvents().
+     * @type {Object<number, number>}
+     */
+    const MOUSE_UP_MAP = {
+        0: MSG_LBUTTONUP,
+        1: MSG_MBUTTONUP,
+        2: MSG_RBUTTONUP
+    };
+
+    /**
      * Mouse and keyboard modifier key state flags
      * Used as bitmask - multiple flags can be OR'd together
      */
@@ -353,6 +375,127 @@
     const VK_OEM_6 = 0xDD;          // Right bracket (]})
     const VK_OEM_7 = 0xDE;          // Quote ('")
     const VK_OEM_102 = 0xE2;        // Non-US backslash
+
+    /**
+     * Maps KeyboardEvent.code values to Win32 Virtual Key codes.
+     * Defined at module level to avoid per-call object allocation in getVirtualKeyCode().
+     * @type {Object<string, number>}
+     */
+    const VK_MAP = {
+        // Control keys
+        'Backspace': VK_BACK,
+        'Tab': VK_TAB,
+        'Enter': VK_RETURN,
+        'ShiftLeft': VK_SHIFT,
+        'ShiftRight': VK_SHIFT,
+        'ControlLeft': VK_CONTROL,
+        'ControlRight': VK_CONTROL,
+        'AltLeft': VK_MENU,
+        'AltRight': VK_MENU,
+        'Pause': VK_PAUSE,
+        'CapsLock': VK_CAPITAL,
+        'Escape': VK_ESCAPE,
+        'Space': VK_SPACE,
+
+        // Navigation keys
+        'PageUp': VK_PRIOR,
+        'PageDown': VK_NEXT,
+        'End': VK_END,
+        'Home': VK_HOME,
+        'ArrowLeft': VK_LEFT,
+        'ArrowUp': VK_UP,
+        'ArrowRight': VK_RIGHT,
+        'ArrowDown': VK_DOWN,
+        'PrintScreen': VK_SNAPSHOT,
+        'Insert': VK_INSERT,
+        'Delete': VK_DELETE,
+
+        // Number keys (top row)
+        'Digit0': VK_0, 'Digit1': VK_1, 'Digit2': VK_2, 'Digit3': VK_3, 'Digit4': VK_4,
+        'Digit5': VK_5, 'Digit6': VK_6, 'Digit7': VK_7, 'Digit8': VK_8, 'Digit9': VK_9,
+
+        // Letter keys
+        'KeyA': VK_A, 'KeyB': VK_B, 'KeyC': VK_C, 'KeyD': VK_D, 'KeyE': VK_E, 'KeyF': VK_F,
+        'KeyG': VK_G, 'KeyH': VK_H, 'KeyI': VK_I, 'KeyJ': VK_J, 'KeyK': VK_K, 'KeyL': VK_L,
+        'KeyM': VK_M, 'KeyN': VK_N, 'KeyO': VK_O, 'KeyP': VK_P, 'KeyQ': VK_Q, 'KeyR': VK_R,
+        'KeyS': VK_S, 'KeyT': VK_T, 'KeyU': VK_U, 'KeyV': VK_V, 'KeyW': VK_W, 'KeyX': VK_X,
+        'KeyY': VK_Y, 'KeyZ': VK_Z,
+
+        // Windows/Meta keys
+        'MetaLeft': VK_LWIN,
+        'MetaRight': VK_RWIN,
+        'ContextMenu': VK_APPS,
+
+        // Numpad keys
+        'Numpad0': VK_NUMPAD0, 'Numpad1': VK_NUMPAD1, 'Numpad2': VK_NUMPAD2,
+        'Numpad3': VK_NUMPAD3, 'Numpad4': VK_NUMPAD4, 'Numpad5': VK_NUMPAD5,
+        'Numpad6': VK_NUMPAD6, 'Numpad7': VK_NUMPAD7, 'Numpad8': VK_NUMPAD8,
+        'Numpad9': VK_NUMPAD9,
+        'NumpadMultiply': VK_MULTIPLY,
+        'NumpadAdd': VK_ADD,
+        'NumpadSubtract': VK_SUBTRACT,
+        'NumpadDecimal': VK_DECIMAL,
+        'NumpadDivide': VK_DIVIDE,
+
+        // Function keys
+        'F1': VK_F1, 'F2': VK_F2, 'F3': VK_F3, 'F4': VK_F4, 'F5': VK_F5, 'F6': VK_F6,
+        'F7': VK_F7, 'F8': VK_F8, 'F9': VK_F9, 'F10': VK_F10, 'F11': VK_F11, 'F12': VK_F12,
+
+        // Lock keys
+        'NumLock': VK_NUMLOCK,
+        'ScrollLock': VK_SCROLL,
+
+        // Browser keys
+        'BrowserBack': VK_BROWSER_BACK,
+        'BrowserForward': VK_BROWSER_FORWARD,
+        'BrowserRefresh': VK_BROWSER_REFRESH,
+        'BrowserStop': VK_BROWSER_STOP,
+        'BrowserSearch': VK_BROWSER_SEARCH,
+        'BrowserFavorites': VK_BROWSER_FAVORITES,
+        'BrowserHome': VK_BROWSER_HOME,
+
+        // Media keys
+        'AudioVolumeMute': VK_VOLUME_MUTE,
+        'AudioVolumeDown': VK_VOLUME_DOWN,
+        'AudioVolumeUp': VK_VOLUME_UP,
+        'MediaTrackNext': VK_MEDIA_NEXT_TRACK,
+        'MediaTrackPrevious': VK_MEDIA_PREV_TRACK,
+        'MediaStop': VK_MEDIA_STOP,
+        'MediaPlayPause': VK_MEDIA_PLAY_PAUSE,
+
+        // OEM keys (punctuation - US layout)
+        'Semicolon': VK_OEM_1,
+        'Equal': VK_OEM_PLUS,
+        'Comma': VK_OEM_COMMA,
+        'Minus': VK_OEM_MINUS,
+        'Period': VK_OEM_PERIOD,
+        'Slash': VK_OEM_2,
+        'Backquote': VK_OEM_3,
+        'BracketLeft': VK_OEM_4,
+        'Backslash': VK_OEM_5,
+        'BracketRight': VK_OEM_6,
+        'Quote': VK_OEM_7,
+        'IntlBackslash': VK_OEM_102
+    };
+
+    /**
+     * Maps data-pac-event modifier names to KeyboardEvent.key values.
+     * Defined at module level to avoid per-call object allocation in processEventModifiers().
+     * @type {Object<string, string>}
+     */
+    const KEY_MODIFIER_MAP = {
+        enter: 'Enter',
+        escape: 'Escape',
+        esc: 'Escape',
+        space: ' ',
+        tab: 'Tab',
+        delete: 'Delete',
+        del: 'Delete',
+        up: 'ArrowUp',
+        down: 'ArrowDown',
+        left: 'ArrowLeft',
+        right: 'ArrowRight'
+    };
 
     // =============================================================================
     // UTILITY FUNCTIONS
@@ -1420,14 +1563,7 @@
             // Capture button press and normalize into message format
             document.addEventListener('mousedown', function(event) {
                 // Map DOM button codes to internal message identifiers
-                const buttonMap = {
-                    0: MSG_LBUTTONDOWN,
-                    1: MSG_MBUTTONDOWN,
-                    2: MSG_RBUTTONDOWN,
-                };
-
-                // Ignore unsupported buttons
-                const messageType = buttonMap[event.button];
+                const messageType = MOUSE_DOWN_MAP[event.button];
 
                 if (!messageType) {
                     return;
@@ -1449,14 +1585,7 @@
             // Capture button release and optionally finalize gesture recording
             window.addEventListener('mouseup', function(event) {
                 // Map DOM button codes to internal release messages
-                const buttonMap = {
-                    0: MSG_LBUTTONUP,
-                    1: MSG_MBUTTONUP,
-                    2: MSG_RBUTTONUP,
-                };
-
-                // Ignore unsupported buttons
-                const messageType = buttonMap[event.button];
+                const messageType = MOUSE_UP_MAP[event.button];
 
                 if (!messageType) {
                     return;
@@ -3068,105 +3197,6 @@
          * @returns {number|null} The Win32 VK_ code, or null if no mapping exists
          */
         getVirtualKeyCode(code) {
-            // Win32 Virtual Key Code mapping
-            // Maps KeyboardEvent.code values to VK constants
-            const VK_MAP = {
-                // Control keys
-                'Backspace': VK_BACK,
-                'Tab': VK_TAB,
-                'Enter': VK_RETURN,
-                'ShiftLeft': VK_SHIFT,
-                'ShiftRight': VK_SHIFT,
-                'ControlLeft': VK_CONTROL,
-                'ControlRight': VK_CONTROL,
-                'AltLeft': VK_MENU,
-                'AltRight': VK_MENU,
-                'Pause': VK_PAUSE,
-                'CapsLock': VK_CAPITAL,
-                'Escape': VK_ESCAPE,
-                'Space': VK_SPACE,
-
-                // Navigation keys
-                'PageUp': VK_PRIOR,
-                'PageDown': VK_NEXT,
-                'End': VK_END,
-                'Home': VK_HOME,
-                'ArrowLeft': VK_LEFT,
-                'ArrowUp': VK_UP,
-                'ArrowRight': VK_RIGHT,
-                'ArrowDown': VK_DOWN,
-                'PrintScreen': VK_SNAPSHOT,
-                'Insert': VK_INSERT,
-                'Delete': VK_DELETE,
-
-                // Number keys (top row)
-                'Digit0': VK_0, 'Digit1': VK_1, 'Digit2': VK_2, 'Digit3': VK_3, 'Digit4': VK_4,
-                'Digit5': VK_5, 'Digit6': VK_6, 'Digit7': VK_7, 'Digit8': VK_8, 'Digit9': VK_9,
-
-                // Letter keys
-                'KeyA': VK_A, 'KeyB': VK_B, 'KeyC': VK_C, 'KeyD': VK_D, 'KeyE': VK_E, 'KeyF': VK_F,
-                'KeyG': VK_G, 'KeyH': VK_H, 'KeyI': VK_I, 'KeyJ': VK_J, 'KeyK': VK_K, 'KeyL': VK_L,
-                'KeyM': VK_M, 'KeyN': VK_N, 'KeyO': VK_O, 'KeyP': VK_P, 'KeyQ': VK_Q, 'KeyR': VK_R,
-                'KeyS': VK_S, 'KeyT': VK_T, 'KeyU': VK_U, 'KeyV': VK_V, 'KeyW': VK_W, 'KeyX': VK_X,
-                'KeyY': VK_Y, 'KeyZ': VK_Z,
-
-                // Windows/Meta keys
-                'MetaLeft': VK_LWIN,
-                'MetaRight': VK_RWIN,
-                'ContextMenu': VK_APPS,
-
-                // Numpad keys
-                'Numpad0': VK_NUMPAD0, 'Numpad1': VK_NUMPAD1, 'Numpad2': VK_NUMPAD2,
-                'Numpad3': VK_NUMPAD3, 'Numpad4': VK_NUMPAD4, 'Numpad5': VK_NUMPAD5,
-                'Numpad6': VK_NUMPAD6, 'Numpad7': VK_NUMPAD7, 'Numpad8': VK_NUMPAD8,
-                'Numpad9': VK_NUMPAD9,
-                'NumpadMultiply': VK_MULTIPLY,
-                'NumpadAdd': VK_ADD,
-                'NumpadSubtract': VK_SUBTRACT,
-                'NumpadDecimal': VK_DECIMAL,
-                'NumpadDivide': VK_DIVIDE,
-
-                // Function keys
-                'F1': VK_F1, 'F2': VK_F2, 'F3': VK_F3, 'F4': VK_F4, 'F5': VK_F5, 'F6': VK_F6,
-                'F7': VK_F7, 'F8': VK_F8, 'F9': VK_F9, 'F10': VK_F10, 'F11': VK_F11, 'F12': VK_F12,
-
-                // Lock keys
-                'NumLock': VK_NUMLOCK,
-                'ScrollLock': VK_SCROLL,
-
-                // Browser keys
-                'BrowserBack': VK_BROWSER_BACK,
-                'BrowserForward': VK_BROWSER_FORWARD,
-                'BrowserRefresh': VK_BROWSER_REFRESH,
-                'BrowserStop': VK_BROWSER_STOP,
-                'BrowserSearch': VK_BROWSER_SEARCH,
-                'BrowserFavorites': VK_BROWSER_FAVORITES,
-                'BrowserHome': VK_BROWSER_HOME,
-
-                // Media keys
-                'AudioVolumeMute': VK_VOLUME_MUTE,
-                'AudioVolumeDown': VK_VOLUME_DOWN,
-                'AudioVolumeUp': VK_VOLUME_UP,
-                'MediaTrackNext': VK_MEDIA_NEXT_TRACK,
-                'MediaTrackPrevious': VK_MEDIA_PREV_TRACK,
-                'MediaStop': VK_MEDIA_STOP,
-                'MediaPlayPause': VK_MEDIA_PLAY_PAUSE,
-
-                // OEM keys (punctuation - US layout)
-                'Semicolon': VK_OEM_1,
-                'Equal': VK_OEM_PLUS,
-                'Comma': VK_OEM_COMMA,
-                'Minus': VK_OEM_MINUS,
-                'Period': VK_OEM_PERIOD,
-                'Slash': VK_OEM_2,
-                'Backquote': VK_OEM_3,
-                'BracketLeft': VK_OEM_4,
-                'Backslash': VK_OEM_5,
-                'BracketRight': VK_OEM_6,
-                'Quote': VK_OEM_7,
-                'IntlBackslash': VK_OEM_102
-            };
-
             return VK_MAP[code] || null;
         },
 
@@ -3199,19 +3229,7 @@
             const isKeyboard = originalEvent.type === 'keyup' || originalEvent.type === 'keydown';
 
             // Map modifier names to required KeyboardEvent.key values
-            const keyMap = {
-                enter: 'Enter',
-                escape: 'Escape',
-                esc: 'Escape',
-                space: ' ',
-                tab: 'Tab',
-                delete: 'Delete',
-                del: 'Delete',
-                up: 'ArrowUp',
-                down: 'ArrowDown',
-                left: 'ArrowLeft',
-                right: 'ArrowRight'
-            };
+            const keyMap = KEY_MODIFIER_MAP;
 
             for (const raw of modifiers) {
                 // transform modifier to lowercase
@@ -3358,20 +3376,41 @@
         currentToken: 0,
         functions: null,
 
-        OPERATOR_PRECEDENCE: {
-            '||': 1, '&&': 2,
-            '===': 6, '!==': 6, '==': 6, '!=': 6,
-            '<': 7, '>': 7, '<=': 7, '>=': 7,
-            '+': 8, '-': 8, '*': 9, '/': 9, '%': 9,
-            '!': 10, 'unary-': 10, 'unary+': 10
+        /**
+         * Combined operator metadata table.
+         * Each entry is [precedence, type].
+         * Operators absent from this table are treated as precedence 0 / 'arithmetic'.
+         */
+        OPERATORS: {
+            '||': [1, 'logical'],  '&&': [2, 'logical'],
+            '===': [6, 'comparison'], '!==': [6, 'comparison'],
+            '==':  [6, 'comparison'], '!=':  [6, 'comparison'],
+            '<':   [7, 'comparison'], '>':   [7, 'comparison'],
+            '<=':  [7, 'comparison'], '>=':  [7, 'comparison'],
+            '+':   [8, 'arithmetic'], '-':   [8, 'arithmetic'],
+            '*':   [9, 'arithmetic'], '/':   [9, 'arithmetic'],
+            '%':   [9, 'arithmetic'],
+            '!':   [10, 'arithmetic'], 'unary-': [10, 'arithmetic'], 'unary+': [10, 'arithmetic']
         },
 
-        OPERATOR_TYPES: {
-            '||': 'logical', '&&': 'logical',
-            '===': 'comparison', '!==': 'comparison', '==': 'comparison', '!=': 'comparison',
-            '>=': 'comparison', '<=': 'comparison', '>': 'comparison', '<': 'comparison',
-            '+': 'arithmetic', '-': 'arithmetic', '*': 'arithmetic', '/': 'arithmetic',
-            '%': 'arithmetic'
+        /** Lookup table for keyword literal values — avoids a switch in parsePrimary */
+        KEYWORD_VALUES: {
+            'true': true,
+            'false': false,
+            'null': null,
+            'undefined': undefined
+        },
+
+        /** Single-character token type map — hoisted out of tokenize() to avoid per-call allocation */
+        SINGLE_CHAR_TOKENS: {
+            '(': 'LPAREN',
+            ')': 'RPAREN',
+            '{': 'LBRACE',
+            '}': 'RBRACE',
+            '[': 'LBRACKET',
+            ']': 'RBRACKET',
+            ',': 'COMMA',
+            '.': 'DOT'
         },
 
         /**
@@ -3440,16 +3479,7 @@
                 }
 
                 // Single character tokens
-                const singleCharTokens = {
-                    '(': 'LPAREN',
-                    ')': 'RPAREN',
-                    '{': 'LBRACE',
-                    '}': 'RBRACE',
-                    '[': 'LBRACKET',
-                    ']': 'RBRACKET',
-                    ',': 'COMMA',
-                    '.': 'DOT'
-                };
+                const singleCharTokens = this.SINGLE_CHAR_TOKENS;
 
                 if (singleCharTokens[char]) {
                     tokens.push({type: singleCharTokens[char], value: char});
@@ -3580,7 +3610,7 @@
          * @returns {number} Precedence level (0 if operator not found)
          */
         getOperatorPrecedence(operator) {
-            return this.OPERATOR_PRECEDENCE[operator] || 0;
+            return (this.OPERATORS[operator] || [0])[0];
         },
 
         /**
@@ -3637,7 +3667,7 @@
 
                 // Determine the AST node type based on the operator
                 // Falls back to 'arithmetic' if operator type is not defined
-                const type = this.OPERATOR_TYPES[op] || 'arithmetic';
+                const type = (this.OPERATORS[op] || [0, 'arithmetic'])[1];
 
                 // Create a new binary expression node with the parsed components
                 // This becomes the new left operand for potential further parsing
@@ -3694,16 +3724,8 @@
                 return this.parsePostfixOperators(this.parseObjectLiteral());
             }
 
-            // String literals
-            if (this.check('STRING')) {
-                return this.parsePostfixOperators({
-                    type: 'literal',
-                    value: this.advance().value
-                });
-            }
-
-            // Number literals
-            if (this.check('NUMBER')) {
+            // String and number literals share the same AST shape
+            if (this.check('STRING') || this.check('NUMBER')) {
                 return this.parsePostfixOperators({
                     type: 'literal',
                     value: this.advance().value
@@ -3712,30 +3734,9 @@
 
             // Keywords (true, false, null, undefined)
             if (this.check('KEYWORD')) {
-                const token = this.advance();
-
-                let value;
-                switch (token.value) {
-                    case 'true':
-                        value = true;
-                        break;
-
-                    case 'false':
-                        value = false;
-                        break;
-
-                    case 'null':
-                        value = null;
-                        break;
-
-                    case 'undefined':
-                        value = undefined;
-                        break;
-                }
-
                 return this.parsePostfixOperators({
                     type: 'literal',
-                    value: value
+                    value: ExpressionParser.KEYWORD_VALUES[this.advance().value]
                 });
             }
 
@@ -4753,6 +4754,20 @@
     // DOM UPDATER - Handles ALL binding applications
     // ========================================================================
 
+    /**
+     * Factory that creates a scopeResolver object for ExpressionParser.evaluate().
+     * All scopeResolver instances share the same shape — this avoids repeating the
+     * object literal at every call site and gives the minifier a single declaration to mangle.
+     * @param {Function} normalizeFn - Bound normalizePath function (already bound to correct `this`)
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @returns {{ resolveScopedPath: function(string): * }}
+     */
+    function makeScopeResolver(normalizeFn, element) {
+        return {
+            resolveScopedPath: (path) => normalizeFn(path, element)
+        };
+    }
+
     function DomUpdater(context) {
         this.context = context;
     }
@@ -4773,11 +4788,7 @@
                 const parsed = ExpressionCache.parseExpression(expression);
 
                 // Resolve the scope - use parentElement for text nodes
-                const scopeResolver = {
-                    resolveScopedPath: (path) => {
-                        return self.context.normalizePath(path, element);
-                    }
-                };
+                const scopeResolver = makeScopeResolver(self.context.normalizePath.bind(self.context), element);
 
                 // Evaluate the expression using the scope resolver
                 const result = ExpressionParser.evaluate(parsed, self.context.abstraction, scopeResolver);
@@ -4805,9 +4816,7 @@
         const parsed = ExpressionCache.parseExpression(bindingData.target);
 
         // Resolver translates scoped paths into normalized context paths
-        const scopeResolver = {
-            resolveScopedPath: (path) => this.context.normalizePath(path, element)
-        };
+        const scopeResolver = makeScopeResolver(this.context.normalizePath.bind(this.context), element);
 
         // Evaluate expression using the abstraction model and resolver
         return ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
@@ -5643,9 +5652,7 @@
 
             // Get the foreach configuration and set up scope resolution
             const foreachData = this.interpolationMap.get(foreachElement);
-            const scopeResolver = {
-                resolveScopedPath: (path) => this.normalizePath(path, event.target)
-            };
+            const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), event.target);
 
             // Evaluate the foreach expression to get the source array
             const array = ExpressionParser.evaluate(
@@ -5915,11 +5922,7 @@
 
             // Build the scope resolver once per element rather than per binding,
             // since it only depends on the element for path normalization
-            const scopeResolver = {
-                resolveScopedPath: function(path) {
-                    return self.normalizePath(path, element);
-                }
-            };
+            const scopeResolver = makeScopeResolver(self.normalizePath.bind(self), element);
 
             // Initialize the previous values store on first encounter.
             // Cache the reference to avoid repeated DOM element property access
@@ -5984,11 +5987,7 @@
 
                 // Build the scope resolver once per text node, not once per expression.
                 // The resolver only depends on the text node for path normalization.
-                const scopeResolver = {
-                    resolveScopedPath: function(path) {
-                        return self.normalizePath(path, textNode);
-                    }
-                };
+                const scopeResolver = makeScopeResolver(self.normalizePath.bind(self), textNode);
 
                 const newText = mappingData.template.replace(INTERPOLATION_REGEX, function(match, expression) {
                     try {
@@ -6864,9 +6863,7 @@
 
         // Create scope resolver for this foreach element
         // This handles variable resolution in nested contexts (e.g., converting "todo.subs" to "todos[0].subs")
-        const scopeResolver = {
-            resolveScopedPath: (path) => this.normalizePath(path, foreachElement)
-        };
+        const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), foreachElement);
 
         try {
             // Evaluate the foreach expression (e.g., "todos" or "todo.subs")
@@ -7310,9 +7307,7 @@
         }
 
         // Create scope resolver to handle scoped path resolution within foreach context
-        const scopeResolver = {
-            resolveScopedPath: (path) => this.normalizePath(path, foreachElement)
-        };
+        const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), foreachElement);
 
         // Evaluate the foreach expression to get the current array
         const newArray = ExpressionParser.evaluate(
@@ -9292,17 +9287,17 @@
         // Construct the message once — shared across all dispatches in the subtree.
         const event = this.createPacMessage(messageId, wParam, lParam, extended);
 
-        // Recursively dispatch to all descendants depth-first.
+        // Iterative depth-first traversal using an explicit stack.
+        // Avoids call-stack overflow on deeply nested component hierarchies and
+        // eliminates the recursive closure overhead of the previous implementation.
         // Uses the in-memory children sets rather than DOM queries for performance.
-        const dispatch = (ctx) => {
-            ctx.children.forEach(child => {
-                DomUpdateTracker.dispatchToContainer(child.container, event);
-                dispatch(child);
-            });
-        };
+        const stack = [...container.children];
 
-        // Do the dispatching
-        dispatch(container);
+        while (stack.length) {
+            const node = stack.pop();
+            DomUpdateTracker.dispatchToContainer(node.container, event);
+            stack.push(...node.children);
+        }
     };
 
     /**
