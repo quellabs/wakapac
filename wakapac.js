@@ -6630,28 +6630,6 @@
          */
         Object.assign(proxiedReactive, {
             /**
-             * Sends a notification to the parent component
-             * @param {string} type - Type of notification
-             * @param {*} data - Data to send with the notification
-             */
-            notifyParent: (type, data) => self.notifyParent(type, data),
-
-            /**
-             * Sends a command to all child components
-             * @param {string} cmd - Command to send
-             * @param {*} data - Data to send with the command
-             */
-            notifyChildren: (cmd, data) => self.notifyChildren(cmd, data),
-
-            /**
-             * Sends a command to a specific child component
-             * @param {string|Function} selector - Selector to find the target child
-             * @param {string} cmd - Command to send
-             * @param {*} data - Data to send with the command
-             */
-            notifyChild: (selector, cmd, data) => self.notifyChild(selector, cmd, data),
-
-            /**
              * Serializing the reactive object to JSON (excluding non-serializable properties)
              * @returns {Object}
              */
@@ -7614,93 +7592,6 @@
             child.parent = this;
             this.children.add(child);
         });
-    };
-
-    /**
-     * Notifies parent component with optional bubbling
-     * @param {string} type - Event type
-     * @param {*} data - Event payload
-     * @param {boolean} bubble - Whether to continue bubbling up the chain (default: false)
-     */
-    Context.prototype.notifyParent = function(type, data, bubble = false) {
-        if (!this.parent) {
-            return;
-        }
-
-        // Call parent's handler if it exists
-        if (typeof this.parent.receiveUpdate === 'function') {
-            const result = this.parent.receiveUpdate(type, data, this);
-
-            // If bubbling is enabled, only stop if handler explicitly returns false
-            if (bubble && result === false) {
-                return;
-            }
-        }
-
-        // Continue bubbling if requested
-        if (bubble) {
-            this.parent.notifyParent(type, data, bubble);
-        }
-    };
-
-    /**
-     * Receives updates from children
-     * @param {string} type - Event type
-     * @param {*} data - Event payload
-     * @param {Object} child - Source child component
-     * @returns {boolean} Return false to stop bubbling, anything else continues
-     */
-    Context.prototype.receiveUpdate = function(type, data, child) {
-        if (this.abstraction.receiveFromChild && typeof this.abstraction.receiveFromChild === 'function') {
-            return this.abstraction.receiveFromChild(type, data, child);
-        }
-
-        // Default: continue bubbling
-        return true;
-    };
-
-    /**
-     * Receives and processes commands sent down from parent component
-     * @param {string} cmd - The command identifier
-     * @param {*} data - The command data payload
-     */
-    Context.prototype.receiveFromParent = function(cmd, data) {
-        if (this.abstraction.receiveFromParent && typeof this.abstraction.receiveFromParent === 'function') {
-            this.abstraction.receiveFromParent(cmd, data);
-        }
-    };
-
-    /**
-     * Sends a command to all direct child components
-     * @param {string} cmd - The command identifier
-     * @param {*} data - The command data payload
-     */
-    Context.prototype.notifyChildren = function(cmd, data) {
-        // Iterate through all child components
-        this.children.forEach(child => {
-            // Ensure child has the receiveFromParent method before calling
-            if (child && typeof child.receiveFromParent === 'function') {
-                child.receiveFromParent(cmd, data);
-            }
-        });
-    };
-
-    /**
-     * Sends a command to a specific child component matching the given selector
-     * @param {string} selector - CSS selector to identify the target child
-     * @param {string} cmd - The command identifier
-     * @param {*} data - The command data payload
-     */
-    Context.prototype.notifyChild = function(selector, cmd, data) {
-        // Find the child by its pac-id attribute
-        const child = Array.from(this.children).find(c =>
-            c.container.getAttribute('data-pac-id') === selector
-        );
-
-        // If matching child found and has receiveFromParent method, send the command
-        if (child && typeof child.receiveFromParent === 'function') {
-            child.receiveFromParent(cmd, data);
-        }
     };
 
     // =============================================================================
