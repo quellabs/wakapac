@@ -9345,8 +9345,7 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessage = function (pacId, messageId, wParam, lParam, extended = {}) {
-        // Resolve the target container from the registry.
-        // If the container does not exist, the message is dropped.
+        // Resolve the target container. If it does not exist, the message is dropped.
         const container = this.getContainerByPacId(pacId);
 
         if (!container) {
@@ -9379,6 +9378,40 @@
         window.PACRegistry.components.forEach((context) => {
             DomUpdateTracker.dispatchToContainer(context.container, event);
         });
+    };
+
+    /**
+     * Broadcasts a message to all descendant components of the given container,
+     * traversing the full subtree depth-first. The container itself does not receive
+     * the message — only its children, grandchildren, and so on.
+     * @param {string} pacId - data-pac-id of the root container whose subtree receives the message
+     * @param {number} messageId - Message identifier (integer constant, e.g., wakaPAC.MSG_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} [extended={}] - Additional data stored in 'event.detail' for custom use cases
+     */
+    wakaPAC.broadcastToChildren = function(pacId, messageId, wParam, lParam, extended = {}) {
+        // Resolve the root container. If it does not exist, the broadcast is dropped.
+        const container = window.PACRegistry.get(pacId);
+
+        if (!container) {
+            return;
+        }
+
+        // Construct the message once — shared across all dispatches in the subtree.
+        const event = this.createPacMessage(messageId, wParam, lParam, extended);
+
+        // Recursively dispatch to all descendants depth-first.
+        // Uses the in-memory children sets rather than DOM queries for performance.
+        const dispatch = (ctx) => {
+            ctx.children.forEach(child => {
+                DomUpdateTracker.dispatchToContainer(child.container, event);
+                dispatch(child);
+            });
+        };
+
+        // Do the dispatching
+        dispatch(container);
     };
 
     /**
