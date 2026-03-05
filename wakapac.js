@@ -9589,10 +9589,6 @@
      * matches a registered accelerator entry. Container-scoped tables are
      * checked before the global table. Returns true and dispatches MSG_ACCEL
      * on a match (suppressing the keydown); returns false otherwise.
-     *
-     * Bare-character shortcuts (no Ctrl, no Alt) are suppressed when focus
-     * is inside a text field.
-     *
      * @param {CustomEvent}  pacEvent  — The MSG_KEYDOWN PAC event.
      * @param {HTMLElement}  container — The target container element.
      * @returns {boolean} True if the message was translated (caller should swallow it).
@@ -9648,81 +9644,73 @@
         return false;
     }
 
-    // ========================================================================
-    // PUBLIC ACCELERATOR API
-    // ========================================================================
-
     /**
-     * Parses a human-readable shortcut string into a normalized { vk, modifiers }
-     * descriptor suitable for storage in an accelerator table entry.
+     * Parses a shortcut string into a { vk, modifiers } descriptor.
      *
-     * Format: zero or more modifier tokens followed by a key name, joined by "+".
-     * Parsing is case-insensitive throughout.
-     *
-     * Modifier tokens: "Ctrl", "Shift", "Alt"
-     * Key tokens: VK_* constant name with the "VK_" prefix omitted.
-     *             e.g. "S" → VK_S, "F5" → VK_F5, "Delete" → VK_DELETE,
-     *                  "OEM_PLUS" → VK_OEM_PLUS
+     * Format: optional modifier tokens followed by a key name, joined by "+".
+     * Parsing is case-insensitive. Modifier tokens are "Ctrl", "Shift", "Alt".
+     * The key name is a VK_* constant with the "VK_" prefix omitted:
+     * "S" → VK_S, "F5" → VK_F5, "Delete" → VK_DELETE, "OEM_PLUS" → VK_OEM_PLUS
      *
      * @param {string} key - Shortcut string, e.g. "Ctrl+S", "Ctrl+Shift+Z", "F5"
      * @returns {{ vk: number, modifiers: number }}
-     * @throws {TypeError} If the string is empty, contains an unknown token, or
-     *                     has no key token (modifiers only).
+     * @throws {TypeError} If the string is empty, the key name is missing or unknown,
+     *                     or more than one key name is present.
      * @private
      */
     function _parseAcceleratorKey(key) {
+        // Reject early so the rest of the function can assume a non-empty string
         if (typeof key !== 'string' || key.trim() === '') {
             throw new TypeError(`wakaPAC: accelerator key must be a non-empty string, got: ${JSON.stringify(key)}`);
         }
 
-        const tokens = key.split('+');
+        // Map the three recognized modifier names to their KM_* bitmask values
+        const MODIFIER_TOKENS = { CTRL: KM_CONTROL, SHIFT: KM_SHIFT, ALT: KM_ALT };
+
+        // Split on "+" and trim each token to tolerate "Ctrl + S" as well as "Ctrl+S"
+        const tokens = key.split('+').map(t => t.trim());
+
+        // Consume all but the last token as modifiers. Iterating up to length - 1
+        // means the final token is always treated as the key name, which makes
+        // the two phases structurally separate rather than distinguished by a flag.
+        let i = 0;
         let modifiers = 0;
-        let vk = null;
 
-        for (const rawToken of tokens) {
-            const token = rawToken.trim().toUpperCase();
+        while (i < tokens.length - 1) {
+            const bit = MODIFIER_TOKENS[tokens[i].toUpperCase()];
 
-            if (token === '') {
-                throw new TypeError(`wakaPAC: empty token in accelerator key: ${JSON.stringify(key)}`);
+            // Any non-modifier token in this position is a mistake — the key name
+            // must come last, so an unknown token here can't be anything valid.
+            if (!bit) {
+                throw new TypeError(`wakaPAC: unknown token "${tokens[i]}" in accelerator key: ${JSON.stringify(key)}`);
             }
 
-            // Check modifier tokens first
-            if (token === 'CTRL') {
-                modifiers |= KM_CONTROL;
-                continue;
-            }
-
-            if (token === 'SHIFT') {
-                modifiers |= KM_SHIFT;
-                continue;
-            }
-
-            if (token === 'ALT') {
-                modifiers |= KM_ALT;
-                continue;
-            }
-
-            // Everything else is treated as a VK_* key name
-            if (vk !== null) {
-                throw new TypeError(`wakaPAC: multiple key tokens in accelerator key: ${JSON.stringify(key)}`);
-            }
-
-            // Look up "VK_" + token in the exported wakaPAC constants
-            const vkName = 'VK_' + token;
-
-            if (!(vkName in wakaPAC)) {
-                throw new TypeError(`wakaPAC: unknown key "${rawToken.trim()}" in accelerator key: ${JSON.stringify(key)} (no constant ${vkName})`);
-            }
-
-            vk = wakaPAC[vkName];
+            modifiers |= bit;
+            ++i;
         }
 
-        if (vk === null) {
-            throw new TypeError(`wakaPAC: no key token found in accelerator key: ${JSON.stringify(key)}`);
+        // Whatever remains after the modifiers is the key name
+        const keyName = tokens[i];
+
+        if (!keyName) {
+            throw new TypeError(`wakaPAC: no key name found in accelerator key: ${JSON.stringify(key)}`);
         }
 
-        return { vk, modifiers };
+        // Look up the VK_* constant by prepending the prefix and uppercasing,
+        // so "s", "S", and "s" all resolve to VK_S
+        const vkName = 'VK_' + keyName.toUpperCase();
+
+        if (!(vkName in wakaPAC)) {
+            throw new TypeError(`wakaPAC: unknown key "${keyName}" in accelerator key: ${JSON.stringify(key)} (no constant ${vkName})`);
+        }
+
+        // Return the result
+        return { vk: wakaPAC[vkName], modifiers };
     }
+
+    // ========================================================================
+    // PUBLIC ACCELERATOR API
+    // ========================================================================
 
     /**
      * Loads (registers) an accelerator table for a PAC container or for the
@@ -9747,16 +9735,7 @@
      *
      * @param {string|null} pacId — Target container's data-pac-id, or null for global.
      * @param {Array<{key: string, cmdId: number}>} entries
-     * @throws {TypeError} If entries is not an array, any entry is malformed, or
-     *                     any key string cannot be parsed.
-     *
-     * @example
-     * wakaPAC.loadAcceleratorTable('my-editor', [
-     *   { key: 'Ctrl+S',       cmdId: 101 },
-     *   { key: 'Ctrl+Z',       cmdId: 102 },
-     *   { key: 'Ctrl+Shift+Z', cmdId: 103 },
-     *   { key: 'F5',           cmdId: 104 },
-     * ]);
+     * @throws {TypeError} If entries is not an array, any entry is malformed, or any key string cannot be parsed.
      */
     wakaPAC.loadAcceleratorTable = function(pacId, entries) {
         if (!Array.isArray(entries)) {
@@ -9785,16 +9764,17 @@
             // _parseAcceleratorKey throws a descriptive TypeError on bad input
             const { vk, modifiers } = _parseAcceleratorKey(e.key);
 
+            // Add parsed accelerator key to list
             parsed.push({ vk, modifiers, cmdId: e.cmdId, key: e.key });
         }
 
+        // Store the data
         const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
         _accelTables.set(tableKey, parsed);
     };
 
     /**
      * Destroys the accelerator table for a container or for the global scope.
-     *
      * @param {string|null} pacId — Container pac-id, or null for global.
      */
     wakaPAC.destroyAcceleratorTable = function(pacId) {
@@ -9807,14 +9787,12 @@
      * Each entry includes the original key string, making this suitable for
      * rendering a keyboard shortcuts help dialog.
      * Returns null if no table is registered for the given scope.
-     *
      * @param {string|null} pacId — Container pac-id, or null for global.
      * @returns {Array<{key: string, cmdId: number}>|null}
      */
     wakaPAC.getAcceleratorTable = function(pacId) {
         const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
         const table = _accelTables.get(tableKey);
-
         return table ? table.map(e => ({ key: e.key, cmdId: e.cmdId })) : null;
     };
 
