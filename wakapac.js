@@ -506,6 +506,28 @@
         },
 
         /**
+         * Returns true if the given value is a plain object (i.e. created via object
+         * literal, Object.create(null), or new Object()), and false for class instances,
+         * arrays, null, primitives, and other built-ins.
+         * Cross-realm safe (works across iframes and vm contexts).
+         * @param {*} value - The value to check
+         * @returns {boolean}
+         */
+        isPlainObject(value) {
+            // Reject if the type is not 'object'
+            if (value === null || typeof value !== 'object') {
+                return false;
+            }
+
+            // Get prototype
+            const proto = Object.getPrototypeOf(value);
+
+            // Accept Object.create(null) (no prototype) and plain objects whose
+            // prototype chain is exactly: value -> Object.prototype -> null
+            return proto === null || Object.getPrototypeOf(proto) === null;
+        },
+
+        /**
          * Sets a nested property value on the reactive abstraction
          * @param {string} path - The property path (e.g., "todos[0].completed")
          * @param {*} value - The value to set
@@ -9129,7 +9151,7 @@
      */
     wakaPAC.createPacMessage = function (messageId, wParam, lParam, extended = {}) {
         // Throw error when extended is not an object
-        if (extended !== null && typeof extended !== 'object') {
+        if (extended !== null && !Utils.isPlainObject(extended)) {
             throw new TypeError(`wakaPAC.createPacMessage(): extended must be a plain object, got ${typeof extended}`);
         }
 
