@@ -662,7 +662,9 @@
 
         msgProc(event) {
             const d = event.detail;
-            logMessage('grandchild', `Received message: ${event.message}`, d);
+            if (event.message >= wakaPAC.MSG_USER) {
+                logMessage('grandchild', `Received message: ${event.message}`, d);
+            }
 
             switch (event.message) {
                 case MSG_ACTIVATE:
@@ -683,7 +685,7 @@
 
                 case MSG_SET_PROGRESS:
                     this.lastParentCommand = `${event.message}: ${JSON.stringify(d)}`;
-                    this.progress = d.progress || 0;
+                    this.progress = d.progress ?? 0;
                     this.updateWorkStatus();
                     break;
 
@@ -741,6 +743,7 @@
 
             this.progress = Math.min(100, this.progress + Math.floor(Math.random() * 20) + 10);
             this.updateWorkStatus();
+            this.lastParentCommand = `${MSG_SET_PROGRESS}: {"progress":${this.progress}}`;
             logMessage('grandchild', `Work completed, progress: ${this.progress}%`);
 
             const parentId = wakaPAC.getParentPacId(this.pacId);
@@ -815,7 +818,9 @@
 
         msgProc(event) {
             const d = event.detail;
-            logMessage('child', `Received message: ${event.message}`, d);
+            if (event.message >= wakaPAC.MSG_USER) {
+                logMessage('child', `Received message: ${event.message}`, d);
+            }
 
             switch (event.message) {
                 // ── Commands from parent ──────────────────────────────────────
@@ -1008,7 +1013,9 @@
 
         msgProc(event) {
             const d = event.detail;
-            logMessage('parent', `Received message: ${event.message}`, d);
+            if (event.message >= wakaPAC.MSG_USER) {
+                logMessage('parent', `Received message: ${event.message}`, d);
+            }
 
             switch (event.message) {
                 case MSG_TASK_COMPLETED:

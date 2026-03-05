@@ -187,28 +187,6 @@
     const MSG_USER = 0x1000;
 
     /**
-     * Maps DOM event.button codes to their corresponding mousedown message types.
-     * Defined at module level to avoid per-event object allocation in _setupMouseButtonEvents().
-     * @type {Object<number, number>}
-     */
-    const MOUSE_DOWN_MAP = {
-        0: MSG_LBUTTONDOWN,
-        1: MSG_MBUTTONDOWN,
-        2: MSG_RBUTTONDOWN
-    };
-
-    /**
-     * Maps DOM event.button codes to their corresponding mouseup message types.
-     * Defined at module level to avoid per-event object allocation in _setupMouseButtonEvents().
-     * @type {Object<number, number>}
-     */
-    const MOUSE_UP_MAP = {
-        0: MSG_LBUTTONUP,
-        1: MSG_MBUTTONUP,
-        2: MSG_RBUTTONUP
-    };
-
-    /**
      * Mouse and keyboard modifier key state flags
      * Used as bitmask - multiple flags can be OR'd together
      */
@@ -1563,7 +1541,14 @@
             // Capture button press and normalize into message format
             document.addEventListener('mousedown', function(event) {
                 // Map DOM button codes to internal message identifiers
-                const messageType = MOUSE_DOWN_MAP[event.button];
+                const buttonMap = {
+                    0: MSG_LBUTTONDOWN,
+                    1: MSG_MBUTTONDOWN,
+                    2: MSG_RBUTTONDOWN,
+                };
+
+                // Ignore unsupported buttons
+                const messageType = buttonMap[event.button];
 
                 if (!messageType) {
                     return;
@@ -1585,7 +1570,14 @@
             // Capture button release and optionally finalize gesture recording
             window.addEventListener('mouseup', function(event) {
                 // Map DOM button codes to internal release messages
-                const messageType = MOUSE_UP_MAP[event.button];
+                const buttonMap = {
+                    0: MSG_LBUTTONUP,
+                    1: MSG_MBUTTONUP,
+                    2: MSG_RBUTTONUP,
+                };
+
+                // Ignore unsupported buttons
+                const messageType = buttonMap[event.button];
 
                 if (!messageType) {
                     return;
@@ -3376,21 +3368,20 @@
         currentToken: 0,
         functions: null,
 
-        /**
-         * Combined operator metadata table.
-         * Each entry is [precedence, type].
-         * Operators absent from this table are treated as precedence 0 / 'arithmetic'.
-         */
-        OPERATORS: {
-            '||': [1, 'logical'],  '&&': [2, 'logical'],
-            '===': [6, 'comparison'], '!==': [6, 'comparison'],
-            '==':  [6, 'comparison'], '!=':  [6, 'comparison'],
-            '<':   [7, 'comparison'], '>':   [7, 'comparison'],
-            '<=':  [7, 'comparison'], '>=':  [7, 'comparison'],
-            '+':   [8, 'arithmetic'], '-':   [8, 'arithmetic'],
-            '*':   [9, 'arithmetic'], '/':   [9, 'arithmetic'],
-            '%':   [9, 'arithmetic'],
-            '!':   [10, 'arithmetic'], 'unary-': [10, 'arithmetic'], 'unary+': [10, 'arithmetic']
+        OPERATOR_PRECEDENCE: {
+            '||': 1, '&&': 2,
+            '===': 6, '!==': 6, '==': 6, '!=': 6,
+            '<': 7, '>': 7, '<=': 7, '>=': 7,
+            '+': 8, '-': 8, '*': 9, '/': 9, '%': 9,
+            '!': 10, 'unary-': 10, 'unary+': 10
+        },
+
+        OPERATOR_TYPES: {
+            '||': 'logical', '&&': 'logical',
+            '===': 'comparison', '!==': 'comparison', '==': 'comparison', '!=': 'comparison',
+            '>=': 'comparison', '<=': 'comparison', '>': 'comparison', '<': 'comparison',
+            '+': 'arithmetic', '-': 'arithmetic', '*': 'arithmetic', '/': 'arithmetic',
+            '%': 'arithmetic'
         },
 
         /** Lookup table for keyword literal values — avoids a switch in parsePrimary */
@@ -3610,7 +3601,7 @@
          * @returns {number} Precedence level (0 if operator not found)
          */
         getOperatorPrecedence(operator) {
-            return (this.OPERATORS[operator] || [0])[0];
+            return this.OPERATOR_PRECEDENCE[operator] || 0;
         },
 
         /**
@@ -3667,7 +3658,7 @@
 
                 // Determine the AST node type based on the operator
                 // Falls back to 'arithmetic' if operator type is not defined
-                const type = (this.OPERATORS[op] || [0, 'arithmetic'])[1];
+                const type = this.OPERATOR_TYPES[op] || 'arithmetic';
 
                 // Create a new binary expression node with the parsed components
                 // This becomes the new left operand for potential further parsing
