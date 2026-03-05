@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Accelerator Table Test</title>
+</head>
+<body>
+
+<h2>Accelerator Table Test</h2>
+
+<div id="editor" tabindex="0">
+    <p>Click here to focus, then press a shortcut.</p>
+
+    <h3>Registered shortcuts</h3>
+    <ul data-pac-bind="foreach: shortcuts" data-pac-item="shortcut">
+        <li>{{ shortcut.key }} → {{ shortcut.label }} ({{ shortcut.cmdId }}){{ shortcut.suffix }}</li>
+    </ul>
+
+    <h3>Log</h3>
+    <ul data-pac-bind="foreach: log" data-pac-item="entry">
+        <li>{{ entry.time }} {{ entry.label }} ({{ entry.cmdId }})</li>
+    </ul>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    const CMD_SAVE = 1;
+    const CMD_UNDO = 2;
+    const CMD_REDO = 3;
+    const CMD_REFRESH = 4;
+    const CMD_DELETE = 5;
+    const CMD_QUIT = 100;
+
+    const CMD_NAMES = {
+        [CMD_SAVE]: 'CMD_SAVE',
+        [CMD_UNDO]: 'CMD_UNDO',
+        [CMD_REDO]: 'CMD_REDO',
+        [CMD_REFRESH]: 'CMD_REFRESH',
+        [CMD_DELETE]: 'CMD_DELETE',
+        [CMD_QUIT]: 'CMD_QUIT',
+    };
+
+    wakaPAC('#editor', {
+        shortcuts: [],
+        log: [],
+
+        init() {
+            wakaPAC.loadAcceleratorTable('editor', [
+                {key: 'Ctrl+S', cmdId: CMD_SAVE},
+                {key: 'Ctrl+Z', cmdId: CMD_UNDO},
+                {key: 'Ctrl+Shift+Z', cmdId: CMD_REDO},
+                {key: 'F5', cmdId: CMD_REFRESH},
+                {key: 'Delete', cmdId: CMD_DELETE},
+            ]);
+
+            wakaPAC.loadAcceleratorTable(null, [
+                {key: 'Ctrl+Q', cmdId: CMD_QUIT},
+            ]);
+
+            this.shortcuts = [
+                ...wakaPAC.getAcceleratorTable('editor').map(e => ({...e, label: CMD_NAMES[e.cmdId], suffix: ''})),
+                ...wakaPAC.getAcceleratorTable(null).map(e => ({...e, label: CMD_NAMES[e.cmdId], suffix: ' [global]'})),
+            ];
+        },
+
+        msgProc(event) {
+            if (event.message !== wakaPAC.MSG_ACCEL) {
+                return;
+            }
+
+            const cmdId = event.wParam;
+            const time = new Date().toLocaleTimeString('en', {hour12: false});
+            this.log.unshift({time, cmdId, label: CMD_NAMES[cmdId]});
+        },
+
+        destroy() {
+            wakaPAC.destroyAcceleratorTable('editor');
+            wakaPAC.destroyAcceleratorTable(null);
+        },
+    });
+</script>
+
+</body>
+</html>

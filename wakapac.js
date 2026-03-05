@@ -180,6 +180,7 @@
     const MSG_KILLFOCUS = 0x0008;
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
+    const MSG_ACCEL = 0x0112;
     const MSG_TIMER = 0x0113;
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
@@ -2057,6 +2058,14 @@
                     key: event.key,   // Logical key value
                     code: event.code  // Physical key identifier
                 });
+
+                // Translate accelerators before dispatch. If a match is found,
+                // MSG_ACCEL is sent to the container, the keydown is suppressed,
+                // and the browser default action is prevented.
+                if (container && _translateAccelerator(keyDownEvent, container)) {
+                    event.preventDefault();
+                    return;
+                }
 
                 // Dispatch the key event
                 self.dispatchToContainer(container, keyDownEvent);
@@ -8969,6 +8978,146 @@
     };
 
     // ========================================================================
+    // ACCELERATOR TABLES
+    // ========================================================================
+    /**
+     * Accelerator table registry.
+     * Keys are pac-id strings (or the sentinel value ACCEL_GLOBAL_KEY for the
+     * application-wide table).  Values are arrays of accelerator descriptors:
+     *   { vk, modifiers, cmdId }
+     *   vk        — Win32 virtual key code (number)
+     *   modifiers — bitmask of ACCEL_* flags (see below)
+     *   cmdId     — command identifier posted in wParam of MSG_ACCEL
+     * @type {Map<string|symbol, Array<{vk:number, modifiers:number, cmdId:number}>>}
+     */
+    const _accelTables = new Map();
+
+    /**
+     * Sentinel key used to store the application-wide (global) accelerator table.
+     * A global table fires regardless of which container currently has focus.
+     * Container-scoped tables take priority over the global table.
+     * @type {symbol}
+     */
+    const ACCEL_GLOBAL_KEY = Symbol('global');
+
+    /**
+     * Translates a MSG_KEYDOWN event into MSG_ACCEL if the key combination
+     * matches a registered accelerator entry. Container-scoped tables are
+     * checked before the global table. Returns true and dispatches MSG_ACCEL
+     * on a match (suppressing the keydown); returns false otherwise.
+     * @param {CustomEvent}  pacEvent  — The MSG_KEYDOWN PAC event.
+     * @param {HTMLElement}  container — The target container element.
+     * @returns {boolean} True if the message was translated (caller should swallow it).
+     * @private
+     */
+    function _translateAccelerator(pacEvent, container) {
+        // Skip immediately if no tables are registered — common case when the
+        // feature is not in use.
+        if (_accelTables.size === 0) {
+            return false;
+        }
+
+        // wParam carries the virtual key code for keyboard messages
+        const vk = pacEvent.wParam;
+
+        // Isolate the modifier bits from lParam — other bits carry repeat count,
+        // extended key flag, etc. and must not affect the comparison.
+        const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
+
+        // Fetch the pacId from the container
+        const pacId = container.getAttribute('data-pac-id');
+
+        // Build the lookup order: container-scoped table first, global table as
+        // fallback. _accelTables.get() returns undefined for missing keys, which
+        // the loop body handles with the !table guard — no double lookup needed.
+        const tables = [
+            pacId && _accelTables.get(pacId),
+            _accelTables.get(ACCEL_GLOBAL_KEY)
+        ];
+
+        for (const table of tables) {
+            if (!table) {
+                continue;
+            }
+
+            for (const entry of table) {
+                // Both the key code and the exact modifier combination must match.
+                // Partial modifier matches are intentionally rejected — Ctrl+Shift+S
+                // must not trigger a Ctrl+S entry.
+                if (entry.vk === vk && entry.modifiers === modifiers) {
+                    wakaPAC.sendMessage(pacId, MSG_ACCEL, entry.cmdId, 0);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Parses a shortcut string into a { vk, modifiers } descriptor.
+     *
+     * Format: optional modifier tokens followed by a key name, joined by "+".
+     * Parsing is case-insensitive. Modifier tokens are "Ctrl", "Shift", "Alt".
+     * The key name is a VK_* constant with the "VK_" prefix omitted:
+     * "S" → VK_S, "F5" → VK_F5, "Delete" → VK_DELETE, "OEM_PLUS" → VK_OEM_PLUS
+     *
+     * @param {string} key - Shortcut string, e.g. "Ctrl+S", "Ctrl+Shift+Z", "F5"
+     * @returns {{ vk: number, modifiers: number }}
+     * @throws {TypeError} If the string is empty, the key name is missing or unknown,
+     *                     or more than one key name is present.
+     * @private
+     */
+    function _parseAcceleratorKey(key) {
+        // Reject early so the rest of the function can assume a non-empty string
+        if (typeof key !== 'string' || key.trim() === '') {
+            throw new TypeError(`wakaPAC: accelerator key must be a non-empty string, got: ${JSON.stringify(key)}`);
+        }
+
+        // Map the three recognised modifier names to their KM_* bitmask values
+        const MODIFIER_TOKENS = { CTRL: KM_CONTROL, SHIFT: KM_SHIFT, ALT: KM_ALT };
+
+        // Split on "+" and trim each token to tolerate "Ctrl + S" as well as "Ctrl+S"
+        const tokens = key.split('+').map(t => t.trim());
+
+        // Consume all but the last token as modifiers. Iterating up to length - 1
+        // means the final token is always treated as the key name, which makes
+        // the two phases structurally separate rather than distinguished by a flag.
+        let modifiers = 0;
+        let i = 0;
+
+        while (i < tokens.length - 1) {
+            const bit = MODIFIER_TOKENS[tokens[i].toUpperCase()];
+
+            // Any non-modifier token in this position is a mistake — the key name
+            // must come last, so an unknown token here can't be anything valid.
+            if (!bit) {
+                throw new TypeError(`wakaPAC: unknown token "${tokens[i]}" in accelerator key: ${JSON.stringify(key)}`);
+            }
+
+            modifiers |= bit;
+            i++;
+        }
+
+        // Whatever remains after the modifiers is the key name
+        const keyName = tokens[i];
+
+        if (!keyName) {
+            throw new TypeError(`wakaPAC: no key name found in accelerator key: ${JSON.stringify(key)}`);
+        }
+
+        // Look up the VK_* constant by prepending the prefix and uppercasing,
+        // so "s", "S", and "s" all resolve to VK_S
+        const vkName = 'VK_' + keyName.toUpperCase();
+
+        if (!(vkName in wakaPAC)) {
+            throw new TypeError(`wakaPAC: unknown key "${keyName}" in accelerator key: ${JSON.stringify(key)} (no constant ${vkName})`);
+        }
+
+        return { vk: wakaPAC[vkName], modifiers };
+    }
+
+    // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
 
@@ -9523,6 +9672,94 @@
     };
 
     // ========================================================================
+    // PUBLIC ACCELERATOR API
+    // ========================================================================
+
+    /**
+     * Loads (registers) an accelerator table for a PAC container or for the
+     * application globally.
+     *
+     * Each entry is a plain object with a human-readable shortcut string and a
+     * command identifier:
+     *   { key: "Ctrl+S", cmdId: 101 }
+     *
+     * The key string consists of optional modifier tokens (Ctrl, Shift, Alt)
+     * followed by a key name, all joined by "+". The key name is a VK_* constant
+     * name with the "VK_" prefix omitted. Parsing is case-insensitive.
+     *
+     *   "Ctrl+S"           → Ctrl + S
+     *   "Ctrl+Shift+Z"     → Ctrl + Shift + Z
+     *   "F5"               → F5 (no modifiers)
+     *   "Ctrl+OEM_PLUS"    → Ctrl + = / +  key
+     *   "Alt+F4"           → Alt + F4
+     *
+     * Calling loadAcceleratorTable() for the same pacId a second time completely
+     * replaces the existing table — entries are not merged.
+     *
+     * @param {string|null} pacId — Target container's data-pac-id, or null for global.
+     * @param {Array<{key: string, cmdId: number}>} entries
+     * @throws {TypeError} If entries is not an array, any entry is malformed, or any key string cannot be parsed.
+     */
+    wakaPAC.loadAcceleratorTable = function(pacId, entries) {
+        if (!Array.isArray(entries)) {
+            throw new TypeError('wakaPAC.loadAcceleratorTable(): entries must be an array');
+        }
+
+        // Parse and validate every entry up-front so callers get a clear error
+        // message rather than a silent misfire at dispatch time.
+        const parsed = [];
+
+        for (let i = 0; i < entries.length; i++) {
+            const e = entries[i];
+
+            if (typeof e !== 'object' || e === null) {
+                throw new TypeError(`wakaPAC.loadAcceleratorTable(): entry[${i}] must be an object`);
+            }
+
+            if (typeof e.key !== 'string') {
+                throw new TypeError(`wakaPAC.loadAcceleratorTable(): entry[${i}].key must be a string`);
+            }
+
+            if (typeof e.cmdId !== 'number' || e.cmdId <= 0) {
+                throw new TypeError(`wakaPAC.loadAcceleratorTable(): entry[${i}].cmdId must be a positive number`);
+            }
+
+            // _parseAcceleratorKey throws a descriptive TypeError on bad input
+            const { vk, modifiers } = _parseAcceleratorKey(e.key);
+
+            // Add parsed accelerator key to list
+            parsed.push({ vk, modifiers, cmdId: e.cmdId, key: e.key });
+        }
+
+        // Store the data
+        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        _accelTables.set(tableKey, parsed);
+    };
+
+    /**
+     * Destroys the accelerator table for a container or for the global scope.
+     * @param {string|null} pacId — Container pac-id, or null for global.
+     */
+    wakaPAC.destroyAcceleratorTable = function(pacId) {
+        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        _accelTables.delete(tableKey);
+    };
+
+    /**
+     * Returns a copy of the registered entries for a container or the global scope.
+     * Each entry includes the original key string, making this suitable for
+     * rendering a keyboard shortcuts help dialog.
+     * Returns null if no table is registered for the given scope.
+     * @param {string|null} pacId — Container pac-id, or null for global.
+     * @returns {Array<{key: string, cmdId: number}>|null}
+     */
+    wakaPAC.getAcceleratorTable = function(pacId) {
+        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const table = _accelTables.get(tableKey);
+        return table ? table.map(e => ({ key: e.key, cmdId: e.cmdId })) : null;
+    };
+
+    // ========================================================================
     // EXPORTS
     // ========================================================================
 
@@ -9539,8 +9776,8 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
         MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
         MSG_INPUT_COMPLETE, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
-        MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
-        MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED,
+        MSG_ACCEL, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER,
+        MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED,
         MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
 
         // Mouse modifier keys
