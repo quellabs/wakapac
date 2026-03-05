@@ -5256,51 +5256,74 @@
     };
 
     /**
-     * Analyzes computed properties to build a dependency graph showing which computed
-     * properties depend on which data properties.
-     * @returns {Map<string, string[]>} A Map where keys are property names that are accessed
+     * Builds a dependency graph by executing each computed property through a tracking
+     * proxy, then transitively expanding chains so that upstream data changes propagate
+     * through all computed layers.
+     * @returns {Map<string, Set<string>>} Keys are accessed property names; values are
+     *   the set of computed properties that ultimately depend on them.
      */
-    Context.prototype.getDependencies = function() {
-        /** @type {Map<string, string[]>} Dependency map from property names to computed property names */
-        const dependencies = new Map();
+    Context.prototype.getDependencies = function () {
+        const computed = this.originalAbstraction.computed ?? {};
+        const computedNames = new Set(Object.keys(computed));
 
-        /** @type {Object<string, Function>} Computed properties from the original abstraction */
-        const computed = this.originalAbstraction.computed || {};
-
-        /** @type {Set<string>} Tracks which properties are accessed during each computed property execution */
+        // Build the direct dependency map by executing each computed property
+        // through a proxy that records every property access.
         const accessed = new Set();
-
-        /** @type {Object} Proxy that intercepts property access to track dependencies */
         const proxy = new Proxy(this.originalAbstraction, {
-            /**
-             * Trap for property access - records accessed property names
-             * @param {Object} target - The original abstraction object
-             * @param {string|symbol} prop - The property being accessed
-             * @returns {*} The property value
-             */
             get(target, prop) {
                 if (typeof prop === 'string') {
                     accessed.add(prop);
                 }
 
-                return target[prop];
+                // Transparently invoke computed properties so that computed-on-computed
+                // access resolves to a value rather than recording a function reference.
+                const value = target[prop];
+                return (typeof value === 'function' && computedNames.has(prop))
+                    ? value.call(proxy)
+                    : value;
             }
         });
 
-        // Execute each computed property to discover its dependencies
-        Object.keys(computed).forEach(name => {
+        /** @type {Map<string, Set<string>>} */
+        const dependencies = new Map();
+
+        for (const name of computedNames) {
             accessed.clear();
             computed[name].call(proxy);
 
-            // For each accessed property, add this computed property as a dependent
-            accessed.forEach(prop => {
+            for (const prop of accessed) {
                 if (!dependencies.has(prop)) {
-                    dependencies.set(prop, []);
+                    dependencies.set(prop, new Set());
                 }
 
-                dependencies.get(prop).push(name);
-            });
-        });
+                dependencies.get(prop).add(name);
+            }
+        }
+
+        // Transitively expand the graph so that data → computed → computed chains
+        // are flattened. A change to `rawData` must list every downstream computed
+        // property as a dependent, not only the first one in the chain.
+        // The loop converges because duplicates are never added to a Set.
+        let changed = true;
+
+        while (changed) {
+            changed = false;
+
+            for (const [, dependents] of dependencies) {
+                for (const dep of [...dependents]) {
+                    if (!computedNames.has(dep)) {
+                        continue;
+                    }
+
+                    for (const transitive of (dependencies.get(dep) ?? [])) {
+                        if (!dependents.has(transitive)) {
+                            dependents.add(transitive);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
 
         return dependencies;
     };
@@ -5317,7 +5340,7 @@
             const rootValue = this.abstraction[rootProperty];
             const isArrayRoot = Array.isArray(rootValue);
 
-            if (dependentList.includes(computedName) && isArrayRoot) {
+            if (dependentList.has(computedName) && isArrayRoot) {
                 return rootProperty; // e.g. "todos"
             }
         }
@@ -6084,7 +6107,7 @@
 
             // Indirect match: this foreach is bound to a computed property
             // that depends on the changed property (e.g., filter → filteredTodos)
-            if (dependents.indexOf(expr) !== -1 || dependents.indexOf(source) !== -1) {
+            if (dependents.has(expr) || dependents.has(source)) {
                 if (this.shouldRebuildForeach(element)) {
                     this.renderForeach(element);
                 }
