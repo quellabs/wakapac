@@ -85,13 +85,14 @@
 
     /**
      * Matches wp-if comment directives
-     * Format: <!-- wp-if: expression --> or <!-- /wp-if -->
+     * Format: <!-- wp-if: expression --> or <!-- /wp-if --> or <!-- wp-else -->
      * Captures: expression for opening tags
      * Note: Comment nodes don't include <!-- --> in their textContent
      * @type {RegExp}
      */
     const WP_IF_COMMENT_REGEX = /^\s*wp-if:\s*(.+?)\s*$/;
     const WP_IF_CLOSE_COMMENT_REGEX = /^\s*\/wp-if\s*$/;
+    const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
     /**
      * This regexp finds runs of dots and square brackets.
@@ -162,6 +163,7 @@
     const MSG_LCLICK = 0x0210;
     const MSG_MCLICK = 0x0211;
     const MSG_RCLICK = 0x0212;
+    const MSG_CONTEXTMENU = 0x007B;
     const MSG_CAPTURECHANGED = 0x0215;
     const MSG_DRAGENTER = 0x0231;
     const MSG_DRAGOVER  = 0x0232;
@@ -1467,6 +1469,14 @@
                 // Resolve container and dispatch message
                 const container = self.getContainerForEvent(messageType, event);
                 self.dispatchMouseMessage(messageType, event, container);
+
+                // Synthesize MSG_RCLICK on right button release, parallel to how the
+                // browser's 'click' event synthesizes MSG_LCLICK on left button release.
+                // Guard against gesture: if a gesture was just recognized the contextmenu
+                // handler will suppress it, and we should not fire a click either.
+                if (event.button === 2 && !MouseGestureRecognizer.gestureJustDispatched) {
+                    self.dispatchMouseMessage(MSG_RCLICK, event, container);
+                }
             });
 
             // Left click
@@ -1483,19 +1493,22 @@
                 }
             });
 
-            // Right click / context menu
-            // Normalize context interactions and optionally suppress native menu
+            // Context menu
+            // Fires on right-click AND the keyboard context menu key.
+            // Dispatched as MSG_CONTEXTMENU so components can intercept and suppress
+            // the native browser menu via event.preventDefault().
             document.addEventListener('contextmenu', function(event) {
-                // Prevent brwowser context menu if a gesture was just dispatched
+                // Suppress native menu if a gesture was just dispatched
                 if (MouseGestureRecognizer.gestureJustDispatched) {
                     MouseGestureRecognizer.gestureJustDispatched = false;
                     event.preventDefault();
                     return;
                 }
 
-                // Dispatch MSG_RCLICK if no gesture recognized
-                const container = self.getContainerForEvent(MSG_RCLICK, event);
-                self.dispatchMouseMessage(MSG_RCLICK, event, container);
+                // Dispatch MSG_CONTEXTMENU — calling event.preventDefault() inside
+                // msgProc will suppress the native browser context menu
+                const container = self.getContainerForEvent(MSG_CONTEXTMENU, event);
+                self.dispatchMouseMessage(MSG_CONTEXTMENU, event, container);
             });
 
             // Double click (left button only)
@@ -3240,7 +3253,8 @@
                 messageType === MSG_MBUTTONUP ||
                 messageType === MSG_LCLICK ||
                 messageType === MSG_MCLICK ||
-                messageType === MSG_RCLICK;
+                messageType === MSG_RCLICK ||
+                messageType === MSG_CONTEXTMENU;
         },
 
         /**
@@ -5496,7 +5510,7 @@
             // Similar to Win32: returning 0 from WndProc means "I handled this, skip default processing"
             const cancellableEvents = [
                 MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
-                MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
+                MSG_LCLICK, MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU,
                 MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE,
                 MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP
             ];
@@ -6375,10 +6389,25 @@
     };
 
     /**
+     * Calls scanAndRegisterNewElements on every Element node in the given array.
+     * Extracted as a module-level helper so it is defined once rather than
+     * recreated as a closure on each updateCommentConditional call.
+     * @param {Context} context
+     * @param {Node[]} nodes
+     */
+    function scanElementNodes(context, nodes) {
+        nodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                context.scanAndRegisterNewElements(node);
+            }
+        });
+    }
+
+    /**
      * Scans the container for comment nodes with wp-if conditionals
      * Builds mapping similar to element bindings but for comment-based conditionals
      * @param {Element} parentElement - The parent element to scan
-     * @returns {Map<Comment, {expression: string, closingComment: Comment, content: Node[]}>}
+     * @returns {Map<Comment, {expression: string, closingComment: Comment, content: Node[], elseContent: Node[]}>}
      */
     Context.prototype.scanCommentBindings = function(parentElement) {
         const commentBindingMap = new Map();
@@ -6419,18 +6448,53 @@
             // pop comment off array
             const { comment: openComment, expression } = openComments.pop();
 
-            // Collect all nodes between opening and closing comments
+            // Collect all nodes between opening and closing comments,
+            // splitting at an optional <!-- wp-else --> into two buckets.
             const content = [];
+            const elseContent = [];
+            let elseComment = null;
+
             for (let node = openComment.nextSibling; node && node !== commentNode; node = node.nextSibling) {
-                content.push(node);
+                if (node.nodeType === Node.COMMENT_NODE && node.nodeValue.match(WP_ELSE_COMMENT_REGEX)) {
+                    elseComment = node;
+                    continue;
+                }
+
+                if (elseComment) {
+                    elseContent.push(node);
+                } else {
+                    content.push(node);
+                }
             }
+
+            // Build the scopeResolver once at scan time. The comment's parent
+            // element is stable for the lifetime of the binding, so there is
+            // no benefit to rebuilding this on every evaluation.
+            let scopeParent = openComment.parentNode;
+
+            while (scopeParent && scopeParent.nodeType !== Node.ELEMENT_NODE) {
+                scopeParent = scopeParent.parentNode;
+            }
+
+            const scopeResolver = {
+                resolveScopedPath: (path) => scopeParent
+                    ? this.normalizePath(path, scopeParent)
+                    : path
+            };
 
             // Store in map
             commentBindingMap.set(openComment, {
                 expression,
                 closingComment: commentNode,
                 content,
-                isVisible: true // Track current visibility state
+                elseContent,
+                scopeResolver,
+                isVisible: null,           // null sentinel forces first evaluation to always run
+                // NOTE: these flags assume content/elseContent nodes are never
+                // replaced after initial scan. If the framework ever supports
+                // keyed re-renders that swap these nodes, the flags must be reset.
+                contentScanned: false,     // Guards against re-scanning on repeated toggles
+                elseContentScanned: false  // Same guard for the else branch
             });
         }
 
@@ -6444,53 +6508,47 @@
     };
 
     /**
-     * Updates the visibility of content controlled by a wp-if comment
+     * Updates the visibility of content controlled by a wp-if comment.
+     * If the binding includes an elseContent branch (from <!-- wp-else -->),
+     * it is toggled in the opposite direction.
      * @param {Comment} commentNode - The wp-if comment node
      * @param {Object} mappingData - The binding data for this comment
      */
     Context.prototype.updateCommentConditional = function(commentNode, mappingData) {
-        const self = this;
-
-        const scopeResolver = {
-            resolveScopedPath: (path) => {
-                let parentElement = commentNode.parentNode;
-
-                while (parentElement && parentElement.nodeType !== Node.ELEMENT_NODE) {
-                    parentElement = parentElement.parentNode;
-                }
-
-                return parentElement ? self.normalizePath(path, parentElement) : path;
-            }
-        };
-
         try {
             const parsed = ExpressionCache.parseExpression(mappingData.expression);
-            const value = ExpressionParser.evaluate(parsed, this.abstraction, scopeResolver);
+            const value = ExpressionParser.evaluate(parsed, this.abstraction, mappingData.scopeResolver);
             const shouldShow = !!value;
 
-            // Do not toggle node if visibility status did not change
+            // Do not toggle nodes if visibility status did not change
             if (shouldShow === mappingData.isVisible) {
                 return;
             }
 
-            // Toggle DOM first, then update flag — ensures isVisible
-            // stays in sync with actual DOM state even if the DOM
-            // operation silently fails for some nodes.
+            // Update DOM before the flag. If toggleNodeVisibility throws,
+            // isVisible remains consistent with the actual DOM state.
             this.domUpdater.toggleNodeVisibility(mappingData.content, shouldShow);
 
-            // Set new visible flag after successful DOM update
+            // Toggle else branch in the opposite direction (if present)
+            if (mappingData.elseContent.length > 0) {
+                this.domUpdater.toggleNodeVisibility(mappingData.elseContent, !shouldShow);
+            }
+
+            // Flag update after DOM operations succeed
             mappingData.isVisible = shouldShow;
 
-            // Scan new nodes
-            if (shouldShow) {
-                mappingData.content.forEach(node => {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        self.scanAndRegisterNewElements(node);
-                    }
-                });
+            // Scan each branch once — on first show only — to register any
+            // reactive bindings inside. Without this, a branch that starts
+            // hidden would have no registered bindings when first revealed.
+            if (shouldShow && !mappingData.contentScanned) {
+                scanElementNodes(this, mappingData.content);
+                mappingData.contentScanned = true;
+            } else if (!shouldShow && mappingData.elseContent.length > 0 && !mappingData.elseContentScanned) {
+                scanElementNodes(this, mappingData.elseContent);
+                mappingData.elseContentScanned = true;
             }
         } catch (error) {
-            console.warn('Error evaluating wp-if comment expression:', mappingData.expression, error);
+            console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
         }
     };
 
@@ -9456,9 +9514,9 @@
         // Message types
         MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
-        MSG_MCLICK, MSG_RCLICK, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
-        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_COPY,
-        MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
+        MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
+        MSG_INPUT_COMPLETE, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
+        MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER, MSG_MOUSELEAVE,
         MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED,
         MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
 

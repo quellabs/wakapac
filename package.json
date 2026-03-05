@@ -1,17 +1,17 @@
 {
   "scripts": {
-    "minify:wakapac": "terser wakapac.js -c passes=3,drop_console=true -m toplevel=true -o wakapac.min.js",
-    "minify:wakasync": "terser wakasync.js -c passes=3,drop_console=true -m toplevel=true -o wakasync.min.js",
-    "minify:wakastore": "terser wakastore.js -c passes=3,drop_console=true -m toplevel=true -o wakastore.min.js",
-    "minify:wakamotion": "terser wakamotion.js -c passes=3,drop_console=true -m toplevel=true -o wakamotion.min.js",
+    "minify:wakapac": "terser wakapac.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakapac.min.js --ecma 2020",
+    "minify:wakasync": "terser wakasync.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakasync.min.js --ecma 2020",
+    "minify:wakastore": "terser wakastore.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakastore.min.js --ecma 2020",
+    "minify:wakamotion": "terser wakamotion.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakamotion.min.js --ecma 2020",
     "minify": "npm run minify:wakapac && npm run minify:wakasync && npm run minify:wakastore && npm run minify:wakamotion"
   },
-  "dependencies": {
-    "jslint": "^0.12.1"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@eslint/js": "^9.34.0",
     "eslint": "^9.34.0",
-    "globals": "^16.3.0"
+    "globals": "^16.3.0",
+    "jslint": "^0.12.1",
+    "terser": "^5.39.0"
   }
 }
