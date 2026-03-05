@@ -9,70 +9,67 @@
 
 <div id="editor" tabindex="0">
     <p>Click here to focus, then press a shortcut.</p>
-    <input type="text" placeholder="Bare-key shortcuts (e.g. Delete) should be suppressed here">
+
+    <h3>Registered shortcuts</h3>
+    <ul data-pac-bind="foreach: shortcuts" data-pac-item="shortcut">
+        <li>{{ shortcut.key }} → {{ shortcut.label }} ({{ shortcut.cmdId }}){{ shortcut.suffix }}</li>
+    </ul>
+
+    <h3>Log</h3>
+    <ul data-pac-bind="foreach: log" data-pac-item="entry">
+        <li>{{ entry.time }} {{ entry.label }} ({{ entry.cmdId }})</li>
+    </ul>
 </div>
-
-<h3>Registered shortcuts</h3>
-<ul id="shortcut-list"></ul>
-
-<h3>Log</h3>
-<ul id="log"></ul>
 
 <script src="../wakapac.js"></script>
 <script>
-    const CMD_SAVE    = 1;
-    const CMD_UNDO    = 2;
-    const CMD_REDO    = 3;
+    const CMD_SAVE = 1;
+    const CMD_UNDO = 2;
+    const CMD_REDO = 3;
     const CMD_REFRESH = 4;
-    const CMD_DELETE  = 5;
-    const CMD_QUIT    = 100;
-
-    const SHORTCUTS = [
-        { key: 'Ctrl+S',       cmdId: CMD_SAVE    },
-        { key: 'Ctrl+Z',       cmdId: CMD_UNDO    },
-        { key: 'Ctrl+Shift+Z', cmdId: CMD_REDO    },
-        { key: 'F5',           cmdId: CMD_REFRESH },
-        { key: 'Delete',       cmdId: CMD_DELETE  },
-    ];
-
-    const GLOBAL_SHORTCUTS = [
-        { key: 'Ctrl+Q', cmdId: CMD_QUIT },
-    ];
+    const CMD_DELETE = 5;
+    const CMD_QUIT = 100;
 
     const CMD_NAMES = {
-        [CMD_SAVE]:    'CMD_SAVE',
-        [CMD_UNDO]:    'CMD_UNDO',
-        [CMD_REDO]:    'CMD_REDO',
+        [CMD_SAVE]: 'CMD_SAVE',
+        [CMD_UNDO]: 'CMD_UNDO',
+        [CMD_REDO]: 'CMD_REDO',
         [CMD_REFRESH]: 'CMD_REFRESH',
-        [CMD_DELETE]:  'CMD_DELETE',
-        [CMD_QUIT]:    'CMD_QUIT',
+        [CMD_DELETE]: 'CMD_DELETE',
+        [CMD_QUIT]: 'CMD_QUIT',
     };
 
     wakaPAC('#editor', {
+        shortcuts: [],
+        log: [],
+
         init() {
-            wakaPAC.loadAcceleratorTable('editor', SHORTCUTS);
-            wakaPAC.loadAcceleratorTable(null, GLOBAL_SHORTCUTS);
+            wakaPAC.loadAcceleratorTable('editor', [
+                {key: 'Ctrl+S', cmdId: CMD_SAVE},
+                {key: 'Ctrl+Z', cmdId: CMD_UNDO},
+                {key: 'Ctrl+Shift+Z', cmdId: CMD_REDO},
+                {key: 'F5', cmdId: CMD_REFRESH},
+                {key: 'Delete', cmdId: CMD_DELETE},
+            ]);
 
-            // Render registered shortcuts
-            const list = document.getElementById('shortcut-list');
+            wakaPAC.loadAcceleratorTable(null, [
+                {key: 'Ctrl+Q', cmdId: CMD_QUIT},
+            ]);
 
-            [...SHORTCUTS, ...GLOBAL_SHORTCUTS.map(e => ({ ...e, global: true }))].forEach(entry => {
-                const li = document.createElement('li');
-                li.textContent = entry.key + ' → ' + CMD_NAMES[entry.cmdId] + ' (' + entry.cmdId + ')' + (entry.global ? ' [global]' : '');
-                li.id = 'shortcut-' + entry.cmdId;
-                list.appendChild(li);
-            });
+            this.shortcuts = [
+                ...wakaPAC.getAcceleratorTable('editor').map(e => ({...e, label: CMD_NAMES[e.cmdId], suffix: ''})),
+                ...wakaPAC.getAcceleratorTable(null).map(e => ({...e, label: CMD_NAMES[e.cmdId], suffix: ' [global]'})),
+            ];
         },
 
         msgProc(event) {
-            if (event.message !== wakaPAC.MSG_ACCEL) return;
+            if (event.message !== wakaPAC.MSG_ACCEL) {
+                return;
+            }
 
             const cmdId = event.wParam;
-            const log = document.getElementById('log');
-            const li = document.createElement('li');
-            li.textContent = CMD_NAMES[cmdId] + ' (' + cmdId + ')';
-            log.prepend(li);
-            return false;
+            const time = new Date().toLocaleTimeString('en', {hour12: false});
+            this.log = [{time, cmdId, label: CMD_NAMES[cmdId]}, ...this.log];
         },
 
         destroy() {
