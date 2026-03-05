@@ -2876,11 +2876,7 @@
             }
 
             // Stamp the container onto the event so hooks and handlers always know the pacId
-            Object.defineProperty(event, 'pacId', {
-                value: container.getAttribute('data-pac-id'),
-                enumerable: true,
-                configurable: true
-            });
+            event.pacId = container.getAttribute('data-pac-id');
 
             // Snapshot the hook array at dispatch time. This prevents mutations to _hooks
             // (installs or uninstalls that happen inside a hook function) from affecting
@@ -9127,6 +9123,11 @@
      * @returns {CustomEvent}
      */
     wakaPAC.createPacMessage = function (messageId, wParam, lParam, extended = {}) {
+        // Throw error when extended is not an object
+        if (extended !== null && typeof extended !== 'object') {
+            throw new TypeError(`wakaPAC.createPacMessage(): extended must be a plain object, got ${typeof extended}`);
+        }
+
         // Create a custom wakapac event that carries Win32-style message data.
         const event = new CustomEvent('pac:event', {
             bubbles: false,
