@@ -9001,10 +9001,47 @@
     const ACCEL_GLOBAL_KEY = Symbol('global');
 
     /**
+     * Returns the ordered list of accelerator tables to search for a container,
+     * walking up the hierarchy innermost-first with the global table as fallback.
+     * @param {HTMLElement} container
+     * @returns {Array}
+     * @private
+     */
+    function _accelTablesForContainer(container) {
+        const tables = [];
+
+        // Walk up the container hierarchy, innermost first.
+        // Uses closest() on parentElement to skip non-container ancestors in one step.
+        for (let el = container; el; el = el.parentElement?.closest(CONTAINER_SEL)) {
+            // Fetch pacId
+            const id = el.getAttribute('data-pac-id');
+
+            // Use !== null rather than truthiness to correctly handle id="0" or id=""
+            if (id !== null) {
+                const table = _accelTables.get(id);
+
+                if (table) {
+                    tables.push(table);
+                }
+            }
+        }
+
+        // Append the global table last so local bindings always take precedence.
+        const global = _accelTables.get(ACCEL_GLOBAL_KEY);
+
+        if (global) {
+            tables.push(global);
+        }
+
+        return tables;
+    }
+
+    /**
      * Translates a MSG_KEYDOWN event into MSG_ACCEL if the key combination
-     * matches a registered accelerator entry. Container-scoped tables are
-     * checked before the global table. Returns true and dispatches MSG_ACCEL
-     * on a match (suppressing the keydown); returns false otherwise.
+     * matches a registered accelerator entry. Tables are checked innermost-first
+     * by walking up the container hierarchy, with the global table as final fallback.
+     * Returns true and dispatches MSG_ACCEL on a match (suppressing the keydown);
+     * returns false otherwise.
      * @param {CustomEvent}  pacEvent  — The MSG_KEYDOWN PAC event.
      * @param {HTMLElement}  container — The target container element.
      * @returns {boolean} True if the message was translated (caller should swallow it).
@@ -9027,14 +9064,10 @@
         // Fetch the pacId from the container
         const pacId = container.getAttribute('data-pac-id');
 
-        // Build the lookup order: container-scoped table first, global table as
-        // fallback. _accelTables.get() returns undefined for missing keys, which
-        // the loop body handles with the !table guard — no double lookup needed.
-        const tables = [
-            pacId && _accelTables.get(pacId),
-            _accelTables.get(ACCEL_GLOBAL_KEY)
-        ];
+        // Fetch accelerator tables of this container and parent containers
+        const tables = _accelTablesForContainer(container);
 
+        // Walk them to map accelerators
         for (const table of tables) {
             if (!table) {
                 continue;
@@ -9056,16 +9089,9 @@
 
     /**
      * Parses a shortcut string into a { vk, modifiers } descriptor.
-     *
-     * Format: optional modifier tokens followed by a key name, joined by "+".
-     * Parsing is case-insensitive. Modifier tokens are "Ctrl", "Shift", "Alt".
-     * The key name is a VK_* constant with the "VK_" prefix omitted:
-     * "S" → VK_S, "F5" → VK_F5, "Delete" → VK_DELETE, "OEM_PLUS" → VK_OEM_PLUS
-     *
      * @param {string} key - Shortcut string, e.g. "Ctrl+S", "Ctrl+Shift+Z", "F5"
      * @returns {{ vk: number, modifiers: number }}
-     * @throws {TypeError} If the string is empty, the key name is missing or unknown,
-     *                     or more than one key name is present.
+     * @throws {TypeError} If the string is empty, the key name is missing or unknown, or more than one key name is present.
      * @private
      */
     function _parseAcceleratorKey(key) {
@@ -9083,10 +9109,11 @@
         // Consume all but the last token as modifiers. Iterating up to length - 1
         // means the final token is always treated as the key name, which makes
         // the two phases structurally separate rather than distinguished by a flag.
-        let modifiers = 0;
         let i = 0;
+        let modifiers = 0;
 
         while (i < tokens.length - 1) {
+            // Isolate bit
             const bit = MODIFIER_TOKENS[tokens[i].toUpperCase()];
 
             // Any non-modifier token in this position is a mistake — the key name
