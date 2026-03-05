@@ -2875,8 +2875,9 @@
                 return;
             }
 
-            // Stamp the container onto the event so hooks and handlers always know the pacId
-            event.pacId = container.getAttribute('data-pac-id');
+            // Stamp the container onto the event so hooks and handlers always know the pacId.
+            // _pacId is cached on the element at registration time to avoid a DOM attribute read here.
+            event.pacId = container._pacId || container.getAttribute('data-pac-id');
 
             // Snapshot the hook array at dispatch time. This prevents mutations to _hooks
             // (installs or uninstalls that happen inside a hook function) from affecting
@@ -3325,7 +3326,7 @@
 
             // Send capture changed message to container losing the capture
             if (this._capturedContainer?.isConnected) {
-                const pacId = this._capturedContainer.getAttribute('data-pac-id');
+                const pacId = this._capturedContainer._pacId || this._capturedContainer.getAttribute('data-pac-id');
 
                 if (pacId !== null) {
                     wakaPAC.sendMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
@@ -6748,7 +6749,7 @@
     Context.prototype.injectSystemProperties = function(abstraction) {
         // Add container element reference and identification
         abstraction.container = this.container;
-        abstraction.pacId = this.container.getAttribute('data-pac-id') || this.container.id;
+        abstraction.pacId = this.container._pacId || this.container.getAttribute('data-pac-id');
 
         // Initialize online/offline state and network quality
         abstraction.browserOnline = navigator.onLine;
@@ -8935,7 +8936,7 @@
         const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
 
         // Fetch the pacId from the container
-        const pacId = container.getAttribute('data-pac-id');
+        const pacId = container._pacId || container.getAttribute('data-pac-id');
 
         // Fetch accelerator tables of this container and parent containers
         const tables = _accelTablesForContainer(container);
@@ -9061,6 +9062,10 @@
                 container.setAttribute('data-pac-id', pacId);
             }
 
+            // Cache on the element itself so dispatchToContainer can read it without
+            // a DOM attribute lookup on every message dispatch
+            container._pacId = pacId;
+
             // Check if component already exists for this container
             // If so, return existing abstraction instead of creating new one
             const existingComponent = window.PACRegistry.get(pacId);
@@ -9178,7 +9183,7 @@
             return null;
         }
 
-        return context.parent.container.getAttribute('data-pac-id');
+        return context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
     };
 
     /**
@@ -9537,7 +9542,7 @@
 
         // Extract the pac-id from the captured container element
         // Use optional chaining since container might be removed from DOM
-        const pacId = DomUpdateTracker._capturedContainer?.getAttribute('data-pac-id');
+        const pacId = DomUpdateTracker._capturedContainer?._pacId || DomUpdateTracker._capturedContainer?.getAttribute('data-pac-id');
 
         // Return pac-id or null if container no longer has the attribute
         return pacId || null;
