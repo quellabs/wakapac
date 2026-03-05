@@ -69,7 +69,7 @@
 
             const cmdId = event.wParam;
             const time = new Date().toLocaleTimeString('en', {hour12: false});
-            this.log = [{time, cmdId, label: CMD_NAMES[cmdId]}, ...this.log];
+            this.log.unshift({time, cmdId, label: CMD_NAMES[cmdId]});
         },
 
         destroy() {
