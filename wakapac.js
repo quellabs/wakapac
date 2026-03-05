@@ -5259,7 +5259,6 @@
      * Builds a dependency graph by executing each computed property through a tracking
      * proxy, then transitively expanding chains so that upstream data changes propagate
      * through all computed layers.
-     *
      * @returns {Map<string, Set<string>>} Keys are accessed property names; values are
      *   the set of computed properties that ultimately depend on them.
      */
