@@ -631,7 +631,27 @@
         */
     });
 
-    // Hierarchical Communication Components
+    // User-defined messages for the hierarchy demo.
+    const MSG_ACTIVATE         = wakaPAC.MSG_USER + 1;   // Parent → Child: start working
+    const MSG_DEACTIVATE       = wakaPAC.MSG_USER + 2;   // Parent → Child: stop working
+    const MSG_SET_PROGRESS     = wakaPAC.MSG_USER + 3;   // Parent → Child: set progress value
+    const MSG_EMERGENCY_STOP   = wakaPAC.MSG_USER + 4;   // Parent → Child: halt everything
+    const MSG_UPDATE_THEME     = wakaPAC.MSG_USER + 5;   // Parent → Child: apply theme
+    const MSG_UPDATE_DATA      = wakaPAC.MSG_USER + 6;   // Parent → Child: push data payload
+    const MSG_PAUSE            = wakaPAC.MSG_USER + 7;   // Parent → Child: pause operations
+    const MSG_RESUME           = wakaPAC.MSG_USER + 8;   // Parent → Child: resume operations
+    const MSG_BLUR             = wakaPAC.MSG_USER + 9;   // Parent → Child: blur all inputs
+    const MSG_STATUS_CHANGE    = wakaPAC.MSG_USER + 10;  // Child → Parent: active/status changed
+    const MSG_PROGRESS_UPDATE  = wakaPAC.MSG_USER + 11;  // Child → Parent: progress tick
+    const MSG_PROGRESS_REPORT  = wakaPAC.MSG_USER + 12;  // Child → Parent: full progress report
+    const MSG_DATA_REQUEST     = wakaPAC.MSG_USER + 13;  // Child → Parent: request data by keys
+    const MSG_TASK_COMPLETED   = wakaPAC.MSG_USER + 14;  // Child → Parent: task counter incremented
+    const MSG_ALERT            = wakaPAC.MSG_USER + 15;  // Child → Parent: high-severity alert
+    const MSG_FOCUS_REQUEST    = wakaPAC.MSG_USER + 16;  // Child → Parent: request exclusive focus
+    const MSG_RESET            = wakaPAC.MSG_USER + 17;  // Child → Parent: child was reset
+    const MSG_GRANDCHILD_PROGRESS = wakaPAC.MSG_USER + 18; // Child → Parent: forwarded grandchild progress
+
+    // Grandchild — sub-task worker at the bottom of the hierarchy.
     const grandchildPAC = wakaPAC('#grandchild-app', {
         workerId: 'GC-001',
         subTask: 'Processing data',
@@ -640,65 +660,64 @@
         isActive: false,
         lastParentCommand: 'None',
 
-        receiveFromParent(command, data) {
-            logMessage('grandchild', `Received command: ${command}`, data);
-            this.lastParentCommand = `${command} (${JSON.stringify(data)})`;
+        msgProc(event) {
+            const d = event.detail;
+            logMessage('grandchild', `Received message: ${event.message}`, d);
 
-            switch(command) {
-                case 'activate':
+            switch (event.message) {
+                case MSG_ACTIVATE:
+                    this.lastParentCommand = `${event.message}: ${JSON.stringify(d)}`;
                     this.isActive = true;
                     this.workStatus = 'low';
-                    this.subTask = data.task || 'Default task';
-
-                    this.notifyParent('statusChange', {
-                        workerId: this.workerId,
-                        isActive: this.isActive,
-                        status: this.workStatus
-                    });
-
+                    this.subTask = d.task || 'Default task';
+                    this.notifyStatusChange();
                     break;
 
-                case 'deactivate':
+                case MSG_DEACTIVATE:
+                    this.lastParentCommand = `${event.message}: ${JSON.stringify(d)}`;
                     this.isActive = false;
                     this.workStatus = 'inactive';
                     this.progress = 0;
-
-                    this.notifyParent('statusChange', {
-                        workerId: this.workerId,
-                        isActive: this.isActive,
-                        status: this.workStatus
-                    });
-
+                    this.notifyStatusChange();
                     break;
 
-                case 'setProgress':
-                    this.progress = data.progress || 0;
+                case MSG_SET_PROGRESS:
+                    this.lastParentCommand = `${event.message}: ${JSON.stringify(d)}`;
+                    this.progress = d.progress || 0;
                     this.updateWorkStatus();
                     break;
 
-                case 'emergencyStop':
+                case MSG_EMERGENCY_STOP:
+                    this.lastParentCommand = `${event.message}: ${JSON.stringify(d)}`;
                     this.isActive = false;
                     this.workStatus = 'high';
                     this.subTask = 'EMERGENCY STOP';
                     this.progress = 0;
-
-                    this.notifyParent('statusChange', {
-                        workerId: this.workerId,
-                        isActive: this.isActive,
-                        status: this.workStatus
-                    });
-
+                    this.notifyStatusChange();
                     break;
 
-                case 'updateTheme':
-                    const container = this.container;
-                    container.className = container.className.replace(/theme-\w+/g, '');
-                    container.classList.add(`theme-${data.theme}`);
+                case MSG_UPDATE_THEME:
+                    this.lastParentCommand = `${event.message}: ${JSON.stringify(d)}`;
+                    this.container.className = this.container.className.replace(/theme-\w+/g, '');
+                    this.container.classList.add(`theme-${d.theme}`);
                     break;
 
-                case 'updateData':
-                    logMessage('grandchild', `Received requested data from parent via hierarchy`, data);
+                case MSG_UPDATE_DATA:
+                    this.lastParentCommand = `${event.message}: ${JSON.stringify(d)}`;
+                    logMessage('grandchild', 'Received requested data from parent via hierarchy', d);
                     break;
+            }
+        },
+
+        notifyStatusChange() {
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_STATUS_CHANGE, 0, 0, {
+                    senderPacId: this.pacId,
+                    workerId: this.workerId,
+                    isActive: this.isActive,
+                    status: this.workStatus
+                });
             }
         },
 
@@ -721,52 +740,56 @@
             }
 
             this.progress = Math.min(100, this.progress + Math.floor(Math.random() * 20) + 10);
-
             this.updateWorkStatus();
-
             logMessage('grandchild', `Work completed, progress: ${this.progress}%`);
 
-            this.notifyParent('progressUpdate', {
-                workerId: this.workerId,
-                progress: this.progress,
-                status: this.workStatus
-            });
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_PROGRESS_UPDATE, 0, 0, {
+                    senderPacId: this.pacId,
+                    workerId: this.workerId,
+                    progress: this.progress,
+                    status: this.workStatus
+                });
+            }
         },
 
         reportProgress() {
             logMessage('grandchild', 'Progress report sent to parent');
-
-            this.notifyParent('progressReport', {
-                workerId: this.workerId,
-                subTask: this.subTask,
-                progress: this.progress,
-                isActive: this.isActive,
-                status: this.workStatus
-            });
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_PROGRESS_REPORT, 0, 0, {
+                    senderPacId: this.pacId,
+                    workerId: this.workerId,
+                    subTask: this.subTask,
+                    progress: this.progress,
+                    isActive: this.isActive,
+                    status: this.workStatus
+                });
+            }
         },
 
         requestParentData() {
             logMessage('grandchild', 'Data request sent to parent');
-            this.notifyParent('dataRequest', {
-                requestedData: ['masterValue', 'currentTheme', 'taskName'],
-                requesterId: this.workerId
-            });
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_DATA_REQUEST, 0, 0, {
+                    senderPacId: this.pacId,
+                    requestedData: ['masterValue', 'currentTheme', 'taskName'],
+                    requesterId: this.workerId
+                });
+            }
         },
 
         toggleActive() {
             this.isActive = !this.isActive;
             this.updateWorkStatus();
-            this.notifyParent('statusChange', {
-                workerId: this.workerId,
-                isActive: this.isActive,
-                status: this.workStatus
-            });
+            this.notifyStatusChange();
             logMessage('grandchild', `Active status changed to: ${this.isActive}`);
         }
     });
 
-    // Replace the childPAC definition with this debug version:
-
+    // Child — task manager; sits between parent and grandchild.
     const childPAC = wakaPAC('#child-app', {
         name: 'Alice',
         taskName: 'Data Processing',
@@ -786,102 +809,97 @@
                 return this.isPaused ? 'badge-warning' : 'badge-success';
             },
             grandchildButtonText() {
-                console.log('grandchildButtonText computed called! grandchildActive =', this.grandchildActive);
                 return this.grandchildActive ? '⏸️ Deactivate Worker' : '⚡ Activate Worker';
             }
         },
 
-        receiveFromParent(command, data) {
-            logMessage('child', `Received command: ${command}`, data);
+        msgProc(event) {
+            const d = event.detail;
+            logMessage('child', `Received message: ${event.message}`, d);
 
-            switch(command) {
-                case 'pause':
+            switch (event.message) {
+                // ── Commands from parent ──────────────────────────────────────
+                case MSG_PAUSE:
                     this.isPaused = true;
-                    this.pauseReason = data.reason || 'Paused by parent';
+                    this.pauseReason = d.reason || 'Paused by parent';
                     this.status = 'inactive';
-                    this.notifyChildren('deactivate', { reason: 'Parent paused' });
+                    wakaPAC.broadcastToChildren(this.pacId, MSG_DEACTIVATE, 0, 0, { reason: 'Parent paused' });
                     break;
 
-                case 'resume':
+                case MSG_RESUME:
                     this.isPaused = false;
                     this.pauseReason = '';
                     this.updateStatus();
-                    this.notifyChildren('activate', { task: this.taskName });
+                    wakaPAC.broadcastToChildren(this.pacId, MSG_ACTIVATE, 0, 0, { task: this.taskName });
                     break;
 
-                case 'updateData':
-                    this.parentData = `Master: ${data.masterValue}`;
-                    logMessage('child', 'Received data update from parent - forwarding to grandchildren', data);
-                    this.notifyChildren('updateData', data);
-                    this.notifyChildren('setProgress', { progress: Math.min(100, data.masterValue || 0) });
+                case MSG_UPDATE_DATA:
+                    this.parentData = `Master: ${d.masterValue}`;
+                    logMessage('child', 'Received data update from parent - forwarding to grandchildren', d);
+                    wakaPAC.broadcastToChildren(this.pacId, MSG_UPDATE_DATA, 0, 0, d);
+                    wakaPAC.broadcastToChildren(this.pacId, MSG_SET_PROGRESS, 0, 0, { progress: Math.min(100, d.masterValue || 0) });
                     break;
 
-                case 'emergencyStop':
+                case MSG_EMERGENCY_STOP:
                     this.isPaused = true;
                     this.pauseReason = 'EMERGENCY STOP';
                     this.status = 'high';
                     this.count = 0;
-                    this.notifyChildren('emergencyStop', { reason: 'Emergency stop initiated' });
+                    wakaPAC.broadcastToChildren(this.pacId, MSG_EMERGENCY_STOP, 0, 0, { reason: 'Emergency stop initiated' });
                     break;
 
-                case 'blur':
+                case MSG_BLUR: {
                     const inputs = this.container.querySelectorAll('input');
                     inputs.forEach(input => input.blur());
                     break;
+                }
 
-                case 'updateTheme':
-                    const container = this.container;
-                    container.className = container.className.replace(/theme-\w+/g, '');
-                    container.classList.add(`theme-${data.theme}`);
-                    this.notifyChildren('updateTheme', data);
+                case MSG_UPDATE_THEME: {
+                    this.container.className = this.container.className.replace(/theme-\w+/g, '');
+                    this.container.classList.add(`theme-${d.theme}`);
+                    wakaPAC.broadcastToChildren(this.pacId, MSG_UPDATE_THEME, 0, 0, d);
                     break;
-            }
-        },
+                }
 
-        receiveFromChild(eventType, data, childPAC) {
-            const childId = childPAC.container.id;
-            logMessage('child', `Received from ${childId}: ${eventType}`, data);
-
-            if (childId === 'grandchild-app' && eventType === 'statusChange') {
-                console.log('Setting grandchildActive from', this.grandchildActive, 'to', data.isActive);
-
-                this.grandchildActive = data.isActive;
-
-                console.log('grandchildActive is now', this.grandchildActive);
-
-                // FORCE computed property update
-                console.log('Manually triggering button text update...');
-
-                // Get current button text to force computed property evaluation
-                const buttonText = this.grandchildButtonText;
-                console.log('Current button text:', buttonText);
-            }
-
-            switch(eventType) {
-                case 'progressUpdate':
-                    logMessage('child', `Grandchild progress: ${data.progress}%`);
-
-                    this.notifyParent('grandchildProgress', {
-                        grandchildId: data.workerId,
-                        progress: data.progress,
-                        childTask: this.taskName
-                    });
-
+                // ── Messages from grandchild ──────────────────────────────────
+                case MSG_STATUS_CHANGE:
+                    if (d.senderPacId === 'grandchild-app') {
+                        this.grandchildActive = d.isActive;
+                    }
+                    logMessage('child', `Grandchild ${d.workerId} status changed to: ${d.isActive ? 'active' : 'inactive'}`);
                     break;
 
-                case 'progressReport':
-                    logMessage('child', `Received progress report from ${data.workerId} - forwarding to parent`);
-                    this.notifyParent('progressReport', data);
+                case MSG_PROGRESS_UPDATE: {
+                    logMessage('child', `Grandchild progress: ${d.progress}%`);
+                    const parentId = wakaPAC.getParentPacId(this.pacId);
+                    if (parentId) {
+                        wakaPAC.sendMessage(parentId, MSG_GRANDCHILD_PROGRESS, 0, 0, {
+                            senderPacId: this.pacId,
+                            grandchildId: d.workerId,
+                            progress: d.progress,
+                            childTask: this.taskName
+                        });
+                    }
                     break;
+                }
 
-                case 'dataRequest':
-                    logMessage('child', `Received data request from ${data.requesterId} - forwarding to parent`);
-                    this.notifyParent('dataRequest', data);
+                case MSG_PROGRESS_REPORT: {
+                    logMessage('child', `Received progress report from ${d.workerId} - forwarding to parent`);
+                    const parentId = wakaPAC.getParentPacId(this.pacId);
+                    if (parentId) {
+                        wakaPAC.sendMessage(parentId, MSG_PROGRESS_REPORT, 0, 0, d);
+                    }
                     break;
+                }
 
-                case 'statusChange':
-                    logMessage('child', `Grandchild ${data.workerId} status changed to: ${data.isActive ? 'active' : 'inactive'}`);
+                case MSG_DATA_REQUEST: {
+                    logMessage('child', `Received data request from ${d.requesterId} - forwarding to parent`);
+                    const parentId = wakaPAC.getParentPacId(this.pacId);
+                    if (parentId) {
+                        wakaPAC.sendMessage(parentId, MSG_DATA_REQUEST, 0, 0, d);
+                    }
                     break;
+                }
             }
         },
 
@@ -908,132 +926,132 @@
             this.count++;
             this.updateStatus();
             this.message = `Completed ${this.count} tasks`;
-
             logMessage('child', `Task completed, count: ${this.count}`);
 
-            this.notifyParent('taskCompleted', {
-                taskName: this.taskName,
-                count: this.count,
-                status: this.status
-            });
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_TASK_COMPLETED, 0, 0, {
+                    senderPacId: this.pacId,
+                    taskName: this.taskName,
+                    count: this.count,
+                    status: this.status
+                });
+            }
         },
 
         reset() {
             this.count = 0;
             this.updateStatus();
             this.message = 'Reset completed';
-            this.notifyChildren('setProgress', { progress: 0 });
-
+            wakaPAC.broadcastToChildren(this.pacId, MSG_SET_PROGRESS, 0, 0, { progress: 0 });
             logMessage('child', 'Reset completed');
 
-            this.notifyParent('reset', { taskName: this.taskName });
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_RESET, 0, 0, {
+                    senderPacId: this.pacId,
+                    taskName: this.taskName
+                });
+            }
         },
 
         requestFocus() {
             logMessage('child', 'Requesting focus from parent');
-            this.notifyParent('focusRequest', {
-                requesterId: 'child-app',
-                reason: 'User interaction required'
-            });
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_FOCUS_REQUEST, 0, 0, {
+                    senderPacId: this.pacId,
+                    requesterId: 'child-app',
+                    reason: 'User interaction required'
+                });
+            }
         },
 
         sendAlert() {
             const alertMsg = `Alert from ${this.taskName} at ${new Date().toLocaleTimeString()}`;
-
             logMessage('child', 'Sending alert to parent');
 
-            this.notifyParent('alert', {
-                message: alertMsg,
-                severity: 'high',
-                taskName: this.taskName,
-                count: this.count
-            });
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_ALERT, 0, 0, {
+                    senderPacId: this.pacId,
+                    message: alertMsg,
+                    severity: 'high',
+                    taskName: this.taskName,
+                    count: this.count
+                });
+            }
         },
 
         createGrandchild() {
             if (this.grandchildActive) {
                 logMessage('child', 'Deactivating grandchild worker');
-
-                this.notifyChildren('deactivate', {
-                    reason: 'Deactivated by parent'
-                });
-
+                wakaPAC.broadcastToChildren(this.pacId, MSG_DEACTIVATE, 0, 0, { reason: 'Deactivated by parent' });
                 this.grandchildActive = false;
             } else {
                 logMessage('child', 'Activating grandchild worker');
-
-                this.notifyChild('grandchild-app', 'activate', {
+                wakaPAC.sendMessage('grandchild-app', MSG_ACTIVATE, 0, 0, {
                     task: `Sub-task of ${this.taskName}`,
                     assignedBy: this.name
                 });
-
                 this.grandchildActive = true;
             }
         }
     });
 
+    // Parent — top-level dashboard controller.
     const parentPAC = wakaPAC('#parent-app', {
         parentStatus: 'low',
         parentStatusText: 'System Active',
         currentTheme: 'light',
         masterValue: 50,
 
-        receiveFromChild(eventType, data, childPAC) {
-            const childId = childPAC.container.id;
-            logMessage('parent', `Received from ${childId}: ${eventType}`, data);
+        msgProc(event) {
+            const d = event.detail;
+            logMessage('parent', `Received message: ${event.message}`, d);
 
-            switch(eventType) {
-                case 'taskCompleted':
-                    if (data.count >= 5) {
-                        this.parentStatus = 'high';
-                        this.parentStatusText = 'High activity detected';
-                    } else {
-                        this.parentStatus = 'medium';
-                        this.parentStatusText = 'Normal operations';
-                    }
-
+            switch (event.message) {
+                case MSG_TASK_COMPLETED:
+                    this.parentStatus = d.count >= 5 ? 'high' : 'medium';
+                    this.parentStatusText = d.count >= 5 ? 'High activity detected' : 'Normal operations';
                     break;
 
-                case 'alert':
+                case MSG_ALERT:
                     this.parentStatus = 'high';
-                    this.parentStatusText = `🚨 ${data.message}`;
-
+                    this.parentStatusText = `🚨 ${d.message}`;
                     setTimeout(() => {
                         this.parentStatus = 'low';
                         this.parentStatusText = 'System Active';
                     }, 5000);
-                    
                     break;
 
-                case 'focusRequest':
+                case MSG_FOCUS_REQUEST:
                     logMessage('parent', 'Handling focus request - blurring other children');
-                    this.notifyChildren('blur');
+                    wakaPAC.broadcastToChildren(this.pacId, MSG_BLUR, 0, 0);
                     break;
 
-                case 'progressReport':
-                    logMessage('parent', `Progress report from grandchild ${data.workerId}: ${data.progress}%`);
+                case MSG_PROGRESS_REPORT:
+                    logMessage('parent', `Progress report from grandchild ${d.workerId}: ${d.progress}%`);
                     break;
 
-                case 'dataRequest':
-                    logMessage('parent', `Received data request from ${data.requesterId} for: ${data.requestedData.join(', ')}`);
-
-                    const requestedData = {};
-
-                    data.requestedData.forEach(key => {
-                        if (this.hasOwnProperty(key)) {
-                            requestedData[key] = this[key];
+                case MSG_DATA_REQUEST: {
+                    logMessage('parent', `Received data request from ${d.requesterId} for: ${d.requestedData.join(', ')}`);
+                    const responseData = {};
+                    d.requestedData.forEach(key => {
+                        if (Object.prototype.hasOwnProperty.call(this, key)) {
+                            responseData[key] = this[key];
                         }
                     });
+                    logMessage('parent', `Sending requested data back to ${d.requesterId}`, responseData);
+                    wakaPAC.broadcastToChildren(this.pacId, MSG_UPDATE_DATA, 0, 0, responseData);
+                    break;
+                }
 
-                    logMessage('parent', `Sending requested data back to ${data.requesterId}`, requestedData);
-                    this.notifyChildren('updateData', requestedData);
+                case MSG_GRANDCHILD_PROGRESS:
+                    logMessage('parent', `Grandchild ${d.grandchildId} progress: ${d.progress}% (via ${d.childTask})`);
                     break;
 
-                case 'grandchildProgress':
-                    logMessage('parent', `Grandchild ${data.grandchildId} progress: ${data.progress}% (via ${data.childTask})`);
-                    break;
-
-                case 'reset':
+                case MSG_RESET:
                     this.parentStatus = 'low';
                     this.parentStatusText = 'Child reset completed';
                     break;
@@ -1042,32 +1060,28 @@
 
         coordinateAllChildren() {
             logMessage('parent', 'Coordinating all children');
-
-            this.notifyChild('#child-app', 'updateData', {
+            wakaPAC.sendMessage('child-app', MSG_UPDATE_DATA, 0, 0, {
                 masterValue: this.masterValue,
                 coordinationTime: new Date().toISOString()
             });
-
-            this.notifyChildren('activate', {
+            wakaPAC.broadcastToChildren(this.pacId, MSG_ACTIVATE, 0, 0, {
                 task: 'Coordinated task',
                 priority: 'high'
             });
-
             this.parentStatusText = 'Coordination completed';
         },
 
         broadcastThemeChange() {
             this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
             logMessage('parent', `Broadcasting theme change to: ${this.currentTheme}`);
-            this.notifyChildren('updateTheme', { theme: this.currentTheme });
-            const container = this.container;
-            container.className = container.className.replace(/theme-\w+/g, '');
-            container.classList.add(`theme-${this.currentTheme}`);
+            wakaPAC.broadcastToChildren(this.pacId, MSG_UPDATE_THEME, 0, 0, { theme: this.currentTheme });
+            this.container.className = this.container.className.replace(/theme-\w+/g, '');
+            this.container.classList.add(`theme-${this.currentTheme}`);
         },
 
         pauseAllChildren() {
             logMessage('parent', 'Pausing all children');
-            this.notifyChildren('pause', {
+            wakaPAC.broadcastToChildren(this.pacId, MSG_PAUSE, 0, 0, {
                 reason: 'Paused by parent',
                 timestamp: Date.now()
             });
@@ -1076,7 +1090,7 @@
 
         resumeAllChildren() {
             logMessage('parent', 'Resuming all children');
-            this.notifyChildren('resume', {
+            wakaPAC.broadcastToChildren(this.pacId, MSG_RESUME, 0, 0, {
                 reason: 'Resumed by parent',
                 timestamp: Date.now()
             });
@@ -1085,13 +1099,11 @@
 
         emergencyStop() {
             logMessage('parent', 'EMERGENCY STOP - All operations halted!');
-
-            this.notifyChildren('emergencyStop', {
+            wakaPAC.broadcastToChildren(this.pacId, MSG_EMERGENCY_STOP, 0, 0, {
                 reason: 'Emergency stop initiated by parent',
                 timestamp: Date.now(),
                 severity: 'critical'
             });
-
             this.parentStatus = 'high';
             this.parentStatusText = '🛑 EMERGENCY STOP ACTIVE';
         },
@@ -1101,10 +1113,8 @@
                 logMessage('parent', 'Invalid master value - must be 0-100');
                 return;
             }
-
             logMessage('parent', `Broadcasting master value: ${this.masterValue}`);
-
-            this.notifyChildren('updateData', {
+            wakaPAC.broadcastToChildren(this.pacId, MSG_UPDATE_DATA, 0, 0, {
                 masterValue: this.masterValue,
                 broadcastTime: new Date().toISOString()
             });

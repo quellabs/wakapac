@@ -13,16 +13,24 @@
 
 <script src="../wakapac.js"></script>
 <script>
+    const MSG_UPDATE_MESSAGE = wakaPAC.MSG_USER + 1;
+    const MSG_CHILD_CHANGED  = wakaPAC.MSG_USER + 2;
+
     const parent = wakaPAC('#parent-component', {
         message: 'Hello from parent',
 
         sendMessageToChild() {
-            this.notifyChild('child-component', 'updateMessage', 'Hello from parent!');
+            wakaPAC.sendMessage('child-component', MSG_UPDATE_MESSAGE, 0, 0, { text: 'Hello from parent!' });
         },
 
-        receiveFromChild(type, data, child) {
-            if (type === 'messageChanged') {
-                this.message = `Child says: ${data.message}`;
+        /*
+            msgProc is called whenever this component receives a message.
+            Check event.message to determine which message arrived, then
+            read event.detail for the data the sender included.
+        */
+        msgProc(event) {
+            if (event.message === MSG_CHILD_CHANGED) {
+                this.message = `Child says: ${event.detail.message}`;
             }
         }
     });
@@ -30,14 +38,19 @@
     const child = wakaPAC('#child-component', {
         childMessage: 'Hello from child',
 
-        receiveFromParent(command, data) {
-            if (command === 'updateMessage') {
-                this.childMessage = data;
+        sendNotificationToParent() {
+            const parentId = wakaPAC.getParentPacId(this.pacId);
+
+            if (parentId) {
+                wakaPAC.sendMessage(parentId, MSG_CHILD_CHANGED, 0, 0, { message: this.childMessage });
             }
         },
 
-        sendNotificationToParent() {
-            this.notifyParent('messageChanged', {message: this.childMessage});
+        // Same pattern: match on event.message, read payload from event.detail.
+        msgProc(event) {
+            if (event.message === MSG_UPDATE_MESSAGE) {
+                this.childMessage = event.detail.text;
+            }
         }
     });
 </script>
