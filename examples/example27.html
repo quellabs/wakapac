@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Accelerator Table Test</title>
+</head>
+<body>
+
+<h2>Accelerator Table Test</h2>
+
+<div id="editor" tabindex="0">
+    <p>Click here to focus, then press a shortcut.</p>
+    <input type="text" placeholder="Bare-key shortcuts (e.g. Delete) should be suppressed here">
+</div>
+
+<h3>Registered shortcuts</h3>
+<ul id="shortcut-list"></ul>
+
+<h3>Log</h3>
+<ul id="log"></ul>
+
+<script src="../wakapac.js"></script>
+<script>
+    const CMD_SAVE    = 1;
+    const CMD_UNDO    = 2;
+    const CMD_REDO    = 3;
+    const CMD_REFRESH = 4;
+    const CMD_DELETE  = 5;
+    const CMD_QUIT    = 100;
+
+    const SHORTCUTS = [
+        { key: 'Ctrl+S',       cmdId: CMD_SAVE    },
+        { key: 'Ctrl+Z',       cmdId: CMD_UNDO    },
+        { key: 'Ctrl+Shift+Z', cmdId: CMD_REDO    },
+        { key: 'F5',           cmdId: CMD_REFRESH },
+        { key: 'Delete',       cmdId: CMD_DELETE  },
+    ];
+
+    const GLOBAL_SHORTCUTS = [
+        { key: 'Ctrl+Q', cmdId: CMD_QUIT },
+    ];
+
+    const CMD_NAMES = {
+        [CMD_SAVE]:    'CMD_SAVE',
+        [CMD_UNDO]:    'CMD_UNDO',
+        [CMD_REDO]:    'CMD_REDO',
+        [CMD_REFRESH]: 'CMD_REFRESH',
+        [CMD_DELETE]:  'CMD_DELETE',
+        [CMD_QUIT]:    'CMD_QUIT',
+    };
+
+    wakaPAC('#editor', {
+        init() {
+            wakaPAC.loadAcceleratorTable('editor', SHORTCUTS);
+            wakaPAC.loadAcceleratorTable(null, GLOBAL_SHORTCUTS);
+
+            // Render registered shortcuts
+            const list = document.getElementById('shortcut-list');
+
+            [...SHORTCUTS, ...GLOBAL_SHORTCUTS.map(e => ({ ...e, global: true }))].forEach(entry => {
+                const li = document.createElement('li');
+                li.textContent = entry.key + ' → ' + CMD_NAMES[entry.cmdId] + ' (' + entry.cmdId + ')' + (entry.global ? ' [global]' : '');
+                li.id = 'shortcut-' + entry.cmdId;
+                list.appendChild(li);
+            });
+        },
+
+        msgProc(event) {
+            if (event.message !== wakaPAC.MSG_ACCEL) return;
+
+            const cmdId = event.wParam;
+            const log = document.getElementById('log');
+            const li = document.createElement('li');
+            li.textContent = CMD_NAMES[cmdId] + ' (' + cmdId + ')';
+            log.prepend(li);
+            return false;
+        },
+
+        destroy() {
+            wakaPAC.destroyAcceleratorTable('editor');
+            wakaPAC.destroyAcceleratorTable(null);
+        },
+    });
+</script>
+
+</body>
+</html>

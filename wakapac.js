@@ -2060,8 +2060,10 @@
                 });
 
                 // Translate accelerators before dispatch. If a match is found,
-                // MSG_ACCEL is sent to the container and the keydown is suppressed.
+                // MSG_ACCEL is sent to the container, the keydown is suppressed,
+                // and the browser default action is prevented.
                 if (container && _translateAccelerator(keyDownEvent, container)) {
+                    event.preventDefault();
                     return;
                 }
 
@@ -8999,45 +9001,10 @@
     const ACCEL_GLOBAL_KEY = Symbol('global');
 
     /**
-     * Returns true if the currently focused element is a text-entry control
-     * (input[type=text/search/…], textarea, contenteditable).
-     * Bare-character accelerators (no Ctrl, no Alt) must not fire inside text
-     * fields — this matches Win32 TranslateAccelerator() behaviour.
-     * @returns {boolean}
-     * @private
-     */
-    function _focusIsInTextControl() {
-        const el = document.activeElement;
-
-        if (!el) {
-            return false;
-        }
-
-        if (el.isContentEditable) {
-            return true;
-        }
-
-        if (el.tagName === 'TEXTAREA') {
-            return true;
-        }
-
-        if (el.tagName === 'INPUT') {
-            const type = (el.type || 'text').toLowerCase();
-            return TEXT_INPUT_TYPES.has(type);
-        }
-
-        return false;
-    }
-
-    /**
      * Translates a MSG_KEYDOWN event into MSG_ACCEL if the key combination
      * matches a registered accelerator entry. Container-scoped tables are
      * checked before the global table. Returns true and dispatches MSG_ACCEL
      * on a match (suppressing the keydown); returns false otherwise.
-     *
-     * Bare-character shortcuts (no Ctrl, no Alt) are suppressed when focus
-     * is inside a text field.
-     *
      * @param {CustomEvent}  pacEvent  — The MSG_KEYDOWN PAC event.
      * @param {HTMLElement}  container — The target container element.
      * @returns {boolean} True if the message was translated (caller should swallow it).
@@ -9051,18 +9018,13 @@
         }
 
         // wParam carries the virtual key code for keyboard messages
-        const vk        = pacEvent.wParam;
+        const vk = pacEvent.wParam;
 
         // Isolate the modifier bits from lParam — other bits carry repeat count,
         // extended key flag, etc. and must not affect the comparison.
         const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
 
-        // Bare-character shortcuts (no Ctrl, no Alt) must not fire inside text
-        // inputs — the character belongs to the field, not the application.
-        if ((modifiers & (KM_CONTROL | KM_ALT)) === 0 && _focusIsInTextControl()) {
-            return false;
-        }
-
+        // Fetch the pacId from the container
         const pacId = container.getAttribute('data-pac-id');
 
         // Build the lookup order: container-scoped table first, global table as
@@ -9074,7 +9036,9 @@
         ];
 
         for (const table of tables) {
-            if (!table) continue;
+            if (!table) {
+                continue;
+            }
 
             for (const entry of table) {
                 // Both the key code and the exact modifier combination must match.
