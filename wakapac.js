@@ -9193,19 +9193,45 @@
     };
 
     /**
-     * Returns the data-pac-id of the parent component of the given container, or null if it has none.
-     * Intended for use inside msgProc to forward messages up the hierarchy.
+     * Send a message to the parent component of the given container (synchronous).
+     * Similar to Win32 SendMessage directed at the parent HWND.
+     * If the container has no parent, the message is dropped.
      * @param {string} pacId - The data-pac-id of the child container
-     * @returns {string|null} The parent's data-pac-id, or null if no parent exists
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.getParentPacId = function(pacId) {
+    wakaPAC.sendMessageToParent = function(pacId, messageId, wParam, lParam, extended = {}) {
         const context = window.PACRegistry.get(pacId);
 
         if (!context || !context.parent) {
-            return null;
+            return;
         }
 
-        return context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
+        const parentId = context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
+        this.sendMessage(parentId, messageId, wParam, lParam, extended);
+    };
+
+    /**
+     * Post a message to the parent component of the given container (asynchronous).
+     * Similar to Win32 PostMessage directed at the parent HWND.
+     * If the container has no parent, the message is dropped.
+     * @param {string} pacId - The data-pac-id of the child container
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
+     */
+    wakaPAC.postMessageToParent = function(pacId, messageId, wParam, lParam, extended = {}) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context || !context.parent) {
+            return;
+        }
+
+        const parentId = context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
+        this.postMessage(parentId, messageId, wParam, lParam, extended);
     };
 
     /**

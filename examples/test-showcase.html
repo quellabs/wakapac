@@ -712,15 +712,12 @@
         },
 
         notifyStatusChange() {
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_STATUS_CHANGE, 0, 0, {
-                    senderPacId: this.pacId,
-                    workerId: this.workerId,
-                    isActive: this.isActive,
-                    status: this.workStatus
-                });
-            }
+            wakaPAC.sendMessageToParent(this.pacId, MSG_STATUS_CHANGE, 0, 0, {
+                senderPacId: this.pacId,
+                workerId: this.workerId,
+                isActive: this.isActive,
+                status: this.workStatus
+            });
         },
 
         updateWorkStatus() {
@@ -746,42 +743,35 @@
             this.lastParentCommand = `${MSG_SET_PROGRESS}: {"progress":${this.progress}}`;
             logMessage('grandchild', `Work completed, progress: ${this.progress}%`);
 
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_PROGRESS_UPDATE, 0, 0, {
-                    senderPacId: this.pacId,
-                    workerId: this.workerId,
-                    progress: this.progress,
-                    status: this.workStatus
-                });
-            }
+            wakaPAC.sendMessageToParent(this.pacId, MSG_PROGRESS_UPDATE, 0, 0, {
+                senderPacId: this.pacId,
+                workerId: this.workerId,
+                progress: this.progress,
+                status: this.workStatus
+            });
         },
 
         reportProgress() {
             logMessage('grandchild', 'Progress report sent to parent');
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_PROGRESS_REPORT, 0, 0, {
-                    senderPacId: this.pacId,
-                    workerId: this.workerId,
-                    subTask: this.subTask,
-                    progress: this.progress,
-                    isActive: this.isActive,
-                    status: this.workStatus
-                });
-            }
+
+            wakaPAC.sendMessageToParent(this.pacId, MSG_PROGRESS_REPORT, 0, 0, {
+                senderPacId: this.pacId,
+                workerId: this.workerId,
+                subTask: this.subTask,
+                progress: this.progress,
+                isActive: this.isActive,
+                status: this.workStatus
+            });
         },
 
         requestParentData() {
             logMessage('grandchild', 'Data request sent to parent');
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_DATA_REQUEST, 0, 0, {
-                    senderPacId: this.pacId,
-                    requestedData: ['masterValue', 'currentTheme', 'taskName'],
-                    requesterId: this.workerId
-                });
-            }
+
+            wakaPAC.sendMessageToParent(this.pacId, MSG_DATA_REQUEST, 0, 0, {
+                senderPacId: this.pacId,
+                requestedData: ['masterValue', 'currentTheme', 'taskName'],
+                requesterId: this.workerId
+            });
         },
 
         toggleActive() {
@@ -876,33 +866,26 @@
 
                 case MSG_PROGRESS_UPDATE: {
                     logMessage('child', `Grandchild progress: ${d.progress}%`);
-                    const parentId = wakaPAC.getParentPacId(this.pacId);
-                    if (parentId) {
-                        wakaPAC.sendMessage(parentId, MSG_GRANDCHILD_PROGRESS, 0, 0, {
-                            senderPacId: this.pacId,
-                            grandchildId: d.workerId,
-                            progress: d.progress,
-                            childTask: this.taskName
-                        });
-                    }
+
+                    wakaPAC.sendMessageToParent(this.pacId, MSG_GRANDCHILD_PROGRESS, 0, 0, {
+                        senderPacId: this.pacId,
+                        grandchildId: d.workerId,
+                        progress: d.progress,
+                        childTask: this.taskName
+                    });
+
                     break;
                 }
 
                 case MSG_PROGRESS_REPORT: {
                     logMessage('child', `Received progress report from ${d.workerId} - forwarding to parent`);
-                    const parentId = wakaPAC.getParentPacId(this.pacId);
-                    if (parentId) {
-                        wakaPAC.sendMessage(parentId, MSG_PROGRESS_REPORT, 0, 0, d);
-                    }
+                    wakaPAC.sendMessageToParent(this.pacId, MSG_PROGRESS_REPORT, 0, 0, d);
                     break;
                 }
 
                 case MSG_DATA_REQUEST: {
                     logMessage('child', `Received data request from ${d.requesterId} - forwarding to parent`);
-                    const parentId = wakaPAC.getParentPacId(this.pacId);
-                    if (parentId) {
-                        wakaPAC.sendMessage(parentId, MSG_DATA_REQUEST, 0, 0, d);
-                    }
+                    wakaPAC.sendMessageToParent(this.pacId, MSG_DATA_REQUEST, 0, 0, d);
                     break;
                 }
             }
@@ -933,15 +916,12 @@
             this.message = `Completed ${this.count} tasks`;
             logMessage('child', `Task completed, count: ${this.count}`);
 
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_TASK_COMPLETED, 0, 0, {
-                    senderPacId: this.pacId,
-                    taskName: this.taskName,
-                    count: this.count,
-                    status: this.status
-                });
-            }
+            wakaPAC.sendMessageToParent(this.pacId, MSG_TASK_COMPLETED, 0, 0, {
+                senderPacId: this.pacId,
+                taskName: this.taskName,
+                count: this.count,
+                status: this.status
+            });
         },
 
         reset() {
@@ -951,41 +931,33 @@
             wakaPAC.broadcastToChildren(this.pacId, MSG_SET_PROGRESS, 0, 0, { progress: 0 });
             logMessage('child', 'Reset completed');
 
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_RESET, 0, 0, {
-                    senderPacId: this.pacId,
-                    taskName: this.taskName
-                });
-            }
+            wakaPAC.sendMessageToParent(this.pacId, MSG_RESET, 0, 0, {
+                senderPacId: this.pacId,
+                taskName: this.taskName
+            });
         },
 
         requestFocus() {
             logMessage('child', 'Requesting focus from parent');
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_FOCUS_REQUEST, 0, 0, {
-                    senderPacId: this.pacId,
-                    requesterId: 'child-app',
-                    reason: 'User interaction required'
-                });
-            }
+
+            wakaPAC.sendMessageToParent(this.pacId, MSG_FOCUS_REQUEST, 0, 0, {
+                senderPacId: this.pacId,
+                requesterId: 'child-app',
+                reason: 'User interaction required'
+            });
         },
 
         sendAlert() {
             const alertMsg = `Alert from ${this.taskName} at ${new Date().toLocaleTimeString()}`;
             logMessage('child', 'Sending alert to parent');
 
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_ALERT, 0, 0, {
-                    senderPacId: this.pacId,
-                    message: alertMsg,
-                    severity: 'high',
-                    taskName: this.taskName,
-                    count: this.count
-                });
-            }
+            wakaPAC.sendMessageToParent(this.pacId, MSG_ALERT, 0, 0, {
+                senderPacId: this.pacId,
+                message: alertMsg,
+                severity: 'high',
+                taskName: this.taskName,
+                count: this.count
+            });
         },
 
         createGrandchild() {

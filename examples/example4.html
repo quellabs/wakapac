@@ -39,11 +39,7 @@
         childMessage: 'Hello from child',
 
         sendNotificationToParent() {
-            const parentId = wakaPAC.getParentPacId(this.pacId);
-
-            if (parentId) {
-                wakaPAC.sendMessage(parentId, MSG_CHILD_CHANGED, 0, 0, { message: this.childMessage });
-            }
+            wakaPAC.sendMessageToParent(this.pacId, MSG_CHILD_CHANGED, 0, 0, { message: this.childMessage });
         },
 
         // Same pattern: match on event.message, read payload from event.detail.

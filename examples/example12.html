@@ -267,16 +267,14 @@
 
                 sendMessageToParent() {
                     this.messagesSent++;
-                    const parentId = wakaPAC.getParentPacId(this.pacId);
 
-                    if (parentId) {
-                        wakaPAC.sendMessage(parentId, MSG_CHILD_MESSAGE, 0, 0, {
-                            childName,
-                            message: `Hello from ${childName}! Message #${this.messagesSent}`,
-                            senderPacId: this.pacId
-                        });
-                        this.status = 'Message sent, waiting for response...';
-                    }
+                    wakaPAC.sendMessageToParent(this.pacId, , MSG_CHILD_MESSAGE, 0, 0, {
+                        childName,
+                        message: `Hello from ${childName}! Message #${this.messagesSent}`,
+                        senderPacId: this.pacId
+                    });
+
+                    this.status = 'Message sent, waiting for response...';
                 },
 
                 msgProc(event) {
