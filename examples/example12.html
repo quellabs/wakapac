@@ -122,275 +122,192 @@
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Parent-Child Communication</h1>
-        
-        <!-- Parent Component -->
-        <div id="parent-dashboard" class="parent-component">
-            <div class="component-title parent-title">🏠 Parent Dashboard</div>
-            
-            <div class="status parent-status">
-                Status: {{status}}
-            </div>
-            
-            <div>
-                <strong>Messages received from children:</strong> {{messageCount}}
-            </div>
-            
-            <div>
-                <button data-pac-bind="click: broadcastToChildren">📢 Broadcast to All Children</button>
-                <button data-pac-bind="click: resetCounters">🔄 Reset Counters</button>
-            </div>
-            
-            <div class="message-log">
-                <div><strong>Activity Log:</strong></div>
-                <div data-pac-bind="foreach: activityLog">
-                    <div class="message-entry">
-                        <span class="timestamp">{{item.time}}</span> - {{item.message}}
-                    </div>
-                </div>
-            </div>
+<div class="container">
+    <h1>Parent-Child Communication</h1>
 
-            <!-- Child Component 1 - Now nested inside parent -->
-            <div id="child-alpha" class="child-component">
-                <div class="component-title child-title">🔵 Child Alpha</div>
-                
-                <div class="status child-status">
-                    Status: {{status}}
-                </div>
-                
-                <div>
-                    <strong>Messages sent:</strong> {{messagesSent}} | 
-                    <strong>Responses received:</strong> {{responsesReceived}}
-                </div>
-                
-                <div>
-                    <button data-pac-bind="click: sendMessageToParent">📤 Send Message to Parent</button>
-                </div>
-                
-                <div data-pac-bind="visible: lastResponse">
-                    <strong>Last response from parent:</strong> "{{lastResponse}}"
-                </div>
-            </div>
+    <!-- Parent Component -->
+    <div id="parent-dashboard" class="parent-component">
+        <div class="component-title parent-title">🏠 Parent Dashboard</div>
 
-            <!-- Child Component 2 - Now nested inside parent -->
-            <div id="child-beta" class="child-component">
-                <div class="component-title child-title">🟢 Child Beta</div>
-                
-                <div class="status child-status">
-                    Status: {{status}}
-                </div>
-                
-                <div>
-                    <strong>Messages sent:</strong> {{messagesSent}} | 
-                    <strong>Responses received:</strong> {{responsesReceived}}
-                </div>
-                
-                <div>
-                    <button data-pac-bind="click: sendMessageToParent">📤 Send Message to Parent</button>
-                </div>
-                
-                <div data-pac-bind="visible: lastResponse">
-                    <strong>Last response from parent:</strong> "{{lastResponse}}"
+        <div class="status parent-status">
+            Status: {{status}}
+        </div>
+
+        <div>
+            <strong>Messages received from children:</strong> {{messageCount}}
+        </div>
+
+        <div>
+            <button data-pac-bind="click: broadcastToChildren">📢 Broadcast to All Children</button>
+            <button data-pac-bind="click: resetCounters">🔄 Reset Counters</button>
+        </div>
+
+        <div class="message-log">
+            <div><strong>Activity Log:</strong></div>
+            <div data-pac-bind="foreach: activityLog">
+                <div class="message-entry">
+                    <span class="timestamp">{{item.time}}</span> - {{item.message}}
                 </div>
             </div>
         </div>
+
+        <!-- Child Component 1 -->
+        <div id="child-alpha" class="child-component">
+            <div class="component-title child-title">🔵 Child Alpha</div>
+
+            <div class="status child-status">
+                Status: {{status}}
+            </div>
+
+            <div>
+                <strong>Messages sent:</strong> {{messagesSent}} |
+                <strong>Responses received:</strong> {{responsesReceived}}
+            </div>
+
+            <div>
+                <button data-pac-bind="click: sendMessageToParent">📤 Send Message to Parent</button>
+            </div>
+
+            <div data-pac-bind="visible: lastResponse">
+                <strong>Last response from parent:</strong> "{{lastResponse}}"
+            </div>
+        </div>
+
+        <!-- Child Component 2 -->
+        <div id="child-beta" class="child-component">
+            <div class="component-title child-title">🟢 Child Beta</div>
+
+            <div class="status child-status">
+                Status: {{status}}
+            </div>
+
+            <div>
+                <strong>Messages sent:</strong> {{messagesSent}} |
+                <strong>Responses received:</strong> {{responsesReceived}}
+            </div>
+
+            <div>
+                <button data-pac-bind="click: sendMessageToParent">📤 Send Message to Parent</button>
+            </div>
+
+            <div data-pac-bind="visible: lastResponse">
+                <strong>Last response from parent:</strong> "{{lastResponse}}"
+            </div>
+        </div>
     </div>
+</div>
 
-    <!-- Load the wakaPAC framework -->
-    <script src="../wakapac.js"></script>
-    
-    <script>
-        // Wait for DOM to be ready
-        document.addEventListener('DOMContentLoaded', function() {
-            // Create Parent Component
-            const parentDashboard = wakaPAC('#parent-dashboard', {
-                status: 'Waiting for child messages...',
-                messageCount: 0,
-                activityLog: [],
-                
-                // Handle updates from child components
-                receiveFromChild: function(type, data, child) {
-                    if (type === 'childMessage') {
-                        this.messageCount++;
-                        this.status = `Received message from ${data.childName}`;
-                        
-                        // Add to activity log
-                        this.activityLog.unshift({
-                            time: new Date().toLocaleTimeString(),
-                            message: `📨 Received "${data.message}" from ${data.childName}`
-                        });
-                        
-                        // Keep only last 10 log entries
-                        if (this.activityLog.length > 10) {
-                            this.activityLog = this.activityLog.slice(0, 10);
-                        }
-                        
-                        // Send response back to the specific child
-                        setTimeout(() => {
-                            child.receiveFromParent('parentResponse', {
-                                message: `Hello ${data.childName}! I received your message "${data.message}". Response #${this.messageCount}`,
-                                timestamp: new Date().toLocaleTimeString()
-                            });
-                            
-                            // Update activity log
-                            this.activityLog.unshift({
-                                time: new Date().toLocaleTimeString(),
-                                message: `📤 Sent response to ${data.childName}`
-                            });
-                        }, 500); // Small delay to simulate processing
-                    }
-                },
-                
-                // Broadcast a message to all children
-                broadcastToChildren: function() {
-                    const broadcastMessage = {
-                        message: 'Broadcast message from parent!',
-                        timestamp: new Date().toLocaleTimeString(),
-                        type: 'broadcast'
-                    };
-                    
-                    this.notifyChildren('parentBroadcast', broadcastMessage);
-                    this.status = 'Broadcasted message to all children';
-                    
-                    // Add to activity log
-                    this.activityLog.unshift({
-                        time: new Date().toLocaleTimeString(),
-                        message: '📢 Broadcasted message to all children'
-                    });
-                },
-                
-                // Reset all counters
-                resetCounters: function() {
-                    this.messageCount = 0;
-                    this.activityLog = [];
-                    this.status = 'Counters reset - waiting for messages...';
-                    
-                    // Tell children to reset their counters too
-                    this.notifyChildren('resetCounters', {});
+<script src="../wakapac.js"></script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+
+        // User-defined messages
+        const MSG_CHILD_MESSAGE      = wakaPAC.MSG_USER + 1;  // Child → Parent: child has something to say
+        const MSG_PARENT_RESPONSE    = wakaPAC.MSG_USER + 2;  // Parent → Child: response to a child message
+        const MSG_PARENT_BROADCAST   = wakaPAC.MSG_USER + 3;  // Parent → Children: broadcast from parent
+        const MSG_RESET_COUNTERS     = wakaPAC.MSG_USER + 4;  // Parent → Children: reset all counters
+
+        // Parent dashboard — receives messages from children, responds, broadcasts, and resets.
+        const parentDashboard = wakaPAC('#parent-dashboard', {
+            status: 'Waiting for child messages...',
+            messageCount: 0,
+            activityLog: [],
+
+            msgProc(event) {
+                if (event.message !== MSG_CHILD_MESSAGE) {
+                    return;
                 }
-            });
 
-            // Create Child Component Alpha
-            const childAlpha = wakaPAC('#child-alpha', {
-                status: 'Ready to send messages',
-                messagesSent: 0,
-                responsesReceived: 0,
-                lastResponse: '',
-                childName: 'Alpha',
-                
-                // Send message to parent
-                sendMessageToParent: function() {
-                    this.messagesSent++;
-                    const message = `Hello from ${this.childName}! Message #${this.messagesSent}`;
-                    
-                    this.status = 'Message sent, waiting for response...';
-                    
-                    // Send message to parent
-                    this.notifyParent('childMessage', {
-                        childName: this.childName,
-                        message: message,
-                        timestamp: new Date().toLocaleTimeString()
+                const { childName, message, senderPacId } = event.detail;
+
+                this.messageCount++;
+                this.status = `Received message from ${childName}`;
+                this.log(`📨 Received "${message}" from ${childName}`);
+
+                // Respond directly to the child that sent the message
+                setTimeout(() => {
+                    wakaPAC.sendMessage(senderPacId, MSG_PARENT_RESPONSE, 0, 0, {
+                        message: `Hello ${childName}! I received your message "${message}". Response #${this.messageCount}`
                     });
-                },
-                
-                // Handle messages from parent
-                receiveFromParent: function(cmd, data) {
-                    if (cmd === 'parentResponse') {
-                        this.responsesReceived++;
-                        this.lastResponse = data.message;
-                        this.status = 'Response received from parent!';
-                        
-                        // Clear status after a delay
-                        setTimeout(() => {
-                            this.status = 'Ready to send messages';
-                        }, 2000);
-                        
-                    } else if (cmd === 'parentBroadcast') {
-                        this.responsesReceived++; // Count broadcasts as responses too
-                        this.lastResponse = `[BROADCAST] ${data.message}`;
-                        this.status = 'Received broadcast from parent!';
-                        
-                        setTimeout(() => {
-                            this.status = 'Ready to send messages';
-                        }, 2000);
-                        
-                    } else if (cmd === 'resetCounters') {
-                        this.messagesSent = 0;
-                        this.responsesReceived = 0;
-                        this.lastResponse = '';
-                        this.status = 'Counters reset by parent';
-                        
-                        setTimeout(() => {
-                            this.status = 'Ready to send messages';
-                        }, 1000);
-                    }
-                }
-            });
+                    this.log(`📤 Sent response to ${childName}`);
+                }, 500);
+            },
 
-            // Create Child Component Beta
-            const childBeta = wakaPAC('#child-beta', {
-                status: 'Ready to send messages',
-                messagesSent: 0,
-                responsesReceived: 0,
-                lastResponse: '',
-                childName: 'Beta',
-                
-                // Send message to parent
-                sendMessageToParent: function() {
-                    this.messagesSent++;
-                    const message = `Greetings from ${this.childName}! Message #${this.messagesSent}`;
-                    
-                    this.status = 'Message sent, waiting for response...';
-                    
-                    // Send message to parent
-                    this.notifyParent('childMessage', {
-                        childName: this.childName,
-                        message: message,
-                        timestamp: new Date().toLocaleTimeString()
-                    });
-                },
-                
-                // Handle messages from parent
-                receiveFromParent: function(cmd, data) {
-                    if (cmd === 'parentResponse') {
-                        this.responsesReceived++;
-                        this.lastResponse = data.message;
-                        this.status = 'Response received from parent!';
-                        
-                        // Clear status after a delay
-                        setTimeout(() => {
-                            this.status = 'Ready to send messages';
-                        }, 2000);
-                        
-                    } else if (cmd === 'parentBroadcast') {
-                        this.responsesReceived++; // Count broadcasts as responses too
-                        this.lastResponse = `[BROADCAST] ${data.message}`;
-                        this.status = 'Received broadcast from parent!';
-                        
-                        setTimeout(() => {
-                            this.status = 'Ready to send messages';
-                        }, 2000);
-                        
-                    } else if (cmd === 'resetCounters') {
-                        this.messagesSent = 0;
-                        this.responsesReceived = 0;
-                        this.lastResponse = '';
-                        this.status = 'Counters reset by parent';
-                        
-                        setTimeout(() => {
-                            this.status = 'Ready to send messages';
-                        }, 1000);
-                    }
-                }
-            });
+            broadcastToChildren() {
+                wakaPAC.broadcastToChildren(this.pacId, MSG_PARENT_BROADCAST, 0, 0, {
+                    message: 'Broadcast message from parent!'
+                });
+                this.status = 'Broadcasted message to all children';
+                this.log('📢 Broadcasted message to all children');
+            },
 
-            // Log the component hierarchy for debugging
-            console.log('Parent component:', parentDashboard);
-            console.log('Parent children:', parentDashboard.children);
-            console.log('Child Alpha parent:', childAlpha.parent);
-            console.log('Child Beta parent:', childBeta.parent);
+            resetCounters() {
+                this.messageCount = 0;
+                this.activityLog = [];
+                this.status = 'Counters reset - waiting for messages...';
+                wakaPAC.broadcastToChildren(this.pacId, MSG_RESET_COUNTERS, 0, 0);
+            },
+
+            log(message) {
+                this.activityLog.unshift({ time: new Date().toLocaleTimeString(), message });
+                if (this.activityLog.length > 10) {
+                    this.activityLog = this.activityLog.slice(0, 10);
+                }
+            }
         });
-    </script>
+
+        // Shared abstraction for child components — Alpha and Beta are identical in behaviour.
+        function makeChild(childName) {
+            return {
+                status: 'Ready to send messages',
+                messagesSent: 0,
+                responsesReceived: 0,
+                lastResponse: '',
+
+                sendMessageToParent() {
+                    this.messagesSent++;
+
+                    wakaPAC.sendMessageToParent(this.pacId, MSG_CHILD_MESSAGE, 0, 0, {
+                        childName,
+                        message: `Hello from ${childName}! Message #${this.messagesSent}`,
+                        senderPacId: this.pacId
+                    });
+
+                    this.status = 'Message sent, waiting for response...';
+                },
+
+                msgProc(event) {
+                    switch (event.message) {
+                        case MSG_PARENT_RESPONSE:
+                            this.responsesReceived++;
+                            this.lastResponse = event.detail.message;
+                            this.status = 'Response received from parent!';
+                            setTimeout(() => { this.status = 'Ready to send messages'; }, 2000);
+                            break;
+
+                        case MSG_PARENT_BROADCAST:
+                            this.responsesReceived++;
+                            this.lastResponse = `[BROADCAST] ${event.detail.message}`;
+                            this.status = 'Received broadcast from parent!';
+                            setTimeout(() => { this.status = 'Ready to send messages'; }, 2000);
+                            break;
+
+                        case MSG_RESET_COUNTERS:
+                            this.messagesSent = 0;
+                            this.responsesReceived = 0;
+                            this.lastResponse = '';
+                            this.status = 'Counters reset by parent';
+                            setTimeout(() => { this.status = 'Ready to send messages'; }, 1000);
+                            break;
+                    }
+                }
+            };
+        }
+
+        const childAlpha = wakaPAC('#child-alpha', makeChild('Alpha'));
+        const childBeta  = wakaPAC('#child-beta',  makeChild('Beta'));
+    });
+</script>
 </body>
 </html>

@@ -209,29 +209,38 @@
 
 <script src="../wakapac.js"></script>
 <script>
-    // App wrapper container - coordinates child components
+    // User-defined messages for inter-component communication.
+    // Each constant occupies its own MSG_USER slot to avoid collisions.
+    const MSG_SCROLL_TO_TOP     = wakaPAC.MSG_USER + 1;
+    const MSG_SCROLL_TO_PERCENT = wakaPAC.MSG_USER + 2;
+    const MSG_SCROLL_TO_BOTTOM  = wakaPAC.MSG_USER + 3;
+    const MSG_ADD_ITEMS         = wakaPAC.MSG_USER + 4;
+    const MSG_REMOVE_ITEMS      = wakaPAC.MSG_USER + 5;
+    const MSG_LOG_METRICS       = wakaPAC.MSG_USER + 6;
+
+    // App wrapper — tracks how many messages it has routed between children.
+    // In this architecture the app container itself does not handle scroll commands;
+    // it simply counts messages that pass through it via its msgProc.
     const app = wakaPAC('#app', {
         messagesRouted: 0,
 
-        // Handle updates from child components
-        receiveFromChild(type, data, child) {
-            this.messagesRouted++;
-
-            // Route commands between children
-            if (type === 'scroll-command') {
-                this.notifyChild('scrollable', data.command, data.payload);
+        msgProc(event) {
+            // Count any user-defined messages that originate from children
+            if (event.message >= wakaPAC.MSG_USER) {
+                this.messagesRouted++;
             }
         }
     });
 
-    // Scrollable container - handles content and scroll state
+    // Scrollable container — owns scroll state and item data.
+    // Receives scroll commands from the control panel via sendMessage.
     const scrollContainer = wakaPAC('#scrollable', {
         items: [
             { title: 'Hierarchical Architecture', content: 'This example demonstrates proper WakaPAC component hierarchy with a wrapper container managing child communication.' },
             { title: 'Automatic Parent Detection', content: 'WakaPAC automatically detects parent-child relationships based on DOM nesting and establishes communication channels.' },
             { title: 'Built-in Scroll Properties', content: 'This container uses the framework\'s native containerScrollY, containerContentHeight, and other scroll properties.' },
             { title: 'Two-Way Binding', content: 'Scroll position can be read and written through reactive properties that sync with the DOM automatically.' },
-            { title: 'Component Messaging', content: 'Commands from the control panel are routed through the parent app container to maintain proper encapsulation.' },
+            { title: 'Component Messaging', content: 'Commands from the control panel are sent directly to this container via wakaPAC.sendMessage.' },
             { title: 'Computed Properties', content: 'Scroll percentage and position indicators are calculated automatically using computed properties.' },
             { title: 'Event Handling', content: 'Scroll events are debounced and processed efficiently to maintain smooth performance.' },
             { title: 'Status Detection', content: 'The framework can detect when you\'re at the top, bottom, or in various zones of the scrollable content.' },
@@ -293,34 +302,37 @@
             }
         },
 
-        // Handle commands from parent (routed from control panel)
-        receiveFromParent(command, data) {
+        msgProc(event) {
             this.commandsReceived++;
 
-            switch (command) {
-                case 'scroll-to-top':
+            switch (event.message) {
+                case MSG_SCROLL_TO_TOP:
                     this.containerScrollY = 0;
                     break;
 
-                case 'scroll-to-percent':
-                    this.containerScrollY = this.maxScrollY * (data.percent / 100);
+                case MSG_SCROLL_TO_PERCENT:
+                    this.containerScrollY = this.maxScrollY * (event.detail.percent / 100);
                     break;
 
-                case 'scroll-to-bottom':
+                case MSG_SCROLL_TO_BOTTOM:
                     this.containerScrollY = this.maxScrollY;
                     break;
 
-                case 'add-items':
+                case MSG_ADD_ITEMS:
                     this.addItems();
                     break;
 
-                case 'remove-items':
+                case MSG_REMOVE_ITEMS:
                     this.removeItems();
                     break;
 
-                case 'log-metrics':
+                case MSG_LOG_METRICS:
                     this.logMetrics();
                     break;
+
+                default:
+                    // Decrement for unhandled messages so the count stays accurate
+                    this.commandsReceived--;
             }
         },
 
@@ -330,12 +342,13 @@
                 { title: `New Item ${this.items.length + 2}`, content: 'Notice how the scroll metrics automatically update when content is added.' },
                 { title: `New Item ${this.items.length + 3}`, content: 'The maximum scroll position recalculates based on the new content height.' }
             ];
+
             this.items.push(...newItems);
         },
 
         removeItems() {
             if (this.items.length > 3) {
-                const removed = this.items.splice(-3, 3);
+                this.items.splice(-3, 3);
             }
         },
 
@@ -352,52 +365,46 @@
         }
     });
 
-    // Control panel container - handles UI controls
+    // Control panel — sends scroll commands directly to the scrollable container.
+    // No longer routes through the parent; the parent's msgProc observes passively.
     const controlPanel = wakaPAC('#controls', {
         commandsSent: 0,
 
-        // Send scroll commands through parent
         scrollToTop() {
-            this.sendScrollCommand('scroll-to-top');
+            this.sendScrollCommand(MSG_SCROLL_TO_TOP);
         },
 
         scrollTo25() {
-            this.sendScrollCommand('scroll-to-percent', { percent: 25 });
+            this.sendScrollCommand(MSG_SCROLL_TO_PERCENT, { percent: 25 });
         },
 
         scrollTo50() {
-            this.sendScrollCommand('scroll-to-percent', { percent: 50 });
+            this.sendScrollCommand(MSG_SCROLL_TO_PERCENT, { percent: 50 });
         },
 
         scrollTo75() {
-            this.sendScrollCommand('scroll-to-percent', { percent: 75 });
+            this.sendScrollCommand(MSG_SCROLL_TO_PERCENT, { percent: 75 });
         },
 
         scrollToBottom() {
-            this.sendScrollCommand('scroll-to-bottom');
+            this.sendScrollCommand(MSG_SCROLL_TO_BOTTOM);
         },
 
         addItems() {
-            this.sendScrollCommand('add-items');
+            this.sendScrollCommand(MSG_ADD_ITEMS);
         },
 
         removeItems() {
-            this.sendScrollCommand('remove-items');
+            this.sendScrollCommand(MSG_REMOVE_ITEMS);
         },
 
         logMetrics() {
-            this.sendScrollCommand('log-metrics');
+            this.sendScrollCommand(MSG_LOG_METRICS);
         },
 
-        // Helper method to send commands via parent
-        sendScrollCommand(command, payload = null) {
+        sendScrollCommand(messageId, detail = {}) {
             this.commandsSent++;
-
-            // Send update to parent, which will route to scroll container
-            this.notifyParent('scroll-command', {
-                command: command,
-                payload: payload
-            });
+            wakaPAC.sendMessage('scrollable', messageId, 0, 0, detail);
         }
     });
 </script>
