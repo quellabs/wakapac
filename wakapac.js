@@ -9332,16 +9332,13 @@
         // Construct the message once — shared across all dispatches in the subtree.
         const event = this.createPacMessage(messageId, wParam, lParam, extended);
 
-        // Iterative depth-first traversal using an explicit stack.
-        // Avoids call-stack overflow on deeply nested component hierarchies and
-        // eliminates the recursive closure overhead of the previous implementation.
-        // Uses the in-memory children sets rather than DOM queries for performance.
-        const stack = [...container.children];
+        // Iterative breadth-first traversal using a queue.
+        const queue = [...container.children];
 
-        while (stack.length) {
-            const node = stack.pop();
+        while (queue.length) {
+            const node = queue.shift();
             DomUpdateTracker.dispatchToContainer(node.container, event);
-            stack.push(...node.children);
+            queue.push(...node.children);
         }
     };
 
