@@ -268,7 +268,7 @@
                 sendMessageToParent() {
                     this.messagesSent++;
 
-                    wakaPAC.sendMessageToParent(this.pacId, , MSG_CHILD_MESSAGE, 0, 0, {
+                    wakaPAC.sendMessageToParent(this.pacId, MSG_CHILD_MESSAGE, 0, 0, {
                         childName,
                         message: `Hello from ${childName}! Message #${this.messagesSent}`,
                         senderPacId: this.pacId
