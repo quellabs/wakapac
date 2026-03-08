@@ -28,6 +28,23 @@
  * ║    // Direct mutation — all components update automatically:                     ║
  * ║    store.user.name = 'Jan';                                                      ║
  * ║                                                                                  ║
+ * ║  Server sync:                                                                    ║
+ * ║                                                                                  ║
+ * ║    // Poll a JSON:API endpoint — store updates, DOM follows automatically:       ║
+ * ║    store.$poll('/api/users', { interval: 3000 });                                ║
+ * ║    store.$stopPoll();                                                            ║
+ * ║                                                                                  ║
+ * ║    // Push store state to server, merge JSON:API response back in:               ║
+ * ║    store.$push('/api/users/1').then(...).catch(...);                             ║
+ * ║                                                                                  ║
+ * ║    // Custom merge for non-JSON:API or envelope responses:                       ║
+ * ║    store.$poll('/api/data', {                                                    ║
+ * ║        interval: 5000,                                                           ║
+ * ║        merge: (store, response) => { store.items = response.data.items; }        ║
+ * ║    });                                                                           ║
+ * ║                                                                                  ║
+ * ║  Note: $poll will overwrite local store mutations on the next cycle.             ║
+ * ║  Call $push() first to persist local changes before they are overwritten.        ║
  * ╚══════════════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -35,7 +52,7 @@
     "use strict";
 
     /** @type {string} */
-    const VERSION = '1.0.0';
+    const VERSION = '1.1.0';
 
     /**
      * Event fired on document when any store mutation occurs.
@@ -61,6 +78,85 @@
      * @type {string[]}
      */
     const MUTATING_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+
+    /**
+     * Default fetch options applied to all $poll and $push requests.
+     * Can be overridden per-call via opts.fetchOptions.
+     * @type {Object}
+     */
+    const DEFAULT_FETCH_OPTIONS = {
+        headers: { 'Accept': 'application/vnd.api+json' }
+    };
+
+    /**
+     * Deserializes a JSON:API response document into a plain object suitable
+     * for merging into the store via Object.assign.
+     *
+     * Convention: the JSON:API resource `type` is used as-is as the store key.
+     * The developer controls naming by choosing type names that match store keys.
+     *
+     * Handles both single resources ({ data: {...} }) and collections
+     * ({ data: [...] }). Flattens `id` and `attributes` into a plain object.
+     * Relationships and `included` are intentionally not resolved — use a
+     * custom `merge` callback for responses that require relationship handling.
+     *
+     * @param {Object} response - Parsed JSON:API response body
+     * @returns {Object} Plain object keyed by resource type
+     */
+    function deserializeJsonApi(response) {
+        if (!response || !response.data) {
+            throw new Error('wakaStore: JSON:API response missing `data` member');
+        }
+
+        const resources = Array.isArray(response.data) ? response.data : [response.data];
+        const result = {};
+
+        for (const resource of resources) {
+            if (!resource.type) {
+                throw new Error('wakaStore: JSON:API resource missing `type` member');
+            }
+
+            const key = resource.type;
+            const record = Object.assign({ id: resource.id }, resource.attributes || {});
+
+            if (Array.isArray(response.data)) {
+                if (!result[key]) {
+                    result[key] = [];
+                }
+
+                result[key].push(record);
+            } else {
+                // Single resource — store directly, not in an array
+                result[key] = record;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Performs a fetch request and returns the parsed JSON body.
+     * Rejects with a descriptive error on non-ok responses.
+     * @param {string} url
+     * @param {Object} [fetchOptions]
+     * @returns {Promise<Object>}
+     */
+    function doFetch(url, fetchOptions) {
+        const opts = Object.assign({}, DEFAULT_FETCH_OPTIONS, fetchOptions, {
+            headers: Object.assign({}, DEFAULT_FETCH_OPTIONS.headers, fetchOptions && fetchOptions.headers)
+        });
+
+        return fetch(url, opts).then(function(response) {
+            if (!response.ok) {
+                const error = new Error('wakaStore: HTTP ' + response.status + ' for ' + url);
+                error.status = response.status;
+                error.response = response;
+                throw error;
+            }
+
+            return response.json();
+        });
+    }
 
     /**
      * Returns true if the property should trigger reactivity.
@@ -419,7 +515,210 @@
                 configurable: false
             });
 
-            return createProxy(initialState, []);
+            /**
+             * Internal poll state. Kept on initialState as non-enumerable
+             * so it survives proxy round-trips but is invisible to templates.
+             */
+            let _pollTimer = null;
+            let _pollActive = false;
+
+            const proxy = createProxy(initialState, []);
+
+            /**
+             * Starts polling an endpoint and merging the response into the store.
+             *
+             * Convention: the server returns a JSON:API document. The deserializer
+             * flattens each resource into a plain object keyed by its `type`, then
+             * Object.assign writes each key onto the store. DOM updates happen
+             * automatically through the existing proxy/event machinery.
+             *
+             * If your server does not speak JSON:API, supply a `merge` callback.
+             * The callback receives the store proxy and the raw parsed response body
+             * and is responsible for writing whatever it needs onto the store.
+             *
+             * Poll timing uses recursive setTimeout so the next poll only starts
+             * after the current request settles. This prevents request pile-up when
+             * the server is slow and avoids setInterval drift.
+             *
+             * The poll pauses automatically when the tab is hidden (Page Visibility
+             * API) and resumes when it becomes visible again. Call $stopPoll() to
+             * stop permanently.
+             *
+             * Note: if you mutate the store locally while polling is active, the
+             * next poll cycle will overwrite those changes with server data. This is
+             * expected behaviour. To persist local changes, call $push() first so
+             * the server reflects them before the next poll.
+             *
+             * @param {string} url - Endpoint to poll
+             * @param {Object} [opts]
+             * @param {number} [opts.interval=5000] - Milliseconds between polls
+             * @param {Function} [opts.merge] - Custom merge: (store, response) => void
+             * @param {Function} [opts.onError] - Error callback: (error) => void
+             * @param {Object} [opts.fetchOptions] - Options forwarded to fetch()
+             */
+            Object.defineProperty(proxy, '$poll', {
+                enumerable: false,
+                configurable: true,
+                value: function(url, opts) {
+                    opts = opts || {};
+
+                    const interval    = opts.interval    !== undefined ? opts.interval : 5000;
+                    const merge       = typeof opts.merge    === 'function' ? opts.merge    : null;
+                    const onError     = typeof opts.onError  === 'function' ? opts.onError  : null;
+                    const fetchOptions = opts.fetchOptions || {};
+
+                    if (_pollActive) {
+                        proxy.$stopPoll();
+                    }
+
+                    _pollActive = true;
+
+                    function applyResponse(response) {
+                        if (merge) {
+                            merge(proxy, response);
+                        } else {
+                            const data = deserializeJsonApi(response);
+                            Object.assign(proxy, data);
+                        }
+                    }
+
+                    function schedulePoll() {
+                        if (!_pollActive) {
+                            return;
+                        }
+
+                        _pollTimer = setTimeout(function() {
+                            if (!_pollActive) {
+                                return;
+                            }
+
+                            // Respect Page Visibility API — skip fetch when hidden,
+                            // reschedule immediately so we catch the next interval.
+                            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+                                schedulePoll();
+                                return;
+                            }
+
+                            doFetch(url, fetchOptions)
+                                .then(function(response) {
+                                    if (_pollActive) {
+                                        applyResponse(response);
+                                    }
+                                })
+                                .catch(function(error) {
+                                    if (onError) {
+                                        try { onError(error); } catch(e) { /* swallow */ }
+                                    } else {
+                                        console.error('wakaStore $poll error:', error);
+                                    }
+                                })
+                                .finally(function() {
+                                    schedulePoll();
+                                });
+                        }, interval);
+                    }
+
+                    schedulePoll();
+                }
+            });
+
+            /**
+             * Stops an active poll started by $poll().
+             * Safe to call when no poll is active.
+             */
+            Object.defineProperty(proxy, '$stopPoll', {
+                enumerable: false,
+                configurable: true,
+                value: function() {
+                    _pollActive = false;
+
+                    if (_pollTimer !== null) {
+                        clearTimeout(_pollTimer);
+                        _pollTimer = null;
+                    }
+                }
+            });
+
+            /**
+             * Pushes store state to a server endpoint.
+             *
+             * By default serializes the entire store as JSON and sends it as a
+             * PATCH request. Supply a `body` option to send a subset, or set
+             * `method` to override the HTTP verb.
+             *
+             * If the server returns a JSON:API document, the response is
+             * deserialized and merged back into the store automatically — useful
+             * when the server enriches the saved object with computed fields,
+             * timestamps, or generated IDs. Supply a custom `merge` callback if
+             * the response shape requires different handling.
+             *
+             * Returns the raw parsed response body for callers that need it.
+             *
+             * @param {string} url - Endpoint to push to
+             * @param {Object} [opts]
+             * @param {string} [opts.method='PATCH'] - HTTP method
+             * @param {Object} [opts.body] - Body to send. Defaults to the full store state.
+             * @param {boolean} [opts.applyResponse=true] - Merge server response back into store
+             * @param {Function} [opts.merge] - Custom merge: (store, response) => void
+             * @param {Function} [opts.onError] - Error callback: (error) => void
+             * @param {Object} [opts.fetchOptions] - Extra options forwarded to fetch()
+             * @returns {Promise<Object>} Resolves with the parsed response body
+             */
+            Object.defineProperty(proxy, '$push', {
+                enumerable: false,
+                configurable: true,
+                value: function(url, opts) {
+                    opts = opts || {};
+
+                    const method       = opts.method       || 'PATCH';
+                    const applyResponse = opts.applyResponse !== false;
+                    const merge        = typeof opts.merge   === 'function' ? opts.merge   : null;
+                    const onError      = typeof opts.onError === 'function' ? opts.onError : null;
+
+                    // Default body: plain enumerable store state (no $ or _ keys)
+                    const body = opts.body !== undefined
+                        ? opts.body
+                        : JSON.parse(JSON.stringify(initialState));
+
+                    const fetchOptions = Object.assign({}, opts.fetchOptions, {
+                        method: method,
+                        headers: Object.assign(
+                            { 'Content-Type': 'application/vnd.api+json' },
+                            opts.fetchOptions && opts.fetchOptions.headers
+                        ),
+                        body: JSON.stringify(body)
+                    });
+
+                    return doFetch(url, fetchOptions)
+                        .then(function(response) {
+                            if (applyResponse && response) {
+                                if (merge) {
+                                    merge(proxy, response);
+                                } else {
+                                    try {
+                                        const data = deserializeJsonApi(response);
+                                        Object.assign(proxy, data);
+                                    } catch(e) {
+                                        // Response may be empty or non-JSON:API (e.g. 204 No Content
+                                        // parsed as null). Silently skip — caller can use merge
+                                        // callback if they need to handle the response.
+                                    }
+                                }
+                            }
+
+                            return response;
+                        })
+                        .catch(function(error) {
+                            if (onError) {
+                                try { onError(error); } catch(e) { /* swallow */ }
+                            }
+
+                            throw error;
+                        });
+                }
+            });
+
+            return proxy;
         }
     };
 
