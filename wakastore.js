@@ -40,7 +40,7 @@
  * ║    // Custom merge for non-JSON:API or envelope responses:                       ║
  * ║    store.poll('/api/data', {                                                     ║
  * ║        interval: 5000,                                                           ║
- * ║        merge: (store, response) => { store.items = response.data.items; }        ║
+ * ║        merge: (response) => { this.items = response.data.items; }                ║
  * ║    });                                                                           ║
  * ║                                                                                  ║
  * ║  Note: poll will overwrite local store mutations on the next cycle.              ║
@@ -570,7 +570,7 @@
              * @param {string} url - Endpoint to poll
              * @param {Object} [opts]
              * @param {number} [opts.interval=5000] - Milliseconds between polls
-             * @param {Function} [opts.merge] - Custom merge: (store, response) => void
+             * @param {Function} [opts.merge] - Custom merge: function(response), called with store as `this`
              * @param {Function} [opts.onError] - Error callback: (error) => void
              * @param {Object} [opts.fetchOptions] - Options forwarded to fetch()
              */
@@ -598,7 +598,7 @@
                     // deserializer + Object.assign convention.
                     function applyResponse(response) {
                         if (merge) {
-                            merge(proxy, response);
+                            merge.call(proxy, response);
                         } else {
                             // deserializeJsonApi returns a plain object keyed by resource
                             // type. Object.assign writes each key onto the store proxy,
@@ -707,7 +707,7 @@
              * @param {string} [opts.method='PATCH'] - HTTP method
              * @param {Object} [opts.body] - Body to send. Defaults to the full store state.
              * @param {boolean} [opts.applyResponse=true] - Merge server response back into store
-             * @param {Function} [opts.merge] - Custom merge: (store, response) => void
+             * @param {Function} [opts.merge] - Custom merge: function(response), called with store as `this`
              * @param {Function} [opts.onError] - Error callback: (error) => void
              * @param {Object} [opts.fetchOptions] - Extra options forwarded to fetch()
              * @returns {Promise<Object>} Resolves with the parsed response body
@@ -746,7 +746,7 @@
                         .then(function(response) {
                             if (applyResponse && response) {
                                 if (merge) {
-                                    merge(proxy, response);
+                                    merge.call(proxy, response);
                                 } else {
                                     try {
                                         // Fold the server response back into the store so that
