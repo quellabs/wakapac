@@ -738,7 +738,6 @@
              * @param {Object} [opts]
              * @param {string} [opts.method='PATCH'] - HTTP method
              * @param {Object} [opts.body] - Body to send. Defaults to the full store state.
-             * @param {boolean} [opts.applyResponse=true] - Merge server response back into store
              * @param {Function} [opts.merge] - Custom merge: function(response), called with store as `this`
              * @param {Function} [opts.onError] - Error callback: (error) => void
              * @param {Object} [opts.fetchOptions] - Extra options forwarded to fetch()
@@ -751,7 +750,6 @@
                     opts = opts || {};
 
                     const method        = opts.method        || 'PATCH';
-                    const applyResponse = opts.applyResponse !== false;
                     const merge         = typeof opts.merge   === 'function' ? opts.merge   : null;
                     const onError       = typeof opts.onError === 'function' ? opts.onError : null;
 
@@ -776,7 +774,7 @@
 
                     return doFetch(url, fetchOptions)
                         .then(function(response) {
-                            if (!applyResponse || !response) {
+                            if (!response) {
                                 return response;
                             }
 
