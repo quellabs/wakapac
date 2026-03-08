@@ -455,6 +455,14 @@
                 markExternalProxy(obj);
 
                 const proxy = new Proxy(obj, {
+                    /**
+                     * Intercepts property reads. Returns storeId for internal identification,
+                     * wraps mutating array methods to trigger notifications, and lazily
+                     * proxies nested objects for deep reactivity.
+                     * @param {Object|Array} target
+                     * @param {string|symbol} prop
+                     * @returns {*}
+                     */
                     get(target, prop) {
                         // Expose _wakaStoreId on the root proxy so the plugin
                         // can identify store references in originalAbstraction.
@@ -482,6 +490,14 @@
                         return val;
                     },
 
+                    /**
+                     * Intercepts property writes. Skips if value is unchanged.
+                     * Marks new object values as external proxies, then notifies.
+                     * @param {Object|Array} target
+                     * @param {string|symbol} prop
+                     * @param {*} newValue
+                     * @returns {boolean}
+                     */
                     set(target, prop, newValue) {
                         const oldValue = target[prop];
 
@@ -503,6 +519,12 @@
                         return true;
                     },
 
+                    /**
+                     * Intercepts property deletions and notifies with undefined as newValue.
+                     * @param {Object|Array} target
+                     * @param {string|symbol} prop
+                     * @returns {boolean}
+                     */
                     deleteProperty(target, prop) {
                         if (!(prop in target)) {
                             return true;
@@ -593,9 +615,12 @@
 
                     _pollActive = true;
 
-                    // Applies a server response to the store. Uses the custom merge
-                    // callback when provided, otherwise falls back to the JSON:API
-                    // deserializer + Object.assign convention.
+                    /**
+                     * Applies a server response to the store.
+                     * Uses the custom merge callback when provided, otherwise falls back
+                     * to the JSON:API deserializer + Object.assign convention.
+                     * @param {Object} response - Parsed response body
+                     */
                     function applyResponse(response) {
                         if (merge) {
                             merge.call(proxy, response);
@@ -610,6 +635,11 @@
                         Object.assign(proxy, data);
                     }
 
+                    /**
+                     * Schedules the next poll cycle via setTimeout.
+                     * Skips the fetch if the tab is hidden and reschedules immediately.
+                     * Always reschedules in .finally() so errors don't break the loop.
+                     */
                     function schedulePoll() {
                         // Guard: stopPoll() may have been called between the end of the
                         // last request and schedulePoll() firing inside .finally().
@@ -622,6 +652,7 @@
                         // This prevents concurrent requests when the server is slow
                         // and keeps the interval measured from response, not dispatch.
                         _pollTimer = setTimeout(function() {
+                            // Do nothing if there is no active poll
                             if (!_pollActive) {
                                 return;
                             }
