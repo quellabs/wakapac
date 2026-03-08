@@ -80,6 +80,14 @@ delivered through the same pipeline --- simplifying complex UI behavior.
 
 No build tooling required.
 
+## Plugins
+
+**WakaStore** adds a shared reactive state layer across components. A store is created once and mounted on any number of components under any property name --- mutations to the store propagate automatically to every subscriber, keeping all components in sync without manual coordination. The plugin also supports server synchronization via polling and push to JSON:API endpoints, with optional custom merge logic for non-standard response formats.
+
+**WakaMotion** exposes device motion and orientation sensors as reactive properties injected into every component. It normalizes the browser's DeviceMotion API into tilt angles, raw acceleration, and rotation rates, handles the iOS 13+ permission flow, and provides a configurable threshold and axis inversion system to filter noise and correct for inconsistent sensor orientation across devices.
+
+**WakaSync** is a full-featured HTTP client built to integrate with wakaPAC's message pipeline. It supports request grouping and cancellation, automatic retries with fixed, linear, or exponential backoff, and request/response interceptors. Completed requests deliver `MSG_HTTP_SUCCESS`, `MSG_HTTP_ERROR`, or `MSG_HTTP_ABORT` messages directly to the component's `msgProc`, keeping HTTP responses in the same predictable event flow as the rest of the runtime.
+
 ## Documentation
 
 Full docs, guides, and API reference:
