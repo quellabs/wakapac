@@ -599,14 +599,15 @@
                     function applyResponse(response) {
                         if (merge) {
                             merge.call(proxy, response);
-                        } else {
-                            // deserializeJsonApi returns a plain object keyed by resource
-                            // type. Object.assign writes each key onto the store proxy,
-                            // which fires individual pac:store-changed events per key —
-                            // exactly the same path as a direct store mutation.
-                            const data = deserializeJsonApi(response);
-                            Object.assign(proxy, data);
+                            return;
                         }
+
+                        // deserializeJsonApi returns a plain object keyed by resource
+                        // type. Object.assign writes each key onto the store proxy,
+                        // which fires individual pac:store-changed events per key —
+                        // exactly the same path as a direct store mutation.
+                        const data = deserializeJsonApi(response);
+                        Object.assign(proxy, data);
                     }
 
                     function schedulePoll() {
@@ -744,23 +745,26 @@
 
                     return doFetch(url, fetchOptions)
                         .then(function(response) {
-                            if (applyResponse && response) {
-                                if (merge) {
-                                    merge.call(proxy, response);
-                                } else {
-                                    try {
-                                        // Fold the server response back into the store so that
-                                        // server-generated fields (timestamps, IDs, computed
-                                        // values) are reflected immediately without waiting for
-                                        // the next poll cycle.
-                                        const data = deserializeJsonApi(response);
-                                        Object.assign(proxy, data);
-                                    } catch(e) {
-                                        // Response may be empty or non-JSON:API (e.g. 204 No Content
-                                        // parsed as null). Silently skip — caller can use a merge
-                                        // callback if they need to handle the response shape.
-                                    }
-                                }
+                            if (!applyResponse || !response) {
+                                return response;
+                            }
+
+                            if (merge) {
+                                merge.call(proxy, response);
+                                return response;
+                            }
+
+                            try {
+                                // Fold the server response back into the store so that
+                                // server-generated fields (timestamps, IDs, computed
+                                // values) are reflected immediately without waiting for
+                                // the next poll cycle.
+                                const data = deserializeJsonApi(response);
+                                Object.assign(proxy, data);
+                            } catch(e) {
+                                // Response may be empty or non-JSON:API (e.g. 204 No Content
+                                // parsed as null). Silently skip — caller can use a merge
+                                // callback if they need to handle the response shape.
                             }
 
                             // Return the raw response so callers can inspect it if needed,
