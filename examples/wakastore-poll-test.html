@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaStore — poll() tests</title>
+    <style>
+        body { font-family: monospace; padding: 2rem; background: #1e1e1e; color: #d4d4d4; }
+        h1   { color: #9cdcfe; margin-bottom: 0.25rem; font-size: 1.1rem; }
+        p.subtitle { color: #6a9955; margin-top: 0; margin-bottom: 2rem; font-size: 0.85rem; }
+
+        #results { display: flex; flex-direction: column; gap: 0.35rem; }
+
+        .suite  { color: #569cd6; margin-top: 1rem; margin-bottom: 0.2rem; font-weight: bold; }
+        .pass   { color: #4ec9b0; }
+        .pass::before { content: '✓ '; }
+        .fail   { color: #f44747; }
+        .fail::before { content: '✗ '; }
+        .info   { color: #808080; padding-left: 1.5rem; font-size: 0.85rem; }
+
+        #summary {
+            margin-top: 2rem;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        #summary.all-pass { background: #1e3a2f; color: #4ec9b0; }
+        #summary.has-fail { background: #3a1e1e; color: #f44747; }
+    </style>
+</head>
+<body>
+
+<h1>WakaStore — poll() test suite</h1>
+<p class="subtitle">Open DevTools console for detailed failure output</p>
+<div id="results"></div>
+<div id="summary"></div>
+
+<!--
+    Replace these paths with your actual script locations.
+    wakastore.js must be loaded AFTER wakapac.js.
+-->
+<script src="../wakapac.js"></script>
+<script src="../wakastore.js"></script>
+
+<script>
+    (function () {
+        'use strict';
+
+        // ─── Mini test runner ────────────────────────────────────────────────────
+
+        const results  = document.getElementById('results');
+        const summary  = document.getElementById('summary');
+        let passed = 0;
+        let failed = 0;
+        let currentSuite = null;
+
+        function suite(name) {
+            currentSuite = name;
+            const el = document.createElement('div');
+            el.className = 'suite';
+            el.textContent = name;
+            results.appendChild(el);
+        }
+
+        function pass(name) {
+            passed++;
+            const el = document.createElement('div');
+            el.className = 'pass';
+            el.textContent = name;
+            results.appendChild(el);
+        }
+
+        function fail(name, reason) {
+            failed++;
+            console.error('[FAIL]', currentSuite, '>', name, '\n', reason);
+            const el = document.createElement('div');
+            el.className = 'fail';
+            el.textContent = name;
+            results.appendChild(el);
+            const info = document.createElement('div');
+            info.className = 'info';
+            info.textContent = String(reason);
+            results.appendChild(info);
+        }
+
+        function assert(condition, message) {
+            if (!condition) throw new Error('Assertion failed: ' + message);
+        }
+
+        function assertEqual(actual, expected, label) {
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                throw new Error(
+                    (label || 'assertEqual') +
+                    '\n  expected: ' + JSON.stringify(expected) +
+                    '\n  actual:   ' + JSON.stringify(actual)
+                );
+            }
+        }
+
+        /**
+         * Runs an async test, catching any thrown assertion errors.
+         * Returns a Promise so tests in a suite can be awaited in sequence.
+         */
+        async function test(name, fn) {
+            try {
+                await fn();
+                pass(name);
+            } catch (e) {
+                fail(name, e.message || e);
+            }
+        }
+
+        // ─── Fake fetch helpers ──────────────────────────────────────────────────
+
+        /**
+         * Installs a global fetch stub that resolves with a JSON:API response.
+         * Returns a spy object with a `calls` counter.
+         * Automatically restores the original fetch when restore() is called.
+         */
+        function stubFetch(responseBody, opts) {
+            opts = opts || {};
+            const spy = { calls: 0, restore: null };
+            const original = window.fetch;
+
+            window.fetch = function () {
+                spy.calls++;
+                if (opts.fail) {
+                    return Promise.resolve({ ok: false, status: opts.status || 500 });
+                }
+                return Promise.resolve({
+                    ok: true,
+                    json: function () { return Promise.resolve(responseBody); }
+                });
+            };
+
+            spy.restore = function () { window.fetch = original; };
+            return spy;
+        }
+
+        /**
+         * Waits `ms` milliseconds. Used to let poll cycles complete in real time.
+         * Tests use short intervals (50–150ms) to stay fast.
+         */
+        function wait(ms) {
+            return new Promise(function (resolve) { setTimeout(resolve, ms); });
+        }
+
+        // ─── JSON:API fixtures ────────────────────────────────────────────────────
+
+        const COLLECTION_RESPONSE = {
+            data: [
+                { id: '1', type: 'user', attributes: { name: 'Floris', role: 'admin' } },
+                { id: '2', type: 'user', attributes: { name: 'Jan',    role: 'editor' } }
+            ]
+        };
+
+        const SINGLE_RESPONSE = {
+            data: { id: '1', type: 'user', attributes: { name: 'Floris', role: 'admin' } }
+        };
+
+        const UPDATED_COLLECTION = {
+            data: [
+                { id: '1', type: 'user', attributes: { name: 'Floris', role: 'superadmin' } }
+            ]
+        };
+
+        // ─── Test suites ──────────────────────────────────────────────────────────
+
+        async function runAll() {
+
+            // ── 1. JSON:API deserialisation ───────────────────────────────────────
+            suite('JSON:API deserialisation');
+
+            await test('collection response populates store array', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                const spy = stubFetch(COLLECTION_RESPONSE);
+
+                store.poll('/api/users', { interval: 50 });
+                await wait(100);
+                store.stopPoll();
+                spy.restore();
+
+                assertEqual(store.user.length, 2, 'user length');
+                assertEqual(store.user[0], { id: '1', name: 'Floris', role: 'admin' }, 'user[0]');
+                assertEqual(store.user[1], { id: '2', name: 'Jan', role: 'editor' }, 'user[1]');
+            });
+
+            await test('single resource response stores object directly (not in array)', async function () {
+                const store = wakaStore.createStore({ user: null });
+                const spy = stubFetch(SINGLE_RESPONSE);
+
+                store.poll('/api/user/1', { interval: 50 });
+                await wait(100);
+                store.stopPoll();
+                spy.restore();
+
+                assert(!Array.isArray(store.user), 'user should not be an array');
+                assertEqual(store.user, { id: '1', name: 'Floris', role: 'admin' }, 'user');
+            });
+
+            await test('id and attributes are flattened into one plain object', async function () {
+                const store = wakaStore.createStore({ user: null });
+                const spy = stubFetch(SINGLE_RESPONSE);
+
+                store.poll('/api/user/1', { interval: 50 });
+                await wait(100);
+                store.stopPoll();
+                spy.restore();
+
+                assert('id'   in store.user, 'id present');
+                assert('name' in store.user, 'name present');
+                assert('role' in store.user, 'role present');
+            });
+
+            await test('type is used as store key verbatim', async function () {
+                const store = wakaStore.createStore({ user: null });
+                const spy = stubFetch(SINGLE_RESPONSE);
+
+                store.poll('/api/user/1', { interval: 50 });
+                await wait(100);
+                store.stopPoll();
+                spy.restore();
+
+                // type = 'user' → store.user
+                assert(store.user !== null, 'store.user populated');
+            });
+
+            await test('resource with no attributes produces id-only record', async function () {
+                const store = wakaStore.createStore({ tag: null });
+                const spy = stubFetch({ data: { id: '42', type: 'tag' } });
+
+                store.poll('/api/tag/42', { interval: 50 });
+                await wait(100);
+                store.stopPoll();
+                spy.restore();
+
+                assertEqual(store.tag, { id: '42' }, 'tag');
+            });
+
+            // ── 2. Poll lifecycle ─────────────────────────────────────────────────
+            suite('Poll lifecycle');
+
+            await test('fetch is called after the interval elapses', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                const spy = stubFetch(COLLECTION_RESPONSE);
+
+                store.poll('/api/users', { interval: 80 });
+
+                // Not called yet — interval hasn't elapsed
+                await wait(40);
+                const callsBefore = spy.calls;
+
+                await wait(60); // now past 80ms
+                store.stopPoll();
+                spy.restore();
+
+                assert(callsBefore === 0, 'fetch not called before interval (' + callsBefore + ' calls)');
+                assert(spy.calls >= 1, 'fetch called after interval (' + spy.calls + ' calls)');
+            });
+
+            await test('fetch is called on each subsequent interval', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                const spy = stubFetch(COLLECTION_RESPONSE);
+
+                store.poll('/api/users', { interval: 50 });
+                await wait(180); // ~3 cycles at 50ms
+                store.stopPoll();
+                spy.restore();
+
+                assert(spy.calls >= 2, 'at least 2 poll cycles (' + spy.calls + ' calls)');
+            });
+
+            await test('stopPoll() prevents further fetches', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                const spy = stubFetch(COLLECTION_RESPONSE);
+
+                store.poll('/api/users', { interval: 50 });
+                await wait(80);
+                store.stopPoll();
+                const callsAtStop = spy.calls;
+
+                await wait(150); // would trigger more cycles if still polling
+                spy.restore();
+
+                assertEqual(spy.calls, callsAtStop, 'no further calls after stopPoll');
+            });
+
+            await test('calling poll() again replaces the active poll', async function () {
+                const store = wakaStore.createStore({ user: [], product: [] });
+                const spy1 = stubFetch(COLLECTION_RESPONSE);
+
+                store.poll('/api/users', { interval: 50 });
+                await wait(80);
+                spy1.restore();
+
+                // Replace with a new poll targeting a different endpoint
+                const spy2 = stubFetch({
+                    data: [{ id: '1', type: 'product', attributes: { name: 'Widget' } }]
+                });
+
+                store.poll('/api/products', { interval: 50 });
+                await wait(100);
+                store.stopPoll();
+                spy2.restore();
+
+                // Only the second poll's data should be present
+                assert(store.product.length > 0, 'product populated by new poll');
+            });
+
+            await test('stopPoll() is safe to call when no poll is active', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                // Should not throw
+                store.stopPoll();
+                pass('no error thrown');
+            });
+
+            // ── 3. Store updates ──────────────────────────────────────────────────
+            suite('Store updates');
+
+            await test('store is updated with latest server data on each cycle', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                let cycle = 0;
+
+                window.fetch = function () {
+                    cycle++;
+                    return Promise.resolve({
+                        ok: true,
+                        json: function () {
+                            return Promise.resolve({
+                                data: [{ id: String(cycle), type: 'user', attributes: { name: 'User ' + cycle } }]
+                            });
+                        }
+                    });
+                };
+
+                store.poll('/api/users', { interval: 50 });
+                await wait(80);
+                const nameAfterFirst = store.user[0] && store.user[0].name;
+
+                await wait(60);
+                const nameAfterSecond = store.user[0] && store.user[0].name;
+
+                store.stopPoll();
+                window.fetch = undefined;
+
+                assert(nameAfterFirst === 'User 1', 'first cycle: ' + nameAfterFirst);
+                assert(nameAfterSecond === 'User 2', 'second cycle: ' + nameAfterSecond);
+            });
+
+            await test('local mutations are overwritten by the next poll cycle', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                const spy = stubFetch(COLLECTION_RESPONSE);
+
+                store.poll('/api/users', { interval: 100 });
+                await wait(120); // first cycle populates store
+
+                // Local mutation
+                store.user = [{ id: '99', name: 'Local', role: 'ghost' }];
+                assertEqual(store.user[0].name, 'Local', 'local mutation applied');
+
+                await wait(110); // second cycle should overwrite
+                store.stopPoll();
+                spy.restore();
+
+                // Server data wins
+                assert(store.user[0].name !== 'Local', 'server data overwrites local mutation');
+            });
+
+            // ── 4. Custom merge callback ──────────────────────────────────────────
+            suite('Custom merge callback');
+
+            await test('merge callback is called with response and store as this', async function () {
+                const store = wakaStore.createStore({ items: [], total: 0 });
+                let capturedThis = null;
+                let capturedResponse = null;
+
+                const spy = stubFetch({ data: { items: ['a', 'b'], total: 2 } });
+
+                store.poll('/api/data', {
+                    interval: 50,
+                    merge: function (response) {
+                        capturedThis     = this;
+                        capturedResponse = response;
+                        this.items = response.data.items;
+                        this.total = response.data.total;
+                    }
+                });
+
+                await wait(100);
+                store.stopPoll();
+                spy.restore();
+
+                assert(capturedThis === store, 'this === store proxy');
+                assert(capturedResponse !== null, 'response received');
+                assertEqual(store.items, ['a', 'b'], 'items');
+                assertEqual(store.total, 2, 'total');
+            });
+
+            await test('merge callback bypasses JSON:API deserialiser', async function () {
+                const store = wakaStore.createStore({ result: null });
+
+                // Non-JSON:API response shape — would throw if deserialised normally
+                const spy = stubFetch({ weirdShape: { value: 42 } });
+
+                store.poll('/api/weird', {
+                    interval: 50,
+                    merge: function (response) {
+                        this.result = response.weirdShape.value;
+                    }
+                });
+
+                await wait(100);
+                store.stopPoll();
+                spy.restore();
+
+                assertEqual(store.result, 42, 'result from custom merge');
+            });
+
+            // ── 5. Error handling ─────────────────────────────────────────────────
+            suite('Error handling');
+
+            await test('onError callback is called on HTTP error response', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                let errorReceived = null;
+
+                const spy = stubFetch(null, { fail: true, status: 404 });
+
+                store.poll('/api/users', {
+                    interval: 50,
+                    onError: function (err) { errorReceived = err; }
+                });
+
+                await wait(100);
+                store.stopPoll();
+                spy.restore();
+
+                assert(errorReceived !== null, 'onError was called');
+                assert(errorReceived.status === 404, 'error carries HTTP status');
+            });
+
+            await test('poll loop continues after an error', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                let errorCount = 0;
+
+                const spy = stubFetch(null, { fail: true, status: 500 });
+
+                store.poll('/api/users', {
+                    interval: 50,
+                    onError: function () { errorCount++; }
+                });
+
+                await wait(180); // ~3 cycles
+                store.stopPoll();
+                spy.restore();
+
+                assert(errorCount >= 2, 'loop continued after errors (' + errorCount + ' errors)');
+            });
+
+            await test('stopPoll() inside onError stops the loop', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                let errorCount = 0;
+
+                const spy = stubFetch(null, { fail: true, status: 401 });
+
+                store.poll('/api/users', {
+                    interval: 50,
+                    onError: function () {
+                        errorCount++;
+                        store.stopPoll();
+                    }
+                });
+
+                await wait(200);
+                spy.restore();
+
+                assertEqual(errorCount, 1, 'loop stopped after first error');
+            });
+
+            await test('fetch rejection (network error) triggers onError', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                let errorReceived = null;
+                const original = window.fetch;
+
+                window.fetch = function () {
+                    return Promise.reject(new TypeError('Network failure'));
+                };
+
+                store.poll('/api/users', {
+                    interval: 50,
+                    onError: function (err) { errorReceived = err; }
+                });
+
+                await wait(100);
+                store.stopPoll();
+                window.fetch = original;
+
+                assert(errorReceived instanceof TypeError, 'network error passed to onError');
+            });
+
+            // ── 6. Page Visibility API ────────────────────────────────────────────
+            suite('Page Visibility API');
+
+            await test('fetch is skipped while tab is hidden', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                const spy = stubFetch(COLLECTION_RESPONSE);
+
+                // Hide the tab before polling starts
+                Object.defineProperty(document, 'visibilityState', {
+                    configurable: true,
+                    get: () => 'hidden'
+                });
+
+                store.poll('/api/users', { interval: 50 });
+                await wait(200);
+                store.stopPoll();
+                spy.restore();
+
+                // Restore visibility for subsequent tests
+                Object.defineProperty(document, 'visibilityState', {
+                    configurable: true,
+                    get: () => 'visible'
+                });
+
+                assertEqual(spy.calls, 0, 'fetch not called while hidden (' + spy.calls + ' calls)');
+            });
+
+            await test('fetch resumes after tab becomes visible again', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                const spy = stubFetch(COLLECTION_RESPONSE);
+
+                // Start hidden
+                Object.defineProperty(document, 'visibilityState', {
+                    configurable: true,
+                    get: () => 'hidden'
+                });
+
+                store.poll('/api/users', { interval: 50 });
+                await wait(150);
+                const callsWhileHidden = spy.calls;
+
+                // Become visible
+                Object.defineProperty(document, 'visibilityState', {
+                    configurable: true,
+                    get: () => 'visible'
+                });
+
+                await wait(150);
+                store.stopPoll();
+                spy.restore();
+
+                assertEqual(callsWhileHidden, 0, 'no calls while hidden');
+                assert(spy.calls >= 1, 'calls resumed after visible (' + spy.calls + ' calls)');
+            });
+
+            // ── Summary ───────────────────────────────────────────────────────────
+
+            summary.textContent = passed + ' passed, ' + failed + ' failed';
+            summary.className   = failed === 0 ? 'all-pass' : 'has-fail';
+        }
+
+        // Kick off after scripts have loaded
+        window.addEventListener('load', function () {
+            if (typeof wakaStore === 'undefined') {
+                summary.textContent = 'ERROR: wakastore.js not loaded — check script src paths';
+                summary.className   = 'has-fail';
+                return;
+            }
+
+            // Register plugin so createStore works (wakaPAC may or may not be present)
+            if (typeof wakaPAC !== 'undefined') {
+                wakaPAC.use(wakaStore);
+            }
+
+            runAll().catch(function (e) {
+                console.error('Test runner error:', e);
+            });
+        });
+
+    })();
+</script>
+</body>
+</html>
