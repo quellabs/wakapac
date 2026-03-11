@@ -184,6 +184,7 @@
     const MSG_TIMER = 0x0113;
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
+    const MSG_PAINT = 0x000F;
     const MSG_USER = 0x1000;
 
     /**
@@ -1030,6 +1031,21 @@
             const end = Math.max(rawStart, rawEnd);
 
             return { start, end };
+        },
+
+        /**
+         * Computes the union of two axis-aligned rectangles.
+         * The union is the smallest rectangle that contains both input rectangles.
+         * @param {{x:number, y:number, w:number, h:number}} a
+         * @param {{x:number, y:number, w:number, h:number}} b
+         * @returns {{x:number, y:number, w:number, h:number}}
+         */
+        unionRect(a, b) {
+            const x = Math.min(a.x, b.x);
+            const y = Math.min(a.y, b.y);
+            const right = Math.max(a.x + a.w, b.x + b.w);
+            const bottom = Math.max(a.y + a.h, b.y + b.h);
+            return {x, y, w: right - x, h: bottom - y};
         }
     }
 
@@ -2567,6 +2583,11 @@
 
                         // Dispatch size update to the owning container/component
                         self.dispatchToContainer(container, customEvent);
+
+                        // Dispatch repaint
+                        if (container instanceof HTMLCanvasElement) {
+                            _invalidateRect(container._pacId || container.getAttribute('data-pac-id'), null);
+                        }
                     }
                 });
             });
@@ -9676,6 +9697,101 @@
     };
 
     // ========================================================================
+    // PAINT INVALIDATION ENGINE
+    // ========================================================================
+
+    /**
+     * Tracks canvas containers that have been invalidated and are waiting for
+     * their MSG_PAINT to be dispatched on the next animation frame.
+     *
+     * Key:   pacId (string)
+     * Value: { container: HTMLCanvasElement, rcPaint: {x, y, w, h} }
+     *
+     * A container is present in this map if and only if a rAF flush is already
+     * scheduled for it. Multiple invalidateRect() calls before the next frame
+     * collapse into a single entry via rect union — identical to how Win32
+     * coalesces WM_PAINT messages in the message queue.
+     *
+     * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, w:number, h:number}}>}
+     */
+    const _dirtyCanvases = new Map();
+
+    /**
+     * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
+     * the dirty set. Called once per animation frame by requestAnimationFrame.
+     */
+    function _flushPaintQueue() {
+        _dirtyCanvases.forEach(function({ container }) {
+            // Skip containers that were removed from the DOM before the frame fired
+            if (!container.isConnected) {
+                return;
+            }
+
+            const event = DomUpdateTracker.wrapDomEventAsMessage(
+                MSG_PAINT,
+                null,   // No originating DOM event
+                0,      // wParam unused
+                0       // lParam unused
+            );
+
+            DomUpdateTracker.dispatchToContainer(container, event);
+        });
+
+        _dirtyCanvases.clear();
+    }
+
+    /**
+     * Marks a canvas PAC container as needing repaint and schedules a
+     * requestAnimationFrame flush if one is not already pending.
+     *
+     * Multiple calls with different rects before the next frame are coalesced
+     * into a single MSG_PAINT carrying the union rectangle — equivalent to
+     * Win32 InvalidateRect() accumulating into the update region.
+     *
+     * @param {string} pacId  - data-pac-id of the target canvas container
+     * @param {{x:number, y:number, w:number, h:number}|null} [rect]
+     *   Rectangle to invalidate in canvas-local coordinates.
+     *   Pass null (or omit) to invalidate the entire canvas.
+     * @returns {void}
+     */
+    function _invalidateRect(pacId, rect) {
+        // Fetch the container
+        const container = wakaPAC.getContainerByPacId(pacId);
+
+        // If not found, bail
+        if (!container) {
+            return;
+        }
+
+        // Do nothing if the container is not a canvas
+        if (!(container instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        // Normalize: null rect means the whole canvas
+        const fullRect = {
+            x: 0,
+            y: 0,
+            w: container.width,
+            h: container.height
+        };
+
+        // Fetch the rect or default to the entire canvas right if omitted
+        const incoming = rect || fullRect;
+
+        // Queue the repaint
+        if (_dirtyCanvases.has(pacId)) {
+            // Container already queued — union the new rect into the existing one
+            const existing = _dirtyCanvases.get(pacId);
+            existing.rcPaint = Utils.unionRect(existing.rcPaint, incoming);
+        } else {
+            // First invalidation this frame — schedule the flush
+            _dirtyCanvases.set(pacId, { container, rcPaint: incoming });
+            requestAnimationFrame(_flushPaintQueue);
+        }
+    }
+
+    // ========================================================================
     // PUBLIC ACCELERATOR API
     // ========================================================================
 
@@ -9764,6 +9880,69 @@
     };
 
     // ========================================================================
+    // PUBLIC PAINT API
+    // ========================================================================
+
+    /**
+     * Returns the CanvasRenderingContext2D for a canvas PAC container.
+     * Equivalent to Win32 GetDC() — retrieves the drawing context for a window.
+     * Returns null if the container does not exist or is not a <canvas> element.
+     * @param {string} pacId
+     * @returns {CanvasRenderingContext2D|null}
+     */
+    wakaPAC.getDC = function(pacId) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container || !(container instanceof HTMLCanvasElement)) {
+            return null;
+        }
+
+        const context = window.PACRegistry.get(pacId);
+        const attributes = context?.config?.dcAttributes;
+
+        return container.getContext('2d', attributes);
+    };
+
+    /**
+     * Marks a canvas PAC container as needing repaint.
+     * @param {string} pacId - data-pac-id of the target canvas container
+     * @param {{x:number, y:number, w:number, h:number}|null} [rect]
+     *   Rectangle to invalidate in canvas-local pixel coordinates.
+     *   Omit or pass null to invalidate the entire canvas surface.
+     */
+    wakaPAC.invalidateRect = function(pacId, rect) {
+        _invalidateRect(pacId, rect || null);
+    };
+
+    /**
+     * Returns the bounding rectangle of the invalidated region for a canvas
+     * PAC container, or null if no repaint is currently pending.
+     * @param {string} pacId - data-pac-id of the target canvas container
+     * @returns {{x:number, y:number, w:number, h:number}|null}
+     */
+    wakaPAC.getInvalidatedRect = function(pacId) {
+        const entry = _dirtyCanvases.get(pacId);
+        return entry ? { ...entry.rcPaint } : null;
+    };
+
+    /**
+     * Resizes the backing store of a canvas PAC container to the given dimensions.
+     * @param {string} pacId  - data-pac-id of the target canvas container
+     * @param {number} width  - New backing store width in pixels
+     * @param {number} height - New backing store height in pixels
+     */
+    wakaPAC.resizeCanvas = function(pacId, width, height) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container || !(container instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        container.width  = width;
+        container.height = height;
+    };
+
+    // ========================================================================
     // EXPORTS
     // ========================================================================
 
@@ -9780,9 +9959,9 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
         MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
         MSG_INPUT_COMPLETE, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
-        MSG_ACCEL, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_SIZE, MSG_MOUSEENTER,
-        MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED,
-        MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
+        MSG_ACCEL, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE,
+        MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
+        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
