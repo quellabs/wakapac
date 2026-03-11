@@ -148,6 +148,8 @@
      */
     const MSG_UNKNOWN = 0x0000;
     const MSG_SIZE = 0x0005;
+    const MSG_PAINT = 0x000F;
+    const MSG_DPR_CHANGE = 0x0010;
     const MSG_MOUSEMOVE = 0x0200;
     const MSG_LBUTTONDOWN = 0x0201;
     const MSG_LBUTTONUP = 0x0202;
@@ -184,7 +186,6 @@
     const MSG_TIMER = 0x0113;
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
-    const MSG_PAINT = 0x000F;
     const MSG_USER = 0x1000;
 
     /**
@@ -1512,6 +1513,23 @@
                     });
                 });
             }
+
+            // Device pixel ratio changes
+            // Fires when the display DPR changes (monitor switch, OS scaling change)
+            (function watchDPR() {
+                const dpr = window.devicePixelRatio || 1;
+                const mq = window.matchMedia(`(resolution: ${dpr}dppx)`);
+
+                mq.addEventListener('change', function onChange() {
+                    mq.removeEventListener('change', onChange);
+                    
+                    self.dispatchBrowserStateEvent('dpr', {
+                        ratio: window.devicePixelRatio || 1
+                    });
+
+                    watchDPR(); // Re-register for the next change
+                });
+            })();
         },
 
         /**
@@ -6235,14 +6253,18 @@
                 break;
             }
 
-            case 'orientation': {
+            case 'orientation':
                 // Screen orientation angle in degrees (0, 90, 180, 270)
                 // and type string e.g. 'portrait-primary', 'landscape-secondary'
                 this.abstraction.browserOrientationAngle = stateData.angle;
                 this.abstraction.browserOrientationType = stateData.type;
                 break;
-            }
 
+            case 'dpr':
+                this.abstraction.browserDevicePixelRatio = stateData.ratio;
+                wakaPAC.sendMessage(this.abstraction.pacId, MSG_DPR_CHANGE, Math.round(stateData.ratio * 100), 0);
+                break;
+                
             default:
                 console.warn('Unknown browser state message ' + stateType);
                 break;
@@ -6818,9 +6840,9 @@
         abstraction.browserContentHeight = document.documentElement.scrollHeight;
 
         // Container scroll properties
-        abstraction.containerIsScrollable =  false;                               // Can scroll in any direction
-        abstraction.containerScrollX = this.container.scrollLeft;                 // Current horizontal scroll position
-        abstraction.containerScrollY = this.container.scrollTop;                  // Current vertical scroll position
+        abstraction.containerIsScrollable =  false;                         // Can scroll in any direction
+        abstraction.containerScrollX = this.container.scrollLeft;           // Current horizontal scroll position
+        abstraction.containerScrollY = this.container.scrollTop;            // Current vertical scroll position
         abstraction.containerContentWidth = this.container.scrollWidth;     // Total scrollable content width
         abstraction.containerContentHeight = this.container.scrollHeight;   // Total scrollable content height
         abstraction.containerScrollWindow = {
@@ -6845,6 +6867,8 @@
         abstraction.browserOrientationAngle = screen.orientation ? screen.orientation.angle : 0;
         abstraction.browserOrientationType = screen.orientation ? screen.orientation.type : 'unknown';
 
+        // Pixel ratio
+        abstraction.browserDevicePixelRatio = window.devicePixelRatio || 1;
     };
 
     /**
@@ -9961,7 +9985,7 @@
         MSG_INPUT_COMPLETE, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
         MSG_ACCEL, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE,
         MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
-        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
+        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
