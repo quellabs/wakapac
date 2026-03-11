@@ -2601,11 +2601,6 @@
 
                         // Dispatch size update to the owning container/component
                         self.dispatchToContainer(container, customEvent);
-
-                        // Dispatch repaint
-                        if (container instanceof HTMLCanvasElement) {
-                            _invalidateRect(container._pacId || container.getAttribute('data-pac-id'), null);
-                        }
                     }
                 });
             });
@@ -9173,6 +9168,13 @@
                 }
             }
 
+            // Synchronously flush any paint requests queued during observation
+            // to avoid a blank frame before the first animation frame fires
+            if (container instanceof HTMLCanvasElement) {
+                _invalidateRect(container._pacId);
+                _flushPaintQueue();
+            }
+
             // Signal that a new component is ready
             document.dispatchEvent(new CustomEvent('pac:component-ready', {
                 detail: { component: context, selector: selector, pacId: pacId }
@@ -9956,14 +9958,26 @@
      * @param {number} height - New backing store height in pixels
      */
     wakaPAC.resizeCanvas = function(pacId, width, height) {
+        // Fetch the container
         const container = this.getContainerByPacId(pacId);
 
+        // resizeCanvas is only meaningful for canvas containers
         if (!container || !(container instanceof HTMLCanvasElement)) {
             return;
         }
 
+        // Skip if dimensions are unchanged — assigning to width/height clears the
+        // backing store even when the value is the same, so avoid it entirely
+        if (container.width === width && container.height === height) {
+            return;
+        }
+
+        // Resize the backing store; existing pixel data is cleared by the browser
         container.width  = width;
         container.height = height;
+
+        // Schedule a repaint — the canvas content is invalid after every resize
+        _invalidateRect(pacId, null);
     };
 
     // ========================================================================
