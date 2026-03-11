@@ -212,12 +212,6 @@
         this._pac = null;
 
         /**
-         * The current route state. Updated on every navigation.
-         * @type {{ path: string, query: Object }}
-         */
-        this._currentRoute = { path: '', query: {} };
-
-        /**
          * Route table populated by onComponentCreated when it discovers a
          * data-pac-route attribute on a newly registered component.
          * Key: pacId, Value: pattern string
@@ -258,23 +252,23 @@
      * @private
      */
     function _broadcastCurrentRoute(instance) {
-        // Snapshot the current location into the route state
-        instance._currentRoute = {
-            path: _normalizePath(location.pathname),
-            query: _parseQuery(location.search)
-        };
-
         // Send a targeted message to each component that declared a pattern,
         // with matches pre-computed from that component's own data-pac-route
+        const path = _normalizePath(location.pathname);
+
         instance._routeTable.forEach(function (pattern, pacId) {
-            const params = instance.matchPattern(pattern, instance._currentRoute.path);
+            const params = instance.matchPattern(pattern, path);
 
             instance._pac.sendMessage(
                 pacId,
                 instance.MSG_ROUTE_CHANGE,
+                params ? 1 : 0,
                 0,
-                0,
-                Object.assign({}, instance._currentRoute, { params: params })
+                {
+                    path: path,
+                    query: _parseQuery(location.search),
+                    params: params
+                }
             );
         });
     }
@@ -297,12 +291,6 @@
         // Extend wakaPAC with the router message constant so component authors
         // can reference it as wakaPAC.MSG_ROUTE_CHANGE alongside the built-in messages
         pac.MSG_ROUTE_CHANGE = this.MSG_ROUTE_CHANGE;
-
-        // Seed the current route from the actual URL at registration time
-        this._currentRoute = {
-            path: _normalizePath(location.pathname),
-            query: _parseQuery(location.search)
-        };
 
         // Preserve instance reference for use inside callbacks
         const self = this;
@@ -398,10 +386,10 @@
      * @returns {{ path: string, query: Object }}
      */
     WakaRoute.prototype.currentRoute = function () {
-        return Object.assign({}, this._currentRoute, {
-            // Return a copy of query so callers cannot mutate internal state
-            query: Object.assign({}, this._currentRoute.query)
-        });
+        return {
+            path: _normalizePath(location.pathname),
+            query: _parseQuery(location.search)
+        };
     };
 
     /**
