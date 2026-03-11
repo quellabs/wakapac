@@ -19,7 +19,7 @@
  * ║    wakaRoute.navigate('/users/42');                                              ║
  * ║                                                                                  ║
  * ║  Components with data-pac-route receive MSG_ROUTE_CHANGE with:                   ║
- * ║    { path, query, matches }
+ * ║    { path, query, params }                                                       ║
  * ║                                                                                  ║
  * ║  matches contains the extracted URL params for that component's own pattern,     ║
  * ║  or null if the pattern did not match the current path.                          ║
@@ -267,14 +267,14 @@
         // Send a targeted message to each component that declared a pattern,
         // with matches pre-computed from that component's own data-pac-route
         instance._routeTable.forEach(function (pattern, pacId) {
-            const matches = instance.matchPattern(pattern, instance._currentRoute.path);
+            const params = instance.matchPattern(pattern, instance._currentRoute.path);
 
             instance._pac.sendMessage(
                 pacId,
                 instance.MSG_ROUTE_CHANGE,
                 0,
                 0,
-                Object.assign({}, instance._currentRoute, { matches: matches })
+                Object.assign({}, instance._currentRoute, { params: params })
             );
         });
     }
