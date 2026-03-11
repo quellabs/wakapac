@@ -332,13 +332,22 @@
                 // Store in route table for introspection via getRouteTable()
                 self._routeTable.set(pacId, pattern);
 
-                // Hide immediately; the router will show it if the current route matches.
-                // This prevents a flash of all route components on initial load.
-                if (self.matchPattern(pattern, self._currentRoute.path)) {
-                    pac.showContainer(pacId);
-                } else {
-                    pac.hideContainer(pacId);
-                }
+                // Fire MSG_ROUTE_CHANGE immediately so the component can decide
+                // its own initial visibility — identical behavior to any navigation.
+                const path = _normalizePath(location.pathname);
+                const params = self.matchPattern(pattern, path);
+
+                pac.sendMessage(
+                    pacId,
+                    self.MSG_ROUTE_CHANGE,
+                    params ? 1 : 0,
+                    0,
+                    {
+                        path: path,
+                        query: _parseQuery(location.search),
+                        params: params
+                    }
+                );
             },
 
             /**
