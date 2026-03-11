@@ -19,10 +19,10 @@
  * ║    wakaRoute.navigate('/users/42');                                              ║
  * ║                                                                                  ║
  * ║  Components receive MSG_ROUTE_CHANGE with detail: { path, query }                ║
- * ║  Use wakaRoute.matchPattern('/users/:id', detail.path) to extract params.        ║
+ * ║  Use wakaRoute.matchPattern('/users/{id}', detail.path) to extract params.        ║
  * ║                                                                                  ║
  * ║  Declarative registration via HTML attribute:                                    ║
- * ║    <div data-pac-id="user-view" data-pac-route="/users/:id">                     ║
+ * ║    <div data-pac-id="user-view" data-pac-route="/users/{id}">                    ║
  * ║                                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -75,9 +75,10 @@
         }
 
         // Replace tokens with placeholders BEFORE escaping so the regex escaper
-        // never sees { } or * characters from our syntax
-        const SEGMENT  = '\x01'; // placeholder for ([^/]+)
-        const WILDCARD = '\x02'; // placeholder for (.*)
+        // never sees { } or * characters from our syntax.
+        // Placeholders use characters illegal in URL paths so they can't collide.
+        const SEGMENT  = '\u0001'; // placeholder for ([^/]+)
+        const WILDCARD = '\u0002'; // placeholder for (.*)
 
         let processed = pattern
             // Multi-segment wildcard: {name:**}
@@ -101,8 +102,8 @@
 
         // Substitute placeholders for their regex capture groups
         const regexStr = processed
-            .replace(/\x01/g, '([^/]+)')
-            .replace(/\x02/g, '(.*)');
+            .split(SEGMENT).join('([^/]+)')
+            .split(WILDCARD).join('(.*)');
 
         // Anchor the pattern — must match the full path
         const regex = new RegExp('^' + regexStr + '$');

@@ -189,8 +189,8 @@
                         document.getElementById('post-user-id').textContent   = params.id   || '—';
                         document.getElementById('post-id-display').textContent = params.postId || '—';
                     }
-                    if (pacId === 'view-wildcard' && params.wildcard !== undefined) {
-                        document.getElementById('file-path-display').textContent = params.wildcard;
+                    if (pacId === 'view-wildcard' && params.rest !== undefined) {
+                        document.getElementById('file-path-display').textContent = params.rest;
                     }
                 }
             }
