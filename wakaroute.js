@@ -248,9 +248,9 @@
      * Components without data-pac-route receive no message.
      *
      * Each component receives a detail object of the shape:
-     *   { path, query, matches }
+     *   { path, query, params }
      *
-     * where `matches` is the result of matching the component's own pattern
+     * where `params` is the result of matching the component's own pattern
      * against the current path — equivalent to calling matchPattern() manually,
      * but pre-computed by the router. null if the pattern did not match.
      *
