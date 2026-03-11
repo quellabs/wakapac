@@ -49,7 +49,9 @@
      * Supported syntax:
      *   {name}    — named segment, matches one path segment (no slashes)
      *   {name:*}  — alias for {name}, explicit single-segment form
-     *   {name:**} — named wildcard, matches multiple segments including slashes (must be last)
+     *   {name:**} — named wildcard, matches multiple segments including slashes
+     *   *         — bare single-segment wildcard, matches but does not capture
+     *   **        — bare multi-segment wildcard, matches but does not capture (may appear multiple times)
      *
      * Examples:
      *   '/users/{id}'                  matches '/users/42'          → { id: '42' }
@@ -58,7 +60,6 @@
      *
      * @param {string} pattern - Route pattern, e.g. '/users/{id}/posts/{postId}'
      * @returns {{ regex: RegExp, keys: string[] }}
-     * @throws {Error} If a bare * or ** is used without a name
      */
     function _compilePattern(pattern) {
         // Get pattern from cache if present
@@ -68,25 +69,21 @@
 
         const keys = [];
 
-        // Reject bare * — strip all valid tokens first, then check for any remaining *
-        const stripped = pattern.replace(/\{[a-zA-Z_][a-zA-Z0-9_]*(?::\*\*?)?\}/g, '');
-        if (stripped.indexOf('*') !== -1) {
-            throw new Error(`wakaRoute: bare wildcard is not allowed in pattern "${pattern}". Use {name:*} or {name:**} instead.`);
-        }
-
         // Replace tokens with placeholders BEFORE escaping so the regex escaper
         // never sees { } or * characters from our syntax.
         // Placeholders use characters illegal in URL paths so they can't collide.
-        const SEGMENT  = '\u0001'; // placeholder for ([^/]+)
-        const WILDCARD = '\u0002'; // placeholder for (.*)
+        const SEGMENT           = '\u0001'; // placeholder for ([^/]+)
+        const WILDCARD          = '\u0002'; // placeholder for (.*)
+        const SEGMENT_SKIP      = '\u0003'; // placeholder for (?:[^/]+)
+        const WILDCARD_SKIP     = '\u0004'; // placeholder for (?:.*)
 
         let processed = pattern
-            // Multi-segment wildcard: {name:**}
+            // Named multi-segment wildcard: {name:**}
             .replace(/\{([a-zA-Z_][a-zA-Z0-9_]*):\*\*\}/g, function (_, key) {
                 keys.push(key);
                 return WILDCARD;
             })
-            // Single-segment alias: {name:*}
+            // Named single-segment alias: {name:*}
             .replace(/\{([a-zA-Z_][a-zA-Z0-9_]*):\*\}/g, function (_, key) {
                 keys.push(key);
                 return SEGMENT;
@@ -95,15 +92,21 @@
             .replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, function (_, key) {
                 keys.push(key);
                 return SEGMENT;
-            });
+            })
+            // Bare multi-segment wildcard: ** (non-capturing, may appear multiple times)
+            .replace(/\*\*/g, WILDCARD_SKIP)
+            // Bare single-segment wildcard: * (non-capturing)
+            .replace(/\*/g, SEGMENT_SKIP);
 
         // Now safe to escape — no token characters remain
         processed = processed.replace(/[.+?^${}()|[\]\\*]/g, '\\$&');
 
-        // Substitute placeholders for their regex capture groups
+        // Substitute placeholders for their regex groups
         const regexStr = processed
             .split(SEGMENT).join('([^/]+)')
-            .split(WILDCARD).join('(.*)');
+            .split(WILDCARD).join('(.*)')
+            .split(SEGMENT_SKIP).join('(?:[^/]+)')
+            .split(WILDCARD_SKIP).join('(?:.*)');
 
         // Anchor the pattern — must match the full path
         const regex = new RegExp('^' + regexStr + '$');

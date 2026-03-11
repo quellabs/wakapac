@@ -59,6 +59,10 @@
     <div class="view-title">File Browser</div>
     <div>Path: <span id="file-path-display">—</span></div>
 </div>
+<div id="view-any" data-pac-id="view-any" data-pac-route="/shop/**/item/**" class="pac-view">
+    <div class="view-title">Shop Item (bare **)</div>
+    <div>Matches any /shop/.../item/... path — wildcards not captured.</div>
+</div>
 
 <!-- =========================================================
      Test suite output
@@ -76,6 +80,7 @@
         <button onclick="wakaRoute.navigate('/users/42')">User 42</button>
         <button onclick="wakaRoute.navigate('/users/99/posts/7')">User 99 Post 7</button>
         <button onclick="wakaRoute.navigate('/files/docs/readme.txt')">File wildcard</button>
+        <button onclick="wakaRoute.navigate('/shop/electronics/phones/item/iphone')">Shop item (bare **)</button>
         <button onclick="wakaRoute.navigate('/users/42?tab=profile&debug')">With query</button>
         <button onclick="wakaRoute.navigate('/users/42', { replace: true })">Replace state</button>
         <button onclick="history.back()">← Back</button>
@@ -156,7 +161,7 @@
     // =============================================================================
     // Register all PAC views — msgProc handles visibility + param display
     // =============================================================================
-    const views = ['view-home', 'view-users', 'view-user', 'view-post', 'view-wildcard'];
+    const views = ['view-home', 'view-users', 'view-user', 'view-post', 'view-wildcard', 'view-any'];
 
     const viewAbstractions = {};
 
@@ -263,9 +268,22 @@
         null
     );
 
-    // Bare * throws
-    assert('bare wildcard throws',
-        (function () { try { wakaRoute.matchPattern('/files/*', '/files/x'); return false; } catch (e) { return true; } })()
+    // Bare * — non-capturing, matches one segment
+    assertEqual('bare * matches without capturing',
+        wakaRoute.matchPattern('/files/*/info', '/files/secret/info'),
+        {}
+    );
+
+    // Bare ** — non-capturing, matches multiple segments
+    assertEqual('bare ** matches without capturing',
+        wakaRoute.matchPattern('/a/**/b', '/a/x/y/z/b'),
+        {}
+    );
+
+    // Multiple bare ** in one pattern
+    assertEqual('multiple bare ** in one pattern',
+        wakaRoute.matchPattern('/**/a/**', '/x/y/a/p/q'),
+        {}
     );
 
     // URL-encoded param
