@@ -10031,6 +10031,27 @@
         _invalidateRect(pacId, null);
     };
 
+    /**
+     * Returns the current backing store dimensions of a canvas PAC container.
+     * These reflect the actual pixel dimensions of the canvas element, which may
+     * differ from the CSS layout size when devicePixelRatio scaling is in use.
+     * Returns null if the pacId does not refer to a canvas container.
+     * @param {string} pacId - data-pac-id of the target canvas container
+     * @returns {{width:number, height:number}|null}
+     */
+    wakaPAC.getCanvasSize = function(pacId) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container || !(container instanceof HTMLCanvasElement)) {
+            return null;
+        }
+
+        return {
+            width: container.width,
+            height: container.height
+        };
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
