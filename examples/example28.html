@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaPAC MSG_PAINT Demo</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        canvas { border: 1px solid #ccc; display: block; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<h2>MSG_PAINT Demo</h2>
+<p>A simple clock redrawn every second via <code>invalidateRect</code>.</p>
+
+<canvas id="clock" data-pac-id="clock" width="200" height="200"></canvas>
+<button id="btn-invalidate">Force repaint</button>
+
+<script src="../wakapac.js"></script>
+<script>
+    wakaPAC('#clock', {
+        width: 200,
+        height: 200,
+
+        init() {
+            // Kick off a 1-second timer — each tick invalidates the canvas
+            wakaPAC.setTimer('clock', 1000);
+        },
+
+        msgProc(event) {
+            switch (event.message) {
+
+                case wakaPAC.MSG_SIZE: {
+                    const width  = wakaPAC.LOWORD(event.lParam);
+                    const height = wakaPAC.HIWORD(event.lParam);
+                    wakaPAC.resizeCanvas('clock', width, height);
+                    this.width  = width;
+                    this.height = height;
+                    return;
+                }
+
+                case wakaPAC.MSG_TIMER: {
+                    wakaPAC.invalidateRect('clock');
+                    return;
+                }
+
+                case wakaPAC.MSG_PAINT: {
+                    const hdc = wakaPAC.getDC('clock');
+                    const cx = this.width  / 2;
+                    const cy = this.height / 2;
+                    const r  = cx - 10;
+
+                    // Clear
+                    hdc.clearRect(0, 0, this.width, this.height);
+
+                    // Clock face
+                    hdc.beginPath();
+                    hdc.arc(cx, cy, r, 0, Math.PI * 2);
+                    hdc.strokeStyle = '#333';
+                    hdc.lineWidth = 2;
+                    hdc.stroke();
+
+                    // Hour markers
+                    for (let i = 0; i < 12; i++) {
+                        const angle = (i / 12) * Math.PI * 2 - Math.PI / 2;
+                        hdc.beginPath();
+                        hdc.moveTo(cx + Math.cos(angle) * (r - 8), cy + Math.sin(angle) * (r - 8));
+                        hdc.lineTo(cx + Math.cos(angle) * r,       cy + Math.sin(angle) * r);
+                        hdc.stroke();
+                    }
+
+                    // Current time
+                    const now = new Date();
+                    const sec   = now.getSeconds();
+                    const min   = now.getMinutes();
+                    const hour  = now.getHours() % 12;
+
+                    const secAngle  = (sec  / 60)  * Math.PI * 2 - Math.PI / 2;
+                    const minAngle  = (min  / 60)  * Math.PI * 2 - Math.PI / 2;
+                    const hourAngle = (hour / 12)  * Math.PI * 2 - Math.PI / 2
+                        + (min / 60) * (Math.PI * 2 / 12);
+
+                    // Hour hand
+                    hdc.beginPath();
+                    hdc.moveTo(cx, cy);
+                    hdc.lineTo(cx + Math.cos(hourAngle) * r * 0.5, cy + Math.sin(hourAngle) * r * 0.5);
+                    hdc.lineWidth = 4;
+                    hdc.strokeStyle = '#333';
+                    hdc.stroke();
+
+                    // Minute hand
+                    hdc.beginPath();
+                    hdc.moveTo(cx, cy);
+                    hdc.lineTo(cx + Math.cos(minAngle) * r * 0.75, cy + Math.sin(minAngle) * r * 0.75);
+                    hdc.lineWidth = 2;
+                    hdc.strokeStyle = '#333';
+                    hdc.stroke();
+
+                    // Second hand
+                    hdc.beginPath();
+                    hdc.moveTo(cx, cy);
+                    hdc.lineTo(cx + Math.cos(secAngle) * r * 0.9, cy + Math.sin(secAngle) * r * 0.9);
+                    hdc.lineWidth = 1;
+                    hdc.strokeStyle = 'red';
+                    hdc.stroke();
+
+                    // Center dot
+                    hdc.beginPath();
+                    hdc.arc(cx, cy, 3, 0, Math.PI * 2);
+                    hdc.fillStyle = '#333';
+                    hdc.fill();
+
+                    return;
+                }
+            }
+        }
+    });
+
+    // Force repaint button — demonstrates invalidateRect outside the timer
+    document.getElementById('btn-invalidate').addEventListener('click', function() {
+        wakaPAC.invalidateRect('clock');
+    });
+</script>
+
+</body>
+</html>

@@ -9888,17 +9888,19 @@
      * Equivalent to Win32 GetDC() — retrieves the drawing context for a window.
      * Returns null if the container does not exist or is not a <canvas> element.
      * @param {string} pacId
-     * @param {{alpha?: boolean, colorSpace?: string, colorType?: string, desynchronized?: boolean, willReadFrequently?: boolean}} [contextAttributes]
      * @returns {CanvasRenderingContext2D|null}
      */
-    wakaPAC.getDC = function(pacId, contextAttributes) {
+    wakaPAC.getDC = function(pacId) {
         const container = this.getContainerByPacId(pacId);
 
         if (!container || !(container instanceof HTMLCanvasElement)) {
             return null;
         }
 
-        return container.getContext('2d', contextAttributes);
+        const context = window.PACRegistry.get(pacId);
+        const attributes = context?.config?.dcAttributes;
+
+        return container.getContext('2d', attributes);
     };
 
     /**
@@ -9921,6 +9923,23 @@
     wakaPAC.getInvalidatedRect = function(pacId) {
         const entry = _dirtyCanvases.get(pacId);
         return entry ? { ...entry.rcPaint } : null;
+    };
+
+    /**
+     * Resizes the backing store of a canvas PAC container to the given dimensions.
+     * @param {string} pacId  - data-pac-id of the target canvas container
+     * @param {number} width  - New backing store width in pixels
+     * @param {number} height - New backing store height in pixels
+     */
+    wakaPAC.resizeCanvas = function(pacId, width, height) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container || !(container instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        container.width  = width;
+        container.height = height;
     };
 
     // ========================================================================
