@@ -9240,6 +9240,41 @@
     };
 
     /**
+     * Shows a PAC container by removing its HTML hidden attribute.
+     * Equivalent to Win32 ShowWindow(hWnd, SW_SHOW).
+     * Has no effect if the container is already visible or does not exist.
+     * @param {string} pacId - data-pac-id of the target container
+     */
+    wakaPAC.showContainer = function(pacId) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container) {
+            return;
+        }
+
+        container.removeAttribute('hidden');
+    };
+
+    /**
+     * Hides a PAC container by setting its HTML hidden attribute.
+     * Equivalent to Win32 ShowWindow(hWnd, SW_HIDE).
+     * The component remains registered and continues to receive messages
+     * while hidden — callers are responsible for suppressing irrelevant
+     * messages in their msgProc if needed.
+     * Has no effect if the container is already hidden or does not exist.
+     * @param {string} pacId - data-pac-id of the target container
+     */
+    wakaPAC.hideContainer = function(pacId) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container) {
+            return;
+        }
+
+        container.setAttribute('hidden', '');
+    };
+
+    /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 PostMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
