@@ -6262,9 +6262,9 @@
 
             case 'dpr':
                 this.abstraction.browserDevicePixelRatio = stateData.ratio;
-                wakaPAC.sendMessage(this.abstraction.pacId, MSG_DPR_CHANGE, 0, 0);
+                wakaPAC.sendMessage(this.abstraction.pacId, MSG_DPR_CHANGE, Math.round(stateData.ratio * 100), 0);
                 break;
-
+                
             default:
                 console.warn('Unknown browser state message ' + stateType);
                 break;
