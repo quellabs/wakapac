@@ -337,17 +337,19 @@
                 const path = _normalizePath(location.pathname);
                 const params = self.matchPattern(pattern, path);
 
-                pac.sendMessage(
-                    pacId,
-                    self.MSG_ROUTE_CHANGE,
-                    params ? 1 : 0,
-                    0,
-                    {
-                        path: path,
-                        query: _parseQuery(location.search),
-                        params: params
-                    }
-                );
+                setTimeout(function () {
+                    pac.sendMessage(
+                        pacId,
+                        self.MSG_ROUTE_CHANGE,
+                        params ? 1 : 0,
+                        0,
+                        {
+                            path: path,
+                            query: _parseQuery(location.search),
+                            params: params
+                        }
+                    );
+                }, 0);
             },
 
             /**
