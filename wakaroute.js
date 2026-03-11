@@ -18,8 +18,13 @@
  * ║    wakaPAC.use(wakaRoute);                                                       ║
  * ║    wakaRoute.navigate('/users/42');                                              ║
  * ║                                                                                  ║
- * ║  Components receive MSG_ROUTE_CHANGE with detail: { path, query }                ║
- * ║  Use wakaRoute.matchPattern('/users/{id}', detail.path) to extract params.        ║
+ * ║  Components with data-pac-route receive MSG_ROUTE_CHANGE with:                   ║
+ * ║    { path, query, matches }
+ * ║                                                                                  ║
+ * ║  matches contains the extracted URL params for that component's own pattern,     ║
+ * ║  or null if the pattern did not match the current path.                          ║
+ * ║  Components without data-pac-route receive no message.                           ║
+ * ║  wakaRoute.matchPattern() remains available for ad-hoc matching.                 ║
  * ║                                                                                  ║
  * ║  Declarative registration via HTML attribute:                                    ║
  * ║    <div data-pac-id="user-view" data-pac-route="/users/{id}">                    ║
@@ -238,8 +243,17 @@
     }
 
     /**
-     * Reads the current location, updates internal route state, and broadcasts
-     * MSG_ROUTE_CHANGE to all registered WakaPAC components.
+     * Reads the current location, updates internal route state, and sends
+     * MSG_ROUTE_CHANGE to every component that declared a data-pac-route attribute.
+     * Components without data-pac-route receive no message.
+     *
+     * Each component receives a detail object of the shape:
+     *   { path, query, matches }
+     *
+     * where `matches` is the result of matching the component's own pattern
+     * against the current path — equivalent to calling matchPattern() manually,
+     * but pre-computed by the router. null if the pattern did not match.
+     *
      * @param {WakaRoute} instance
      * @private
      */
@@ -250,14 +264,19 @@
             query: _parseQuery(location.search)
         };
 
-        // Broadcast to all registered components — each receives a shallow copy
-        // of the route state so mutations in one msgProc don't affect others
-        instance._pac.broadcastMessage(
-            instance.MSG_ROUTE_CHANGE,
-            0,
-            0,
-            Object.assign({}, instance._currentRoute)
-        );
+        // Send a targeted message to each component that declared a pattern,
+        // with matches pre-computed from that component's own data-pac-route
+        instance._routeTable.forEach(function (pattern, pacId) {
+            const matches = instance.matchPattern(pattern, instance._currentRoute.path);
+
+            instance._pac.sendMessage(
+                pacId,
+                instance.MSG_ROUTE_CHANGE,
+                0,
+                0,
+                Object.assign({}, instance._currentRoute, { matches: matches })
+            );
+        });
     }
 
     // =========================================================================
