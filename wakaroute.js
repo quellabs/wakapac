@@ -47,11 +47,18 @@
      * do not re-run the compilation.
      *
      * Supported syntax:
-     *   :param   — named segment, matches one path segment (no slashes)
-     *   *        — wildcard, matches everything including slashes (must be last)
+     *   {name}    — named segment, matches one path segment (no slashes)
+     *   {name:*}  — alias for {name}, explicit single-segment form
+     *   {name:**} — named wildcard, matches multiple segments including slashes (must be last)
      *
-     * @param {string} pattern - Route pattern, e.g. '/users/:id/posts/:postId'
+     * Examples:
+     *   '/users/{id}'                  matches '/users/42'          → { id: '42' }
+     *   '/users/{id}/posts/{postId}'   matches '/users/1/posts/7'   → { id: '1', postId: '7' }
+     *   '/files/{rest:**}'             matches '/files/a/b/c'       → { rest: 'a/b/c' }
+     *
+     * @param {string} pattern - Route pattern, e.g. '/users/{id}/posts/{postId}'
      * @returns {{ regex: RegExp, keys: string[] }}
+     * @throws {Error} If a bare * or ** is used without a name
      */
     function _compilePattern(pattern) {
         // Get pattern from cache if present
@@ -59,16 +66,43 @@
             return _patternCache.get(pattern);
         }
 
-        // Escape special regex characters except : and *
-        // Then replace :param with a capture group and * with a greedy match
         const keys = [];
-        const regexStr = pattern
-            .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-            .replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, function (_, key) {
+
+        // Reject bare * — strip all valid tokens first, then check for any remaining *
+        const stripped = pattern.replace(/\{[a-zA-Z_][a-zA-Z0-9_]*(?::\*\*?)?\}/g, '');
+        if (stripped.indexOf('*') !== -1) {
+            throw new Error(`wakaRoute: bare wildcard is not allowed in pattern "${pattern}". Use {name:*} or {name:**} instead.`);
+        }
+
+        // Replace tokens with placeholders BEFORE escaping so the regex escaper
+        // never sees { } or * characters from our syntax
+        const SEGMENT  = '\x01'; // placeholder for ([^/]+)
+        const WILDCARD = '\x02'; // placeholder for (.*)
+
+        let processed = pattern
+            // Multi-segment wildcard: {name:**}
+            .replace(/\{([a-zA-Z_][a-zA-Z0-9_]*):\*\*\}/g, function (_, key) {
                 keys.push(key);
-                return '([^/]+)';
+                return WILDCARD;
             })
-            .replace(/\*/g, '(.*)');
+            // Single-segment alias: {name:*}
+            .replace(/\{([a-zA-Z_][a-zA-Z0-9_]*):\*\}/g, function (_, key) {
+                keys.push(key);
+                return SEGMENT;
+            })
+            // Named segment: {name}
+            .replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, function (_, key) {
+                keys.push(key);
+                return SEGMENT;
+            });
+
+        // Now safe to escape — no token characters remain
+        processed = processed.replace(/[.+?^${}()|[\]\\*]/g, '\\$&');
+
+        // Substitute placeholders for their regex capture groups
+        const regexStr = processed
+            .replace(/\x01/g, '([^/]+)')
+            .replace(/\x02/g, '(.*)');
 
         // Anchor the pattern — must match the full path
         const regex = new RegExp('^' + regexStr + '$');
@@ -312,13 +346,16 @@
      * MSG_ROUTE_CHANGE, to extract named segments from the incoming path.
      *
      * Example:
-     *   wakaRoute.matchPattern('/users/:id', '/users/42')
+     *   wakaRoute.matchPattern('/users/{id}', '/users/42')
      *   // → { id: '42' }
      *
-     *   wakaRoute.matchPattern('/users/:id', '/posts/1')
+     *   wakaRoute.matchPattern('/users/{id}', '/posts/1')
      *   // → null
      *
-     * @param {string} pattern - Route pattern, e.g. '/users/:id'
+     *   wakaRoute.matchPattern('/files/{rest:**}', '/files/docs/readme.txt')
+     *   // → { rest: 'docs/readme.txt' }
+     *
+     * @param {string} pattern - Route pattern, e.g. '/users/{id}'
      * @param {string} path - Path to test, e.g. '/users/42'
      * @returns {Object|null} Extracted params, or null if no match
      */
@@ -345,6 +382,7 @@
      * Key: pacId, Value: registered pattern string.
      * Useful for debugging — lists all components that declared a
      * data-pac-route attribute and are currently registered.
+     *
      * @returns {Object}
      */
     WakaRoute.prototype.getRouteTable = function () {

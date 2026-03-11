@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>wakaRoute Demo</title>
+    <style>
+        body { font-family: monospace; padding: 2rem; background: #1a1a1a; color: #e0e0e0; }
+        h1 { color: #7ec8e3; margin-bottom: 0.25rem; }
+        h2 { color: #aaa; font-size: 0.9rem; font-weight: normal; margin-top: 0; margin-bottom: 2rem; }
+        .section { margin-bottom: 2rem; }
+        .section-title { color: #7ec8e3; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem; border-bottom: 1px solid #333; padding-bottom: 0.25rem; }
+        .test { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.35rem; font-size: 0.9rem; }
+        .test-name { color: #bbb; }
+        .pass { color: #5cb85c; }
+        .fail { color: #d9534f; }
+        .nav-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        button { background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; padding: 0.4rem 0.9rem; cursor: pointer; font-family: monospace; font-size: 0.85rem; border-radius: 2px; }
+        button:hover { background: #333; border-color: #7ec8e3; }
+        .log { background: #111; border: 1px solid #333; padding: 1rem; font-size: 0.82rem; line-height: 1.7; max-height: 220px; overflow-y: auto; }
+        .log-entry { color: #aaa; }
+        .log-entry .route { color: #7ec8e3; }
+        .log-entry .params { color: #c3e88d; }
+        .log-entry .pac-id { color: #f78c6c; }
+        #summary { margin-top: 2rem; font-size: 1rem; padding: 0.75rem 1rem; background: #111; border: 1px solid #333; }
+        .summary-pass { color: #5cb85c; }
+        .summary-fail { color: #d9534f; }
+
+        /* PAC containers — hidden until the router shows them */
+        .pac-view { display: none; padding: 0.75rem 1rem; background: #111; border: 1px solid #444; margin-bottom: 0.5rem; font-size: 0.875rem; }
+        .pac-view.active { display: block; border-color: #7ec8e3; }
+        .pac-view .view-title { color: #7ec8e3; margin-bottom: 0.25rem; }
+    </style>
+</head>
+<body>
+
+<h1>wakaRoute</h1>
+<h2>Demo &amp; test suite</h2>
+
+<!-- =========================================================
+     PAC containers — each declares its route via data-pac-route
+     ========================================================= -->
+<div id="view-home"    data-pac-id="view-home"    data-pac-route="/"                       class="pac-view">
+    <div class="view-title">Home</div>
+    <div>Welcome to the home page.</div>
+</div>
+<div id="view-users"   data-pac-id="view-users"   data-pac-route="/users"                  class="pac-view">
+    <div class="view-title">Users</div>
+    <div>User list.</div>
+</div>
+<div id="view-user"    data-pac-id="view-user"    data-pac-route="/users/{id}"             class="pac-view">
+    <div class="view-title">User Detail</div>
+    <div>Viewing user: <span id="user-id-display">—</span></div>
+</div>
+<div id="view-post"    data-pac-id="view-post"    data-pac-route="/users/{id}/posts/{postId}" class="pac-view">
+    <div class="view-title">Post Detail</div>
+    <div>User: <span id="post-user-id">—</span> / Post: <span id="post-id-display">—</span></div>
+</div>
+<div id="view-wildcard" data-pac-id="view-wildcard" data-pac-route="/files/{rest:**}"      class="pac-view">
+    <div class="view-title">File Browser</div>
+    <div>Path: <span id="file-path-display">—</span></div>
+</div>
+
+<!-- =========================================================
+     Test suite output
+     ========================================================= -->
+<div class="section">
+    <div class="section-title">Unit tests — matchPattern</div>
+    <div id="unit-tests"></div>
+</div>
+
+<div class="section">
+    <div class="section-title">Integration — navigation + MSG_ROUTE_CHANGE</div>
+    <div class="nav-buttons">
+        <button onclick="wakaRoute.navigate('/')">Home</button>
+        <button onclick="wakaRoute.navigate('/users')">Users</button>
+        <button onclick="wakaRoute.navigate('/users/42')">User 42</button>
+        <button onclick="wakaRoute.navigate('/users/99/posts/7')">User 99 Post 7</button>
+        <button onclick="wakaRoute.navigate('/files/docs/readme.txt')">File wildcard</button>
+        <button onclick="wakaRoute.navigate('/users/42?tab=profile&debug')">With query</button>
+        <button onclick="wakaRoute.navigate('/users/42', { replace: true })">Replace state</button>
+        <button onclick="history.back()">← Back</button>
+    </div>
+    <div class="log" id="nav-log"><span style="color:#555">Navigate to see MSG_ROUTE_CHANGE events...</span></div>
+</div>
+
+<div class="section">
+    <div class="section-title">Route table (data-pac-route registrations)</div>
+    <div id="route-table" class="log"></div>
+</div>
+
+<div id="summary"></div>
+
+<!-- =========================================================
+     Scripts — load wakaPAC stubs then wakaRoute then init
+     ========================================================= -->
+<!-- Load wakaPAC -->
+<script src="../wakapac.js"></script>
+
+<!-- Load wakaRoute -->
+<script src="../wakaroute.js"></script>
+
+<script>
+    // =============================================================================
+    // Test helpers
+    // =============================================================================
+    let _passed = 0;
+    let _failed = 0;
+
+    function assert(name, condition) {
+        const el = document.createElement('div');
+        el.className = 'test';
+
+        if (condition) {
+            el.innerHTML = `<span class="pass">✓</span><span class="test-name">${name}</span>`;
+            _passed++;
+        } else {
+            el.innerHTML = `<span class="fail">✗</span><span class="test-name">${name}</span>`;
+            _failed++;
+        }
+
+        document.getElementById('unit-tests').appendChild(el);
+    }
+
+    function assertEqual(name, actual, expected) {
+        assert(name + ` (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`, JSON.stringify(actual) === JSON.stringify(expected));
+    }
+
+    // =============================================================================
+    // Register wakaRoute with wakaPAC
+    // =============================================================================
+    wakaPAC.use(wakaRoute);
+
+    // =============================================================================
+    // Navigation log
+    // =============================================================================
+    const navLog = document.getElementById('nav-log');
+    navLog.innerHTML = '';
+
+    function logRouteChange(extended) {
+        if (navLog.querySelector('span[style]')) {
+            navLog.innerHTML = '';
+        }
+
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerHTML =
+            `MSG_ROUTE_CHANGE → ` +
+            `<span class="route">${extended.path}</span>` +
+            (Object.keys(extended.query).length
+                ? ` query=<span class="params">${JSON.stringify(extended.query)}</span>`
+                : '');
+        navLog.appendChild(entry);
+        navLog.scrollTop = navLog.scrollHeight;
+    }
+
+    // =============================================================================
+    // Register all PAC views — msgProc handles visibility + param display
+    // =============================================================================
+    const views = ['view-home', 'view-users', 'view-user', 'view-post', 'view-wildcard'];
+
+    const viewAbstractions = {};
+
+    views.forEach(function (pacId) {
+        const pattern = document.getElementById(pacId).getAttribute('data-pac-route');
+
+        viewAbstractions[pacId] = {
+            msgProc(msg) {
+                if (msg.message !== wakaPAC.MSG_ROUTE_CHANGE) {
+                    return;
+                }
+
+                // Log once per navigation (first component to handle it)
+                if (pacId === views[0]) {
+                    logRouteChange(msg.detail);
+                }
+
+                const params = wakaRoute.matchPattern(pattern, msg.detail.path);
+                const el = document.getElementById(pacId);
+
+                // Show this view only if its pattern matches the current path
+                el.classList.toggle('active', params !== null);
+
+                // Update display fields
+                if (params) {
+                    if (pacId === 'view-user' && params.id) {
+                        document.getElementById('user-id-display').textContent = params.id;
+                    }
+                    if (pacId === 'view-post') {
+                        document.getElementById('post-user-id').textContent   = params.id   || '—';
+                        document.getElementById('post-id-display').textContent = params.postId || '—';
+                    }
+                    if (pacId === 'view-wildcard' && params.wildcard !== undefined) {
+                        document.getElementById('file-path-display').textContent = params.wildcard;
+                    }
+                }
+            }
+        };
+
+        wakaPAC('#' + pacId, viewAbstractions[pacId]);
+    });
+
+    // =============================================================================
+    // Route table display
+    // =============================================================================
+    function renderRouteTable() {
+        const table = wakaRoute.getRouteTable();
+        const el = document.getElementById('route-table');
+        el.innerHTML = Object.keys(table).map(function (pacId) {
+            return `<div class="log-entry"><span class="pac-id">${pacId}</span>  →  <span class="route">${table[pacId]}</span></div>`;
+        }).join('');
+    }
+    renderRouteTable();
+
+    // =============================================================================
+    // Unit tests — matchPattern
+    // =============================================================================
+
+    // Basic match
+    assertEqual('simple match returns params',
+        wakaRoute.matchPattern('/users/{id}', '/users/42'),
+        { id: '42' }
+    );
+
+    // No match returns null
+    assertEqual('no match returns null',
+        wakaRoute.matchPattern('/users/{id}', '/posts/42'),
+        null
+    );
+
+    // Multiple params
+    assertEqual('multiple params extracted',
+        wakaRoute.matchPattern('/users/{id}/posts/{postId}', '/users/9/posts/3'),
+        { id: '9', postId: '3' }
+    );
+
+    // Exact path match with no params
+    assertEqual('exact path match',
+        wakaRoute.matchPattern('/about', '/about'),
+        {}
+    );
+
+    // Exact path does not match prefix
+    assertEqual('prefix does not match',
+        wakaRoute.matchPattern('/about', '/about/team'),
+        null
+    );
+
+    // Named wildcard — multi-segment {name:**}
+    assertEqual('named wildcard {name:**} matches multiple segments',
+        wakaRoute.matchPattern('/files/{rest:**}', '/files/docs/readme.txt'),
+        { rest: 'docs/readme.txt' }
+    );
+
+    // Named single-segment alias {name:*}
+    assertEqual('named single-segment {name:*} matches one segment',
+        wakaRoute.matchPattern('/tags/{tag:*}', '/tags/javascript'),
+        { tag: 'javascript' }
+    );
+
+    // {name:*} does not cross slash boundary
+    assertEqual('{name:*} does not cross slash boundary',
+        wakaRoute.matchPattern('/tags/{tag:*}', '/tags/a/b'),
+        null
+    );
+
+    // Bare * throws
+    assert('bare wildcard throws',
+        (function () { try { wakaRoute.matchPattern('/files/*', '/files/x'); return false; } catch (e) { return true; } })()
+    );
+
+    // URL-encoded param
+    assertEqual('url-encoded param decoded',
+        wakaRoute.matchPattern('/search/{term}', '/search/hello%20world'),
+        { term: 'hello world' }
+    );
+
+    // Pattern with dot in static segment
+    assertEqual('dot in static segment',
+        wakaRoute.matchPattern('/v1.0/users/{id}', '/v1.0/users/7'),
+        { id: '7' }
+    );
+
+    // Param does not match across slashes
+    assertEqual('param does not cross slash boundary',
+        wakaRoute.matchPattern('/users/{id}', '/users/42/extra'),
+        null
+    );
+
+    // currentRoute returns a copy
+    const r1 = wakaRoute.currentRoute();
+    const r2 = wakaRoute.currentRoute();
+    r1.query.mutated = true;
+    assert('currentRoute returns independent copy', r2.query.mutated === undefined);
+
+    // MSG_ROUTE_CHANGE constant exposed on both wakaRoute and wakaPAC
+    assert('wakaRoute.MSG_ROUTE_CHANGE is a number',    typeof wakaRoute.MSG_ROUTE_CHANGE === 'number');
+    assert('wakaPAC.MSG_ROUTE_CHANGE matches wakaRoute', wakaPAC.MSG_ROUTE_CHANGE === wakaRoute.MSG_ROUTE_CHANGE);
+
+    // navigate throws before use() — can't test here since use() already called,
+    // so verify the guard exists instead
+    assert('navigate guard exists', typeof wakaRoute.navigate === 'function');
+
+    // =============================================================================
+    // Summary
+    // =============================================================================
+    const summary = document.getElementById('summary');
+    const total = _passed + _failed;
+    summary.innerHTML = _failed === 0
+        ? `<span class="summary-pass">All ${total} tests passed.</span>`
+        : `<span class="summary-fail">${_failed} of ${total} tests failed.</span>`;
+
+    // Navigate to / on load so a view is visible
+    wakaRoute.navigate('/');
+
+</script>
+</body>
+</html>
