@@ -34,8 +34,6 @@
                     const width  = wakaPAC.LOWORD(event.lParam);
                     const height = wakaPAC.HIWORD(event.lParam);
                     wakaPAC.resizeCanvas('clock', width, height);
-                    this.width  = width;
-                    this.height = height;
                     return;
                 }
 
@@ -46,12 +44,12 @@
 
                 case wakaPAC.MSG_PAINT: {
                     const hdc = wakaPAC.getDC('clock');
-                    const cx = this.width  / 2;
-                    const cy = this.height / 2;
+                    const cx = this.containerWidth  / 2;
+                    const cy = this.containerHeight / 2;
                     const r  = cx - 10;
 
                     // Clear
-                    hdc.clearRect(0, 0, this.width, this.height);
+                    hdc.clearRect(0, 0, this.containerWidth, this.containerHeight);
 
                     // Clock face
                     hdc.beginPath();
