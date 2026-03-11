@@ -9758,26 +9758,12 @@
             // Mark as actively painting so getDC() knows to apply the clip
             entry.painting = true;
 
-            const event = DomUpdateTracker.wrapDomEventAsMessage(
+            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
                 MSG_PAINT,
                 null,   // No originating DOM event
                 0,      // wParam unused
                 0       // lParam unused
-            );
-
-            DomUpdateTracker.dispatchToContainer(container, event);
-
-            // Debug assertion: if _dcAcquired is still true here, the handler
-            // called getDC() without a matching releaseDC() — equivalent to a
-            // missing EndPaint() in Win32.  This leaks the canvas save stack and
-            // will cause clipping corruption after ~1024 frames.
-            if (entry._dcAcquired) {
-                console.error(
-                    `WakaPAC: MSG_PAINT handler for '${container.dataset.pacId}' ` +
-                    `called getDC() without a matching releaseDC(). ` +
-                    `Canvas save stack is leaking.`
-                );
-            }
+            ));
 
             // Clear the painting flag — releaseDC() uses this to decide whether
             // to restore the context state
@@ -9953,16 +9939,13 @@
         // up a clip region over the update rect.  Callers must balance this with
         // a matching releaseDC() call so the saved state is properly unwound.
         const entry = _dirtyCanvases.get(pacId);
+
         if (entry?.painting && entry.rcPaint) {
             const r = entry.rcPaint;
             ctx.save();
             ctx.beginPath();
             ctx.rect(r.x, r.y, r.width, r.height);
             ctx.clip();
-
-            // Track that a save was pushed so _flushPaintQueue can assert it was
-            // released — equivalent to detecting a missing EndPaint() in Win32
-            entry._dcAcquired = true;
         }
 
         return ctx;
@@ -9994,7 +9977,6 @@
         // Only restore if getDC() pushed a save — it does so only during painting
         if (entry?.painting && entry.rcPaint) {
             ctx.restore();
-            entry._dcAcquired = false;
         }
     };
 
