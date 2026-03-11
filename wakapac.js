@@ -1037,16 +1037,16 @@
         /**
          * Computes the union of two axis-aligned rectangles.
          * The union is the smallest rectangle that contains both input rectangles.
-         * @param {{x:number, y:number, w:number, h:number}} a
-         * @param {{x:number, y:number, w:number, h:number}} b
-         * @returns {{x:number, y:number, w:number, h:number}}
+         * @param {{x:number, y:number, width:number, height:number}} a
+         * @param {{x:number, y:number, width:number, height:number}} b
+         * @returns {{x:number, y:number, width:number, height:number}}
          */
         unionRect(a, b) {
             const x = Math.min(a.x, b.x);
             const y = Math.min(a.y, b.y);
-            const right = Math.max(a.x + a.w, b.x + b.w);
-            const bottom = Math.max(a.y + a.h, b.y + b.h);
-            return {x, y, w: right - x, h: bottom - y};
+            const right  = Math.max(a.x + a.width,  b.x + b.width);
+            const bottom = Math.max(a.y + a.height, b.y + b.height);
+            return { x, y, width: right - x, height: bottom - y };
         }
     }
 
@@ -9731,14 +9731,14 @@
      * their MSG_PAINT to be dispatched on the next animation frame.
      *
      * Key:   pacId (string)
-     * Value: { container: HTMLCanvasElement, rcPaint: {x, y, w, h} }
+     * Value: { container: HTMLCanvasElement, rcPaint: {x, y, width, height} }
      *
      * A container is present in this map if and only if a rAF flush is already
      * scheduled for it. Multiple invalidateRect() calls before the next frame
      * collapse into a single entry via rect union — identical to how Win32
      * coalesces WM_PAINT messages in the message queue.
      *
-     * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, w:number, h:number}}>}
+     * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, width:number, height:number}}>}
      */
     const _dirtyCanvases = new Map();
 
@@ -9747,20 +9747,27 @@
      * the dirty set. Called once per animation frame by requestAnimationFrame.
      */
     function _flushPaintQueue() {
-        _dirtyCanvases.forEach(function({ container }) {
+        _dirtyCanvases.forEach(function(entry) {
+            const { container } = entry;
+
             // Skip containers that were removed from the DOM before the frame fired
             if (!container.isConnected) {
                 return;
             }
 
-            const event = DomUpdateTracker.wrapDomEventAsMessage(
+            // Mark as actively painting so getDC() knows to apply the clip
+            entry.painting = true;
+
+            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
                 MSG_PAINT,
                 null,   // No originating DOM event
                 0,      // wParam unused
                 0       // lParam unused
-            );
+            ));
 
-            DomUpdateTracker.dispatchToContainer(container, event);
+            // Clear the painting flag — releaseDC() uses this to decide whether
+            // to restore the context state
+            entry.painting = false;
         });
 
         _dirtyCanvases.clear();
@@ -9775,7 +9782,7 @@
      * Win32 InvalidateRect() accumulating into the update region.
      *
      * @param {string} pacId  - data-pac-id of the target canvas container
-     * @param {{x:number, y:number, w:number, h:number}|null} [rect]
+     * @param {{x:number, y:number, width:number, height:number}|null} [rect]
      *   Rectangle to invalidate in canvas-local coordinates.
      *   Pass null (or omit) to invalidate the entire canvas.
      * @returns {void}
@@ -9798,8 +9805,8 @@
         const fullRect = {
             x: 0,
             y: 0,
-            w: container.width,
-            h: container.height
+            width:  container.width,
+            height: container.height
         };
 
         // Fetch the rect or default to the entire canvas right if omitted
@@ -9925,14 +9932,58 @@
 
         const context = window.PACRegistry.get(pacId);
         const attributes = context?.config?.dcAttributes;
+        const ctx = container.getContext('2d', attributes);
 
-        return container.getContext('2d', attributes);
+        // If we're inside a MSG_PAINT dispatch, automatically restrict drawing
+        // to the invalidated rectangle — equivalent to Win32 BeginPaint() setting
+        // up a clip region over the update rect.  Callers must balance this with
+        // a matching releaseDC() call so the saved state is properly unwound.
+        const entry = _dirtyCanvases.get(pacId);
+
+        if (entry?.painting && entry.rcPaint) {
+            const r = entry.rcPaint;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(r.x, r.y, r.width, r.height);
+            ctx.clip();
+        }
+
+        return ctx;
+    };
+
+    /**
+     * Releases a device context previously obtained with getDC().
+     * Must be called once for every getDC() call made inside a MSG_PAINT
+     * handler; outside of paint cycles this is a no-op and safe to call
+     * unconditionally.
+     * @param {CanvasRenderingContext2D} ctx - the context returned by getDC()
+     */
+    wakaPAC.releaseDC = function (ctx) {
+        // Bail if no ctx passed
+        if (!ctx) {
+            return;
+        }
+
+        // Recover the pacId from the canvas element the context belongs to
+        const pacId = ctx.canvas?.dataset?.pacId;
+
+        if (!pacId) {
+            return;
+        }
+
+        // Fetch entry from the store
+        const entry = _dirtyCanvases.get(pacId);
+
+        // Only restore if getDC() pushed a save — it does so only during painting
+        if (entry?.painting && entry.rcPaint) {
+            ctx.restore();
+        }
     };
 
     /**
      * Marks a canvas PAC container as needing repaint.
      * @param {string} pacId - data-pac-id of the target canvas container
-     * @param {{x:number, y:number, w:number, h:number}|null} [rect]
+     * @param {{x:number, y:number, width:number, height:number}|null} [rect]
      *   Rectangle to invalidate in canvas-local pixel coordinates.
      *   Omit or pass null to invalidate the entire canvas surface.
      */
@@ -9944,7 +9995,7 @@
      * Returns the bounding rectangle of the invalidated region for a canvas
      * PAC container, or null if no repaint is currently pending.
      * @param {string} pacId - data-pac-id of the target canvas container
-     * @returns {{x:number, y:number, w:number, h:number}|null}
+     * @returns {{x:number, y:number, width:number, height:number}|null}
      */
     wakaPAC.getInvalidatedRect = function(pacId) {
         const entry = _dirtyCanvases.get(pacId);
