@@ -324,12 +324,14 @@
              * @param {Object} config - The component's configuration
              */
             onComponentCreated(abstraction, pacId, config) {
+                // Fetch container
                 const container = pac.getContainerByPacId(pacId);
 
                 if (!container) {
                     return;
                 }
 
+                // Fetch pattern
                 const pattern = container.getAttribute('data-pac-route');
 
                 if (!pattern) {
@@ -341,6 +343,14 @@
 
                 // Store in route table for introspection via getRouteTable()
                 self._routeTable.set(pacId, pattern);
+
+                // Hide immediately; the router will show it if the current route matches.
+                // This prevents a flash of all route components on initial load.
+                if (self.matchPattern(pattern, self._currentRoute.path)) {
+                    pac.showContainer(pacId);
+                } else {
+                    pac.hideContainer(pacId);
+                }
             },
 
             /**
