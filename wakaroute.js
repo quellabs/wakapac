@@ -60,11 +60,32 @@
      *
      * @param {string} pattern - Route pattern, e.g. '/users/{id}/posts/{postId}'
      * @returns {{ regex: RegExp, keys: string[] }}
+     * @throws {Error} If the pattern contains malformed tokens or unmatched braces
      */
     function _compilePattern(pattern) {
         // Get pattern from cache if present
         if (_patternCache.has(pattern)) {
             return _patternCache.get(pattern);
+        }
+
+        // Validate: every '{' must form a well-structured token.
+        // Valid forms: {name}  {name:*}  {name:**}
+        // Anything else — unclosed brace, empty name, bad identifier,
+        // invalid quantifier — is caught here before compilation proceeds.
+        const TOKEN = /\{([^}]*)\}/g;
+        const VALID_TOKEN = /^[a-zA-Z_][a-zA-Z0-9_]*(?::\*\*?)?$/;
+        let tokenMatch;
+
+        while ((tokenMatch = TOKEN.exec(pattern)) !== null) {
+            if (!VALID_TOKEN.test(tokenMatch[1])) {
+                throw new Error(
+                    'wakaRoute: invalid token "' + tokenMatch[0] + '" in pattern "' + pattern + '"'
+                );
+            }
+        }
+
+        if ((pattern.match(/\{/g) || []).length !== (pattern.match(/\}/g) || []).length) {
+            throw new Error('wakaRoute: unmatched "{" in pattern "' + pattern + '"');
         }
 
         const keys = [];
@@ -99,7 +120,7 @@
             .replace(/\*/g, SEGMENT_SKIP);
 
         // Now safe to escape — no token characters remain
-        processed = processed.replace(/[.+?^${}()|[\]\\*]/g, '\\$&');
+        processed = processed.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
 
         // Substitute placeholders for their regex groups
         const regexStr = processed
@@ -205,6 +226,18 @@
     // =========================================================================
 
     /**
+     * Strips trailing slashes from a path, preserving bare '/'.
+     * Ensures '/users/42' and '/users/42/' are treated identically by
+     * both the router state and matchPattern().
+     * @param {string} path
+     * @returns {string}
+     * @private
+     */
+    function _normalizePath(path) {
+        return path.replace(/\/+$/, '') || '/';
+    }
+
+    /**
      * Reads the current location, updates internal route state, and broadcasts
      * MSG_ROUTE_CHANGE to all registered WakaPAC components.
      * @param {WakaRoute} instance
@@ -213,7 +246,7 @@
     function _broadcastCurrentRoute(instance) {
         // Snapshot the current location into the route state
         instance._currentRoute = {
-            path: location.pathname,
+            path: _normalizePath(location.pathname),
             query: _parseQuery(location.search)
         };
 
@@ -248,7 +281,7 @@
 
         // Seed the current route from the actual URL at registration time
         this._currentRoute = {
-            path: location.pathname,
+            path: _normalizePath(location.pathname),
             query: _parseQuery(location.search)
         };
 
@@ -309,7 +342,7 @@
     /**
      * Navigates to the given path by updating the browser history and
      * broadcasting MSG_ROUTE_CHANGE to all registered components.
-     * @param {string} path - Target path, e.g. '/users/42'
+     * @param {string} path - Target path, e.g. '/users/42'. Trailing slashes are normalized.
      * @param {Object} [options={}]
      * @param {boolean} [options.replace=false] - Use replaceState instead of pushState,
      *   replacing the current history entry rather than adding a new one
@@ -360,12 +393,12 @@
      *   // → { rest: 'docs/readme.txt' }
      *
      * @param {string} pattern - Route pattern, e.g. '/users/{id}'
-     * @param {string} path - Path to test, e.g. '/users/42'
+     * @param {string} path - Path to test, e.g. '/users/42'. Trailing slashes are normalized.
      * @returns {Object|null} Extracted params, or null if no match
      */
     WakaRoute.prototype.matchPattern = function (pattern, path) {
         const { regex, keys } = _compilePattern(pattern);
-        const match = path.match(regex);
+        const match = _normalizePath(path).match(regex);
 
         if (!match) {
             return null;
