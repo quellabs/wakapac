@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WakaStore — poll() tests</title>
+    <title>WakaStore — test suite</title>
     <style>
         body { font-family: monospace; padding: 2rem; background: #1e1e1e; color: #d4d4d4; }
         h1   { color: #9cdcfe; margin-bottom: 0.25rem; font-size: 1.1rem; }
@@ -29,7 +29,7 @@
 </head>
 <body>
 
-<h1>WakaStore — poll() test suite</h1>
+<h1>WakaStore — test suite</h1>
 <p class="subtitle">Open DevTools console for detailed failure output</p>
 <div id="results"></div>
 <div id="summary"></div>
@@ -549,6 +549,357 @@
 
                 assertEqual(callsWhileHidden, 0, 'no calls while hidden');
                 assert(spy.calls >= 1, 'calls resumed after visible (' + spy.calls + ' calls)');
+            });
+
+            // ── 7. createStore validation ─────────────────────────────────────────
+            suite('createStore validation');
+
+            await test('throws on null', async function () {
+                let threw = false;
+                try { wakaStore.createStore(null); } catch (e) { threw = true; }
+                assert(threw, 'should throw on null');
+            });
+
+            await test('throws on array', async function () {
+                let threw = false;
+                try { wakaStore.createStore([]); } catch (e) { threw = true; }
+                assert(threw, 'should throw on array');
+            });
+
+            await test('throws on Date', async function () {
+                let threw = false;
+                try { wakaStore.createStore(new Date()); } catch (e) { threw = true; }
+                assert(threw, 'should throw on Date');
+            });
+
+            await test('throws on Map', async function () {
+                let threw = false;
+                try { wakaStore.createStore(new Map()); } catch (e) { threw = true; }
+                assert(threw, 'should throw on Map');
+            });
+
+            await test('accepts plain object', async function () {
+                const store = wakaStore.createStore({ x: 1 });
+                assert(store !== null, 'store created');
+            });
+
+            // ── 8. Local persistence — save / load / clearPersist ─────────────────
+            suite('Local persistence — save / load / clearPersist');
+
+            /**
+             * Installs an in-memory localStorage stub and returns a restore function.
+             * The real localStorage is not touched during tests.
+             */
+            function stubLocalStorage() {
+                const storage = {};
+                const original = window.localStorage;
+
+                const stub = {
+                    getItem:    function (k)    { return Object.prototype.hasOwnProperty.call(storage, k) ? storage[k] : null; },
+                    setItem:    function (k, v) { storage[k] = String(v); },
+                    removeItem: function (k)    { delete storage[k]; },
+                    _raw: storage
+                };
+
+                Object.defineProperty(window, 'localStorage', { configurable: true, get: () => stub });
+
+                return {
+                    raw: storage,
+                    restore: function () {
+                        Object.defineProperty(window, 'localStorage', { configurable: true, get: () => original });
+                    }
+                };
+            }
+
+            await test('save() writes current state to localStorage', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ name: 'Floris' }, { persist: 'test-save' });
+                store.name = 'Jan';
+                store.save();
+                const stored = JSON.parse(ls.raw['test-save']);
+                ls.restore();
+                assertEqual(stored.name, 'Jan', 'persisted name');
+            });
+
+            await test('save() returns true on success', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ x: 1 }, { persist: 'test-save-ret' });
+                const result = store.save();
+                ls.restore();
+                assert(result === true, 'save() returned true');
+            });
+
+            await test('save() returns false when no persist key set', async function () {
+                const store = wakaStore.createStore({ x: 1 });
+                const result = store.save();
+                assert(result === false, 'save() returned false');
+            });
+
+            await test('load() rehydrates stored values into the store', async function () {
+                const ls = stubLocalStorage();
+                ls.raw['test-load'] = JSON.stringify({ theme: 'dark' });
+                const store = wakaStore.createStore({ theme: 'light' }, { persist: 'test-load' });
+                // createStore calls load() automatically — check state is restored
+                ls.restore();
+                assertEqual(store.theme, 'dark', 'theme rehydrated');
+            });
+
+            await test('load() keeps initialState defaults for keys absent from storage', async function () {
+                const ls = stubLocalStorage();
+                ls.raw['test-load-defaults'] = JSON.stringify({ existing: 'stored' });
+                const store = wakaStore.createStore({ existing: 'default', newKey: 'default' }, { persist: 'test-load-defaults' });
+                ls.restore();
+                assertEqual(store.existing, 'stored',  'existing key overwritten');
+                assertEqual(store.newKey,   'default', 'new key keeps default');
+            });
+
+            await test('load() returns false when nothing is stored', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ x: 0 }, { persist: 'test-load-empty' });
+                // storage is empty — load() already ran in createStore, ran again explicitly
+                const result = store.load();
+                ls.restore();
+                assert(result === false, 'load() returned false for missing key');
+            });
+
+            await test('load() returns false when stored data is not valid JSON', async function () {
+                const ls = stubLocalStorage();
+                ls.raw['test-load-bad'] = 'not-json{{';
+                const store = wakaStore.createStore({ x: 0 }, { persist: 'test-load-bad' });
+                const result = store.load();
+                ls.restore();
+                assert(result === false, 'load() returned false for invalid JSON');
+            });
+
+            await test('clearPersist() removes the key from localStorage', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ x: 1 }, { persist: 'test-clear' });
+                store.save();
+                assert(Object.prototype.hasOwnProperty.call(ls.raw, 'test-clear'), 'key exists before clear');
+                store.clearPersist();
+                assert(!Object.prototype.hasOwnProperty.call(ls.raw, 'test-clear'), 'key removed after clear');
+                ls.restore();
+            });
+
+            await test('clearPersist() does not affect in-memory state', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ count: 5 }, { persist: 'test-clear-mem' });
+                store.clearPersist();
+                ls.restore();
+                assertEqual(store.count, 5, 'in-memory state unchanged');
+            });
+
+            await test('clearPersist() returns false when no persist key set', async function () {
+                const store = wakaStore.createStore({ x: 1 });
+                const result = store.clearPersist();
+                assert(result === false, 'clearPersist() returned false');
+            });
+
+            // ── 9. Local persistence — autoSave ───────────────────────────────────
+            suite('Local persistence — autoSave');
+
+            await test('autoSave writes to localStorage on mutation', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ count: 0 }, { persist: 'test-autosave', autoSave: true });
+                store.count = 42;
+                await wait(20); // let debounce flush
+                ls.restore();
+                const stored = JSON.parse(ls.raw['test-autosave'] || 'null');
+                assert(stored !== null, 'something was written');
+                assertEqual(stored.count, 42, 'count persisted');
+            });
+
+            await test('autoSave debounces — multiple mutations produce one write', async function () {
+                const ls = stubLocalStorage();
+                let writeCount = 0;
+                const origSetItem = localStorage.setItem.bind(localStorage);
+
+                // Patch setItem to count writes after stub is in place
+                const ls2 = stubLocalStorage();
+                const origStub = window.localStorage;
+                const countingStub = Object.assign({}, origStub, {
+                    setItem: function (k, v) { writeCount++; origStub.setItem(k, v); }
+                });
+                Object.defineProperty(window, 'localStorage', { configurable: true, get: () => countingStub });
+
+                const store = wakaStore.createStore({ a: 0, b: 0, c: 0 }, { persist: 'test-debounce', autoSave: true });
+                store.a = 1;
+                store.b = 2;
+                store.c = 3;
+                await wait(20);
+
+                const writes = writeCount;
+                Object.defineProperty(window, 'localStorage', { configurable: true, get: () => origStub });
+                ls2.restore();
+                ls.restore();
+
+                assert(writes <= 2, 'debounced to at most 2 writes (' + writes + ')');
+            });
+
+            await test('stopAutoSave() stops further automatic writes', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ val: 0 }, { persist: 'test-stop-autosave', autoSave: true });
+                store.val = 1;
+                await wait(20);
+                store.stopAutoSave();
+                store.val = 99;
+                await wait(20);
+                const stored = JSON.parse(ls.raw['test-stop-autosave'] || 'null');
+                ls.restore();
+                assert(stored.val !== 99, 'write did not happen after stopAutoSave (' + (stored && stored.val) + ')');
+            });
+
+            await test('autoSave: true without persist key is silently ignored', async function () {
+                const ls = stubLocalStorage();
+                const keysBefore = Object.keys(ls.raw).length;
+                const store = wakaStore.createStore({ x: 1 }, { autoSave: true });
+                store.x = 2;
+                await wait(20);
+                const keysAfter = Object.keys(ls.raw).length;
+                ls.restore();
+                assertEqual(keysAfter, keysBefore, 'no keys written to localStorage');
+            });
+
+            // ── 10. destroy() ─────────────────────────────────────────────────────
+            suite('destroy()');
+
+            await test('destroy() stops an active poll', async function () {
+                const store = wakaStore.createStore({ user: [] });
+                const spy = stubFetch(COLLECTION_RESPONSE);
+
+                store.poll('/api/users', { interval: 50 });
+                await wait(80);
+                store.destroy();
+                const callsAtDestroy = spy.calls;
+
+                await wait(150);
+                spy.restore();
+
+                assertEqual(spy.calls, callsAtDestroy, 'no further poll calls after destroy');
+            });
+
+            await test('destroy() stops autoSave', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ val: 0 }, { persist: 'test-destroy-autosave', autoSave: true });
+                store.val = 1;
+                await wait(20);
+                store.destroy();
+                store.val = 99;
+                await wait(20);
+                const stored = JSON.parse(ls.raw['test-destroy-autosave'] || 'null');
+                ls.restore();
+                assert(stored.val !== 99, 'autoSave stopped by destroy');
+            });
+
+            await test('destroy() is safe to call when no poll or autoSave is active', async function () {
+                const store = wakaStore.createStore({ x: 1 });
+                store.destroy(); // should not throw
+                pass('no error thrown');
+            });
+
+            await test('store remains usable after destroy()', async function () {
+                const ls = stubLocalStorage();
+                const store = wakaStore.createStore({ count: 0 }, { persist: 'test-destroy-usable' });
+                store.destroy();
+                store.count = 5;
+                store.save();
+                const stored = JSON.parse(ls.raw['test-destroy-usable'] || 'null');
+                ls.restore();
+                assertEqual(stored.count, 5, 'save() still works after destroy');
+            });
+
+            // ── 11. push() ────────────────────────────────────────────────────────
+            suite('push()');
+
+            await test('push() sends a PATCH request by default', async function () {
+                let capturedMethod = null;
+                const original = window.fetch;
+                window.fetch = function (url, opts) {
+                    capturedMethod = opts && opts.method;
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(SINGLE_RESPONSE) });
+                };
+                const store = wakaStore.createStore({ user: null });
+                await store.push('/api/user/1');
+                window.fetch = original;
+                assertEqual(capturedMethod, 'PATCH', 'method is PATCH');
+            });
+
+            await test('push() sends the full store state as JSON body by default', async function () {
+                let capturedBody = null;
+                const original = window.fetch;
+                window.fetch = function (url, opts) {
+                    capturedBody = JSON.parse(opts.body);
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(SINGLE_RESPONSE) });
+                };
+                const store = wakaStore.createStore({ name: 'Floris', role: 'admin' });
+                await store.push('/api/user/1');
+                window.fetch = original;
+                assertEqual(capturedBody.name, 'Floris', 'name in body');
+                assertEqual(capturedBody.role, 'admin', 'role in body');
+            });
+
+            await test('push() merges JSON:API response back into the store', async function () {
+                const spy = stubFetch(SINGLE_RESPONSE);
+                const store = wakaStore.createStore({ user: null });
+                await store.push('/api/user/1');
+                spy.restore();
+                assertEqual(store.user, { id: '1', name: 'Floris', role: 'admin' }, 'store updated from response');
+            });
+
+            await test('push() accepts a custom HTTP method', async function () {
+                let capturedMethod = null;
+                const original = window.fetch;
+                window.fetch = function (url, opts) {
+                    capturedMethod = opts && opts.method;
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(SINGLE_RESPONSE) });
+                };
+                const store = wakaStore.createStore({ user: null });
+                await store.push('/api/user/1', { method: 'PUT' });
+                window.fetch = original;
+                assertEqual(capturedMethod, 'PUT', 'method is PUT');
+            });
+
+            await test('push() accepts a partial body', async function () {
+                let capturedBody = null;
+                const original = window.fetch;
+                window.fetch = function (url, opts) {
+                    capturedBody = JSON.parse(opts.body);
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(SINGLE_RESPONSE) });
+                };
+                const store = wakaStore.createStore({ name: 'Floris', role: 'admin' });
+                await store.push('/api/user/1', { body: { name: store.name } });
+                window.fetch = original;
+                assert('name' in capturedBody, 'name in body');
+                assert(!('role' in capturedBody), 'role not in partial body');
+            });
+
+            await test('push() calls custom merge callback with store as this', async function () {
+                let capturedThis = null;
+                const spy = stubFetch({ custom: true });
+                const store = wakaStore.createStore({ result: null });
+                await store.push('/api/user/1', {
+                    merge: function (response) {
+                        capturedThis = this;
+                        this.result = response.custom;
+                    }
+                });
+                spy.restore();
+                assert(capturedThis === store, 'this === store');
+                assert(store.result === true, 'merge applied');
+            });
+
+            await test('push() rejects and calls onError on HTTP error', async function () {
+                const spy = stubFetch(null, { fail: true, status: 422 });
+                const store = wakaStore.createStore({ user: null });
+                let errorReceived = null;
+                let rejected = false;
+                await store.push('/api/user/1', {
+                    onError: function (e) { errorReceived = e; }
+                }).catch(function () { rejected = true; });
+                spy.restore();
+                assert(errorReceived !== null, 'onError called');
+                assert(rejected, 'promise rejected');
+                assert(errorReceived.status === 422, 'error carries status');
             });
 
             // ── Summary ───────────────────────────────────────────────────────────
