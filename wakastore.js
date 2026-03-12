@@ -64,6 +64,10 @@
  * ║                                                                                  ║
  * ║  Note: persist without autoSave only rehydrates on creation. Subsequent          ║
  * ║  mutations are not saved automatically — call store.save() explicitly.           ║
+ * ║                                                                                  ║
+ * ║  Cleanup:                                                                        ║
+ * ║                                                                                  ║
+ * ║    store.destroy();  // stop poll + autoSave listener. Call on SPA navigation.   ║
  * ╚══════════════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -143,7 +147,8 @@
 
             // Flatten id + attributes into a single plain object. This is the
             // entire deserialization — relationships and included are out of scope.
-            const record = Object.assign({ id: resource.id }, resource.attributes || {});
+            const attrs = isPlainObject(resource.attributes) ? resource.attributes : {};
+            const record = Object.assign({ id: resource.id }, attrs);
 
             if (Array.isArray(response.data)) {
                 // Collection response: accumulate records under the shared type key.
@@ -203,6 +208,15 @@
      */
     function isReactive(prop) {
         return typeof prop === 'string' && prop[0] !== '_' && prop[0] !== '$';
+    }
+
+    /**
+     * Returns true if val is a plain object (not an array, Date, Map, etc.).
+     * @param {*} val
+     * @returns {boolean}
+     */
+    function isPlainObject(val) {
+        return !!val && typeof val === 'object' && Object.getPrototypeOf(val) === Object.prototype;
     }
 
     /**
@@ -417,14 +431,12 @@
          * @returns {Proxy} Store proxy for direct mutation
          */
         createStore(initialState, opts) {
-            if (!initialState || typeof initialState !== 'object' || Array.isArray(initialState)) {
+            if (!isPlainObject(initialState)) {
                 throw new Error('wakaStore.createStore(): initialState must be a plain object');
             }
 
-            // Fetch options
             opts = opts || {};
 
-            // Store data
             const storeId     = 'store-' + (this._nextStoreId++);
             const persistKey  = typeof opts.persist  === 'string' ? opts.persist  : null;
             const autoSave    = opts.autoSave === true && persistKey !== null;
@@ -437,21 +449,23 @@
              * so the flag must exist on the raw object itself.
              * @param {Object|Array} obj
              */
-            function markExternalProxy(obj) {
-                if (!obj || typeof obj !== 'object' || obj._externalProxy) {
+            function markExternalProxy(obj, seen = new WeakSet()) {
+                if (!obj || typeof obj !== 'object' || obj._externalProxy || seen.has(obj)) {
                     return;
                 }
+
+                seen.add(obj);
 
                 Object.defineProperty(obj, EXTERNAL_PROXY_FLAG, {
                     value: true,
                     enumerable: false,
                     writable: false,
-                    configurable: true
+                    configurable: false
                 });
 
                 for (const key of Object.keys(obj)) {
                     if (obj[key] && typeof obj[key] === 'object') {
-                        markExternalProxy(obj[key]);
+                        markExternalProxy(obj[key], seen);
                     }
                 }
             }
@@ -535,7 +549,7 @@
                             return function() {
                                 const oldArray = target.slice();
                                 const result = Array.prototype[prop].apply(target, arguments);
-                                notify(currentPath, oldArray, target.slice());
+                                notify(currentPath, oldArray, target);
                                 return result;
                             };
                         }
@@ -620,21 +634,28 @@
             let _pollTimer = null;
             let _pollActive = false;
 
-            // ─── Persistence ─────────────────────────────────────────────────────
-
             /**
              * Safe localStorage wrapper. Returns null on any error (private
              * browsing, storage quota exceeded, security restrictions).
              * @param {'get'|'set'|'remove'} op
              * @param {string} key
              * @param {string} [value]
-             * @returns {string|null}
+             * @returns {string|boolean|null} The stored string for 'get', true for 'set'/'remove', null on error
              */
             function localStorageOp(op, key, value) {
                 try {
-                    if (op === 'get')    { return localStorage.getItem(key); }
-                    if (op === 'set')    { localStorage.setItem(key, value); }
-                    if (op === 'remove') { localStorage.removeItem(key); }
+                    switch(op) {
+                        case "get":
+                            return localStorage.getItem(key);
+
+                        case "set":
+                            localStorage.setItem(key, value);
+                            return true;
+
+                        case "remove":
+                            localStorage.removeItem(key);
+                            return true;
+                    }
                 } catch (e) {
                     // Swallow — quota exceeded, private browsing, or security error.
                 }
@@ -648,6 +669,7 @@
             /** @type {Function|null} Bound document listener for autoSave, kept for removeEventListener */
             let _autoSaveListener = null;
 
+            // Create proxy
             const proxy = createProxy(initialState, []);
 
             /**
@@ -665,9 +687,8 @@
                     }
 
                     try {
-                        const snapshot = JSON.stringify(JSON.parse(JSON.stringify(initialState)));
-                        localStorageOp('set', persistKey, snapshot);
-                        return true;
+                        const snapshot = JSON.stringify(initialState);
+                        return localStorageOp('set', persistKey, snapshot) === true;
                     } catch (e) {
                         console.warn('wakaStore.save(): serialization failed', e);
                         return false;
@@ -765,8 +786,11 @@
             }
 
             // Rehydrate from localStorage if a persist key was supplied.
-            // This runs after the proxy is fully constructed so reactivity
-            // fires normally and all subscribers see the restored state.
+            // This runs after the proxy is fully constructed but before any
+            // wakaPAC() component mounts, so pac:store-changed events fired
+            // by Object.assign hit an empty registry and produce no DOM updates.
+            // That is intentional — components read the already-rehydrated state
+            // when they mount, so no re-render is needed or missed.
             if (persistKey) {
                 proxy.load();
             }
@@ -809,9 +833,9 @@
                 value: function(url, opts) {
                     opts = opts || {};
 
-                    const interval     = opts.interval     !== undefined ? opts.interval : 5000;
-                    const merge        = typeof opts.merge    === 'function' ? opts.merge    : null;
-                    const onError      = typeof opts.onError  === 'function' ? opts.onError  : null;
+                    const interval = Math.max(0, opts.interval !== undefined ? opts.interval : 5000);
+                    const merge = typeof opts.merge === 'function' ? opts.merge : null;
+                    const onError = typeof opts.onError === 'function' ? opts.onError : null;
                     const fetchOptions = opts.fetchOptions || {};
 
                     // Calling poll() while already polling replaces the active poll.
@@ -889,10 +913,13 @@
                                     }
                                 })
                                 .finally(function() {
-                                    // Always reschedule, whether the request succeeded or
-                                    // failed. onError is responsible for deciding whether
-                                    // to call stopPoll() if errors should be terminal.
-                                    schedulePoll();
+                                    // Guard against the race where stopPoll() was called
+                                    // while the request was in flight. Without this check,
+                                    // .finally() would create a new timer even though
+                                    // _pollActive is false and _pollTimer was cleared.
+                                    if (_pollActive) {
+                                        schedulePoll();
+                                    }
                                 });
                         }, interval);
                     }
@@ -949,9 +976,28 @@
             });
 
             /**
+             * Tears down all active background activity for this store.
+             * Stops any running poll, detaches the autoSave listener, and cancels
+             * any pending debounced write. Call this when the store is no longer
+             * needed — particularly important in SPAs where stores are created and
+             * discarded on navigation, to prevent listener accumulation.
+             *
+             * The store proxy remains usable after destroy() — in-memory state,
+             * save(), load(), and clearPersist() are unaffected.
+             */
+            Object.defineProperty(proxy, 'destroy', {
+                enumerable: false,
+                configurable: true,
+                value: function() {
+                    proxy.stopPoll();
+                    proxy.stopAutoSave();
+                }
+            });
+
+            /**
              * Pushes store state to a server endpoint.
              *
-             * By default serializes the entire store as JSON and sends it as a
+             * By default, serializes the entire store as JSON and sends it as a
              * PATCH request. Supply a `body` option to send a subset, or set
              * `method` to override the HTTP verb.
              *
