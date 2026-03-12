@@ -656,7 +656,7 @@
                             localStorage.removeItem(key);
                             return true;
                     }
-                } catch (e) {
+                } catch (_e) {
                     // Swallow — quota exceeded, private browsing, or security error.
                 }
 
@@ -907,7 +907,7 @@
                                     if (onError) {
                                         // Swallow errors thrown inside the callback — they
                                         // are the caller's problem, not the poll loop's.
-                                        try { onError(error); } catch(e) { /* swallow */ }
+                                        try { onError(error); } catch(_e) { /* swallow */ }
                                     } else {
                                         console.error('wakaStore poll error:', error);
                                     }
@@ -1065,7 +1065,7 @@
                                 // the next poll cycle.
                                 const data = deserializeJsonApi(response);
                                 Object.assign(proxy, data);
-                            } catch(e) {
+                            } catch(_e) {
                                 // Response may be empty or non-JSON:API (e.g. 204 No Content
                                 // parsed as null). Silently skip — caller can use a merge
                                 // callback if they need to handle the response shape.
@@ -1077,7 +1077,7 @@
                         })
                         .catch(function(error) {
                             if (onError) {
-                                try { onError(error); } catch(e) { /* swallow */ }
+                                try { onError(error); } catch(_e) { /* swallow */ }
                             }
 
                             // Re-throw so the caller's own .catch() / await try-catch still fires.
