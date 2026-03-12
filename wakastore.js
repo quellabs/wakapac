@@ -45,6 +45,25 @@
  * ║                                                                                  ║
  * ║  Note: poll will overwrite local store mutations on the next cycle.              ║
  * ║  Call push() first to persist local changes before they are overwritten.         ║
+ * ║                                                                                  ║
+ * ║  Local persistence:                                                              ║
+ * ║                                                                                  ║
+ * ║    // Auto-save to localStorage on every mutation, rehydrate on creation:        ║
+ * ║    const store = wakaStore.createStore({ theme: 'dark' }, {                      ║
+ * ║        persist: 'app-settings',                                                  ║
+ * ║        autoSave: true                                                            ║
+ * ║    });                                                                           ║
+ * ║                                                                                  ║
+ * ║    // Or control persistence manually:                                           ║
+ * ║    const store = wakaStore.createStore({ theme: 'dark' }, {                      ║
+ * ║        persist: 'app-settings'                                                   ║
+ * ║    });                                                                           ║
+ * ║    store.load();           // rehydrate from localStorage                        ║
+ * ║    store.save();           // write current state to localStorage                ║
+ * ║    store.clearPersist();   // remove from localStorage                           ║
+ * ║                                                                                  ║
+ * ║  Note: persist without autoSave only rehydrates on creation. Subsequent          ║
+ * ║  mutations are not saved automatically — call store.save() explicitly.           ║
  * ╚══════════════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -52,7 +71,7 @@
     "use strict";
 
     /** @type {string} */
-    const VERSION = '1.1.0';
+    const VERSION = '1.2.0';
 
     /**
      * Event fired on document when any store mutation occurs.
@@ -108,7 +127,7 @@
             throw new Error('wakaStore: JSON:API response missing `data` member');
         }
 
-        // Normalise to array so we can iterate uniformly regardless of whether
+        // Normalize to array so we can iterate uniformly regardless of whether
         // the server returned a single resource object or a resource collection.
         const resources = Array.isArray(response.data) ? response.data : [response.data];
         const result = {};
@@ -201,6 +220,21 @@
         this._registry = new Map();
     }
 
+    /**
+     * WakaStore prototype methods.
+     *
+     * createPacPlugin() — called by wakaPAC.use(wakaStore). Returns the plugin
+     * descriptor that registers and deregisters component subscriptions.
+     *
+     * createStore(initialState, opts) — creates a new reactive store proxy.
+     *   opts.persist  {string}  localStorage key. If supplied, the store
+     *                           rehydrates from localStorage on creation and
+     *                           save()/load()/clearPersist() become available.
+     *   opts.autoSave {boolean} When true (and persist is set), automatically
+     *                           saves to localStorage on every mutation.
+     *                           Omitting autoSave disables automatic saves —
+     *                           call store.save() explicitly when needed.
+     */
     WakaStore.prototype = {
         constructor: WakaStore,
 
@@ -313,6 +347,10 @@
                  * @param {string} pacId
                  */
                 onComponentCreated(abstraction, pacId) {
+                    // originalAbstraction holds the raw object passed to wakaPAC()
+                    // before it was proxied. Store references are identified by their
+                    // non-enumerable _wakaStoreId tag, which survives proxy wrapping
+                    // because findStoreReferences reads the raw object directly.
                     const context = window.PACRegistry.get(pacId);
 
                     if (!context || !context.originalAbstraction) {
@@ -321,15 +359,22 @@
 
                     const storeEntries = findStoreReferences(context.originalAbstraction);
 
+                    // Nothing to subscribe to, or container not yet in the DOM.
                     if (storeEntries.length === 0 || !context.container) {
                         return;
                     }
 
                     for (const { key, storeId } of storeEntries) {
+                        // Lazily create the subscriber map for this store on first use.
                         if (!registry.has(storeId)) {
                             registry.set(storeId, new Map());
                         }
 
+                        // Register this component as a subscriber. key is the property
+                        // name under which the store is mounted on this component's
+                        // abstraction (e.g. 'session' in wakaPAC('#header', { session: store })).
+                        // onStoreChanged prepends it to the mutation path so wakaPAC
+                        // resolves the correct binding (e.g. ['session', 'user', 'name']).
                         registry.get(storeId).set(pacId, { key, container: context.container });
                     }
                 },
@@ -362,14 +407,27 @@
          * storeId and the store-relative path of the change.
          *
          * @param {Object} initialState - Plain object representing initial state
+         * @param {Object}  [opts]                 - Optional configuration
+         * @param {string}  [opts.persist]          - localStorage key. When set, the store rehydrates
+         *                                            from localStorage on creation and save(), load(),
+         *                                            and clearPersist() become available on the proxy.
+         * @param {boolean} [opts.autoSave=false]   - When true (and opts.persist is set), automatically
+         *                                            saves to localStorage on every mutation (debounced).
+         *                                            When omitted or false, call store.save() explicitly.
          * @returns {Proxy} Store proxy for direct mutation
          */
-        createStore(initialState) {
+        createStore(initialState, opts) {
             if (!initialState || typeof initialState !== 'object' || Array.isArray(initialState)) {
                 throw new Error('wakaStore.createStore(): initialState must be a plain object');
             }
 
-            const storeId = 'store-' + (this._nextStoreId++);
+            // Fetch options
+            opts = opts || {};
+
+            // Store data
+            const storeId     = 'store-' + (this._nextStoreId++);
+            const persistKey  = typeof opts.persist  === 'string' ? opts.persist  : null;
+            const autoSave    = opts.autoSave === true && persistKey !== null;
 
             /**
              * Marks obj and all nested objects with _externalProxy = true as a
@@ -562,7 +620,156 @@
             let _pollTimer = null;
             let _pollActive = false;
 
+            // ─── Persistence ─────────────────────────────────────────────────────
+
+            /**
+             * Safe localStorage wrapper. Returns null on any error (private
+             * browsing, storage quota exceeded, security restrictions).
+             * @param {'get'|'set'|'remove'} op
+             * @param {string} key
+             * @param {string} [value]
+             * @returns {string|null}
+             */
+            function localStorageOp(op, key, value) {
+                try {
+                    if (op === 'get')    { return localStorage.getItem(key); }
+                    if (op === 'set')    { localStorage.setItem(key, value); }
+                    if (op === 'remove') { localStorage.removeItem(key); }
+                } catch (e) {
+                    // Swallow — quota exceeded, private browsing, or security error.
+                }
+
+                return null;
+            }
+
+            /** @type {number|null} Pending autoSave debounce timer */
+            let _autoSaveTimer = null;
+
+            /** @type {Function|null} Bound document listener for autoSave, kept for removeEventListener */
+            let _autoSaveListener = null;
+
             const proxy = createProxy(initialState, []);
+
+            /**
+             * Writes the current store state to localStorage under the persist key.
+             * No-op if no persist key was set on createStore.
+             * @returns {boolean} True if the write succeeded
+             */
+            Object.defineProperty(proxy, 'save', {
+                enumerable: false,
+                configurable: true,
+                value: function() {
+                    if (!persistKey) {
+                        console.warn('wakaStore.save(): no persist key set — pass { persist: \'key\' } to createStore');
+                        return false;
+                    }
+
+                    try {
+                        const snapshot = JSON.stringify(JSON.parse(JSON.stringify(initialState)));
+                        localStorageOp('set', persistKey, snapshot);
+                        return true;
+                    } catch (e) {
+                        console.warn('wakaStore.save(): serialization failed', e);
+                        return false;
+                    }
+                }
+            });
+
+            /**
+             * Rehydrates the store from localStorage, merging stored values onto
+             * the proxy. Unknown keys in storage are silently ignored.
+             *
+             * Merge strategy: stored values overwrite current state for matching
+             * keys. Keys present in current state but absent in storage are left
+             * untouched — this handles new keys added after the first save without
+             * leaving them undefined.
+             *
+             * @returns {boolean} True if stored data was found and applied
+             */
+            Object.defineProperty(proxy, 'load', {
+                enumerable: false,
+                configurable: true,
+                value: function() {
+                    if (!persistKey) {
+                        console.warn('wakaStore.load(): no persist key set — pass { persist: \'key\' } to createStore');
+                        return false;
+                    }
+
+                    const raw = localStorageOp('get', persistKey);
+
+                    if (raw === null) {
+                        return false;
+                    }
+
+                    let stored;
+
+                    try {
+                        stored = JSON.parse(raw);
+                    } catch (e) {
+                        console.warn('wakaStore.load(): stored data is not valid JSON, ignoring', e);
+                        return false;
+                    }
+
+                    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+                        console.warn('wakaStore.load(): stored data is not a plain object, ignoring');
+                        return false;
+                    }
+
+                    // Write through the proxy so reactivity fires for each key.
+                    // Only overwrite keys that exist in stored — do not delete keys
+                    // that are in initialState but absent from storage.
+                    Object.assign(proxy, stored);
+                    return true;
+                }
+            });
+
+            /**
+             * Removes this store's entry from localStorage.
+             * Does not affect current in-memory state.
+             * @returns {boolean} True if a persist key was set
+             */
+            Object.defineProperty(proxy, 'clearPersist', {
+                enumerable: false,
+                configurable: true,
+                value: function() {
+                    if (!persistKey) {
+                        return false;
+                    }
+
+                    localStorageOp('remove', persistKey);
+                    return true;
+                }
+            });
+
+            // Wire autoSave: listen for this store's mutations on document and
+            // debounce writes to localStorage. Debouncing is important because
+            // Object.assign or a poll response can fire many consecutive mutations
+            // in a single tick — we only want one localStorage write per batch.
+            if (autoSave) {
+                _autoSaveListener = function(event) {
+                    if (event.detail.storeId !== storeId) {
+                        return;
+                    }
+
+                    if (_autoSaveTimer !== null) {
+                        clearTimeout(_autoSaveTimer);
+                    }
+
+                    _autoSaveTimer = setTimeout(function() {
+                        _autoSaveTimer = null;
+                        proxy.save();
+                    }, 0);
+                };
+
+                document.addEventListener(STORE_CHANGED_EVENT, _autoSaveListener);
+            }
+
+            // Rehydrate from localStorage if a persist key was supplied.
+            // This runs after the proxy is fully constructed so reactivity
+            // fires normally and all subscribers see the restored state.
+            if (persistKey) {
+                proxy.load();
+            }
 
             /**
              * Starts polling an endpoint and merging the response into the store.
@@ -720,6 +927,28 @@
             });
 
             /**
+             * Detaches the autoSave mutation listener and cancels any pending
+             * debounced write. The persist key and save()/load() methods remain
+             * available — only the automatic save-on-mutation behaviour stops.
+             * Safe to call when autoSave was not enabled.
+             */
+            Object.defineProperty(proxy, 'stopAutoSave', {
+                enumerable: false,
+                configurable: true,
+                value: function() {
+                    if (_autoSaveListener !== null) {
+                        document.removeEventListener(STORE_CHANGED_EVENT, _autoSaveListener);
+                        _autoSaveListener = null;
+                    }
+
+                    if (_autoSaveTimer !== null) {
+                        clearTimeout(_autoSaveTimer);
+                        _autoSaveTimer = null;
+                    }
+                }
+            });
+
+            /**
              * Pushes store state to a server endpoint.
              *
              * By default serializes the entire store as JSON and sends it as a
@@ -821,15 +1050,6 @@
     /** @type {WakaStore} */
     const wakaStore = new WakaStore();
 
-    /* globals module, define */
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { WakaStore, wakaStore };
-    } else if (typeof define === 'function' && define.amd) {
-        define(function () {
-            return { WakaStore, wakaStore };
-        });
-    } else if (typeof window !== 'undefined') {
-        window.WakaStore = WakaStore;
-        window.wakaStore = wakaStore;
-    }
+    window.WakaStore = WakaStore;
+    window.wakaStore = wakaStore;
 })();
