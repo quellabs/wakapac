@@ -1094,7 +1094,7 @@
                 // Re-proxy all items with correct indices after the operation
                 // This ensures all objects have the proper path references
                 newArray.forEach((item, index) => {
-                    if (item && typeof item === 'object') {
+                    if (item && typeof item === 'object' && !item._isReactive) {
                         const correctPath = currentPath.concat([index]);
                         newArray[index] = createProxy(item, correctPath);
                         newArray[index]._isReactive = true;
@@ -1234,7 +1234,19 @@
                 }
 
                 const propertyPath = currentPath.concat([prop]);
-                return createProxy(val, propertyPath);
+                const proxiedVal = createProxy(val, propertyPath);
+                proxiedVal._isReactive = true;
+
+                // Write directly to target without going through the proxy set trap.
+                // This caches the proxy without firing pac:change.
+                Object.defineProperty(target, prop, {
+                    value: proxiedVal,
+                    writable: true,
+                    enumerable: true,
+                    configurable: true
+                });
+
+                return proxiedVal;
             }
 
             return val;
@@ -5265,17 +5277,19 @@
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
-        const foreachEntries = Array.from(newBindings.entries())
+        // Handle nested foreach rendering (sort by depth, deepest first)
+        Array.from(newBindings.entries())
             .filter(([element, mappingData]) =>
                 mappingData.bindings.foreach && element !== parentElement
             )
-            .sort(([, mappingDataA], [, mappingDataB]) =>
-                mappingDataB.depth - mappingDataA.depth
-            );
-
-        foreachEntries.forEach(([element]) => {
-            this.renderForeach(element);
-        });
+            .sort(([, mappingDataA], [, mappingDataB]) => {
+                const depthA = mappingDataA.depth;
+                const depthB = mappingDataB.depth;
+                return depthB - depthA; // deepest first
+            })
+            .forEach(([element]) => {
+                this.renderForeach(element);
+            });
     };
 
     /**
