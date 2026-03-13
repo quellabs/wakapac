@@ -398,7 +398,7 @@
          * @param {boolean} [opts.autoSave=false]   - When true (and opts.persist is set), automatically
          *                                            saves to localStorage on every mutation (debounced).
          *                                            When omitted or false, call store.save() explicitly.
-         * @param {boolean} [opts.autoLoad=true]    - When true (and opts.persist is set), automatically
+         * @param {boolean} [opts.autoLoad=false]   - When true (and opts.persist is set), automatically
          *                                            rehydrates from localStorage on creation.
          *                                            Set to false to start from initialState and call
          *                                            store.load() yourself when ready.
@@ -411,9 +411,9 @@
 
             opts = opts || {};
 
-            const storeId     = 'store-' + (this._nextStoreId++);
-            const persistKey  = typeof opts.persist  === 'string' ? opts.persist  : null;
-            const autoSave    = opts.autoSave === true && persistKey !== null;
+            const storeId = 'store-' + (this._nextStoreId++);
+            const persistKey = typeof opts.persist === 'string' ? opts.persist : null;
+            const autoSave = opts.autoSave === true && persistKey !== null;
             const autoLoad = opts.autoLoad === true && persistKey !== null;
 
             /**
