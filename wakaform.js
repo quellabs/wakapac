@@ -119,8 +119,10 @@
             return;
         }
 
+        // Track this object before recursing to break cycles.
         seen.add(obj);
 
+        // Non-enumerable so the flag is invisible to templates and Object.keys().
         Object.defineProperty(obj, EXTERNAL_PROXY_FLAG, {
             value: true,
             enumerable: false,
@@ -128,6 +130,7 @@
             configurable: false
         });
 
+        // Recurse into nested objects so deep sub-trees are also flagged.
         for (const key of Object.keys(obj)) {
             if (obj[key] && typeof obj[key] === 'object') {
                 markExternalProxy(obj[key], seen);
@@ -146,6 +149,7 @@
     }
 
     NotBlank.prototype.validate = function (value) {
+        // Coerce to string so numeric 0 is not treated as blank.
         return (value === null || value === undefined || String(value).trim() === '')
             ? this.message
             : null;
@@ -161,6 +165,7 @@
     }
 
     Email.prototype.validate = function (value) {
+        // Let NotBlank() own the empty-value case; Email only checks format.
         if (value === null || value === undefined || String(value).trim() === '') {
             return null;
         }
@@ -182,12 +187,14 @@
     }
 
     Min.prototype.validate = function (value) {
+        // Empty string / null / undefined — let NotBlank() handle the required case.
         if (value === null || value === undefined || value === '') {
             return null;
         }
 
         const num = Number(value);
 
+        // Non-numeric input fails with the same message as an out-of-range value.
         if (Number.isNaN(num)) {
             return this.message;
         }
@@ -207,12 +214,14 @@
     }
 
     Max.prototype.validate = function (value) {
+        // Empty string / null / undefined — let NotBlank() handle the required case.
         if (value === null || value === undefined || value === '') {
             return null;
         }
 
         const num = Number(value);
 
+        // Non-numeric input fails with the same message as an out-of-range value.
         if (Number.isNaN(num)) {
             return this.message;
         }
@@ -230,8 +239,13 @@
         this.n       = n;
         this.message = message || 'Must be at least ' + n + ' characters';
     }
+
     MinLength.prototype.validate = function (value) {
-        if (value === null || value === undefined) return null;
+        // Treat null/undefined as zero-length rather than throwing on String() coercion.
+        if (value === null || value === undefined) {
+            return null;
+        }
+
         return String(value).length >= this.n ? null : this.message;
     };
 
@@ -244,8 +258,13 @@
         this.n       = n;
         this.message = message || 'Must be at most ' + n + ' characters';
     }
+
     MaxLength.prototype.validate = function (value) {
-        if (value === null || value === undefined) return null;
+        // Empty null / undefined — let NotBlank() handle the required case.
+        if (value === null || value === undefined) {
+            return null;
+        }
+
         return String(value).length <= this.n ? null : this.message;
     };
 
@@ -265,6 +284,8 @@
             return null;
         }
 
+        // Reset lastIndex before each test — required for regexes with the g or y flag,
+        // where .test() is stateful and advances lastIndex on successive calls.
         this.regex.lastIndex = 0;
 
         return this.regex.test(String(value)) ? null : this.message;
@@ -328,6 +349,9 @@
                 for (const key of Object.keys(rawAbstraction)) {
                     const val = rawAbstraction[key];
 
+                    // _wakaFormId is set non-enumerable on the form proxy root;
+                    // reading it here works because originalAbstraction is the raw
+                    // object before wakaPAC wrapped it, so the tag is still readable.
                     if (val && typeof val === 'object' && val._wakaFormId) {
                         entries.push({ key, formId: val._wakaFormId });
                     }
@@ -346,11 +370,14 @@
                 const { formId, path, oldValue, newValue } = event.detail;
                 const subscribers = registry.get(formId);
 
+                // No subscribers for this form — nothing to do.
                 if (!subscribers || subscribers.size === 0) {
                     return;
                 }
 
                 subscribers.forEach(function ({ key, container }) {
+                    // Prepend the abstraction key so wakaPAC resolves the path
+                    // from the component root, e.g. ['form', 'username', 'value'].
                     container.dispatchEvent(new CustomEvent('pac:change', {
                         detail: {
                             path: [key].concat(path),
@@ -378,15 +405,20 @@
 
                     const formEntries = findFormReferences(context.originalAbstraction);
 
+                    // Skip if no form references or if the container isn't in the DOM yet.
                     if (formEntries.length === 0 || !context.container) {
                         return;
                     }
 
                     for (const { key, formId } of formEntries) {
+                        // Lazily create the subscriber map for this form on first use.
                         if (!registry.has(formId)) {
                             registry.set(formId, new Map());
                         }
 
+                        // key is the property name under which the form is mounted
+                        // (e.g. 'form' in wakaPAC('#login', { form })). onFormChanged
+                        // prepends it to the mutation path so wakaPAC can resolve bindings.
                         registry.get(formId).set(pacId, { key, container: context.container });
                     }
                 },
@@ -399,6 +431,8 @@
                     registry.forEach(function (subscribers, formId) {
                         subscribers.delete(pacId);
 
+                        // Remove the form's subscriber map entirely once it has no listeners
+                        // to avoid accumulating empty maps for long-lived applications.
                         if (subscribers.size === 0) {
                             registry.delete(formId);
                         }
@@ -481,9 +515,13 @@
                     throw new Error('wakaForm.createForm(): field "' + fieldName + '" must be a plain object with value and rules');
                 }
 
-                const rules         = Array.isArray(fieldDef.rules) ? fieldDef.rules : [];
-                const initialValue  = fieldDef.value !== undefined ? fieldDef.value : '';
+                // Default to empty string if value is omitted from the field definition.
+                const rules        = Array.isArray(fieldDef.rules) ? fieldDef.rules : [];
+                const initialValue = fieldDef.value !== undefined ? fieldDef.value : '';
 
+                // Object values break dirty tracking — === always returns false for distinct
+                // object references. Fail early with a clear message rather than silently
+                // producing wrong dirty state at runtime.
                 if (initialValue !== null && typeof initialValue === 'object') {
                     throw new Error('wakaForm.createForm(): field "' + fieldName + '" value must be a primitive (string, number, boolean, null, or undefined). Object values are not supported — dirty tracking uses strict equality.');
                 }
@@ -527,6 +565,8 @@
              * @param {*} newValue
              */
             function notify(path, oldValue, newValue) {
+                // Guard against re-entrant notifications triggered by derived state
+                // writes (error, dirty, valid) that happen inside the event handler.
                 if (notifying) {
                     return;
                 }
@@ -538,6 +578,7 @@
                         detail: { formId, path, oldValue, newValue }
                     }));
                 } finally {
+                    // Always reset the flag, even if a listener throws.
                     notifying = false;
                 }
             }
@@ -584,16 +625,20 @@
                     set(target, prop, newValue) {
                         const oldValue = target[prop];
 
+                        // Skip if the value hasn't actually changed.
                         if (oldValue === newValue) {
                             return true;
                         }
 
+                        // Ensure incoming objects are flagged before they enter the proxy tree.
                         if (newValue && typeof newValue === 'object') {
                             markExternalProxy(newValue);
                         }
 
                         const success = Reflect.set(target, prop, newValue);
 
+                        // Only notify if the write succeeded — non-configurable / non-writable
+                        // properties will return false from Reflect.set.
                         if (success && isReactive(prop)) {
                             notify(currentPath.concat([prop]), oldValue, newValue);
                         }
@@ -609,6 +654,7 @@
                         const oldValue = target[prop];
                         const deleted  = Reflect.deleteProperty(target, prop);
 
+                        // Only notify if the delete actually succeeded.
                         if (deleted && isReactive(prop)) {
                             notify(currentPath.concat([prop]), oldValue, undefined);
                         }
@@ -645,6 +691,8 @@
                 const value = state[fieldName].value;
 
                 for (const rule of rules) {
+                    // Skip malformed entries rather than throwing — warn so the
+                    // developer can spot the mistake in the console.
                     if (!rule || typeof rule.validate !== 'function') {
                         console.warn('wakaForm: invalid rule in field "' + fieldName + '" — expected an object with a validate() method:', rule);
                         continue;
@@ -652,12 +700,14 @@
 
                     const error = rule.validate(value);
 
+                    // First failing rule wins — update the cache and return immediately.
                     if (error !== null && error !== undefined) {
                         fieldValid[fieldName] = false;
                         return String(error);
                     }
                 }
 
+                // All rules passed.
                 fieldValid[fieldName] = true;
                 return null;
             }
@@ -777,12 +827,14 @@
                 enumerable: false,
                 configurable: true,
                 value: function () {
+                    // Flip the flag so updateFieldError() starts exposing errors.
                     validateCalled = true;
 
                     for (const fieldName of Object.keys(fieldRules)) {
                         updateFieldError(fieldName);
                     }
 
+                    // Full recompute — all fields may now have different error visibility.
                     recomputeFormState();
                 }
             });
@@ -797,6 +849,7 @@
                 enumerable: false,
                 configurable: true,
                 value: function () {
+                    // Hide errors again until the next validate() call.
                     validateCalled = false;
 
                     for (const fieldName of Object.keys(fieldRules)) {
@@ -804,10 +857,16 @@
                         proxy[fieldName].error   = null;
                         proxy[fieldName].touched = false;
                         proxy[fieldName].dirty   = false;
-                        runRules(fieldName); // refresh fieldValid cache for initial value
+
+                        // Refresh the fieldValid cache now that the value has changed —
+                        // the next recomputeFormState() must see accurate results.
+                        runRules(fieldName);
                     }
 
-                    proxy.valid = true;
+                    // Write final form-level state directly rather than calling
+                    // recomputeFormState() — all field state was just set above, and
+                    // dirty is always false after a reset.
+                    proxy.valid = Object.keys(fieldRules).every(function (fn) { return fieldValid[fn]; });
                     proxy.dirty = false;
                 }
             });
@@ -823,6 +882,8 @@
                 value: function () {
                     const result = {};
 
+                    // Read directly from state rather than the proxy to avoid
+                    // triggering get traps on a plain data extraction.
                     for (const fieldName of Object.keys(fieldRules)) {
                         result[fieldName] = state[fieldName].value;
                     }
@@ -853,6 +914,10 @@
                     }
 
                     proxy[fieldName].touched = true;
+
+                    // Immediately expose the error for this field in 'touch' mode.
+                    // In 'submit' mode this is a no-op for error visibility but still
+                    // records the touched flag, which is available for styling.
                     updateFieldError(fieldName);
                     recomputeFormState(fieldName);
                 }
