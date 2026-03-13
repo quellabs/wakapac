@@ -76,7 +76,7 @@
     "use strict";
 
     /** @type {string} */
-    const VERSION = '1.2.0';
+    const VERSION = '1.2.1';
 
     /**
      * Event fired on document when any store mutation occurs.
