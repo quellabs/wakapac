@@ -1228,25 +1228,13 @@
 
             // If the value is an object/array and not already reactive, wrap it in a proxy
             if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
-                // Return raw value if the data is already proxied
                 if (val._externalProxy) {
                     return val;
                 }
 
                 const propertyPath = currentPath.concat([prop]);
-                const proxiedVal = createProxy(val, propertyPath);
-                proxiedVal._isReactive = true;
-
-                // Write directly to target without going through the proxy set trap.
-                // This caches the proxy without firing pac:change.
-                Object.defineProperty(target, prop, {
-                    value: proxiedVal,
-                    writable: true,
-                    enumerable: true,
-                    configurable: true
-                });
-
-                return proxiedVal;
+                console.log('proxyGetHandler: creating fresh proxy for path', JSON.stringify(propertyPath));
+                return createProxy(val, propertyPath);
             }
 
             return val;
@@ -5240,12 +5228,10 @@
     Context.prototype.scanAndRegisterNewElements = function(parentElement) {
         const self = this;
 
-        // Scan for new bound elements within this container
         const newBindings = this.scanBindings(parentElement);
         const newTextBindings = this.scanTextBindings(parentElement);
         const newCommentBindings = this.scanCommentBindings(parentElement);
 
-        // Add new bindings to main maps
         newBindings.forEach((mappingData, element) => {
             if (element !== parentElement) {
                 this.interpolationMap.set(element, mappingData);
@@ -5256,15 +5242,11 @@
             this.textInterpolationMap.set(textNode, mappingData);
         });
 
-        // Store comment bindings
         newCommentBindings.forEach((mappingData, commentNode) => {
             this.commentBindingMap.set(commentNode, mappingData);
-
-            // Apply initial state
             self.updateCommentConditional(commentNode, mappingData);
         });
 
-        // Apply initial bindings to new elements
         newBindings.forEach((mappingData, element) => {
             Object.keys(mappingData.bindings).forEach(bindingType => {
                 const bindingData = mappingData.bindings[bindingType];
@@ -5272,24 +5254,30 @@
             });
         });
 
-        // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
-        // Handle nested foreach rendering (sort by depth, deepest first)
-        Array.from(newBindings.entries())
+        const foreachEntries = Array.from(newBindings.entries())
             .filter(([element, mappingData]) =>
                 mappingData.bindings.foreach && element !== parentElement
             )
-            .sort(([, mappingDataA], [, mappingDataB]) => {
-                const depthA = mappingDataA.depth;
-                const depthB = mappingDataB.depth;
-                return depthB - depthA; // deepest first
-            })
-            .forEach(([element]) => {
-                this.renderForeach(element);
-            });
+            .sort(([, mappingDataA], [, mappingDataB]) =>
+                mappingDataB.depth - mappingDataA.depth
+            );
+
+        console.log('scanAndRegister parentElement:', parentElement.getAttribute('data-pac-id') || parentElement.className, 'foreach entries:',
+            foreachEntries.map(([el, data]) => ({
+                expr: data.foreachExpr,
+                foreachId: data.foreachId,
+                connected: el.isConnected,
+                inDOM: document.body.contains(el)
+            }))
+        );
+
+        foreachEntries.forEach(([element]) => {
+            this.renderForeach(element);
+        });
     };
 
     /**
@@ -5675,9 +5663,11 @@
         try {
             // Check if click occurred within a foreach loop context
             const contextInfo = this.extractClosestForeachContext(event.target);
+            console.log('handleDomClicks: contextInfo=', contextInfo);
 
             // Simple case: call method with just the event
             if (!contextInfo) {
+                console.log('handleDomClicks: no contextInfo, simple call');
                 method.call(this.abstraction, event);
                 return;
             }
@@ -5686,25 +5676,28 @@
             const foreachElement = Array.from(this.interpolationMap.entries())
                 .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
 
+            console.log('handleDomClicks: foreachElement=', foreachElement, 'looking for foreachId=', contextInfo.foreachId);
+
             if (!foreachElement) {
                 // Fallback to simple call if foreach element not found
+                console.log('handleDomClicks: no foreachElement, fallback call');
                 method.call(this.abstraction, event);
                 return;
             }
 
             // Get the foreach configuration and set up scope resolution
             const foreachData = this.interpolationMap.get(foreachElement);
-            const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), event.target);
-
-            // Evaluate the foreach expression to get the source array
-            const array = ExpressionParser.evaluate(
-                ExpressionCache.parseExpression(foreachData.foreachExpr),
-                this.abstraction,
-                scopeResolver
-            );
 
             // Call method with foreach context: (arrayItem, index, originalEvent)
-            method.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
+            const sourceArrayPath = foreachData.sourceArray;
+            const liveArray = ExpressionParser.evaluate(
+                ExpressionCache.parseExpression(sourceArrayPath),
+                this.abstraction,
+                null
+            );
+            const freshItem = liveArray[contextInfo.index];
+            console.log('handleDomClicks: sourceArrayPath=', sourceArrayPath, 'index=', contextInfo.index, 'liveArray.length=', liveArray?.length, 'freshItem=', freshItem);
+            method.call(this.abstraction, freshItem, contextInfo.index, event);
         } catch (error) {
             console.error(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
         }
@@ -6296,9 +6289,16 @@
         // Use a for loop instead of forEach to avoid closure creation per iteration
         for (let i = 0, len = elements.length; i < len; i++) {
             const element = elements[i];
+            const belongs = Utils.belongsToPacContainer(this.container, element);
+
+            console.log('scanBindings:', element.getAttribute('data-pac-bind'),
+                'belongs=', belongs,
+                'connected=', element.isConnected,
+                'closest=', element.closest('[data-pac-id]')?.getAttribute('data-pac-id')
+            );
 
             // Skip elements that don't belong to this container
-            if (!Utils.belongsToPacContainer(this.container, element)) {
+            if (!belongs) {
                 continue;
             }
 
@@ -6362,6 +6362,13 @@
                 return;
             }
 
+            console.log('extendBindings entry:',
+                'hasId=', element.hasAttribute('data-pac-foreach-id'),
+                'id=', element.getAttribute('data-pac-foreach-id'),
+                'hasForeachId=', !!mappingData.foreachId,
+                'connected=', element.isConnected
+            );
+
             // Do nothing when the binding already has a foreachId
             if (mappingData.foreachId) {
                 return;
@@ -6375,9 +6382,21 @@
                 const elementByForEach = self.findElementByForEachId(foreachId);
                 const elementData = self.interpolationMap.get(elementByForEach);
 
-                interpolationMap.set(element, elementData);
-                self.interpolationMap.delete(elementByForEach);
-                return;
+                console.log('extendBindings: has foreachId=', foreachId,
+                    'elementByForEach=', elementByForEach,
+                    'elementData=', elementData,
+                    'element.isConnected=', element.isConnected
+                );
+
+                if (elementByForEach && elementData) {
+                    interpolationMap.set(element, elementData);
+                    self.interpolationMap.delete(elementByForEach);
+                    return;
+                }
+
+                // Old element no longer exists — strip the stale id and fall through
+                // to generate a fresh foreachId below
+                element.removeAttribute('data-pac-foreach-id');
             }
 
             // Set a new foreachId
@@ -7396,10 +7415,13 @@
                 // element itself so scope variables are expanded, then compare.
                 try {
                     const resolvedExpr = this.normalizePath(mappingData.foreachExpr, element);
+                    console.log('findForeach: expr=', mappingData.foreachExpr, 'resolved=', resolvedExpr, 'target=', arrayPath, 'match=', resolvedExpr === arrayPath, 'connected=', element.isConnected);
+
                     if (resolvedExpr === arrayPath) {
                         elementsToUpdate.push(element);
                     }
-                } catch (e) {
+                } catch (_e) {
+                    console.log('findForeach: normalizePath threw for', mappingData.foreachExpr);
                     // normalizePath can throw for malformed expressions — skip silently
                 }
             }
