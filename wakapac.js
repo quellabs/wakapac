@@ -4970,7 +4970,6 @@
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
         this.commentBindingMap = new Map();
-        this.arrayHashMaps = new Map();
         this._readyCalled = false;
 
         // Set up container-specific scroll tracking
@@ -5089,7 +5088,6 @@
         // Clean up all maps
         this.interpolationMap.clear();
         this.textInterpolationMap.clear();
-        this.arrayHashMaps.clear();
         this.commentBindingMap.clear();
         this.updateQueue.clear();
 
@@ -6274,36 +6272,14 @@
      */
     Context.prototype.handleArrayChange = function(event) {
         const detail = event.detail;
-
-        // Convert the array path to a dot-notation string for easier matching
-        // e.g., ['users', 0, 'orders'] becomes 'users.0.orders'
         const pathString = Utils.pathArrayToString(detail.path);
-
-        // Locate all DOM elements with foreach directives that are bound to this array path.
-        // This method searches the DOM for elements whose foreach binding matches the changed array.
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
 
-        // Nothing to update if no foreach elements are bound to this path
         if (foreachElements.length === 0) {
             return;
         }
 
-        // Compute the change classification once, shared across all affected elements.
-        // Avoids redundant diffing when multiple foreach elements bind to the same array.
-        const oldHashMap = this.arrayHashMaps.get(pathString) || new Map();
-        const changes = this.classifyArrayChanges(oldHashMap, detail.newValue);
-        const isSimple = this.canHandleSimply(changes);
-
-        // Re-render each affected foreach element to reflect the array changes
         for (let i = 0, len = foreachElements.length; i < len; i++) {
-            // Simple approach: handle common cases efficiently
-            if (isSimple) {
-                this.handleSimpleArrayChange(foreachElements[i], changes, detail.newValue, pathString);
-                continue;
-            }
-
-            // Trigger a complete re-render of the foreach element.
-            // This will recreate child elements based on the updated array data.
             this.renderForeach(foreachElements[i]);
         }
     };
@@ -6320,9 +6296,10 @@
         // Use a for loop instead of forEach to avoid closure creation per iteration
         for (let i = 0, len = elements.length; i < len; i++) {
             const element = elements[i];
+            const belongs = Utils.belongsToPacContainer(this.container, element);
 
             // Skip elements that don't belong to this container
-            if (!Utils.belongsToPacContainer(this.container, element)) {
+            if (!belongs) {
                 continue;
             }
 
@@ -6399,9 +6376,14 @@
                 const elementByForEach = self.findElementByForEachId(foreachId);
                 const elementData = self.interpolationMap.get(elementByForEach);
 
-                interpolationMap.set(element, elementData);
-                self.interpolationMap.delete(elementByForEach);
-                return;
+                if (elementByForEach && elementData) {
+                    interpolationMap.set(element, elementData);
+                    self.interpolationMap.delete(elementByForEach);
+                    return;
+                }
+
+                // Old element no longer exists — strip the stale id
+                element.removeAttribute('data-pac-foreach-id');
             }
 
             // Set a new foreachId
@@ -6891,6 +6873,30 @@
     // =============================================================================
 
     /**
+     * Builds a mapping from render indices to source indices, accounting for duplicate values.
+     * @param {Array} sourceArray - The original unfiltered array containing all items.
+     * @param {Array} filteredArray - A subset (or reordering) of sourceArray to map back to source positions.
+     * @returns {Map<number, number>} A Map where each key is a render index (position in filteredArray)
+     *                                and each value is the corresponding source index (position in sourceArray).
+     */
+    Context.prototype.buildIndexMap = function (sourceArray, filteredArray) {
+        const claimed = new Set();
+        const result = new Map(); // keyed by renderIndex
+
+        filteredArray.forEach((item, renderIndex) => {
+            for (let i = 0; i < sourceArray.length; i++) {
+                if (!claimed.has(i) && sourceArray[i] === item) {
+                    claimed.add(i);
+                    result.set(renderIndex, i);
+                    break;
+                }
+            }
+        });
+
+        return result;
+    }
+
+    /**
      * Renders a foreach loop by evaluating its array expression and generating DOM content.
      * @param {Element} foreachElement - DOM element with foreach binding
      * @returns {void}
@@ -6903,9 +6909,6 @@
             console.warn('No foreach binding found for element');
             return;
         }
-
-        // Keep array path for later use
-        const arrayPath = mappingData.sourceArray;
 
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
@@ -6943,10 +6946,6 @@
             // Get the source array to find original indices
             const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array, mappingData);
 
-            // Get hash map and clear it
-            const hashMap = self.arrayHashMaps.get(arrayPath) || new Map();
-            hashMap.clear();
-
             // Store array to be able to compare later
             foreachElement._pacPreviousArray = array;
 
@@ -6956,15 +6955,11 @@
 
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
+            const indexMap = self.buildIndexMap(sourceArray, array);
+
             array.forEach((item, renderIndex) => {
                 // Find the original index in the source array
-                const originalIndex = self.findOriginalIndex(item, sourceArray, renderIndex);
-
-                // Store in mapping data for later diffing
-                const contentHash = self.createForeachEntryHash(item, originalIndex);
-
-                // Put hash in map
-                hashMap.set(contentHash, originalIndex);
+                const originalIndex = indexMap.has(renderIndex) ? indexMap.get(renderIndex) : renderIndex;
 
                 // Build the HTML for this item
                 completeHTML += self.buildForeachItemHTML(
@@ -6974,9 +6969,6 @@
 
             // Set the complete HTML at once - this preserves comment structure
             foreachElement.innerHTML = completeHTML;
-
-            // Add to hash map
-            this.arrayHashMaps.set(arrayPath, hashMap);
 
             // Cache context on item elements for fast lookups
             this.cacheContextOnItemElements(foreachElement);
@@ -7403,19 +7395,38 @@
      * @returns {HTMLElement[]} Elements whose foreach bindings depend on the array.
      */
     Context.prototype.findForeachElementsByArrayPath = function (arrayPath) {
-        // Collect elements that need to be re-rendered
         const elementsToUpdate = [];
 
-        // Scan all registered interpolation mappings
         for (const [element, mappingData] of this.interpolationMap) {
-            if (mappingData.bindings && mappingData.bindings.foreach) {
-                // Match either raw foreach expression or resolved source array
-                if (
-                    mappingData.foreachExpr === arrayPath ||
-                    mappingData.sourceArray === arrayPath
-                ) {
+            // Do not do anything if no foreach was mapped
+            if (!mappingData.bindings?.foreach) {
+                continue;
+            }
+
+            // Fetch the foreach expression and source array
+            const { foreachExpr, sourceArray } = mappingData;
+
+            // Check whether arrayPath is or descends from the bound expression.
+            // e.g. "rows[1].cells[3]" should match a foreach bound to "rows[1].cells".
+            const matches = (expr) => expr === arrayPath || arrayPath.startsWith(expr + '[');
+
+            // Try the raw expressions first — no allocation needed
+            if (matches(foreachExpr) || matches(sourceArray)) {
+                elementsToUpdate.push(element);
+                continue;
+            }
+
+            // foreachExpr may be scoped (e.g. "row.cells" inside an outer foreach),
+            // so resolve it against this element's context and try again.
+            // Result is cached on mappingData to avoid redundant resolution.
+            try {
+                const resolvedExpr = (mappingData._resolvedForeachExpr ??= this.normalizePath(foreachExpr, element));
+
+                if (matches(resolvedExpr)) {
                     elementsToUpdate.push(element);
                 }
+            } catch (_e) {
+                // normalizePath throws for malformed expressions — skip silently
             }
         }
 
@@ -7548,6 +7559,7 @@
             delete element._pacPreviousArray;
             delete element._pacDynamicClass;
             delete element._pacForeachChain;
+            delete element._pacForeachContext;
         });
 
         textNodesToRemove.forEach(textNode => {
@@ -7688,31 +7700,7 @@
     };
 
     /**
-     * Creates a stable hash for a foreach entry based on content data, foreach ID, and logical index.
-     * This hash can be used for change detection, caching, or reconciliation in foreach loops.
-     * @param {*} contentData - The data item being rendered (object, primitive, etc.)
-     * @param {number} index - The logical index in the source array (not renderIndex)
-     * @returns {string} A hash string representing this foreach entry
-     */
-    Context.prototype.createForeachEntryHash = function(contentData, index) {
-        if (typeof index !== 'number' || index < 0 || !Number.isInteger(index)) {
-            throw new Error('index must be a non-negative integer');
-        }
-
-        // Serialize the content data to a stable string representation
-        const contentHash = this.createContentHash(contentData);
-
-        // Combine all components with delimiters to avoid collisions
-        // Format: "foreachId|index|contentHash"
-        const combined = `${index}|${contentHash}`;
-
-        // Create a simple but effective hash using djb2 algorithm
-        return Utils.djb2Hash(combined);
-    }
-
-    /**
      * Builds the HTML string for a single foreach item, wrapped in boundary comments.
-     * Used by both renderForeach (full rebuild) and addItems (incremental insert).
      * @param {string} foreachId - The unique identifier for this foreach loop
      * @param {string} template - The raw HTML template for one iteration
      * @param {number} originalIndex - The item's index in the source array
@@ -7724,367 +7712,6 @@
             template +
             `<!-- /pac-foreach-item -->`;
     }
-
-    /**
-     * Classifies changes between old and new arrays based on content hashes.
-     * This function enables efficient DOM diffing by identifying what items were
-     * added, removed, moved, or remained unchanged between array renders.
-     * Uses the existing createForeachEntryHash method for consistent hashing.
-     * @param {Map<string, number>} oldHashMap - Map of hash -> index from previous render
-     * @param {Array} newArray - New array data to be rendered
-     * @returns {{removed: *[], moved: *[], added: *[], unchanged: *[]}} Classification object with arrays for each change type
-     * @returns {number[]} returns.removed - Indices of items to remove from DOM (sorted high to low)
-     * @returns {Object[]} returns.moved - Items that moved positions [{from: oldIndex, to: newIndex, hash}]
-     * @returns {number[]} returns.added - Indices where new items should be inserted
-     * @returns {number[]} returns.unchanged - Indices of items that stayed in same position
-     */
-    Context.prototype.classifyArrayChanges = function(oldHashMap, newArray) {
-        const self = this;
-
-        // Step 1: Generate hash map for the new array state
-        const newHashMap = new Map();
-
-        // Create hashes for new array
-        newArray.forEach((item, index) => {
-            const hash = self.createForeachEntryHash(item, index);
-            newHashMap.set(hash, index); // hash -> newIndex mapping
-        });
-
-        // Initialize result object to collect our classifications
-        const result = {
-            removed: [],    // Items present in old array but missing in new array
-            moved: [],      // Items present in both arrays but at different positions
-            added: [],      // Items present in new array but missing in old array
-            unchanged: []   // Items present in both arrays at the same position
-        };
-
-        // Step 2: Find removed items by checking old hashes against new array
-        // If an old hash is not found in the new array, the item was deleted
-        oldHashMap.forEach((oldIndex, hash) => {
-            if (!newHashMap.has(hash)) {
-                result.removed.push(oldIndex);
-            }
-        });
-
-        // Step 3: Process each item in the new array to find moves, adds, and unchanged
-        newHashMap.forEach((newIndex, hash) => {
-            if (oldHashMap.has(hash)) {
-                // This hash existed in the previous render
-                const oldIndex = oldHashMap.get(hash);
-
-                if (oldIndex === newIndex) {
-                    // Same position in both arrays - no DOM operation needed
-                    result.unchanged.push(newIndex);
-                } else {
-                    // Different position - DOM element needs to be moved
-                    result.moved.push({
-                        from: oldIndex,    // Where the DOM element currently is
-                        to: newIndex,      // Where it needs to move to
-                        hash: hash         // Hash for debugging/verification
-                    });
-                }
-            } else {
-                // This hash is new - DOM element needs to be created
-                result.added.push(newIndex);
-            }
-        });
-
-        // Step 4: Sort arrays to ensure safe DOM manipulation order
-        // CRITICAL: Process removals from highest index to lowest to avoid index shifting
-        result.removed.sort((a, b) => b - a);
-
-        // Process moves by target position to maintain proper order during DOM manipulation
-        result.moved.sort((a, b) => a.to - b.to);
-
-        // Process additions in ascending order to maintain natural insertion order
-        result.added.sort((a, b) => a - b);
-
-        // Return the result
-        return result;
-    }
-
-    /**
-     * Determines if changes can be handled with simple operations
-     * @param {Object} changes - The changes object containing arrays of added, removed, and moved items
-     * @param {Array} changes.added - Items that were added to the array
-     * @param {Array} changes.removed - Items that were removed from the array
-     * @param {Array} changes.moved - Items that were moved/reordered within the array
-     * @returns {boolean} True if changes can be handled with simple DOM operations, false if full rebuild needed
-     */
-    Context.prototype.canHandleSimply = function (changes) {
-        const totalChanges = changes.added.length + changes.removed.length + changes.moved.length;
-
-        // Skip simple handling if changes are too complex
-        if (totalChanges > 10) {
-            return false;
-        }
-
-        // Handle these patterns efficiently:
-        return (
-            // Pure additions anywhere
-            (changes.added.length > 0 && changes.removed.length === 0 && changes.moved.length === 0) ||
-
-            // Pure removals anywhere
-            (changes.removed.length > 0 && changes.added.length === 0 && changes.moved.length === 0) ||
-
-            // Pure moves (reordering without add/remove)
-            (changes.moved.length > 0 && changes.added.length === 0 && changes.removed.length === 0) ||
-
-            // Simple replace operations (same number of items added/removed, no moves)
-            (changes.added.length === changes.removed.length && changes.moved.length === 0) ||
-
-            // Small mixed operations (a few changes of different types)
-            (totalChanges <= 3)
-        );
-    };
-
-    /**
-     * Handles simple array changes with targeted DOM operations
-     * FIXED: Proper hash map cleanup and index management
-     * @param {HTMLElement} element - The DOM element containing the array representation
-     * @param {Object} changes - The changes object with added, removed, and moved arrays
-     * @param {Array} newArray - The complete updated array after changes
-     * @param {string} arrayPath - The property path to the array being updated
-     * @returns {void}
-     */
-    Context.prototype.handleSimpleArrayChange = function(element, changes, newArray, arrayPath) {
-        const mappingData = this.interpolationMap.get(element);
-
-        // Apply removals first (hash map will be rebuilt after all operations)
-        if (changes.removed.length > 0) {
-            this.removeItems(element, changes.removed);
-        }
-
-        if (changes.moved.length > 0) {
-            this.moveItems(element, changes.moved);
-        }
-
-        if (changes.added.length > 0) {
-            this.addItems(element, changes.added, newArray, mappingData);
-        }
-
-        // Scan newly added elements for bindings
-        this.scanAndRegisterNewElements(element);
-
-        // Rebuild hash map from scratch after all operations
-        this.rebuildHashMap(element, newArray, arrayPath);
-
-        // Store new array
-        element._pacPreviousArray = newArray;
-
-        // Sync <select> DOM state back to model after child elements changed
-        this.syncSelectAfterForeach(element);
-    };
-
-    /**
-     * Rebuilds the hash map from current DOM state
-     * This ensures the hash map stays synchronized with actual DOM content
-     * @param {HTMLElement} element - The foreach container
-     * @param {Array} currentArray - Current array data
-     * @param {string} arrayPath - Path to the array
-     */
-    Context.prototype.rebuildHashMap = function(element, currentArray, arrayPath) {
-        const newHashMap = new Map();
-
-        // Walk through current DOM and rebuild hash map
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_COMMENT);
-        let node;
-
-        while ((node = walker.nextNode())) {
-            const match = node.textContent.match(FOREACH_INDEX_REGEX);
-            if (match) {
-                const originalIndex = parseInt(match[2], 10);
-                const renderIndex = parseInt(match[3], 10);
-
-                // Get the current item data
-                if (renderIndex < currentArray.length) {
-                    const item = currentArray[renderIndex];
-                    const hash = this.createForeachEntryHash(item, originalIndex);
-                    newHashMap.set(hash, originalIndex);
-                }
-            }
-        }
-
-        // Replace the hash map
-        this.arrayHashMaps.set(arrayPath, newHashMap);
-    };
-
-    /**
-     * Removes items from a foreach-rendered element and cleans up all associated references
-     * to prevent memory leaks. This method handles both DOM removal and tracking map cleanup.
-     * @param {Element} element - The container element containing the items to remove
-     * @param {number[]} removedIndices - Array of original indices of items to remove
-     * @throws {TypeError} If element is not a valid DOM Element
-     * @throws {TypeError} If removedIndices is not an array
-     */
-    Context.prototype.removeItems = function(element, removedIndices) {
-        // Validate input parameters to catch programming errors early
-        if (!(element instanceof Element)) {
-            throw new TypeError('element must be a DOM Element');
-        }
-
-        if (!Array.isArray(removedIndices)) {
-            throw new TypeError('removedIndices must be an array');
-        }
-
-        // Store reference to context for use in walker callback
-        // (callbacks don't have access to 'this' unless bound or captured)
-        const self = this;
-
-        // Process each index that needs to be removed
-        removedIndices.forEach(index => {
-            // Find all DOM nodes associated with this foreach item
-            // (includes the comment markers and all content between them)
-            const nodes = this.findItemNodes(element, index);
-
-            nodes.forEach(node => {
-                // STEP 1: CLEANUP PHASE - Remove all map references before DOM removal
-                // This prevents memory leaks by ensuring removed nodes can be garbage collected
-
-                // Create a tree walker to traverse all descendant nodes
-                // We need to walk the entire subtree because nested elements might have their own bindings
-                const walker = document.createTreeWalker(
-                    // Start from the node itself if it's an element, otherwise from its parent
-                    // (text/comment nodes can't be tree roots, so we use their parent)
-                    node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement,
-
-                    // Walk elements, text nodes, and comment nodes
-                    // (all three types can have entries in our tracking maps)
-                    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT,
-
-                    // Filter function to only process nodes that belong to this component
-                    // This prevents accidentally cleaning up nodes from nested child components
-                    {
-                        acceptNode(n) {
-                            // Check if this node belongs to our container, not a nested component
-                            // belongsToPacContainer returns true only if 'element' is the immediate PAC parent
-                            return Utils.belongsToPacContainer(element, n)
-                                ? NodeFilter.FILTER_ACCEPT  // Process this node
-                                : NodeFilter.FILTER_SKIP;   // Skip this node and its descendants
-                        }
-                    }
-                );
-
-                // Walk through all nodes in the subtree and clean up map references
-                let currentNode;
-
-                while ((currentNode = walker.nextNode())) {
-                    // Clean up based on node type - each type uses a different map
-
-                    if (currentNode instanceof Element) {
-                        // Element nodes have attribute bindings (wp-text, wp-class, etc.)
-                        // Remove from interpolationMap to release binding metadata
-                        self.interpolationMap.delete(currentNode);
-                    } else if (currentNode.nodeType === Node.TEXT_NODE) {
-                        // Text nodes have interpolation templates ({{variable}})
-                        // Remove from textInterpolationMap to release template data
-                        self.textInterpolationMap.delete(currentNode);
-                    } else if (currentNode.nodeType === Node.COMMENT_NODE) {
-                        // Comment nodes might have conditional directives (<!-- wp-if: condition -->)
-                        // Remove from commentBindingMap to release conditional metadata
-                        self.commentBindingMap.delete(currentNode);
-                    }
-                }
-
-                // STEP 2: DOM REMOVAL PHASE - Remove the node from the DOM tree
-                // At this point, all map references have been cleaned up, so the node
-                // and its descendants can be garbage collected once removed from the DOM
-                node.remove();
-            });
-        });
-    };
-
-    /**
-     * Handles DOM node repositioning while maintaining proper insertion order.
-     * Each move operation relocates nodes from their current position to a new target position.
-     * @param {Element} element - The container element containing the items to move
-     * @param {Object[]} moves - Array of move operations
-     * @param {number} moves[].from - Original index of the item to move
-     * @param {number} moves[].to - Target index where the item should be moved
-     */
-    Context.prototype.moveItems = function(element, moves) {
-        // Input validation
-        if (!(element instanceof Element)) {
-            throw new TypeError('element must be a DOM Element');
-        }
-
-        if (!Array.isArray(moves)) {
-            throw new TypeError('moves must be an array');
-        }
-
-        moves.forEach(move => {
-            // Validate move object structure
-            if (typeof move !== 'object' || move === null) {
-                throw new TypeError('each move must be an object');
-            }
-
-            if (typeof move.from !== 'number' || typeof move.to !== 'number') {
-                throw new TypeError('move objects must have numeric "from" and "to" properties');
-            }
-
-            if (move.from < 0 || move.to < 0) {
-                throw new RangeError('move indices cannot be negative');
-            }
-
-            const itemNodes = this.findItemNodes(element, move.from);
-            const insertPoint = this.findInsertionPoint(element, move.to);
-
-            itemNodes.forEach(node => {
-                if (insertPoint) {
-                    element.insertBefore(node, insertPoint);
-                } else {
-                    // Insert at end when no insertion point found (target index beyond current items)
-                    element.appendChild(node);
-                }
-            });
-        });
-    };
-
-    /**
-     * Adds new items to a foreach-rendered element at specified indices
-     * @param {HTMLElement} element - The DOM element containing the foreach-rendered items
-     * @param {number[]} addedIndices - Array of indices where new items should be inserted
-     * @param {Array} newArray - The updated array containing all items including new ones
-     * @param {Object} mappingData - Configuration object for the foreach mapping
-     * @param {string} mappingData.foreachId - Unique identifier for this foreach instance
-     * @param {string} mappingData.template - HTML template string for rendering items
-     * @param {string} mappingData.foreachExpr - The foreach expression used for filtering/mapping
-     */
-    Context.prototype.addItems = function(element, addedIndices, newArray, mappingData) {
-        // Get the source array to determine original indices
-        const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, newArray, mappingData);
-
-        addedIndices.forEach(index => {
-            const item = newArray[index];
-
-            // Find the original index in the source array for this item
-            const originalIndex = this.findOriginalIndex(item, sourceArray, index);
-
-            // Create HTML with proper comments
-            const itemHTML = this.buildForeachItemHTML(
-                mappingData.foreachId, mappingData.template, originalIndex, index
-            );
-
-            // Create appropriate container based on parent element type
-            const tempContainer = this.createTemporaryContainer(element);
-            tempContainer.innerHTML = itemHTML;
-
-            // Cache context on the newly created item elements
-            this.cacheContextOnItemElements(tempContainer);
-
-            // Find insertion point
-            const insertPoint = this.findInsertionPoint(element, index);
-
-            // Insert all nodes
-            while (tempContainer.firstChild) {
-                if (insertPoint) {
-                    element.insertBefore(tempContainer.firstChild, insertPoint);
-                } else {
-                    element.appendChild(tempContainer.firstChild);
-                }
-            }
-        });
-    };
 
     /**
      * Creates an appropriate temporary container based on the parent element type
@@ -8115,78 +7742,6 @@
             default:
                 return document.createElement('div');
         }
-    };
-
-    /**
-     * Finds all DOM nodes for a foreach item by its index, handling nested foreach loops
-     * @param {Element} element - The DOM element to search within
-     * @param {number} index - The index of the foreach item to find
-     * @returns {Node[]} Array of DOM nodes that belong to the foreach item at the specified index
-     */
-    Context.prototype.findItemNodes = function(element, index) {
-        const nodes = [];
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
-
-        let collecting = false;  // Whether we're currently collecting nodes for our target item
-        let depth = 0;           // Nesting depth counter for handling nested foreach loops
-        let node;
-
-        while ((node = walker.nextNode())) {
-            if (node.nodeType === Node.COMMENT_NODE) {
-                const text = node.textContent.trim();
-                const match = text.match(FOREACH_INDEX_REGEX);
-
-                // Check if this is the start comment for our target index
-                if (match && parseInt(match[2], 10) === index && !collecting) {
-                    collecting = true;
-                    depth = 0;
-                    nodes.push(node);
-                } else if (collecting) {
-                    // We're collecting - add this comment node
-                    nodes.push(node);
-
-                    if (match) {
-                        // Found a nested foreach start - increment depth
-                        depth++;
-                    } else if (text === '/pac-foreach-item') {
-                        // Found a foreach end comment
-                        if (depth === 0) {
-                            // This closes our target item - stop collecting
-                            break;
-                        }
-
-                        // This closes a nested foreach item - decrement depth
-                        depth--;
-                    }
-                }
-            } else if (collecting) {
-                // Collect all non-comment nodes while we're in collection mode
-                nodes.push(node);
-            }
-        }
-
-        return nodes;
-    };
-
-    /**
-     * Finds the insertion point for an item at the given index within a foreach loop
-     * @param {Element} element - The DOM element to search within
-     * @param {number} targetIndex - The index where the new item should be inserted
-     * @returns {Comment|null} The comment node marking where to insert, or null to append at end
-     */
-    Context.prototype.findInsertionPoint = function(element, targetIndex) {
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_COMMENT);
-
-        let node;
-        while ((node = walker.nextNode())) {
-            const match = node.textContent.match(FOREACH_INDEX_REGEX);
-
-            if (match && parseInt(match[3], 10) >= targetIndex) {
-                return node;
-            }
-        }
-
-        return null; // Append at end
     };
 
     // =============================================================================
