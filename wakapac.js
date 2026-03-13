@@ -7898,7 +7898,7 @@
         this.scanAndRegisterNewElements(element);
 
         // Rebuild hash map from scratch after all operations
-        this.rebuildHashMap(element, newArray, arrayPath);
+        this.rebuildHashMap(element, newArray, arrayPath, mappingData.foreachId);
 
         // Store new array
         element._pacPreviousArray = newArray;
@@ -7913,8 +7913,9 @@
      * @param {HTMLElement} element - The foreach container
      * @param {Array} currentArray - Current array data
      * @param {string} arrayPath - Path to the array
+     * @param foreachId
      */
-    Context.prototype.rebuildHashMap = function(element, currentArray, arrayPath) {
+    Context.prototype.rebuildHashMap = function(element, currentArray, arrayPath, foreachId) {
         const newHashMap = new Map();
 
         // Walk through current DOM and rebuild hash map
@@ -7924,7 +7925,7 @@
         while ((node = walker.nextNode())) {
             const match = node.textContent.match(FOREACH_INDEX_REGEX);
 
-            if (match) {
+            if (match && match[1].trim() === foreachId) {
                 const renderIndex = parseInt(match[3], 10);
 
                 // Get the current item data
@@ -8032,9 +8033,9 @@
      * @param {Object[]} moves - Array of move operations
      * @param {number} moves[].from - Original index of the item to move
      * @param {number} moves[].to - Target index where the item should be moved
+     * @param foreachId
      */
-    Context.prototype.moveItems = function(element, moves) {
-        // Input validation
+    Context.prototype.moveItems = function(element, moves, foreachId) {
         if (!(element instanceof Element)) {
             throw new TypeError('element must be a DOM Element');
         }
@@ -8044,7 +8045,6 @@
         }
 
         moves.forEach(move => {
-            // Validate move object structure
             if (typeof move !== 'object' || move === null) {
                 throw new TypeError('each move must be an object');
             }
@@ -8057,38 +8057,27 @@
                 throw new RangeError('move indices cannot be negative');
             }
 
-            const itemNodes = this.findItemNodes(element, move.from);
-            const insertPoint = this.findInsertionPoint(element, move.to);
+            const itemNodes = this.findItemNodes(element, move.from, foreachId);
+            const insertPoint = this.findInsertionPoint(element, move.to, foreachId);
 
             itemNodes.forEach(node => {
                 if (insertPoint) {
                     element.insertBefore(node, insertPoint);
                 } else {
-                    // Insert at end when no insertion point found (target index beyond current items)
                     element.appendChild(node);
                 }
             });
 
-            // After moving, update the start comment marker to reflect the new index
-            // and invalidate any stale _pacForeachContext / _pacForeachChain caches
-            // on all moved nodes. Without this, normalizePath and extractClosestForeachContext
-            // will resolve scope variables to the pre-move index, causing wrong path matches
-            // and incorrect reactive updates for nested foreach expressions.
             itemNodes.forEach(node => {
                 if (node.nodeType === Node.COMMENT_NODE) {
                     const match = node.textContent.trim().match(FOREACH_INDEX_REGEX);
-
-                    if (match) {
-                        // Only update renderIndex — index tracks the item's source array position
-                        // and must remain stable so handleDomClicks can index into abstraction[foreachExpr]
+                    if (match && match[1].trim() === foreachId) {
                         node.textContent = ` pac-foreach-item: ${match[1].trim()}, index=${move.to}, renderIndex=${move.to} `;
                     }
                 } else if (node.nodeType === Node.ELEMENT_NODE) {
-                    // Invalidate cached context so it is recomputed from the updated comment
                     delete node._pacForeachContext;
                     delete node._pacForeachChain;
 
-                    // Invalidate caches on all descendants too
                     const descendants = node.querySelectorAll('*');
                     for (let i = 0; i < descendants.length; i++) {
                         delete descendants[i]._pacForeachContext;
