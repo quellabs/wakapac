@@ -55,11 +55,11 @@
  * ║    new Max(n)                                                                    ║
  * ║    new MinLength(n)                                                              ║
  * ║    new MaxLength(n)                                                              ║
- * ║    new Pattern(regex, message)                                                   ║
+ * ║    new Pattern(regex)                                                            ║
  * ║                                                                                  ║
  * ║  Custom rules:                                                                   ║
- * ║    Any object with a validate(value) method that returns null or an error        ║
- * ║    message string.                                                               ║
+ * ║    Any object with a validate(value) method that returns true (valid) or         ║
+ * ║    false (invalid).                                                              ║
  * ║                                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -139,153 +139,134 @@
 
     /**
      * Fails if the value is empty (null, undefined, empty string, or whitespace only).
-     * @param {string} [message='This field is required']
      */
-    function NotBlank(message) {
-        this.message = message || 'This field is required';
-    }
+    function NotBlank() {}
 
     NotBlank.prototype.validate = function (value) {
         // Coerce to string so numeric 0 is not treated as blank.
-        return (value === null || value === undefined || String(value).trim() === '')
-            ? this.message
-            : null;
+        return (!(value === null || value === undefined || String(value).trim() === ''));
     };
 
     /**
      * Fails if the value is not a valid email address.
      * Empty values pass — combine with NotBlank() if the field is required.
-     * @param {string} [message='Must be a valid email address']
      */
-    function Email(message) {
-        this.message = message || 'Must be a valid email address';
-    }
+    function Email() {}
 
     Email.prototype.validate = function (value) {
         // Let NotBlank() own the empty-value case; Email only checks format.
         if (value === null || value === undefined || String(value).trim() === '') {
-            return null;
+            return true;
         }
 
-        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))
-            ? null
-            : this.message;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value));
     };
 
     /**
      * Fails if the numeric value is less than n.
      * Empty values pass — combine with NotBlank() if the field is required.
      * @param {number} n
-     * @param {string} [message]
      */
-    function Min(n, message) {
-        this.n       = n;
-        this.message = message || 'Must be at least ' + n;
+    function Min(n) {
+        this.n = n;
     }
 
     Min.prototype.validate = function (value) {
         // Empty string / null / undefined — let NotBlank() handle the required case.
         if (value === null || value === undefined || value === '') {
-            return null;
+            return true;
         }
 
         const num = Number(value);
 
-        // Non-numeric input fails with the same message as an out-of-range value.
+        // Non-numeric input fails the same as an out-of-range value.
         if (Number.isNaN(num)) {
-            return this.message;
+            return false;
         }
 
-        return num >= this.n ? null : this.message;
+        return num >= this.n;
     };
 
     /**
      * Fails if the numeric value is greater than n.
      * Empty values pass — combine with NotBlank() if the field is required.
      * @param {number} n
-     * @param {string} [message]
      */
-    function Max(n, message) {
-        this.n       = n;
-        this.message = message || 'Must be at most ' + n;
+    function Max(n) {
+        this.n = n;
     }
 
     Max.prototype.validate = function (value) {
         // Empty string / null / undefined — let NotBlank() handle the required case.
         if (value === null || value === undefined || value === '') {
-            return null;
+            return true;
         }
 
         const num = Number(value);
 
-        // Non-numeric input fails with the same message as an out-of-range value.
+        // Non-numeric input fails the same as an out-of-range value.
         if (Number.isNaN(num)) {
-            return this.message;
+            return false;
         }
 
-        return num <= this.n ? null : this.message;
+        return num <= this.n;
     };
 
     /**
      * Fails if the string length is less than n characters.
      * Empty values pass — combine with NotBlank() if the field is required.
      * @param {number} n
-     * @param {string} [message]
      */
-    function MinLength(n, message) {
-        this.n       = n;
-        this.message = message || 'Must be at least ' + n + ' characters';
+    function MinLength(n) {
+        this.n = n;
     }
 
     MinLength.prototype.validate = function (value) {
         // Treat null/undefined as zero-length rather than throwing on String() coercion.
         if (value === null || value === undefined) {
-            return null;
+            return true;
         }
 
-        return String(value).length >= this.n ? null : this.message;
+        return String(value).length >= this.n;
     };
 
     /**
      * Fails if the string length is greater than n characters.
      * @param {number} n
-     * @param {string} [message]
      */
-    function MaxLength(n, message) {
-        this.n       = n;
-        this.message = message || 'Must be at most ' + n + ' characters';
+    function MaxLength(n) {
+        this.n = n;
     }
 
     MaxLength.prototype.validate = function (value) {
         // Empty null / undefined — let NotBlank() handle the required case.
         if (value === null || value === undefined) {
-            return null;
+            return true;
         }
 
-        return String(value).length <= this.n ? null : this.message;
+        return String(value).length <= this.n;
     };
 
     /**
      * Fails if the value does not match the given regular expression.
      * Empty values pass — combine with NotBlank() if the field is required.
      * @param {RegExp} regex
-     * @param {string} [message='Invalid format']
      */
-    function Pattern(regex, message) {
-        this.regex   = regex;
-        this.message = message || 'Invalid format';
+    function Pattern(regex) {
+        this.regex = regex;
     }
 
     Pattern.prototype.validate = function (value) {
         if (value === null || value === undefined || value === '') {
-            return null;
+            return true;
         }
 
         // Reset lastIndex before each test — required for regexes with the g or y flag,
         // where .test() is stateful and advances lastIndex on successive calls.
         this.regex.lastIndex = 0;
 
-        return this.regex.test(String(value)) ? null : this.message;
+        // Run the test
+        return this.regex.test(String(value));
     };
 
     // ─── WakaForm ─────────────────────────────────────────────────────────────────
@@ -634,20 +615,10 @@
                         return success;
                     },
 
-                    deleteProperty(target, prop) {
-                        if (!(prop in target)) {
-                            return true;
-                        }
-
-                        const oldValue = target[prop];
-                        const deleted  = Reflect.deleteProperty(target, prop);
-
-                        // Only notify if the delete actually succeeded.
-                        if (deleted && isReactive(prop)) {
-                            notify(currentPath.concat([prop]), oldValue, undefined);
-                        }
-
-                        return deleted;
+                    deleteProperty(_target, _prop) {
+                        // Deletion is never valid on a form proxy — fields are schema-defined,
+                        // valid and dirty are derived. There is nothing here worth deleting.
+                        throw new Error('wakaForm: deletion is not permitted on form proxies');
                     }
                 });
 
@@ -687,9 +658,8 @@
                     }
 
                     // First failing rule wins — no need to run the rest.
-                    const result = rule.validate(value);
-
-                    if (result !== null && result !== undefined) {
+                    // Rules return true (valid) or false (invalid).
+                    if (!rule.validate(value)) {
                         valid = false;
                         break;
                     }
