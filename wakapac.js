@@ -1228,12 +1228,12 @@
 
             // If the value is an object/array and not already reactive, wrap it in a proxy
             if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+                // Return raw value if the data is already proxied
                 if (val._externalProxy) {
                     return val;
                 }
 
                 const propertyPath = currentPath.concat([prop]);
-                console.log('proxyGetHandler: creating fresh proxy for path', JSON.stringify(propertyPath));
                 return createProxy(val, propertyPath);
             }
 
@@ -5228,10 +5228,12 @@
     Context.prototype.scanAndRegisterNewElements = function(parentElement) {
         const self = this;
 
+        // Scan for new bound elements within this container
         const newBindings = this.scanBindings(parentElement);
         const newTextBindings = this.scanTextBindings(parentElement);
         const newCommentBindings = this.scanCommentBindings(parentElement);
 
+        // Add new bindings to main maps
         newBindings.forEach((mappingData, element) => {
             if (element !== parentElement) {
                 this.interpolationMap.set(element, mappingData);
@@ -5242,11 +5244,15 @@
             this.textInterpolationMap.set(textNode, mappingData);
         });
 
+        // Store comment bindings
         newCommentBindings.forEach((mappingData, commentNode) => {
             this.commentBindingMap.set(commentNode, mappingData);
+
+            // Apply initial state
             self.updateCommentConditional(commentNode, mappingData);
         });
 
+        // Apply initial bindings to new elements
         newBindings.forEach((mappingData, element) => {
             Object.keys(mappingData.bindings).forEach(bindingType => {
                 const bindingData = mappingData.bindings[bindingType];
@@ -5254,6 +5260,7 @@
             });
         });
 
+        // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
@@ -5265,15 +5272,6 @@
             .sort(([, mappingDataA], [, mappingDataB]) =>
                 mappingDataB.depth - mappingDataA.depth
             );
-
-        console.log('scanAndRegister parentElement:', parentElement.getAttribute('data-pac-id') || parentElement.className, 'foreach entries:',
-            foreachEntries.map(([el, data]) => ({
-                expr: data.foreachExpr,
-                foreachId: data.foreachId,
-                connected: el.isConnected,
-                inDOM: document.body.contains(el)
-            }))
-        );
 
         foreachEntries.forEach(([element]) => {
             this.renderForeach(element);
@@ -5663,11 +5661,9 @@
         try {
             // Check if click occurred within a foreach loop context
             const contextInfo = this.extractClosestForeachContext(event.target);
-            console.log('handleDomClicks: contextInfo=', contextInfo);
 
             // Simple case: call method with just the event
             if (!contextInfo) {
-                console.log('handleDomClicks: no contextInfo, simple call');
                 method.call(this.abstraction, event);
                 return;
             }
@@ -5676,11 +5672,8 @@
             const foreachElement = Array.from(this.interpolationMap.entries())
                 .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
 
-            console.log('handleDomClicks: foreachElement=', foreachElement, 'looking for foreachId=', contextInfo.foreachId);
-
             if (!foreachElement) {
                 // Fallback to simple call if foreach element not found
-                console.log('handleDomClicks: no foreachElement, fallback call');
                 method.call(this.abstraction, event);
                 return;
             }
@@ -5695,8 +5688,8 @@
                 this.abstraction,
                 null
             );
+
             const freshItem = liveArray[contextInfo.index];
-            console.log('handleDomClicks: sourceArrayPath=', sourceArrayPath, 'index=', contextInfo.index, 'liveArray.length=', liveArray?.length, 'freshItem=', freshItem);
             method.call(this.abstraction, freshItem, contextInfo.index, event);
         } catch (error) {
             console.error(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
@@ -6291,12 +6284,6 @@
             const element = elements[i];
             const belongs = Utils.belongsToPacContainer(this.container, element);
 
-            console.log('scanBindings:', element.getAttribute('data-pac-bind'),
-                'belongs=', belongs,
-                'connected=', element.isConnected,
-                'closest=', element.closest('[data-pac-id]')?.getAttribute('data-pac-id')
-            );
-
             // Skip elements that don't belong to this container
             if (!belongs) {
                 continue;
@@ -6362,13 +6349,6 @@
                 return;
             }
 
-            console.log('extendBindings entry:',
-                'hasId=', element.hasAttribute('data-pac-foreach-id'),
-                'id=', element.getAttribute('data-pac-foreach-id'),
-                'hasForeachId=', !!mappingData.foreachId,
-                'connected=', element.isConnected
-            );
-
             // Do nothing when the binding already has a foreachId
             if (mappingData.foreachId) {
                 return;
@@ -6382,20 +6362,13 @@
                 const elementByForEach = self.findElementByForEachId(foreachId);
                 const elementData = self.interpolationMap.get(elementByForEach);
 
-                console.log('extendBindings: has foreachId=', foreachId,
-                    'elementByForEach=', elementByForEach,
-                    'elementData=', elementData,
-                    'element.isConnected=', element.isConnected
-                );
-
                 if (elementByForEach && elementData) {
                     interpolationMap.set(element, elementData);
                     self.interpolationMap.delete(elementByForEach);
                     return;
                 }
 
-                // Old element no longer exists — strip the stale id and fall through
-                // to generate a fresh foreachId below
+                // Old element no longer exists — strip the stale id
                 element.removeAttribute('data-pac-foreach-id');
             }
 
@@ -6955,9 +6928,6 @@
             array.forEach((item, renderIndex) => {
                 // Find the original index in the source array
                 const originalIndex = self.findOriginalIndex(item, sourceArray, renderIndex);
-
-                // Store in mapping data for later diffing
-                const contentHash = self.createForeachEntryHash(item, originalIndex);
 
                 // Build the HTML for this item
                 completeHTML += self.buildForeachItemHTML(
@@ -7695,29 +7665,6 @@
         // Entry point: return stable representation for the given input
         return createStableRepresentation(inputData);
     };
-
-    /**
-     * Creates a stable hash for a foreach entry based on content data, foreach ID, and logical index.
-     * This hash can be used for change detection, caching, or reconciliation in foreach loops.
-     * @param {*} contentData - The data item being rendered (object, primitive, etc.)
-     * @param {number} index - The logical index in the source array (not renderIndex)
-     * @returns {string} A hash string representing this foreach entry
-     */
-    Context.prototype.createForeachEntryHash = function(contentData, index) {
-        if (typeof index !== 'number' || index < 0 || !Number.isInteger(index)) {
-            throw new Error('index must be a non-negative integer');
-        }
-
-        // Serialize the content data to a stable string representation
-        const contentHash = this.createContentHash(contentData);
-
-        // Combine all components with delimiters to avoid collisions
-        // Format: "foreachId|index|contentHash"
-        const combined = `${index}|${contentHash}`;
-
-        // Create a simple but effective hash using djb2 algorithm
-        return Utils.djb2Hash(combined);
-    }
 
     /**
      * Builds the HTML string for a single foreach item, wrapped in boundary comments.
