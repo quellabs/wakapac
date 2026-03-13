@@ -6858,14 +6858,28 @@
     // FOREACH RENDERING (Array → DOM List Generation)
     // =============================================================================
 
-    Context.prototype.buildIndexMap = function (sourceArray) {
-        const map = new Map();
+    /**
+     * Builds a mapping from render indices to source indices, accounting for duplicate values.
+     * @param {Array} sourceArray - The original unfiltered array containing all items.
+     * @param {Array} filteredArray - A subset (or reordering) of sourceArray to map back to source positions.
+     * @returns {Map<number, number>} A Map where each key is a render index (position in filteredArray)
+     *                                and each value is the corresponding source index (position in sourceArray).
+     */
+    Context.prototype.buildIndexMap = function (sourceArray, filteredArray) {
+        const claimed = new Set();
+        const result = new Map(); // keyed by renderIndex
 
-        sourceArray.forEach((item, index) => {
-            map.set(item, index);
+        filteredArray.forEach((item, renderIndex) => {
+            for (let i = 0; i < sourceArray.length; i++) {
+                if (!claimed.has(i) && sourceArray[i] === item) {
+                    claimed.add(i);
+                    result.set(renderIndex, i);
+                    break;
+                }
+            }
         });
 
-        return map;
+        return result;
     }
 
     /**
@@ -6927,16 +6941,11 @@
 
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
-            const indexMap = self.buildIndexMap(sourceArray);
+            const indexMap = self.buildIndexMap(sourceArray, array);
 
             array.forEach((item, renderIndex) => {
                 // Find the original index in the source array
-                let originalIndex = indexMap.get(item);
-
-                // Makes sure original index is valid
-                if (originalIndex === undefined) {
-                    originalIndex = renderIndex;
-                }
+                const originalIndex = indexMap.has(renderIndex) ? indexMap.get(renderIndex) : renderIndex;
 
                 // Build the HTML for this item
                 completeHTML += self.buildForeachItemHTML(
