@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaForm — test suite</title>
+    <style>
+        body { font-family: monospace; padding: 2rem; background: #1e1e1e; color: #d4d4d4; }
+        h1   { color: #9cdcfe; margin-bottom: 0.25rem; font-size: 1.1rem; }
+        p.subtitle { color: #6a9955; margin-top: 0; margin-bottom: 2rem; font-size: 0.85rem; }
+
+        #results { display: flex; flex-direction: column; gap: 0.35rem; }
+
+        .suite  { color: #569cd6; margin-top: 1rem; margin-bottom: 0.2rem; font-weight: bold; }
+        .pass   { color: #4ec9b0; }
+        .pass::before { content: '✓ '; }
+        .fail   { color: #f44747; }
+        .fail::before { content: '✗ '; }
+        .info   { color: #808080; padding-left: 1.5rem; font-size: 0.85rem; }
+
+        #summary {
+            margin-top: 2rem;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        #summary.all-pass { background: #1e3a2f; color: #4ec9b0; }
+        #summary.has-fail { background: #3a1e1e; color: #f44747; }
+    </style>
+</head>
+<body>
+
+<h1>WakaForm — test suite</h1>
+<p class="subtitle">Open DevTools console for detailed failure output</p>
+<div id="results"></div>
+<div id="summary"></div>
+
+<!--
+    Replace these paths with your actual script locations.
+    wakaform.js must be loaded AFTER wakapac.js.
+-->
+<script src="../wakapac.js"></script>
+<script src="../wakaform.js"></script>
+
+<script>
+    (function () {
+        'use strict';
+
+        // ─── Mini test runner ────────────────────────────────────────────────────
+
+        const results = document.getElementById('results');
+        const summary = document.getElementById('summary');
+        let passed = 0;
+        let failed = 0;
+        let currentSuite = null;
+
+        function suite(name) {
+            currentSuite = name;
+            const el = document.createElement('div');
+            el.className = 'suite';
+            el.textContent = name;
+            results.appendChild(el);
+        }
+
+        function pass(name) {
+            passed++;
+            const el = document.createElement('div');
+            el.className = 'pass';
+            el.textContent = name;
+            results.appendChild(el);
+        }
+
+        function fail(name, reason) {
+            failed++;
+            console.error('[FAIL]', currentSuite, '>', name, '\n', reason);
+            const el = document.createElement('div');
+            el.className = 'fail';
+            el.textContent = name;
+            results.appendChild(el);
+            const info = document.createElement('div');
+            info.className = 'info';
+            info.textContent = String(reason);
+            results.appendChild(info);
+        }
+
+        function assert(condition, message) {
+            if (!condition) throw new Error('Assertion failed: ' + message);
+        }
+
+        function assertEqual(actual, expected, label) {
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                throw new Error(
+                    (label || 'assertEqual') +
+                    '\n  expected: ' + JSON.stringify(expected) +
+                    '\n  actual:   ' + JSON.stringify(actual)
+                );
+            }
+        }
+
+        function assertThrows(fn, messageFragment) {
+            try {
+                fn();
+                throw new Error('Expected a throw but none occurred');
+            } catch (e) {
+                if (messageFragment && !e.message.includes(messageFragment)) {
+                    throw new Error(
+                        'Wrong error message.\n  expected to contain: ' + messageFragment +
+                        '\n  actual: ' + e.message
+                    );
+                }
+            }
+        }
+
+        async function test(name, fn) {
+            try {
+                await fn();
+                pass(name);
+            } catch (e) {
+                fail(name, e.message || e);
+            }
+        }
+
+        // ─── Helpers ─────────────────────────────────────────────────────────────
+
+        /**
+         * Waits one microtask tick so synchronous proxy notifications
+         * dispatched via dispatchEvent have time to propagate.
+         */
+        function tick() {
+            return new Promise(function (resolve) { setTimeout(resolve, 0); });
+        }
+
+        /**
+         * Collects pac:form-changed events fired on document for a given formId.
+         * Returns { events, restore }.
+         */
+        function captureFormEvents(formId) {
+            const events = [];
+
+            function handler(e) {
+                if (!formId || e.detail.formId === formId) {
+                    events.push(e.detail);
+                }
+            }
+
+            document.addEventListener('pac:form-changed', handler);
+
+            return {
+                events,
+                restore: function () {
+                    document.removeEventListener('pac:form-changed', handler);
+                }
+            };
+        }
+
+        // ─── Test suites ──────────────────────────────────────────────────────────
+
+        async function runAll() {
+
+            // ── 1. createForm() validation ────────────────────────────────────────
+            suite('1. createForm() validation');
+
+            await test('throws if schema is not a plain object', function () {
+                assertThrows(function () { wakaForm.createForm(null); }, 'schema must be a plain object');
+                assertThrows(function () { wakaForm.createForm([]); },  'schema must be a plain object');
+                assertThrows(function () { wakaForm.createForm('x'); }, 'schema must be a plain object');
+            });
+
+            await test('throws if a field definition is not a plain object', function () {
+                assertThrows(function () {
+                    wakaForm.createForm({ username: 'bad' });
+                }, 'must be a plain object');
+            });
+
+            await test('throws if a field value is a plain object', function () {
+                assertThrows(function () {
+                    wakaForm.createForm({ meta: { value: {} } });
+                }, 'value must be a primitive');
+            });
+
+            await test('throws if a field value is an array', function () {
+                assertThrows(function () {
+                    wakaForm.createForm({ tags: { value: [] } });
+                }, 'value must be a primitive');
+            });
+
+            await test('accepts null as initial value', function () {
+                const form = wakaForm.createForm({ field: { value: null } });
+                assertEqual(form.field.value, null, 'value');
+            });
+
+            await test('defaults missing value to empty string', function () {
+                const form = wakaForm.createForm({ field: {} });
+                assertEqual(form.field.value, '', 'default value');
+            });
+
+            await test('defaults missing rules to empty array — field always valid', function () {
+                const form = wakaForm.createForm({ field: { value: '' } });
+                assertEqual(form.field.valid, true, 'valid');
+            });
+
+            // ── 2. Built-in rules — NotBlank ──────────────────────────────────────
+            suite('2. NotBlank');
+
+            await test('fails for empty string', function () {
+                const r = new NotBlank();
+                assertEqual(r.validate(''), false, 'empty string');
+            });
+
+            await test('fails for whitespace-only string', function () {
+                const r = new NotBlank();
+                assertEqual(r.validate('   '), false, 'whitespace');
+            });
+
+            await test('fails for null', function () {
+                assertEqual(new NotBlank().validate(null), false, 'null');
+            });
+
+            await test('fails for undefined', function () {
+                assertEqual(new NotBlank().validate(undefined), false, 'undefined');
+            });
+
+            await test('passes for non-empty string', function () {
+                assertEqual(new NotBlank().validate('hello'), true, 'string');
+            });
+
+            await test('passes for numeric 0 — 0 is not blank', function () {
+                assertEqual(new NotBlank().validate(0), true, 'zero');
+            });
+
+            // ── 3. Built-in rules — Email ─────────────────────────────────────────
+            suite('3. Email');
+
+            await test('passes for valid email', function () {
+                assertEqual(new Email().validate('floris@example.com'), true, 'valid');
+            });
+
+            await test('fails for string without @', function () {
+                assertEqual(new Email().validate('notanemail'), false, 'no @');
+            });
+
+            await test('fails for string without domain', function () {
+                assertEqual(new Email().validate('x@'), false, 'no domain');
+            });
+
+            await test('passes for empty string — empty is not Email\'s concern', function () {
+                assertEqual(new Email().validate(''), true, 'empty');
+            });
+
+            await test('passes for null', function () {
+                assertEqual(new Email().validate(null), true, 'null');
+            });
+
+            // ── 4. Built-in rules — Min / Max ─────────────────────────────────────
+            suite('4. Min / Max');
+
+            await test('Min passes when value equals n', function () {
+                assertEqual(new Min(5).validate(5), true, 'equal');
+            });
+
+            await test('Min passes when value exceeds n', function () {
+                assertEqual(new Min(5).validate(10), true, 'above');
+            });
+
+            await test('Min fails when value is below n', function () {
+                assertEqual(new Min(5).validate(4), false, 'below');
+            });
+
+            await test('Min fails for non-numeric string', function () {
+                assertEqual(new Min(5).validate('abc'), false, 'NaN');
+            });
+
+            await test('Min passes for empty string', function () {
+                assertEqual(new Min(5).validate(''), true, 'empty');
+            });
+
+            await test('Min passes for null', function () {
+                assertEqual(new Min(5).validate(null), true, 'null');
+            });
+
+            await test('Max passes when value equals n', function () {
+                assertEqual(new Max(10).validate(10), true, 'equal');
+            });
+
+            await test('Max fails when value exceeds n', function () {
+                assertEqual(new Max(10).validate(11), false, 'above');
+            });
+
+            await test('Max passes when value is below n', function () {
+                assertEqual(new Max(10).validate(5), true, 'below');
+            });
+
+            await test('Max fails for non-numeric string', function () {
+                assertEqual(new Max(10).validate('abc'), false, 'NaN');
+            });
+
+            await test('Max passes for empty string', function () {
+                assertEqual(new Max(10).validate(''), true, 'empty');
+            });
+
+            // ── 5. Built-in rules — MinLength / MaxLength ─────────────────────────
+            suite('5. MinLength / MaxLength');
+
+            await test('MinLength passes when length equals n', function () {
+                assertEqual(new MinLength(3).validate('abc'), true, 'exact');
+            });
+
+            await test('MinLength fails when length is below n', function () {
+                assertEqual(new MinLength(3).validate('ab'), false, 'short');
+            });
+
+            await test('MinLength passes for null', function () {
+                assertEqual(new MinLength(3).validate(null), true, 'null');
+            });
+
+            await test('MaxLength passes when length equals n', function () {
+                assertEqual(new MaxLength(3).validate('abc'), true, 'exact');
+            });
+
+            await test('MaxLength fails when length exceeds n', function () {
+                assertEqual(new MaxLength(3).validate('abcd'), false, 'long');
+            });
+
+            await test('MaxLength passes for empty string', function () {
+                assertEqual(new MaxLength(3).validate(''), true, 'empty');
+            });
+
+            // ── 6. Built-in rules — Pattern ───────────────────────────────────────
+            suite('6. Pattern');
+
+            await test('passes when value matches regex', function () {
+                assertEqual(new Pattern(/^\d+$/).validate('123'), true, 'match');
+            });
+
+            await test('fails when value does not match regex', function () {
+                assertEqual(new Pattern(/^\d+$/).validate('abc'), false, 'no match');
+            });
+
+            await test('passes for empty string', function () {
+                assertEqual(new Pattern(/^\d+$/).validate(''), true, 'empty');
+            });
+
+            await test('passes for null', function () {
+                assertEqual(new Pattern(/^\d+$/).validate(null), true, 'null');
+            });
+
+            await test('is safe with stateful regex (g flag)', function () {
+                const r = new Pattern(/\d+/g);
+                // A stateful regex without lastIndex reset would fail on the second call.
+                assertEqual(r.validate('123'), true,  'first call');
+                assertEqual(r.validate('456'), true,  'second call');
+                assertEqual(r.validate('abc'), false, 'third call — no digits');
+            });
+
+            // ── 7. Initial field state ────────────────────────────────────────────
+            suite('7. Initial field state');
+
+            await test('field.value matches schema initial value', function () {
+                const form = wakaForm.createForm({ name: { value: 'Floris' } });
+                assertEqual(form.name.value, 'Floris', 'value');
+            });
+
+            await test('field.dirty is false on creation', function () {
+                const form = wakaForm.createForm({ name: { value: 'Floris' } });
+                assertEqual(form.name.dirty, false, 'dirty');
+            });
+
+            await test('field.valid is true when initial value passes all rules', function () {
+                const form = wakaForm.createForm({
+                    name: { value: 'Floris', rules: [new NotBlank()] }
+                });
+                assertEqual(form.name.valid, true, 'valid');
+            });
+
+            await test('field.valid is false when initial value fails a rule', function () {
+                const form = wakaForm.createForm({
+                    name: { value: '', rules: [new NotBlank()] }
+                });
+                assertEqual(form.name.valid, false, 'valid');
+            });
+
+            // ── 8. Initial form state ─────────────────────────────────────────────
+            suite('8. Initial form state');
+
+            await test('form.valid is true when all fields pass', function () {
+                const form = wakaForm.createForm({
+                    a: { value: 'x', rules: [new NotBlank()] },
+                    b: { value: 'y', rules: [new NotBlank()] }
+                });
+                assertEqual(form.valid, true, 'form.valid');
+            });
+
+            await test('form.valid is false when any field fails', function () {
+                const form = wakaForm.createForm({
+                    a: { value: 'x', rules: [new NotBlank()] },
+                    b: { value: '',  rules: [new NotBlank()] }
+                });
+                assertEqual(form.valid, false, 'form.valid');
+            });
+
+            await test('form.dirty is false on creation', function () {
+                const form = wakaForm.createForm({ a: { value: 'x' } });
+                assertEqual(form.dirty, false, 'form.dirty');
+            });
+
+            await test('form.valid is true when form has no rules', function () {
+                const form = wakaForm.createForm({ a: { value: '' } });
+                assertEqual(form.valid, true, 'form.valid');
+            });
+
+            // ── 9. Value changes and dirty tracking ───────────────────────────────
+            suite('9. Value changes and dirty tracking');
+
+            await test('field.dirty becomes true after value change', async function () {
+                const form = wakaForm.createForm({ name: { value: 'Floris' } });
+                form.name.value = 'Jan';
+                await tick();
+                assertEqual(form.name.dirty, true, 'dirty');
+            });
+
+            await test('field.dirty returns to false when value restored to initial', async function () {
+                const form = wakaForm.createForm({ name: { value: 'Floris' } });
+                form.name.value = 'Jan';
+                await tick();
+                form.name.value = 'Floris';
+                await tick();
+                assertEqual(form.name.dirty, false, 'dirty');
+            });
+
+            await test('form.dirty becomes true when any field is dirtied', async function () {
+                const form = wakaForm.createForm({
+                    a: { value: 'x' },
+                    b: { value: 'y' }
+                });
+                form.a.value = 'z';
+                await tick();
+                assertEqual(form.dirty, true, 'form.dirty');
+            });
+
+            await test('form.dirty returns to false when all fields restored', async function () {
+                const form = wakaForm.createForm({ a: { value: 'x' } });
+                form.a.value = 'z';
+                await tick();
+                form.a.value = 'x';
+                await tick();
+                assertEqual(form.dirty, false, 'form.dirty');
+            });
+
+            await test('field.valid updates live as value changes', async function () {
+                const form = wakaForm.createForm({
+                    email: { value: '', rules: [new NotBlank(), new Email()] }
+                });
+
+                assertEqual(form.email.valid, false, 'initially invalid');
+
+                form.email.value = 'floris@example.com';
+                await tick();
+                assertEqual(form.email.valid, true, 'valid after correct input');
+
+                form.email.value = 'notanemail';
+                await tick();
+                assertEqual(form.email.valid, false, 'invalid after bad input');
+            });
+
+            await test('form.valid updates when a field changes validity', async function () {
+                const form = wakaForm.createForm({
+                    name: { value: '', rules: [new NotBlank()] }
+                });
+                assertEqual(form.valid, false, 'initially invalid');
+
+                form.name.value = 'Floris';
+                await tick();
+                assertEqual(form.valid, true, 'valid after fix');
+            });
+
+            // ── 10. validate() ────────────────────────────────────────────────────
+            suite('10. validate()');
+
+            await test('returns false when form is invalid', function () {
+                const form = wakaForm.createForm({
+                    name: { value: '', rules: [new NotBlank()] }
+                });
+                assertEqual(form.validate(), false, 'return value');
+            });
+
+            await test('returns true when form is valid', function () {
+                const form = wakaForm.createForm({
+                    name: { value: 'Floris', rules: [new NotBlank()] }
+                });
+                assertEqual(form.validate(), true, 'return value');
+            });
+
+            await test('validate() return value matches form.valid', function () {
+                const form = wakaForm.createForm({
+                    a: { value: '',      rules: [new NotBlank()] },
+                    b: { value: 'hello', rules: [new NotBlank()] }
+                });
+                const result = form.validate();
+                assertEqual(result, form.valid, 'return matches form.valid');
+            });
+
+            await test('validate() updates field.valid for all fields', async function () {
+                const form = wakaForm.createForm({
+                    a: { value: '', rules: [new NotBlank()] },
+                    b: { value: '', rules: [new NotBlank()] }
+                });
+
+                // Both start invalid — validate() should leave them that way
+                form.validate();
+                await tick();
+                assertEqual(form.a.valid, false, 'a.valid');
+                assertEqual(form.b.valid, false, 'b.valid');
+            });
+
+            await test('validate() recomputes after values change', async function () {
+                const form = wakaForm.createForm({
+                    name: { value: '', rules: [new NotBlank()] }
+                });
+                assertEqual(form.validate(), false, 'before');
+
+                form.name.value = 'Floris';
+                await tick();
+                assertEqual(form.validate(), true, 'after');
+            });
+
+            // ── 11. reset() ───────────────────────────────────────────────────────
+            suite('11. reset()');
+
+            await test('reset() restores all field values to initial', async function () {
+                const form = wakaForm.createForm({
+                    a: { value: 'x' },
+                    b: { value: 'y' }
+                });
+                form.a.value = 'changed';
+                form.b.value = 'changed';
+                await tick();
+                form.reset();
+                assertEqual(form.a.value, 'x', 'a.value');
+                assertEqual(form.b.value, 'y', 'b.value');
+            });
+
+            await test('reset() clears all dirty flags', async function () {
+                const form = wakaForm.createForm({
+                    a: { value: 'x' },
+                    b: { value: 'y' }
+                });
+                form.a.value = 'changed';
+                form.b.value = 'changed';
+                await tick();
+                form.reset();
+                assertEqual(form.a.dirty, false, 'a.dirty');
+                assertEqual(form.b.dirty, false, 'b.dirty');
+                assertEqual(form.dirty,   false, 'form.dirty');
+            });
+
+            await test('reset() recomputes form.valid from initial values', function () {
+                const form = wakaForm.createForm({
+                    name: { value: '', rules: [new NotBlank()] }
+                });
+                // form starts invalid; reset should leave it invalid
+                form.reset();
+                assertEqual(form.valid, false, 'form.valid after reset on empty initial');
+            });
+
+            await test('reset() on initially valid form leaves form.valid true', function () {
+                const form = wakaForm.createForm({
+                    name: { value: 'Floris', rules: [new NotBlank()] }
+                });
+                form.name.value = '';   // make it invalid
+                form.reset();
+                assertEqual(form.valid, true, 'form.valid after reset');
+            });
+
+            await test('reset() recomputes field.valid from initial values', function () {
+                const form = wakaForm.createForm({
+                    name: { value: 'Floris', rules: [new NotBlank()] }
+                });
+                form.name.value = '';   // make field invalid
+                form.reset();
+                assertEqual(form.name.valid, true, 'field.valid after reset');
+            });
+
+            // ── 12. values() ──────────────────────────────────────────────────────
+            suite('12. values()');
+
+            await test('values() returns plain object with current values', function () {
+                const form = wakaForm.createForm({
+                    username: { value: 'floris' },
+                    password: { value: 'secret' }
+                });
+                const v = form.values();
+                assertEqual(v, { username: 'floris', password: 'secret' }, 'values');
+            });
+
+            await test('values() reflects latest value after change', async function () {
+                const form = wakaForm.createForm({ name: { value: 'Floris' } });
+                form.name.value = 'Jan';
+                await tick();
+                assertEqual(form.values().name, 'Jan', 'updated value');
+            });
+
+            await test('values() snapshot is not reactive — mutations do not affect form', function () {
+                const form = wakaForm.createForm({ name: { value: 'Floris' } });
+                const v = form.values();
+                v.name = 'Mutated';
+                assertEqual(form.name.value, 'Floris', 'form unchanged');
+            });
+
+            await test('values() does not include valid, dirty, or other meta', function () {
+                const form = wakaForm.createForm({ name: { value: 'x' } });
+                const v = form.values();
+                assert(!('valid' in v), 'no valid');
+                assert(!('dirty' in v), 'no dirty');
+            });
+
+            // ── 13. Deletion guard ────────────────────────────────────────────────
+            suite('13. Deletion guard');
+
+            await test('deleting a schema field throws', function () {
+                const form = wakaForm.createForm({ name: { value: 'x' } });
+                assertThrows(function () { delete form.name; }, 'deletion is not permitted');
+            });
+
+            await test('deleting form.valid throws', function () {
+                const form = wakaForm.createForm({ name: { value: 'x' } });
+                assertThrows(function () { delete form.valid; }, 'deletion is not permitted');
+            });
+
+            await test('deleting a field property throws', function () {
+                const form = wakaForm.createForm({ name: { value: 'x' } });
+                assertThrows(function () { delete form.name.value; }, 'deletion is not permitted');
+            });
+
+            // ── 14. Reactivity — pac:form-changed events ──────────────────────────
+            suite('14. Reactivity');
+
+            await test('pac:form-changed fires when field value changes', async function () {
+                const form = wakaForm.createForm({ name: { value: '' } });
+                const formId = form._wakaFormId;
+                const cap = captureFormEvents(formId);
+
+                form.name.value = 'Floris';
+                await tick();
+                cap.restore();
+
+                assert(cap.events.length > 0, 'at least one event fired');
+                const valueEvent = cap.events.find(function (e) {
+                    return e.path[e.path.length - 1] === 'value';
+                });
+                assert(valueEvent !== undefined, 'value change event present');
+                assertEqual(valueEvent.newValue, 'Floris', 'newValue');
+            });
+
+            await test('setting field.value to same value does not fire event', async function () {
+                const form = wakaForm.createForm({ name: { value: 'Floris' } });
+                const formId = form._wakaFormId;
+                const cap = captureFormEvents(formId);
+
+                form.name.value = 'Floris'; // no change
+                await tick();
+                cap.restore();
+
+                assertEqual(cap.events.length, 0, 'no events');
+            });
+
+            await test('events from different forms are isolated by formId', async function () {
+                const form1 = wakaForm.createForm({ a: { value: '' } });
+                const form2 = wakaForm.createForm({ b: { value: '' } });
+
+                const cap1 = captureFormEvents(form1._wakaFormId);
+                const cap2 = captureFormEvents(form2._wakaFormId);
+
+                form1.a.value = 'x';
+                await tick();
+
+                cap1.restore();
+                cap2.restore();
+
+                assert(cap1.events.length > 0, 'form1 received event');
+                assertEqual(cap2.events.length, 0, 'form2 received no event');
+            });
+
+            // ── 15. Custom rules ──────────────────────────────────────────────────
+            suite('15. Custom rules');
+
+            await test('custom rule returning true marks field valid', function () {
+                const alwaysValid = { validate: function () { return true; } };
+                const form = wakaForm.createForm({
+                    field: { value: 'anything', rules: [alwaysValid] }
+                });
+                assertEqual(form.field.valid, true, 'valid');
+            });
+
+            await test('custom rule returning false marks field invalid', function () {
+                const alwaysFail = { validate: function () { return false; } };
+                const form = wakaForm.createForm({
+                    field: { value: 'anything', rules: [alwaysFail] }
+                });
+                assertEqual(form.field.valid, false, 'valid');
+            });
+
+            await test('rules are evaluated in order — first failure wins', function () {
+                let secondCalled = false;
+                const first  = { validate: function () { return false; } };
+                const second = { validate: function () { secondCalled = true; return false; } };
+
+                const form = wakaForm.createForm({
+                    field: { value: 'x', rules: [first, second] }
+                });
+                assertEqual(form.field.valid, false, 'invalid');
+                assertEqual(secondCalled, false, 'second rule not called');
+            });
+
+            await test('malformed rule (no validate method) emits console.warn and does not throw', function () {
+                const warnings = [];
+                const originalWarn = console.warn;
+                console.warn = function () { warnings.push(Array.from(arguments).join(' ')); };
+
+                try {
+                    const form = wakaForm.createForm({
+                        field: { value: 'x', rules: [{ notValidate: true }] }
+                    });
+                    // field should still be valid (malformed rule is skipped)
+                    assertEqual(form.field.valid, true, 'valid after malformed rule skipped');
+                    assert(warnings.length > 0, 'warning was emitted');
+                } finally {
+                    console.warn = originalWarn;
+                }
+            });
+
+            await test('null rule entry emits console.warn and does not throw', function () {
+                const warnings = [];
+                const originalWarn = console.warn;
+                console.warn = function () { warnings.push(true); };
+
+                try {
+                    const form = wakaForm.createForm({
+                        field: { value: 'x', rules: [null] }
+                    });
+                    assertEqual(form.field.valid, true, 'valid');
+                    assert(warnings.length > 0, 'warning emitted');
+                } finally {
+                    console.warn = originalWarn;
+                }
+            });
+
+            // ── 16. Multiple forms coexist independently ──────────────────────────
+            suite('16. Multiple forms');
+
+            await test('two forms have different formIds', function () {
+                const form1 = wakaForm.createForm({ a: { value: '' } });
+                const form2 = wakaForm.createForm({ a: { value: '' } });
+                assert(form1._wakaFormId !== form2._wakaFormId, 'distinct formIds');
+            });
+
+            await test('changing one form does not affect the other', async function () {
+                const form1 = wakaForm.createForm({ a: { value: 'x', rules: [new NotBlank()] } });
+                const form2 = wakaForm.createForm({ a: { value: 'y', rules: [new NotBlank()] } });
+
+                form1.a.value = '';
+                await tick();
+
+                assertEqual(form1.a.valid, false, 'form1 invalid');
+                assertEqual(form2.a.valid, true,  'form2 unaffected');
+            });
+
+            await test('reset() on one form does not affect the other', async function () {
+                const form1 = wakaForm.createForm({ a: { value: 'x' } });
+                const form2 = wakaForm.createForm({ a: { value: 'y' } });
+
+                form1.a.value = 'changed';
+                await tick();
+                form1.reset();
+
+                assertEqual(form1.a.value, 'x', 'form1 reset');
+                assertEqual(form2.a.value, 'y', 'form2 unchanged');
+            });
+
+            // ── 17. Edge cases ────────────────────────────────────────────────────
+            suite('17. Edge cases');
+
+            await test('boolean false as initial value is not treated as blank by NotBlank', function () {
+                // NotBlank coerces to string — 'false' is not blank
+                const form = wakaForm.createForm({
+                    flag: { value: false, rules: [new NotBlank()] }
+                });
+                assertEqual(form.flag.valid, true, 'false is not blank');
+            });
+
+            await test('numeric 0 as initial value is not treated as blank by NotBlank', function () {
+                const form = wakaForm.createForm({
+                    count: { value: 0, rules: [new NotBlank()] }
+                });
+                assertEqual(form.count.valid, true, 'zero is not blank');
+            });
+
+            await test('form with empty schema is valid and not dirty', function () {
+                const form = wakaForm.createForm({});
+                assertEqual(form.valid, true,  'valid');
+                assertEqual(form.dirty, false, 'dirty');
+            });
+
+            await test('validate() on empty schema returns true', function () {
+                const form = wakaForm.createForm({});
+                assertEqual(form.validate(), true, 'validate');
+            });
+
+            await test('reset() on unchanged form is a no-op', function () {
+                const form = wakaForm.createForm({
+                    name: { value: 'Floris', rules: [new NotBlank()] }
+                });
+                form.reset();
+                assertEqual(form.name.value, 'Floris', 'value unchanged');
+                assertEqual(form.name.dirty, false,    'still clean');
+                assertEqual(form.valid,      true,     'still valid');
+            });
+
+            await test('proxy returns stable reference for same field on repeated reads', function () {
+                const form = wakaForm.createForm({ name: { value: 'x' } });
+                const ref1 = form.name;
+                const ref2 = form.name;
+                assert(ref1 === ref2, 'same proxy reference');
+            });
+
+            // ── 18. Plugin lifecycle — wakaPAC integration ───────────────────────
+            suite('18. Plugin lifecycle — wakaPAC integration');
+
+            await test('pac:change fires on container when field value changes', async function () {
+                // Register the plugin
+                wakaPAC.use(wakaForm);
+
+                const form = wakaForm.createForm({
+                    username: { value: '', rules: [new NotBlank()] }
+                });
+
+                // Mount a real wakaPAC component with the form
+                const container = document.createElement('div');
+                container.id = 'test-pac-lifecycle-1';
+                container.innerHTML = '<input data-pac-bind="value: form.username.value">';
+                document.body.appendChild(container);
+
+                wakaPAC('#test-pac-lifecycle-1', { form });
+
+                // Collect pac:change events on the container
+                const changes = [];
+                container.addEventListener('pac:change', function (e) {
+                    changes.push(e.detail);
+                });
+
+                form.username.value = 'floris';
+                await tick();
+
+                document.body.removeChild(container);
+
+                assert(changes.length > 0, 'pac:change fired on container');
+                const valueChange = changes.find(function (d) {
+                    return d.path && d.path[d.path.length - 1] === 'value';
+                });
+                assert(valueChange !== undefined, 'value change event present');
+                assertEqual(valueChange.newValue, 'floris', 'newValue correct');
+            });
+
+            await test('pac:change path is prefixed with abstraction key', async function () {
+                wakaPAC.use(wakaForm);
+
+                const form = wakaForm.createForm({ email: { value: '' } });
+
+                const container = document.createElement('div');
+                container.id = 'test-pac-lifecycle-2';
+                document.body.appendChild(container);
+
+                wakaPAC('#test-pac-lifecycle-2', { form });
+
+                const paths = [];
+                container.addEventListener('pac:change', function (e) {
+                    paths.push(e.detail.path);
+                });
+
+                form.email.value = 'x@y.com';
+                await tick();
+
+                document.body.removeChild(container);
+
+                assert(paths.length > 0, 'event fired');
+                // Path must start with the abstraction key ('form'), not the raw field name
+                assert(paths[0][0] === 'form', 'path prefixed with abstraction key "form"');
+            });
+
+            await test('onComponentDestroyed unsubscribes container', async function () {
+                wakaPAC.use(wakaForm);
+
+                const form = wakaForm.createForm({ name: { value: '' } });
+
+                const container = document.createElement('div');
+                container.id = 'test-pac-lifecycle-3';
+                document.body.appendChild(container);
+
+                wakaPAC('#test-pac-lifecycle-3', { form });
+
+                // Destroy the component — wakaPAC calls onComponentDestroyed
+                // The standard way to do this is to remove and discard the component.
+                // We simulate it by removing the element and triggering cleanup.
+                const pacId = container._pacId || container.dataset.pacId;
+
+                const afterDestroy = [];
+                container.addEventListener('pac:change', function (e) {
+                    afterDestroy.push(e.detail);
+                });
+
+                // Remove from DOM to trigger MutationObserver-based cleanup if present,
+                // or call destroy directly if wakaPAC exposes it.
+                if (typeof wakaPAC.destroy === 'function') {
+                    wakaPAC.destroy('#test-pac-lifecycle-3');
+                } else {
+                    document.body.removeChild(container);
+                    await tick();
+                }
+
+                form.name.value = 'should not propagate';
+                await tick();
+
+                if (document.body.contains(container)) {
+                    document.body.removeChild(container);
+                }
+
+                // After destruction, no pac:change should reach the container
+                assertEqual(afterDestroy.length, 0, 'no events after destroy');
+            });
+
+            await test('multiple components subscribed to same form all receive pac:change', async function () {
+                wakaPAC.use(wakaForm);
+
+                const form = wakaForm.createForm({ score: { value: 0 } });
+
+                const c1 = document.createElement('div');
+                const c2 = document.createElement('div');
+                c1.id = 'test-pac-multi-1';
+                c2.id = 'test-pac-multi-2';
+                document.body.appendChild(c1);
+                document.body.appendChild(c2);
+
+                wakaPAC('#test-pac-multi-1', { form });
+                wakaPAC('#test-pac-multi-2', { form });
+
+                const hits1 = [], hits2 = [];
+                c1.addEventListener('pac:change', function (e) { hits1.push(e.detail); });
+                c2.addEventListener('pac:change', function (e) { hits2.push(e.detail); });
+
+                form.score.value = 42;
+                await tick();
+
+                document.body.removeChild(c1);
+                document.body.removeChild(c2);
+
+                assert(hits1.length > 0, 'component 1 received pac:change');
+                assert(hits2.length > 0, 'component 2 received pac:change');
+            });
+
+            // ── Summary ───────────────────────────────────────────────────────────
+
+            const total = passed + failed;
+            summary.textContent = failed === 0
+                ? '✓ All ' + total + ' tests passed'
+                : '✗ ' + failed + ' of ' + total + ' tests failed';
+            summary.className = failed === 0 ? 'all-pass' : 'has-fail';
+        }
+
+        runAll().catch(function (err) {
+            console.error('Test runner error:', err);
+        });
+
+    })();
+</script>
+</body>
+</html>
