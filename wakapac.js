@@ -5694,17 +5694,17 @@
 
             // Get the foreach configuration and set up scope resolution
             const foreachData = this.interpolationMap.get(foreachElement);
+            const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), event.target);
 
-            // Call method with foreach context: (arrayItem, index, originalEvent)
-            const sourceArrayPath = foreachData.sourceArray;
-            const liveArray = ExpressionParser.evaluate(
-                ExpressionCache.parseExpression(sourceArrayPath),
+            // Evaluate the foreach expression to get the source array
+            const array = ExpressionParser.evaluate(
+                ExpressionCache.parseExpression(foreachData.foreachExpr),
                 this.abstraction,
-                null
+                scopeResolver
             );
 
-            const freshItem = liveArray[contextInfo.index];
-            method.call(this.abstraction, freshItem, contextInfo.index, event);
+            // Call method with foreach context: (arrayItem, index, originalEvent)
+            method.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
         } catch (error) {
             console.error(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
         }
