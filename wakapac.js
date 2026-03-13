@@ -7568,6 +7568,7 @@
             delete element._pacPreviousArray;
             delete element._pacDynamicClass;
             delete element._pacForeachChain;
+            delete element._pacForeachContext;
         });
 
         textNodesToRemove.forEach(textNode => {
@@ -7860,7 +7861,6 @@
 
     /**
      * Handles simple array changes with targeted DOM operations
-     * FIXED: Proper hash map cleanup and index management
      * @param {HTMLElement} element - The DOM element containing the array representation
      * @param {Object} changes - The changes object with added, removed, and moved arrays
      * @param {Array} newArray - The complete updated array after changes
@@ -7872,11 +7872,22 @@
 
         // Apply removals first (hash map will be rebuilt after all operations)
         if (changes.removed.length > 0) {
-            this.removeItems(element, changes.removed);
+            this.removeItems(element, changes.removed, mappingData.foreachId);
         }
 
         if (changes.moved.length > 0) {
-            this.moveItems(element, changes.moved);
+            this.moveItems(element, changes.moved, mappingData.foreachId);
+        }
+
+        // Invalidate stale foreach context caches on surviving elements
+        if (changes.removed.length > 0 || changes.moved.length > 0) {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT);
+
+            let node;
+            while ((node = walker.nextNode())) {
+                delete node._pacForeachContext;
+                delete node._pacForeachChain;
+            }
         }
 
         if (changes.added.length > 0) {
@@ -7912,15 +7923,15 @@
 
         while ((node = walker.nextNode())) {
             const match = node.textContent.match(FOREACH_INDEX_REGEX);
+
             if (match) {
-                const originalIndex = parseInt(match[2], 10);
                 const renderIndex = parseInt(match[3], 10);
 
                 // Get the current item data
                 if (renderIndex < currentArray.length) {
                     const item = currentArray[renderIndex];
-                    const hash = this.createForeachEntryHash(item, originalIndex);
-                    newHashMap.set(hash, originalIndex);
+                    const hash = this.createForeachEntryHash(item, renderIndex);
+                    newHashMap.set(hash, renderIndex);
                 }
             }
         }
@@ -7937,7 +7948,7 @@
      * @throws {TypeError} If element is not a valid DOM Element
      * @throws {TypeError} If removedIndices is not an array
      */
-    Context.prototype.removeItems = function(element, removedIndices) {
+    Context.prototype.removeItems = function(element, removedIndices, foreachId) {
         // Validate input parameters to catch programming errors early
         if (!(element instanceof Element)) {
             throw new TypeError('element must be a DOM Element');
@@ -7955,7 +7966,7 @@
         removedIndices.forEach(index => {
             // Find all DOM nodes associated with this foreach item
             // (includes the comment markers and all content between them)
-            const nodes = this.findItemNodes(element, index);
+            const nodes = this.findItemNodes(element, index, foreachId);
 
             nodes.forEach(node => {
                 // STEP 1: CLEANUP PHASE - Remove all map references before DOM removal
@@ -8066,8 +8077,10 @@
             itemNodes.forEach(node => {
                 if (node.nodeType === Node.COMMENT_NODE) {
                     const match = node.textContent.trim().match(FOREACH_INDEX_REGEX);
+
                     if (match) {
-                        // Update both index and renderIndex in the comment text
+                        // Only update renderIndex — index tracks the item's source array position
+                        // and must remain stable so handleDomClicks can index into abstraction[foreachExpr]
                         node.textContent = ` pac-foreach-item: ${match[1].trim()}, index=${move.to}, renderIndex=${move.to} `;
                     }
                 } else if (node.nodeType === Node.ELEMENT_NODE) {
@@ -8167,14 +8180,15 @@
      * Finds all DOM nodes for a foreach item by its index, handling nested foreach loops
      * @param {Element} element - The DOM element to search within
      * @param {number} index - The index of the foreach item to find
+     * @param foreachId
      * @returns {Node[]} Array of DOM nodes that belong to the foreach item at the specified index
      */
-    Context.prototype.findItemNodes = function(element, index) {
+    Context.prototype.findItemNodes = function(element, index, foreachId) {
         const nodes = [];
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
 
-        let collecting = false;  // Whether we're currently collecting nodes for our target item
-        let depth = 0;           // Nesting depth counter for handling nested foreach loops
+        let collecting = false;
+        let depth = 0;
         let node;
 
         while ((node = walker.nextNode())) {
@@ -8182,31 +8196,21 @@
                 const text = node.textContent.trim();
                 const match = text.match(FOREACH_INDEX_REGEX);
 
-                // Check if this is the start comment for our target index
-                if (match && parseInt(match[2], 10) === index && !collecting) {
+                if (match && match[1].trim() === foreachId && parseInt(match[2], 10) === index && !collecting) {
                     collecting = true;
                     depth = 0;
                     nodes.push(node);
                 } else if (collecting) {
-                    // We're collecting - add this comment node
                     nodes.push(node);
 
-                    if (match) {
-                        // Found a nested foreach start - increment depth
+                    if (match && match[1].trim() === foreachId) {
                         depth++;
                     } else if (text === '/pac-foreach-item') {
-                        // Found a foreach end comment
-                        if (depth === 0) {
-                            // This closes our target item - stop collecting
-                            break;
-                        }
-
-                        // This closes a nested foreach item - decrement depth
+                        if (depth === 0) break;
                         depth--;
                     }
                 }
             } else if (collecting) {
-                // Collect all non-comment nodes while we're in collection mode
                 nodes.push(node);
             }
         }
@@ -8218,21 +8222,22 @@
      * Finds the insertion point for an item at the given index within a foreach loop
      * @param {Element} element - The DOM element to search within
      * @param {number} targetIndex - The index where the new item should be inserted
+     * @param foreachId
      * @returns {Comment|null} The comment node marking where to insert, or null to append at end
      */
-    Context.prototype.findInsertionPoint = function(element, targetIndex) {
+    Context.prototype.findInsertionPoint = function(element, targetIndex, foreachId) {
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_COMMENT);
 
         let node;
         while ((node = walker.nextNode())) {
             const match = node.textContent.match(FOREACH_INDEX_REGEX);
 
-            if (match && parseInt(match[3], 10) >= targetIndex) {
+            if (match && match[1].trim() === foreachId && parseInt(match[3], 10) >= targetIndex) {
                 return node;
             }
         }
 
-        return null; // Append at end
+        return null;
     };
 
     // =============================================================================
