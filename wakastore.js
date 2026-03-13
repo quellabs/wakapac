@@ -51,6 +51,7 @@
  * ║    // Auto-save to localStorage on every mutation, rehydrate on creation:        ║
  * ║    const store = wakaStore.createStore({ theme: 'dark' }, {                      ║
  * ║        persist: 'app-settings',                                                  ║
+ * ║        autoload: true,                                                           ║
  * ║        autoSave: true                                                            ║
  * ║    });                                                                           ║
  * ║                                                                                  ║
@@ -236,45 +237,12 @@
 
     /**
      * WakaStore prototype methods.
-     *
-     * createPacPlugin() — called by wakaPAC.use(wakaStore). Returns the plugin
-     * descriptor that registers and deregisters component subscriptions.
-     *
-     * createStore(initialState, opts) — creates a new reactive store proxy.
-     *   opts.persist  {string}  localStorage key. If supplied, the store
-     *                           rehydrates from localStorage on creation and
-     *                           save()/load()/clearPersist() become available.
-     *   opts.autoSave {boolean} When true (and persist is set), automatically
-     *                           saves to localStorage on every mutation.
-     *                           Omitting autoSave disables automatic saves —
-     *                           call store.save() explicitly when needed.
      */
     WakaStore.prototype = {
         constructor: WakaStore,
 
         /**
          * Creates a wakaPAC plugin descriptor.
-         *
-         * Architecture:
-         *
-         * The store proxy wraps initialState and intercepts all mutations.
-         * It is tagged with _externalProxy = true (non-enumerable) so that
-         * wakaPAC's proxyGetHandler recognises it and returns it as-is,
-         * never wrapping it in a second reactive proxy.
-         *
-         * On any mutation the store fires pac:store-changed on document with
-         * the storeId. The plugin listener dispatches pac:change on each
-         * subscriber container. wakaPAC re-renders by reading the abstraction,
-         * which returns the store proxy directly. Template reads go through
-         * the store proxy's get trap — pure reads, no writes, no re-notification.
-         *
-         * Required change in wakaPAC's proxyGetHandler:
-         *
-         *   if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
-         *       if (val._externalProxy) { return val; }   // ← add this
-         *       // ... existing wrapping logic
-         *   }
-         *
          * @returns {Object} Plugin descriptor
          */
         createPacPlugin() {
@@ -321,6 +289,7 @@
                 const { storeId, path, oldValue, newValue } = event.detail;
                 const subscribers = registry.get(storeId);
 
+                // Do nothing when no subscribers present
                 if (!subscribers || subscribers.size === 0) {
                     return;
                 }
@@ -352,6 +321,7 @@
                 });
             }
 
+            // Listen to STORE_CHANGED_EVENT events
             document.addEventListener(STORE_CHANGED_EVENT, onStoreChanged);
 
             return {
@@ -428,6 +398,10 @@
          * @param {boolean} [opts.autoSave=false]   - When true (and opts.persist is set), automatically
          *                                            saves to localStorage on every mutation (debounced).
          *                                            When omitted or false, call store.save() explicitly.
+         * @param {boolean} [opts.autoLoad=true]    - When true (and opts.persist is set), automatically
+         *                                            rehydrates from localStorage on creation.
+         *                                            Set to false to start from initialState and call
+         *                                            store.load() yourself when ready.
          * @returns {Proxy} Store proxy for direct mutation
          */
         createStore(initialState, opts) {
@@ -440,6 +414,7 @@
             const storeId     = 'store-' + (this._nextStoreId++);
             const persistKey  = typeof opts.persist  === 'string' ? opts.persist  : null;
             const autoSave    = opts.autoSave === true && persistKey !== null;
+            const autoLoad = opts.autoLoad === true && persistKey !== null;
 
             /**
              * Marks obj and all nested objects with _externalProxy = true as a
@@ -448,6 +423,7 @@
              * the raw object directly, not through the store proxy's get trap,
              * so the flag must exist on the raw object itself.
              * @param {Object|Array} obj
+             * @param {WeakSet} [seen] - Cycle guard; tracks already-visited objects to prevent infinite recursion on circular references
              */
             function markExternalProxy(obj, seen = new WeakSet()) {
                 if (!obj || typeof obj !== 'object' || obj._externalProxy || seen.has(obj)) {
@@ -791,7 +767,7 @@
             // by Object.assign hit an empty registry and produce no DOM updates.
             // That is intentional — components read the already-rehydrated state
             // when they mount, so no re-render is needed or missed.
-            if (persistKey) {
+            if (persistKey && autoLoad) {
                 proxy.load();
             }
 
