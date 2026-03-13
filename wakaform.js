@@ -540,6 +540,14 @@
 
             /**
              * Fires pac:form-changed on document with the form-relative path.
+             *
+             * Architectural note: notify() fires before derived state (valid, dirty)
+             * has been updated. Listeners that re-read state through the proxy — as
+             * wakaPAC's renderer does — will always see a consistent snapshot because
+             * the renderer re-evaluates all bindings on every pac:change event.
+             * Listeners that consume event.detail directly and expect derived state
+             * to already be updated will see stale valid/dirty values.
+             *
              * @param {string[]} path
              * @param {*} oldValue
              * @param {*} newValue
