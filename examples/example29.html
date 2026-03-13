@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        .grid { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
+        .row  { display: flex; gap: 8px; align-items: center; }
+        .cells-foreach { display: contents; }  /* make the foreach wrapper transparent to layout */
+        .cell { width: 60px; height: 60px; border: 2px solid #666;
+            display: flex; align-items: center; justify-content: center;
+            background: #f0f0f0; }
+        button { cursor: pointer; padding: 4px 8px; }
+        .row-controls { display: flex; gap: 4px; margin-right: 8px; }
+    </style>
+</head>
+<body>
+
+<div id="app" data-pac-id="app">
+    <div class="grid">
+        <div data-pac-bind="foreach: rows" data-pac-item="row">
+            <div class="row">
+                <div class="row-controls">
+                    <button data-pac-bind="click: addCol">+</button>
+                    <button data-pac-bind="click: removeCol">−</button>
+                    <button data-pac-bind="click: removeRow">✕</button>
+                </div>
+                <div class="cells-foreach" data-pac-bind="foreach: row.cells" data-pac-item="cell" data-pac-index="$ci">
+                    <div class="cell">{{$ci + 1}}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <button data-pac-bind="click: addRow">+ Add Row</button>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    wakaPAC('#app', {
+        rows: [
+            { cells: [1, 2, 3] },
+            { cells: [1, 2] }
+        ],
+        addRow() {
+            this.rows.push({ cells: [1] });
+        },
+        removeRow(row) {
+            const i = this.rows.indexOf(row);
+            if (i !== -1) this.rows.splice(i, 1);
+        },
+        addCol(row) {
+            row.cells.push(row.cells.length + 1);
+        },
+        removeCol(row) {
+            if (row.cells.length > 1) row.cells.pop();
+        }
+    });
+</script>
+</body>
+</html>

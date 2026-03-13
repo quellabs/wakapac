@@ -6904,8 +6904,13 @@
             return;
         }
 
-        // Keep array path for later use
-        const arrayPath = mappingData.sourceArray;
+        // Keep array path for later use.
+        // For scoped foreach expressions (e.g. "row.cells" inside a foreach: rows loop),
+        // sourceArray is the raw unresolved string. We need the fully-resolved absolute
+        // path (e.g. "rows[0].cells") so the hash map key matches what handleArrayChange
+        // receives from the pac:array-change event, which always carries the resolved path.
+        const resolvedPath = this.normalizePath(mappingData.foreachExpr, foreachElement);
+        const arrayPath = resolvedPath || mappingData.sourceArray;
 
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
@@ -7415,6 +7420,21 @@
                     mappingData.sourceArray === arrayPath
                 ) {
                     elementsToUpdate.push(element);
+                    continue;
+                }
+
+                // The foreachExpr may be a scoped expression (e.g. "row.cells") that
+                // contains an item variable from an outer foreach. In that case the
+                // raw string never matches the fully-resolved event path (e.g.
+                // "rows[0].cells"). Resolve it through normalizePath using the foreach
+                // element itself so scope variables are expanded, then compare.
+                try {
+                    const resolvedExpr = this.normalizePath(mappingData.foreachExpr, element);
+                    if (resolvedExpr === arrayPath) {
+                        elementsToUpdate.push(element);
+                    }
+                } catch (e) {
+                    // normalizePath can throw for malformed expressions — skip silently
                 }
             }
         }
@@ -8035,6 +8055,32 @@
                 } else {
                     // Insert at end when no insertion point found (target index beyond current items)
                     element.appendChild(node);
+                }
+            });
+
+            // After moving, update the start comment marker to reflect the new index
+            // and invalidate any stale _pacForeachContext / _pacForeachChain caches
+            // on all moved nodes. Without this, normalizePath and extractClosestForeachContext
+            // will resolve scope variables to the pre-move index, causing wrong path matches
+            // and incorrect reactive updates for nested foreach expressions.
+            itemNodes.forEach(node => {
+                if (node.nodeType === Node.COMMENT_NODE) {
+                    const match = node.textContent.trim().match(FOREACH_INDEX_REGEX);
+                    if (match) {
+                        // Update both index and renderIndex in the comment text
+                        node.textContent = ` pac-foreach-item: ${match[1].trim()}, index=${move.to}, renderIndex=${move.to} `;
+                    }
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    // Invalidate cached context so it is recomputed from the updated comment
+                    delete node._pacForeachContext;
+                    delete node._pacForeachChain;
+
+                    // Invalidate caches on all descendants too
+                    const descendants = node.querySelectorAll('*');
+                    for (let i = 0; i < descendants.length; i++) {
+                        delete descendants[i]._pacForeachContext;
+                        delete descendants[i]._pacForeachChain;
+                    }
                 }
             });
         });
