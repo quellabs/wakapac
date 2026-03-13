@@ -7395,41 +7395,38 @@
      * @returns {HTMLElement[]} Elements whose foreach bindings depend on the array.
      */
     Context.prototype.findForeachElementsByArrayPath = function (arrayPath) {
-        // Collect elements that need to be re-rendered
         const elementsToUpdate = [];
 
-        // Scan all registered interpolation mappings
         for (const [element, mappingData] of this.interpolationMap) {
-            if (mappingData.bindings && mappingData.bindings.foreach) {
+            // Do not do anything if no foreach was mapped
+            if (!mappingData.bindings?.foreach) {
+                continue;
+            }
 
-                // Match either raw foreach expression or resolved source array
-                if (
-                    mappingData.foreachExpr === arrayPath ||
-                    arrayPath.startsWith(mappingData.foreachExpr + '[') ||
-                    mappingData.sourceArray === arrayPath ||
-                    arrayPath.startsWith(mappingData.sourceArray + '[')
-                ) {
+            // Fetch the foreach expression and source array
+            const { foreachExpr, sourceArray } = mappingData;
+
+            // Check whether arrayPath is or descends from the bound expression.
+            // e.g. "rows[1].cells[3]" should match a foreach bound to "rows[1].cells".
+            const matches = (expr) => expr === arrayPath || arrayPath.startsWith(expr + '[');
+
+            // Try the raw expressions first — no allocation needed
+            if (matches(foreachExpr) || matches(sourceArray)) {
+                elementsToUpdate.push(element);
+                continue;
+            }
+
+            // foreachExpr may be scoped (e.g. "row.cells" inside an outer foreach),
+            // so resolve it against this element's context and try again.
+            // Result is cached on mappingData to avoid redundant resolution.
+            try {
+                const resolvedExpr = (mappingData._resolvedForeachExpr ??= this.normalizePath(foreachExpr, element));
+
+                if (matches(resolvedExpr)) {
                     elementsToUpdate.push(element);
-                    continue;
                 }
-
-                // The foreachExpr may be a scoped expression (e.g. "row.cells") that
-                // contains an item variable from an outer foreach. In that case the
-                // raw string never matches the fully-resolved event path (e.g.
-                // "rows[0].cells"). Resolve it through normalizePath using the foreach
-                // element itself so scope variables are expanded, then compare.
-                try {
-                    const resolvedExpr = this.normalizePath(mappingData.foreachExpr, element);
-
-                    if (
-                        resolvedExpr === arrayPath ||
-                        arrayPath.startsWith(resolvedExpr + '[')
-                    ) {
-                        elementsToUpdate.push(element);
-                    }
-                } catch (_e) {
-                    // normalizePath can throw for malformed expressions — skip silently
-                }
+            } catch (_e) {
+                // normalizePath throws for malformed expressions — skip silently
             }
         }
 
