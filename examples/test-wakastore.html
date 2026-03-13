@@ -638,8 +638,8 @@
             await test('load() rehydrates stored values into the store', async function () {
                 const ls = stubLocalStorage();
                 ls.raw['test-load'] = JSON.stringify({ theme: 'dark' });
-                const store = wakaStore.createStore({ theme: 'light' }, { persist: 'test-load' });
-                // createStore calls load() automatically — check state is restored
+                const store = wakaStore.createStore({ theme: 'light' }, { persist: 'test-load', autoLoad: true });
+                // createStore calls load() automatically when autoLoad is true — check state is restored
                 ls.restore();
                 assertEqual(store.theme, 'dark', 'theme rehydrated');
             });
@@ -647,7 +647,7 @@
             await test('load() keeps initialState defaults for keys absent from storage', async function () {
                 const ls = stubLocalStorage();
                 ls.raw['test-load-defaults'] = JSON.stringify({ existing: 'stored' });
-                const store = wakaStore.createStore({ existing: 'default', newKey: 'default' }, { persist: 'test-load-defaults' });
+                const store = wakaStore.createStore({ existing: 'default', newKey: 'default' }, { persist: 'test-load-defaults', autoLoad: true });
                 ls.restore();
                 assertEqual(store.existing, 'stored',  'existing key overwritten');
                 assertEqual(store.newKey,   'default', 'new key keeps default');
