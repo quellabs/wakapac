@@ -426,7 +426,7 @@
              * @param {WeakSet} [seen] - Cycle guard; tracks already-visited objects to prevent infinite recursion on circular references
              */
             function markExternalProxy(obj, seen = new WeakSet()) {
-                if (!obj || typeof obj !== 'object' || obj._externalProxy || seen.has(obj)) {
+                if (!obj || typeof obj !== 'object' || obj[EXTERNAL_PROXY_FLAG] || seen.has(obj)) {
                     return;
                 }
 
@@ -558,13 +558,13 @@
                             markExternalProxy(newValue);
                         }
 
-                        target[prop] = newValue;
+                        const success = Reflect.set(target, prop, newValue);
 
-                        if (isReactive(prop)) {
+                        if (success && isReactive(prop)) {
                             notify(currentPath.concat([prop]), oldValue, newValue);
                         }
 
-                        return true;
+                        return success;
                     },
 
                     /**
@@ -579,13 +579,13 @@
                         }
 
                         const oldValue = target[prop];
-                        delete target[prop];
+                        const deleted  = Reflect.deleteProperty(target, prop);
 
-                        if (isReactive(prop)) {
+                        if (deleted && isReactive(prop)) {
                             notify(currentPath.concat([prop]), oldValue, undefined);
                         }
 
-                        return true;
+                        return deleted;
                     }
                 });
 

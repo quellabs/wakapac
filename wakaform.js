@@ -115,7 +115,7 @@
      * @param {WeakSet} [seen=new WeakSet()]
      */
     function markExternalProxy(obj, seen = new WeakSet()) {
-        if (!obj || typeof obj !== 'object' || obj._externalProxy || seen.has(obj)) {
+        if (!obj || typeof obj !== 'object' || obj[EXTERNAL_PROXY_FLAG] || seen.has(obj)) {
             return;
         }
 
@@ -144,6 +144,7 @@
     function NotBlank(message) {
         this.message = message || 'This field is required';
     }
+
     NotBlank.prototype.validate = function (value) {
         return (value === null || value === undefined || String(value).trim() === '')
             ? this.message
@@ -158,6 +159,7 @@
     function Email(message) {
         this.message = message || 'Must be a valid email address';
     }
+
     Email.prototype.validate = function (value) {
         if (value === null || value === undefined || String(value).trim() === '') {
             return null;
@@ -178,9 +180,19 @@
         this.n       = n;
         this.message = message || 'Must be at least ' + n;
     }
+
     Min.prototype.validate = function (value) {
-        if (value === null || value === undefined || value === '') return null;
-        return Number(value) >= this.n ? null : this.message;
+        if (value === null || value === undefined || value === '') {
+            return null;
+        }
+
+        const num = Number(value);
+
+        if (Number.isNaN(num)) {
+            return this.message;
+        }
+
+        return num >= this.n ? null : this.message;
     };
 
     /**
@@ -193,9 +205,19 @@
         this.n       = n;
         this.message = message || 'Must be at most ' + n;
     }
+
     Max.prototype.validate = function (value) {
-        if (value === null || value === undefined || value === '') return null;
-        return Number(value) <= this.n ? null : this.message;
+        if (value === null || value === undefined || value === '') {
+            return null;
+        }
+
+        const num = Number(value);
+
+        if (Number.isNaN(num)) {
+            return this.message;
+        }
+
+        return num <= this.n ? null : this.message;
     };
 
     /**
@@ -234,11 +256,17 @@
      * @param {string} [message='Invalid format']
      */
     function Pattern(regex, message) {
-        this.regex   = regex;
+        this.regex = regex;
         this.message = message || 'Invalid format';
     }
+
     Pattern.prototype.validate = function (value) {
-        if (value === null || value === undefined || value === '') return null;
+        if (value === null || value === undefined || value === '') {
+            return null;
+        }
+
+        this.regex.lastIndex = 0;
+
         return this.regex.test(String(value)) ? null : this.message;
     };
 
@@ -390,6 +418,10 @@
          * and the form-relative path of the change.
          *
          * @param {Object} schema                    - { fieldName: { value, rules } }
+         *                                             Field values must be primitives
+         *                                             (string, number, boolean, null, or undefined).
+         *                                             Object values are not supported — dirty
+         *                                             tracking uses strict equality (===).
          * @param {Object}  [opts]                   - Optional configuration
          * @param {string}  [opts.validateOn='submit'] - When to expose field errors.
          *                                             'submit': after form.validate() is called.
@@ -414,6 +446,15 @@
              * @type {Object.<string, Array>}
              */
             const fieldRules = {};
+
+            /**
+             * Validity cache — stores the raw runRules() result for each field,
+             * independent of error visibility. Used by recomputeFormState() to
+             * determine form.valid without re-running all rules on every keystroke.
+             * Keyed by field name, value is true (valid) or false (invalid).
+             * @type {Object.<string, boolean>}
+             */
+            const fieldValid = {};
 
             /**
              * Initial values stored for dirty tracking and reset().
@@ -443,7 +484,12 @@
                 const rules         = Array.isArray(fieldDef.rules) ? fieldDef.rules : [];
                 const initialValue  = fieldDef.value !== undefined ? fieldDef.value : '';
 
+                if (initialValue !== null && typeof initialValue === 'object') {
+                    throw new Error('wakaForm.createForm(): field "' + fieldName + '" value must be a primitive (string, number, boolean, null, or undefined). Object values are not supported — dirty tracking uses strict equality.');
+                }
+
                 fieldRules[fieldName]    = rules;
+                fieldValid[fieldName]    = true; // populated by first recomputeFormState() call below
                 initialValues[fieldName] = initialValue;
 
                 state[fieldName] = {
@@ -547,13 +593,13 @@
                             markExternalProxy(newValue);
                         }
 
-                        target[prop] = newValue;
+                        const success = Reflect.set(target, prop, newValue);
 
-                        if (isReactive(prop)) {
+                        if (success && isReactive(prop)) {
                             notify(currentPath.concat([prop]), oldValue, newValue);
                         }
 
-                        return true;
+                        return success;
                     },
 
                     deleteProperty(target, prop) {
@@ -562,13 +608,13 @@
                         }
 
                         const oldValue = target[prop];
-                        delete target[prop];
+                        const deleted  = Reflect.deleteProperty(target, prop);
 
-                        if (isReactive(prop)) {
+                        if (deleted && isReactive(prop)) {
                             notify(currentPath.concat([prop]), oldValue, undefined);
                         }
 
-                        return true;
+                        return deleted;
                     }
                 });
 
@@ -600,13 +646,20 @@
                 const value = state[fieldName].value;
 
                 for (const rule of rules) {
+                    if (!rule || typeof rule.validate !== 'function') {
+                        console.warn('wakaForm: invalid rule in field "' + fieldName + '" — expected an object with a validate() method:', rule);
+                        continue;
+                    }
+
                     const error = rule.validate(value);
 
                     if (error !== null && error !== undefined) {
+                        fieldValid[fieldName] = false;
                         return String(error);
                     }
                 }
 
+                fieldValid[fieldName] = true;
                 return null;
             }
 
@@ -615,13 +668,26 @@
              * Writes back through the proxy so subscribers are notified.
              * valid reflects actual rule results regardless of error visibility —
              * form.valid is always accurate, even before errors are shown.
+             *
+             * @param {string} [changedField] - When supplied, runRules is only called
+             *   for the changed field; all other fields read from the fieldValid cache.
+             *   Omit to force a full recompute — needed after validate() and reset()
+             *   where all fields change at once.
              */
-            function recomputeFormState() {
+            function recomputeFormState(changedField) {
                 let allValid = true;
                 let anyDirty = false;
 
                 for (const fieldName of Object.keys(fieldRules)) {
-                    if (runRules(fieldName) !== null) {
+                    // Full recompute (no changedField): run rules for every field.
+                    // Partial recompute (changedField supplied): only re-run rules
+                    // for the changed field; all others read from the fieldValid cache,
+                    // which is always current because runRules() updates it as a side effect.
+                    if (changedField === undefined || fieldName === changedField) {
+                        runRules(fieldName);
+                    }
+
+                    if (!fieldValid[fieldName]) {
                         allValid = false;
                     }
 
@@ -685,8 +751,9 @@
                 // Update error visibility for this field
                 updateFieldError(fieldName);
 
-                // Recompute form-level valid and dirty
-                recomputeFormState();
+                // Recompute form-level valid and dirty — only re-runs rules for
+                // the changed field; all others are inferred from existing error state.
+                recomputeFormState(fieldName);
             });
 
             // ── Public methods ────────────────────────────────────────────────────
@@ -738,6 +805,7 @@
                         proxy[fieldName].error   = null;
                         proxy[fieldName].touched = false;
                         proxy[fieldName].dirty   = false;
+                        runRules(fieldName); // refresh fieldValid cache for initial value
                     }
 
                     proxy.valid = true;
@@ -787,7 +855,7 @@
 
                     proxy[fieldName].touched = true;
                     updateFieldError(fieldName);
-                    recomputeFormState();
+                    recomputeFormState(fieldName);
                 }
             });
 
