@@ -647,10 +647,7 @@
              */
             function updateFieldError(fieldName) {
                 const field      = state[fieldName];
-                const shouldShow = validateOn === 'submit'
-                    ? validateCalled
-                    : field.touched;
-
+                const shouldShow = validateOn === 'submit' ? validateCalled : field.touched;
                 proxy[fieldName].error = shouldShow ? runRules(fieldName) : null;
             }
 
@@ -775,7 +772,7 @@
              * for styling) but does not expose the error until validate() is called.
              *
              * Typically called from a blur handler:
-             *   <input data-pac-bind="blur: () => form.touch('username')">
+             *   <input data-pac-bind="blur: form.touch('username')">
              *
              * @param {string} fieldName
              */
