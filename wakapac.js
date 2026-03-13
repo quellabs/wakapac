@@ -7870,6 +7870,17 @@
     Context.prototype.handleSimpleArrayChange = function(element, changes, newArray, arrayPath) {
         const mappingData = this.interpolationMap.get(element);
 
+        console.log('element.innerHTML:', element.innerHTML);
+        console.log('pre-rebuild DOM comments:');
+        const dbgWalker = document.createTreeWalker(element, NodeFilter.SHOW_COMMENT);
+        let dbgNode;
+        while ((dbgNode = dbgWalker.nextNode())) {
+            console.log(' ', JSON.stringify(dbgNode.textContent.trim()));
+        }
+        console.log('newArray:', JSON.stringify(newArray));
+        console.log('arrayPath:', arrayPath);
+        console.log('mappingData.foreachId:', mappingData?.foreachId);
+
         // Apply removals first (hash map will be rebuilt after all operations)
         if (changes.removed.length > 0) {
             this.removeItems(element, changes.removed, mappingData.foreachId);
@@ -7899,6 +7910,8 @@
 
         // Rebuild hash map from scratch after all operations
         this.rebuildHashMap(element, newArray, arrayPath, mappingData.foreachId);
+
+        console.log('post-rebuild hashMap:', [...this.arrayHashMaps.get(arrayPath).entries()]);
 
         // Store new array
         element._pacPreviousArray = newArray;
@@ -8121,7 +8134,7 @@
             this.cacheContextOnItemElements(tempContainer);
 
             // Find insertion point
-            const insertPoint = this.findInsertionPoint(element, index);
+            const insertPoint = this.findInsertionPoint(element, index, mappingData.foreachId);
 
             // Insert all nodes
             while (tempContainer.firstChild) {
