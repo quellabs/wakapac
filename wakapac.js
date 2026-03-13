@@ -1094,7 +1094,7 @@
                 // Re-proxy all items with correct indices after the operation
                 // This ensures all objects have the proper path references
                 newArray.forEach((item, index) => {
-                    if (item && typeof item === 'object' && !item._isReactive) {
+                    if (item && typeof item === 'object') {
                         const correctPath = currentPath.concat([index]);
                         newArray[index] = createProxy(item, correctPath);
                         newArray[index]._isReactive = true;
@@ -7373,10 +7373,13 @@
         // Scan all registered interpolation mappings
         for (const [element, mappingData] of this.interpolationMap) {
             if (mappingData.bindings && mappingData.bindings.foreach) {
+
                 // Match either raw foreach expression or resolved source array
                 if (
                     mappingData.foreachExpr === arrayPath ||
-                    mappingData.sourceArray === arrayPath
+                    arrayPath.startsWith(mappingData.foreachExpr + '[') ||
+                    mappingData.sourceArray === arrayPath ||
+                    arrayPath.startsWith(mappingData.sourceArray + '[')
                 ) {
                     elementsToUpdate.push(element);
                     continue;
@@ -7389,9 +7392,11 @@
                 // element itself so scope variables are expanded, then compare.
                 try {
                     const resolvedExpr = this.normalizePath(mappingData.foreachExpr, element);
-                    console.log('findForeach: expr=', mappingData.foreachExpr, 'resolved=', resolvedExpr, 'target=', arrayPath, 'match=', resolvedExpr === arrayPath, 'connected=', element.isConnected);
 
-                    if (resolvedExpr === arrayPath) {
+                    if (
+                        resolvedExpr === arrayPath ||
+                        arrayPath.startsWith(resolvedExpr + '[')
+                    ) {
                         elementsToUpdate.push(element);
                     }
                 } catch (_e) {
