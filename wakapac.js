@@ -6858,6 +6858,16 @@
     // FOREACH RENDERING (Array → DOM List Generation)
     // =============================================================================
 
+    Context.prototype.buildIndexMap = function (sourceArray) {
+        const map = new Map();
+
+        sourceArray.forEach((item, index) => {
+            map.set(item, index);
+        });
+
+        return map;
+    }
+
     /**
      * Renders a foreach loop by evaluating its array expression and generating DOM content.
      * @param {Element} foreachElement - DOM element with foreach binding
@@ -6871,14 +6881,6 @@
             console.warn('No foreach binding found for element');
             return;
         }
-
-        // Keep array path for later use.
-        // For scoped foreach expressions (e.g. "row.cells" inside a foreach: rows loop),
-        // sourceArray is the raw unresolved string. We need the fully-resolved absolute
-        // path (e.g. "rows[0].cells") so the hash map key matches what handleArrayChange
-        // receives from the pac:array-change event, which always carries the resolved path.
-        const resolvedPath = this.normalizePath(mappingData.foreachExpr, foreachElement);
-        const arrayPath = resolvedPath || mappingData.sourceArray;
 
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
@@ -6925,9 +6927,11 @@
 
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
+            const indexMap = self.buildIndexMap(sourceArray);
+
             array.forEach((item, renderIndex) => {
                 // Find the original index in the source array
-                const originalIndex = self.findOriginalIndex(item, sourceArray, renderIndex);
+                const originalIndex = indexMap.get(item);
 
                 // Build the HTML for this item
                 completeHTML += self.buildForeachItemHTML(
