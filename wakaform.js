@@ -489,7 +489,6 @@
                 }
 
                 fieldRules[fieldName]    = rules;
-                fieldValid[fieldName]    = true; // populated by first recomputeFormState() call below
                 initialValues[fieldName] = initialValue;
 
                 state[fieldName] = {
