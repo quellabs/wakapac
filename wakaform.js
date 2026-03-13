@@ -10,9 +10,8 @@
  * ║                                                                                  ║
  * ║  WakaForm - Reactive Form Plugin for wakaPAC                                     ║
  * ║                                                                                  ║
- * ║  Provides reactive form state with field-level validation, dirty tracking,       ║
- * ║  and configurable error visibility. Self-contained — no dependency on            ║
- * ║  wakaStore.                                                                      ║
+ * ║  Provides reactive form state with field-level validation and dirty tracking.    ║
+ * ║  Error visibility is left to the template — bind against field.valid directly.   ║
  * ║                                                                                  ║
  * ║  Usage:                                                                          ║
  * ║    wakaPAC.use(wakaForm);                                                        ║
@@ -26,8 +25,7 @@
  * ║                                                                                  ║
  * ║  Field state (reactive):                                                         ║
  * ║    form.username.value    — current value                                        ║
- * ║    form.username.error    — null, or error message string                        ║
- * ║    form.username.touched  — true after touch() is called on this field           ║
+ * ║    form.username.valid    — true when all rules pass for this field              ║
  * ║    form.username.dirty    — true when value differs from initial                 ║
  * ║                                                                                  ║
  * ║  Form state (reactive):                                                          ║
@@ -35,14 +33,20 @@
  * ║    form.dirty   — true when any field is dirty                                   ║
  * ║                                                                                  ║
  * ║  Methods:                                                                        ║
- * ║    form.validate()        — run all rules, expose errors, update form.valid      ║
- * ║    form.reset()           — restore initial values, clear errors and touched     ║
- * ║    form.values()          — plain object of { fieldName: currentValue }          ║
- * ║    form.touch(fieldName)  — mark field as touched (validateOn: 'touch' only)     ║
+ * ║    form.validate()   — recomputes all fields, returns form.valid (boolean)       ║
+ * ║    form.reset()      — restores initial values, clears dirty flags               ║
+ * ║    form.values()     — plain object of { fieldName: currentValue }               ║
  * ║                                                                                  ║
- * ║  Options:                                                                        ║
- * ║    validateOn: 'submit'   — errors shown only after form.validate() is called    ║
- * ║    validateOn: 'touch'    — errors shown per-field after form.touch(field)       ║
+ * ║  Template pattern:                                                               ║
+ * ║    <span data-pac-bind="visible: !form.username.valid">                          ║
+ * ║        Username is required                                                      ║
+ * ║    </span>                                                                       ║
+ * ║                                                                                  ║
+ * ║  Typical submit pattern:                                                         ║
+ * ║    submit() {                                                                    ║
+ * ║        if (!form.validate()) return;                                             ║
+ * ║        this._http.post('/api/login', form.values());                             ║
+ * ║    }                                                                             ║
  * ║                                                                                  ║
  * ║  Built-in rules:                                                                 ║
  * ║    new NotBlank()                                                                ║
@@ -56,13 +60,6 @@
  * ║  Custom rules:                                                                   ║
  * ║    Any object with a validate(value) method that returns null or an error        ║
  * ║    message string.                                                               ║
- * ║                                                                                  ║
- * ║  Typical submit pattern:                                                         ║
- * ║    submit() {                                                                    ║
- * ║        form.validate();                                                          ║
- * ║        if (!form.valid) return;                                                  ║
- * ║        this._http.post('/api/login', form.values());                             ║
- * ║    }                                                                             ║
  * ║                                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -124,9 +121,9 @@
 
         // Non-enumerable so the flag is invisible to templates and Object.keys().
         Object.defineProperty(obj, EXTERNAL_PROXY_FLAG, {
-            value: true,
-            enumerable: false,
-            writable: false,
+            value:        true,
+            enumerable:   false,
+            writable:     false,
             configurable: false
         });
 
@@ -275,7 +272,7 @@
      * @param {string} [message='Invalid format']
      */
     function Pattern(regex, message) {
-        this.regex = regex;
+        this.regex   = regex;
         this.message = message || 'Invalid format';
     }
 
@@ -314,9 +311,8 @@
      * createPacPlugin() — called by wakaPAC.use(wakaForm). Returns the plugin
      * descriptor that registers and deregisters component subscriptions.
      *
-     * createForm(schema, opts) — creates a new reactive form proxy.
+     * createForm(schema) — creates a new reactive form proxy.
      *   schema is { fieldName: { value, rules } }
-     *   opts.validateOn  'submit' (default) | 'touch'
      */
     WakaForm.prototype = {
         constructor: WakaForm,
@@ -380,7 +376,7 @@
                     // from the component root, e.g. ['form', 'username', 'value'].
                     container.dispatchEvent(new CustomEvent('pac:change', {
                         detail: {
-                            path: [key].concat(path),
+                            path:     [key].concat(path),
                             oldValue: oldValue,
                             newValue: newValue
                         }
@@ -445,32 +441,25 @@
          * Creates a new reactive form from a schema.
          *
          * Each field in the schema produces a reactive sub-object with value,
-         * error, touched, and dirty properties. The form proxy also exposes
-         * form-level valid and dirty computed properties.
+         * valid, and dirty properties. The form proxy also exposes form-level
+         * valid and dirty computed properties.
          *
          * On any mutation, fires pac:form-changed on document with the formId
          * and the form-relative path of the change.
          *
-         * @param {Object} schema                    - { fieldName: { value, rules } }
-         *                                             Field values must be primitives
-         *                                             (string, number, boolean, null, or undefined).
-         *                                             Object values are not supported — dirty
-         *                                             tracking uses strict equality (===).
-         * @param {Object}  [opts]                   - Optional configuration
-         * @param {string}  [opts.validateOn='submit'] - When to expose field errors.
-         *                                             'submit': after form.validate() is called.
-         *                                             'touch':  after form.touch(fieldName) is called.
+         * @param {Object} schema  - { fieldName: { value, rules } }
+         *                           Field values must be primitives
+         *                           (string, number, boolean, null, or undefined).
+         *                           Object values are not supported — dirty
+         *                           tracking uses strict equality (===).
          * @returns {Proxy} Form proxy
          */
-        createForm(schema, opts) {
+        createForm(schema) {
             if (!isPlainObject(schema)) {
                 throw new Error('wakaForm.createForm(): schema must be a plain object');
             }
 
-            opts = opts || {};
-
-            const validateOn = opts.validateOn === 'touch' ? 'touch' : 'submit';
-            const formId     = 'form-' + (this._nextFormId++);
+            const formId = 'form-' + (this._nextFormId++);
 
             // ── Extract field names and rules, build raw state ────────────────────
 
@@ -482,10 +471,9 @@
             const fieldRules = {};
 
             /**
-             * Validity cache — stores the raw runRules() result for each field,
-             * independent of error visibility. Used by recomputeFormState() to
-             * determine form.valid without re-running all rules on every keystroke.
-             * Keyed by field name, value is true (valid) or false (invalid).
+             * Validity cache — stores the boolean result of running all rules for
+             * each field. Updated by runRules() as a side effect and read by
+             * recomputeFormState() to determine form.valid efficiently.
              * @type {Object.<string, boolean>}
              */
             const fieldValid = {};
@@ -500,7 +488,7 @@
              * Raw state object that the proxy wraps.
              * Shape:
              *   {
-             *     fieldName: { value, error, touched, dirty },
+             *     fieldName: { value, valid, dirty },
              *     ...
              *     valid: boolean,
              *     dirty: boolean
@@ -530,14 +518,14 @@
                 initialValues[fieldName] = initialValue;
 
                 state[fieldName] = {
-                    value:   initialValue,
-                    error:   null,
-                    touched: false,
-                    dirty:   false
+                    value: initialValue,
+                    valid: true,
+                    dirty: false
                 };
             }
 
-            // Form-level computed properties
+            // Form-level computed properties — accurate initial values set by
+            // recomputeFormState() below.
             state.valid = true;
             state.dirty = false;
 
@@ -545,18 +533,10 @@
 
             /**
              * Reentrancy guard — prevents notification loops when derived state
-             * (valid, dirty, error) is written back during a field mutation.
+             * (valid, dirty) is written back during a field mutation.
              * @type {boolean}
              */
             let notifying = false;
-
-            /**
-             * Whether validate() has been called at least once.
-             * Controls error visibility in 'submit' mode — errors are hidden
-             * until the first validate() call, then live on every keystroke.
-             * @type {boolean}
-             */
-            let validateCalled = false;
 
             /**
              * Fires pac:form-changed on document with the form-relative path.
@@ -566,7 +546,7 @@
              */
             function notify(path, oldValue, newValue) {
                 // Guard against re-entrant notifications triggered by derived state
-                // writes (error, dirty, valid) that happen inside the event handler.
+                // writes (valid, dirty) that happen inside the event handler.
                 if (notifying) {
                     return;
                 }
@@ -670,9 +650,9 @@
             // Tag state so onComponentCreated can identify it when scanning
             // originalAbstraction. Non-enumerable so templates never see it.
             Object.defineProperty(state, '_wakaFormId', {
-                value: formId,
-                enumerable: false,
-                writable: false,
+                value:        formId,
+                enumerable:   false,
+                writable:     false,
                 configurable: false
             });
 
@@ -681,14 +661,14 @@
             // ── Validation helpers ────────────────────────────────────────────────
 
             /**
-             * Runs all rules for a single field and returns the first error
-             * message, or null if all rules pass.
+             * Runs all rules for a single field. Updates the fieldValid cache and
+             * writes field.valid through the proxy so bindings are notified.
              * @param {string} fieldName
-             * @returns {string|null}
              */
             function runRules(fieldName) {
                 const rules = fieldRules[fieldName];
                 const value = state[fieldName].value;
+                let   valid = true;
 
                 for (const rule of rules) {
                     // Skip malformed entries rather than throwing — warn so the
@@ -698,30 +678,28 @@
                         continue;
                     }
 
-                    const error = rule.validate(value);
+                    // First failing rule wins — no need to run the rest.
+                    const result = rule.validate(value);
 
-                    // First failing rule wins — update the cache and return immediately.
-                    if (error !== null && error !== undefined) {
-                        fieldValid[fieldName] = false;
-                        return String(error);
+                    if (result !== null && result !== undefined) {
+                        valid = false;
+                        break;
                     }
                 }
 
-                // All rules passed.
-                fieldValid[fieldName] = true;
-                return null;
+                // Update both the cache (read by recomputeFormState) and reactive state.
+                fieldValid[fieldName]  = valid;
+                proxy[fieldName].valid = valid;
             }
 
             /**
              * Recomputes form-level valid and dirty from current field state.
              * Writes back through the proxy so subscribers are notified.
-             * valid reflects actual rule results regardless of error visibility —
-             * form.valid is always accurate, even before errors are shown.
              *
              * @param {string} [changedField] - When supplied, runRules is only called
-             *   for the changed field; all other fields read from the fieldValid cache.
-             *   Omit to force a full recompute — needed after validate() and reset()
-             *   where all fields change at once.
+             *   for the changed field; all other fields read from the fieldValid cache,
+             *   which is always current because runRules() updates it as a side effect.
+             *   Omit to force a full recompute — used on initialisation and in validate().
              */
             function recomputeFormState(changedField) {
                 let allValid = true;
@@ -729,9 +707,8 @@
 
                 for (const fieldName of Object.keys(fieldRules)) {
                     // Full recompute (no changedField): run rules for every field.
-                    // Partial recompute (changedField supplied): only re-run rules
-                    // for the changed field; all others read from the fieldValid cache,
-                    // which is always current because runRules() updates it as a side effect.
+                    // Partial recompute (changedField supplied): only re-run for the
+                    // changed field; all others read from the fieldValid cache.
                     if (changedField === undefined || fieldName === changedField) {
                         runRules(fieldName);
                     }
@@ -749,23 +726,6 @@
                 proxy.dirty = anyDirty;
             }
 
-            /**
-             * Updates a single field's error visibility.
-             *
-             * submit mode: error shown only after validate() has been called.
-             * touch mode:  error shown after the field has been touched.
-             *
-             * In both modes, once errors are visible for a field they update
-             * live on every subsequent value change.
-             *
-             * @param {string} fieldName
-             */
-            function updateFieldError(fieldName) {
-                const field      = state[fieldName];
-                const shouldShow = validateOn === 'submit' ? validateCalled : field.touched;
-                proxy[fieldName].error = shouldShow ? runRules(fieldName) : null;
-            }
-
             // ── Wire value changes to validation and dirty tracking ───────────────
 
             // Listen for field value changes on document to run validation and
@@ -779,9 +739,9 @@
                 }
 
                 // path is e.g. ['username', 'value'] — we only react to value changes.
-                // Writes to error, touched, dirty, valid are derived state and must
-                // not re-trigger this handler (notifying guard in notify() prevents
-                // the loop, but filtering here is cleaner and avoids unnecessary work).
+                // Writes to valid and dirty are derived state and must not re-trigger
+                // this handler (the notifying guard in notify() prevents the loop, but
+                // filtering here is cleaner and avoids unnecessary work).
                 const path = detail.path;
 
                 if (path.length !== 2 || path[1] !== 'value') {
@@ -794,78 +754,54 @@
                     return;
                 }
 
-                // Update dirty: true if current value differs from initial
+                // Update field-level dirty: true if current value differs from initial.
                 proxy[fieldName].dirty = state[fieldName].value !== initialValues[fieldName];
 
-                // Update error visibility for this field
-                updateFieldError(fieldName);
-
-                // Recompute form-level valid and dirty — only re-runs rules for
-                // the changed field; all others are inferred from existing error state.
+                // Recompute form-level valid and dirty — only re-runs rules for the
+                // changed field; all others read from the fieldValid cache.
                 recomputeFormState(fieldName);
             });
 
             // ── Public methods ────────────────────────────────────────────────────
 
             /**
-             * Runs all validation rules, exposes errors on all fields, and
-             * updates form.valid.
-             *
-             * In 'submit' mode this is the trigger that makes errors visible —
-             * call it at the start of your submit handler, then check form.valid:
+             * Runs all validation rules, updates all field.valid flags, updates
+             * form.valid, and returns form.valid as a boolean. Convenient for
+             * use directly in a submit guard:
              *
              *   submit() {
-             *       form.validate();
-             *       if (!form.valid) return;
+             *       if (!form.validate()) return;
              *       this._http.post('/api/login', form.values());
              *   }
              *
-             * In 'touch' mode, validate() still works and can be used to force
-             * all errors visible at once (e.g. on a final review step).
+             * @returns {boolean}
              */
             Object.defineProperty(proxy, 'validate', {
-                enumerable: false,
+                enumerable:   false,
                 configurable: true,
                 value: function () {
-                    // Flip the flag so updateFieldError() starts exposing errors.
-                    validateCalled = true;
-
-                    for (const fieldName of Object.keys(fieldRules)) {
-                        updateFieldError(fieldName);
-                    }
-
-                    // Full recompute — all fields may now have different error visibility.
+                    // Full recompute — runs rules for every field and refreshes all state.
                     recomputeFormState();
+                    return state.valid;
                 }
             });
 
             /**
-             * Restores all fields to their initial values and clears errors,
-             * touched flags, and dirty flags. Resets validateCalled so errors
-             * are hidden again until the next validate() call.
+             * Restores all fields to their initial values and clears dirty flags.
              * Useful after a successful submit to return the form to a clean state.
              */
             Object.defineProperty(proxy, 'reset', {
-                enumerable: false,
+                enumerable:   false,
                 configurable: true,
                 value: function () {
-                    // Hide errors again until the next validate() call.
-                    validateCalled = false;
-
                     for (const fieldName of Object.keys(fieldRules)) {
-                        proxy[fieldName].value   = initialValues[fieldName];
-                        proxy[fieldName].error   = null;
-                        proxy[fieldName].touched = false;
-                        proxy[fieldName].dirty   = false;
-
-                        // Refresh the fieldValid cache now that the value has changed —
-                        // the next recomputeFormState() must see accurate results.
+                        proxy[fieldName].value = initialValues[fieldName];
+                        proxy[fieldName].dirty = false;
+                        // Refresh the fieldValid cache for the restored value.
                         runRules(fieldName);
                     }
 
-                    // Write final form-level state directly rather than calling
-                    // recomputeFormState() — all field state was just set above, and
-                    // dirty is always false after a reset.
+                    // Recompute form-level state from the refreshed cache.
                     proxy.valid = Object.keys(fieldRules).every(function (fn) { return fieldValid[fn]; });
                     proxy.dirty = false;
                 }
@@ -877,7 +813,7 @@
              * @returns {Object}
              */
             Object.defineProperty(proxy, 'values', {
-                enumerable: false,
+                enumerable:   false,
                 configurable: true,
                 value: function () {
                     const result = {};
@@ -892,41 +828,8 @@
                 }
             });
 
-            /**
-             * Marks a field as touched and immediately runs its validation rules,
-             * exposing any error in 'touch' mode.
-             *
-             * In 'submit' mode, touch() still records the touched flag (available
-             * for styling) but does not expose the error until validate() is called.
-             *
-             * Typically called from a blur handler:
-             *   <input data-pac-bind="blur: form.touch('username')">
-             *
-             * @param {string} fieldName
-             */
-            Object.defineProperty(proxy, 'touch', {
-                enumerable: false,
-                configurable: true,
-                value: function (fieldName) {
-                    if (!(fieldName in fieldRules)) {
-                        console.warn('wakaForm.touch(): unknown field "' + fieldName + '"');
-                        return;
-                    }
-
-                    proxy[fieldName].touched = true;
-
-                    // Immediately expose the error for this field in 'touch' mode.
-                    // In 'submit' mode this is a no-op for error visibility but still
-                    // records the touched flag, which is available for styling.
-                    updateFieldError(fieldName);
-                    recomputeFormState(fieldName);
-                }
-            });
-
-            // Compute initial form-level state. All fields start valid if they
-            // have no rules or if initial values satisfy all rules. This means
-            // form.valid accurately reflects reality from the start, even though
-            // errors are not yet visible.
+            // Compute initial form-level state. form.valid accurately reflects
+            // whether initial values satisfy all rules from the moment of creation.
             recomputeFormState();
 
             return proxy;
