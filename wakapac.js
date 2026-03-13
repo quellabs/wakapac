@@ -6931,7 +6931,12 @@
 
             array.forEach((item, renderIndex) => {
                 // Find the original index in the source array
-                const originalIndex = indexMap.get(item);
+                let originalIndex = indexMap.get(item);
+
+                // Makes sure original index is valid
+                if (originalIndex === undefined) {
+                    originalIndex = renderIndex;
+                }
 
                 // Build the HTML for this item
                 completeHTML += self.buildForeachItemHTML(
@@ -7400,7 +7405,6 @@
                         elementsToUpdate.push(element);
                     }
                 } catch (_e) {
-                    console.log('findForeach: normalizePath threw for', mappingData.foreachExpr);
                     // normalizePath can throw for malformed expressions — skip silently
                 }
             }
