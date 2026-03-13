@@ -139,19 +139,25 @@
 
     /**
      * Fails if the value is empty (null, undefined, empty string, or whitespace only).
+     * @param {string} [message='This field is required']
      */
-    function NotBlank() {}
+    function NotBlank(message) {
+        this.message = message || 'This field is required';
+    }
     NotBlank.prototype.validate = function (value) {
         return (value === null || value === undefined || String(value).trim() === '')
-            ? 'This field is required'
+            ? this.message
             : null;
     };
 
     /**
      * Fails if the value is not a valid email address.
      * Empty values pass — combine with NotBlank() if the field is required.
+     * @param {string} [message='Must be a valid email address']
      */
-    function Email() {}
+    function Email(message) {
+        this.message = message || 'Must be a valid email address';
+    }
     Email.prototype.validate = function (value) {
         if (value === null || value === undefined || String(value).trim() === '') {
             return null;
@@ -159,54 +165,66 @@
 
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value))
             ? null
-            : 'Must be a valid email address';
+            : this.message;
     };
 
     /**
      * Fails if the numeric value is less than n.
      * Empty values pass — combine with NotBlank() if the field is required.
      * @param {number} n
+     * @param {string} [message]
      */
-    function Min(n) { this.n = n; }
+    function Min(n, message) {
+        this.n       = n;
+        this.message = message || 'Must be at least ' + n;
+    }
     Min.prototype.validate = function (value) {
         if (value === null || value === undefined || value === '') return null;
-        return Number(value) >= this.n ? null : 'Must be at least ' + this.n;
+        return Number(value) >= this.n ? null : this.message;
     };
 
     /**
      * Fails if the numeric value is greater than n.
      * Empty values pass — combine with NotBlank() if the field is required.
      * @param {number} n
+     * @param {string} [message]
      */
-    function Max(n) { this.n = n; }
+    function Max(n, message) {
+        this.n       = n;
+        this.message = message || 'Must be at most ' + n;
+    }
     Max.prototype.validate = function (value) {
         if (value === null || value === undefined || value === '') return null;
-        return Number(value) <= this.n ? null : 'Must be at most ' + this.n;
+        return Number(value) <= this.n ? null : this.message;
     };
 
     /**
      * Fails if the string length is less than n characters.
      * Empty values pass — combine with NotBlank() if the field is required.
      * @param {number} n
+     * @param {string} [message]
      */
-    function MinLength(n) { this.n = n; }
+    function MinLength(n, message) {
+        this.n       = n;
+        this.message = message || 'Must be at least ' + n + ' characters';
+    }
     MinLength.prototype.validate = function (value) {
         if (value === null || value === undefined) return null;
-        return String(value).length >= this.n
-            ? null
-            : 'Must be at least ' + this.n + ' characters';
+        return String(value).length >= this.n ? null : this.message;
     };
 
     /**
      * Fails if the string length is greater than n characters.
      * @param {number} n
+     * @param {string} [message]
      */
-    function MaxLength(n) { this.n = n; }
+    function MaxLength(n, message) {
+        this.n       = n;
+        this.message = message || 'Must be at most ' + n + ' characters';
+    }
     MaxLength.prototype.validate = function (value) {
         if (value === null || value === undefined) return null;
-        return String(value).length <= this.n
-            ? null
-            : 'Must be at most ' + this.n + ' characters';
+        return String(value).length <= this.n ? null : this.message;
     };
 
     /**
