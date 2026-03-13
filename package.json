@@ -5,7 +5,8 @@
     "minify:wakastore": "terser wakastore.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakastore.min.js --ecma 2020",
     "minify:wakamotion": "terser wakamotion.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakamotion.min.js --ecma 2020",
     "minify:wakaroute": "terser wakaroute.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakaroute.min.js --ecma 2020",
-    "minify": "npm run minify:wakapac && npm run minify:wakasync && npm run minify:wakastore && npm run minify:wakamotion && npm run minify:wakaroute"
+    "minify:wakaform": "terser wakaform.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakaform.min.js --ecma 2020",
+    "minify": "npm run minify:wakapac && npm run minify:wakasync && npm run minify:wakastore && npm run minify:wakamotion && npm run minify:wakaroute && npm run minify:wakaform"
   },
   "dependencies": {},
   "devDependencies": {
