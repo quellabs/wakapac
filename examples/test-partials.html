@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaPAC Partials Test</title>
+</head>
+<body>
+
+<!-- =====================================================================
+     PARTIAL DEFINITIONS
+     script[type="text/template"] — browser treats content as opaque text,
+     so {{> name}} is never entity-encoded.
+     ===================================================================== -->
+<script type="text/template" data-pac-partial="userCard">
+    <div><strong>{{user.name}}</strong> &mdash; {{user.email}}</div>
+</script>
+
+<script type="text/template" data-pac-partial="userCardWithVisibility">
+    <div data-pac-bind="visible: user.active"><strong>{{user.name}}</strong> (active)</div>
+</script>
+
+<!-- userPanel references userCard — tests nested partials -->
+<script type="text/template" data-pac-partial="userPanel">
+    <fieldset>
+        <legend>User Panel</legend>
+        {{> userCard}}
+    </fieldset>
+</script>
+
+<script type="text/template" data-pac-partial="selectableCard">
+    <div>{{user.name}} <button data-pac-bind="click: selectUser">Select</button></div>
+</script>
+
+<!-- =====================================================================
+     TESTS
+     ===================================================================== -->
+<h1>WakaPAC Partials Test</h1>
+
+<!-- TEST 1: Basic partial outside foreach
+     Expected: single user card for Alice -->
+<h2>Test 1: Basic partial (outside foreach)</h2>
+<div id="test1">
+    {{> userCard}}
+</div>
+
+<!-- TEST 2: Partial inside foreach
+     Expected: three user cards for Alice, Bob, Carol -->
+<h2>Test 2: Partial inside foreach</h2>
+<div id="test2">
+    <div data-pac-bind="foreach: users" data-pac-item="user">
+        {{> userCard}}
+    </div>
+</div>
+
+<!-- TEST 3: Partial with binding inside foreach
+     Expected: Alice visible, Bob hidden -->
+<h2>Test 3: Partial with binding inside foreach</h2>
+<div id="test3">
+    <div data-pac-bind="foreach: users" data-pac-item="user">
+        {{> userCardWithVisibility}}
+    </div>
+</div>
+
+<!-- TEST 4: Nested partials
+     Expected: each user in a fieldset panel containing a user card -->
+<h2>Test 4: Nested partials</h2>
+<div id="test4">
+    <div data-pac-bind="foreach: users" data-pac-item="user">
+        {{> userPanel}}
+    </div>
+</div>
+
+<!-- TEST 5: Click handler inside partial
+     Expected: clicking Select updates selectedUser -->
+<h2>Test 5: Click handler in partial</h2>
+<div id="test5">
+    <div data-pac-bind="foreach: users" data-pac-item="user">
+        {{> selectableCard}}
+    </div>
+    <p>Selected: <strong>{{selectedUser}}</strong></p>
+</div>
+
+<!-- TEST 6: Unknown partial — should warn, not crash
+     Expected: console warning, {{> doesNotExist}} left unexpanded -->
+<h2>Test 6: Unknown partial (warn, no crash)</h2>
+<div id="test6">
+    <p>Before</p>
+    {{> doesNotExist}}
+    <p>After</p>
+</div>
+
+<!-- TEST 7: Partial in dynamically added foreach item
+     Expected: new items added by button also render with partial -->
+<h2>Test 7: Dynamic foreach item with partial</h2>
+<div id="test7">
+    <div data-pac-bind="foreach: users" data-pac-item="user">
+        {{> userCard}}
+    </div>
+    <button data-pac-bind="click: addUser">Add user</button>
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+    wakaPAC('#test1', {
+        user: { name: 'Alice', email: 'alice@example.com' }
+    });
+
+    wakaPAC('#test2', {
+        users: [
+            { name: 'Alice', email: 'alice@example.com' },
+            { name: 'Bob',   email: 'bob@example.com'   },
+            { name: 'Carol', email: 'carol@example.com' }
+        ]
+    });
+
+    wakaPAC('#test3', {
+        users: [
+            { name: 'Alice', email: 'alice@example.com', active: true  },
+            { name: 'Bob',   email: 'bob@example.com',   active: false }
+        ]
+    });
+
+    wakaPAC('#test4', {
+        users: [
+            { name: 'Alice', email: 'alice@example.com' },
+            { name: 'Bob',   email: 'bob@example.com'   }
+        ]
+    });
+
+    wakaPAC('#test5', {
+        users: [
+            { name: 'Alice', email: 'alice@example.com' },
+            { name: 'Bob',   email: 'bob@example.com'   },
+            { name: 'Carol', email: 'carol@example.com' }
+        ],
+        selectedUser: '(none)',
+        selectUser(user) {
+            this.selectedUser = user.name;
+        }
+    });
+
+    wakaPAC('#test6', {});
+
+    wakaPAC('#test7', {
+        users: [
+            { name: 'Alice', email: 'alice@example.com' }
+        ],
+        addUser() {
+            const names = ['Bob', 'Carol', 'Dave', 'Eve'];
+            const next = names[this.users.length % names.length];
+            this.users.push({ name: next, email: next.toLowerCase() + '@example.com' });
+        }
+    });
+</script>
+
+</body>
+</html>

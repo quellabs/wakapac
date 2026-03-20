@@ -46,13 +46,6 @@
     const _plugins = [];
 
     /**
-     * Registry of named partial templates, populated via wakaPAC.registerPartial().
-     * Keys are partial names, values are raw HTML strings.
-     * @type {Map<string, string>}
-     */
-    const _partials = new Map();
-
-    /**
      * Registered message hooks, installed via wakaPAC.installMessageHook().
      * Each entry holds a handle (for removal) and the hook function.
      * Hooks are invoked in registration order before the message reaches its container.
@@ -73,14 +66,14 @@
      * Captures variable name/expression with global flag
      * @type {RegExp}
      */
-    const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
+    const INTERPOLATION_REGEX = /\{\{(?!>)\s*([^}]+)\s*}}/g;
 
     /**
      * Tests for presence of interpolation syntax without capture groups
      * More efficient for boolean checks than INTERPOLATION_REGEX
      * @type {RegExp}
      */
-    const INTERPOLATION_TEST_REGEX = /\{\{.*?}}/;
+    const INTERPOLATION_TEST_REGEX = /\{\{(?!>).*?}}/;
 
     /**
      * Extracts foreach item metadata from PAC syntax
@@ -102,11 +95,36 @@
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
     /**
-     * Matches partial inclusion syntax: {{> partialName}}
-     * Captures the partial name with optional surrounding whitespace.
+     * Attribute name that both defines and references partial templates.
+     * Definition: <div data-pac-partial="name">...template html...</div>
+     * Injection:  {{> name}} inside any partial's template string
+     * @type {string}
+     */
+    const PAC_PARTIAL_ATTR = 'data-pac-partial';
+
+    /**
+     * Registry of named partial templates, collected once from the document
+     * on the first wakaPAC() call by collectPartials().
+     * Keys are partial names (data-pac-partial attribute values),
+     * values are raw innerHTML strings.
+     * @type {Map<string, string>}
+     */
+    const _partials = new Map();
+
+    /**
+     * Whether collectPartials() has already run.
+     * Partials are static — collection happens once only.
+     * @type {boolean}
+     */
+    let _partialsCollected = false;
+
+    /**
+     * Regex matching {{> name}} injection syntax inside partial template strings.
+     * Only used on raw JS strings — never on browser-parsed innerHTML — so the
+     * > character is never entity-encoded.
      * @type {RegExp}
      */
-    const PARTIAL_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
+    const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
 
     /**
      * This regexp finds runs of dots and square brackets.
@@ -6486,16 +6504,100 @@
     };
 
     /**
-     * Expands {{> partialName}} inclusions inside an element's innerHTML.
-     * Partial expansion is purely textual and runs before WakaPAC's binding scan
-     * so that the injected markup participates in normal binding and interpolation
-     * processing. Unknown partial names produce a console warning and are left
-     * unexpanded so the developer can spot the typo.
+     * Collects all partial template definitions from the document and populates
+     * the _partials map. Called once lazily on the first wakaPAC() invocation.
+     * Partials are assumed static — this never runs more than once.
      *
-     * Expansion is recursive up to a depth of 10 to support partials that contain
+     * Partials are defined as <script type="text/template" data-pac-partial="name">
+     * elements. Using script tags ensures the browser treats the content as opaque
+     * text — textContent returns the raw unencoded string, so {{> name}} injection
+     * syntax is preserved exactly as written.
+     *
+     * @returns {void}
+     */
+    function collectPartials() {
+        if (_partialsCollected) {
+            return;
+        }
+
+        _partialsCollected = true;
+
+        document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
+            const name = el.getAttribute(PAC_PARTIAL_ATTR);
+
+            if (!name) {
+                return;
+            }
+
+            if (_partials.has(name)) {
+                console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
+                return;
+            }
+
+            // textContent gives the raw unencoded string — > is never encoded
+            // inside a script tag, so {{> name}} injection syntax is preserved
+            _partials.set(name, el.textContent);
+        });
+    }
+
+    /**
+     * Expands {{> name}} injection syntax in a raw HTML string.
+     * Expansion is recursive up to depth 10 to support partials referencing
      * other partials, while guarding against circular references.
+     * Safe to run on raw strings — > is never entity-encoded outside the browser parser.
      *
-     * @param {Element} element - The element whose innerHTML should be expanded
+     * @param {string} html - Raw HTML string possibly containing {{> name}} injections
+     * @param {number} [depth=0] - Current recursion depth (internal use)
+     * @returns {string} HTML string with all known partials expanded
+     */
+    function expandPartialsInString(html, depth) {
+        if (_partials.size === 0) {
+            return html;
+        }
+
+        depth = depth || 0;
+
+        if (depth >= 10) {
+            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
+            return html;
+        }
+
+        // innerHTML encodes > as &gt;, so {{> name}} becomes {{&gt; name}} when
+        // a template is captured via element.innerHTML. Normalise before matching.
+        html = html.replace(/\{\{&gt;/g, '{{>');
+
+        // Quick check before paying regex cost
+        if (html.indexOf('{{>') === -1) {
+            return html;
+        }
+
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name) {
+            if (!_partials.has(name)) {
+                console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
+                return match;
+        }
+
+            return _partials.get(name);
+        });
+
+        // Recurse only if something was replaced and depth allows
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        if (expanded !== html && expanded.indexOf('{{>') !== -1) {
+            return expandPartialsInString(expanded, depth + 1);
+        }
+
+        return expanded;
+    }
+
+    /**
+     * Expands {{> name}} injections inside a live DOM element's innerHTML.
+     * Reads innerHTML as a string, expands, writes back only if changed
+     * to avoid destroying live DOM nodes unnecessarily.
+     *
+     * @param {Element} element - The element to expand partials within
      * @returns {void}
      */
     function expandPartials(element) {
@@ -6503,72 +6605,38 @@
             return;
         }
 
-        const MAX_DEPTH = 10;
-        let html = element.innerHTML;
-        let depth = 0;
+        // innerHTML encodes > as &gt; in text content, so {{> name}} becomes
+        // {{&gt; name}} and indexOf('{{>') never matches.
+        // Instead walk text nodes directly — textContent gives the raw decoded string.
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const hits = [];
+        let node;
 
-        while (PARTIAL_REGEX.test(html) && depth < MAX_DEPTH) {
-            // Reset lastIndex after the test
-            PARTIAL_REGEX.lastIndex = 0;
-            depth++;
+        while ((node = walker.nextNode())) {
+            if (node.textContent.indexOf('{{>') !== -1) {
+                hits.push(node);
+            }
+        }
 
-            html = html.replace(PARTIAL_REGEX, function(match, name) {
-                if (!_partials.has(name)) {
-                    console.warn(`wakaPAC: Unknown partial "{{> ${name}}}". Register it with wakaPAC.registerPartial("${name}", html).`);
-                    return match;
+        if (hits.length === 0) {
+                return;
                 }
 
-                return _partials.get(name);
-            });
+        hits.forEach(function(textNode) {
+            const expanded = expandPartialsInString(textNode.textContent, 0);
+
+            if (expanded === textNode.textContent) {
+                return;
         }
 
-        if (depth === MAX_DEPTH && PARTIAL_REGEX.test(html)) {
-            PARTIAL_REGEX.lastIndex = 0;
-            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
-        }
-
-        element.innerHTML = html;
-    }
-
-    /**
-     * Expands {{> partialName}} inclusions in a raw HTML string.
-     * Used when partials appear inside foreach templates, which are stored as
-     * strings rather than live DOM nodes.
-     *
-     * @param {string} html - Raw HTML string possibly containing partial syntax
-     * @returns {string} HTML string with all known partials expanded
-     */
-    function expandPartialsInString(html) {
-        if (_partials.size === 0 || !PARTIAL_REGEX.test(html)) {
-            PARTIAL_REGEX.lastIndex = 0;
-            return html;
-        }
-
-        PARTIAL_REGEX.lastIndex = 0;
-
-        const MAX_DEPTH = 10;
-        let depth = 0;
-
-        while (PARTIAL_REGEX.test(html) && depth < MAX_DEPTH) {
-            PARTIAL_REGEX.lastIndex = 0;
-            depth++;
-
-            html = html.replace(PARTIAL_REGEX, function(match, name) {
-                if (!_partials.has(name)) {
-                    console.warn(`wakaPAC: Unknown partial "{{> ${name}}}". Register it with wakaPAC.registerPartial("${name}", html).`);
-                    return match;
-                }
-
-                return _partials.get(name);
-            });
-        }
-
-        if (depth === MAX_DEPTH && PARTIAL_REGEX.test(html)) {
-            PARTIAL_REGEX.lastIndex = 0;
-            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
-        }
-
-        return html;
+            // Replace the text node with parsed HTML nodes.
+            // Create a temporary container, parse the expanded HTML into it,
+            // then insert its children before the text node and remove it.
+            const temp = document.createElement('template');
+            temp.innerHTML = expanded;
+            const fragment = temp.content;
+            textNode.parentNode.replaceChild(fragment, textNode);
+        });
     }
 
     /**
@@ -9202,6 +9270,9 @@
      * @returns {Object|Object[]|undefined} Single abstraction for ID, array for class/tag selectors
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
+        // Collect data-pac-partial elements from the document (once only)
+        collectPartials();
+
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
 
@@ -9295,62 +9366,6 @@
         // Return array for multi-selectors, single abstraction for ID selectors
         return isMultiSelector ? abstractions : abstractions[0];
     }
-
-    /**
-     * Registers a named partial template for use in WakaPAC views.
-     *
-     * Partials are reusable HTML fragments referenced with {{> partialName}} syntax.
-     * They are expanded at DOM scan time, before binding and interpolation run,
-     * so any WakaPAC bindings or {{expressions}} inside a partial work exactly as
-     * if you had written the markup inline.
-     *
-     * Partials inside foreach elements share the loop's item scope — a partial
-     * containing {{user.name}} works as expected inside a foreach with data-pac-item="user".
-     *
-     * Partials may reference other partials. Circular references are detected at
-     * expansion time and halted after 10 levels.
-     *
-     * @param {string} name - Identifier used in {{> name}} syntax. Must be a valid JS identifier.
-     * @param {string} html - Raw HTML string for the partial. May contain WakaPAC bindings and expressions.
-     * @returns {void}
-     *
-     * @example
-     * wakaPAC.registerPartial('userCard', `
-     *     <div class="card">
-     *         <h3>{{user.name}}</h3>
-     *         <p>{{user.email}}</p>
-     *     </div>
-     * `);
-     *
-     * // In your template:
-     * // <div data-pac-bind="foreach: users" data-pac-item="user">
-     * //     {{> userCard}}
-     * // </div>
-     */
-    wakaPAC.registerPartial = function(name, html) {
-        if (typeof name !== 'string' || !/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
-            throw new TypeError(`wakaPAC.registerPartial(): name must be a valid identifier, got "${name}"`);
-        }
-
-        if (typeof html !== 'string') {
-            throw new TypeError(`wakaPAC.registerPartial(): html must be a string, got ${typeof html}`);
-        }
-
-        _partials.set(name, html);
-    };
-
-    /**
-     * Removes a previously registered partial template.
-     * Has no effect if the partial does not exist.
-     * Note: already-rendered components are not affected — removal only prevents
-     * future expansions (e.g., on the next foreach re-render).
-     *
-     * @param {string} name - The partial name to remove
-     * @returns {void}
-     */
-    wakaPAC.unregisterPartial = function(name) {
-        _partials.delete(name);
-    };
 
     /**
      * Create a wakapac CustomEvent carrying Win32-style message data.
