@@ -6496,13 +6496,17 @@
 
         _partialsCollected = true;
 
+        // Find all partials
         document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
+            // Extract name
             const name = el.getAttribute(PAC_PARTIAL_ATTR);
 
+            // If none passed, ignore
             if (!name) {
                 return;
             }
 
+            // If already defined, warn the user and ignore
             if (_partials.has(name)) {
                 console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
                 return;
@@ -6516,7 +6520,7 @@
 
     /**
      * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
-     * Normalises {{&gt; to {{> first to handle strings captured via element.innerHTML.
+     * Normalizes {{&gt; to {{> first to handle strings captured via element.innerHTML.
      * @param {string} html
      * @param {number} [depth=0]
      * @returns {string}
@@ -6543,11 +6547,11 @@
 
         PARTIAL_INJECT_REGEX.lastIndex = 0;
 
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name) {
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name) {
             if (!_partials.has(name)) {
                 console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
                 return match;
-        }
+            }
 
             return _partials.get(name);
         });
