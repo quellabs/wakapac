@@ -856,27 +856,6 @@
         },
 
         /**
-         * Simple djb2 hash algorithm implementation
-         * Provides good distribution for typical string inputs
-         * @param {string} str - String to hash
-         * @returns {string} Hexadecimal hash string
-         */
-        djb2Hash(str) {
-            let hash = 5381;
-
-            for (let i = 0; i < str.length; i++) {
-                // hash * 33 + char_code
-                hash = ((hash << 5) + hash) + str.charCodeAt(i);
-
-                // Keep within 32-bit integer range
-                hash = hash & 0xffffffff;
-            }
-
-            // Convert to positive hex string
-            return (hash >>> 0).toString(16);
-        },
-
-        /**
          * Builds the reverse key name mapping once for caching.
          * @returns {Object<number, string>}
          */
