@@ -7837,37 +7837,6 @@
             `<!-- /pac-foreach-item -->`;
     }
 
-    /**
-     * Creates an appropriate temporary container based on the parent element type
-     * This ensures the browser's HTML parser doesn't strip invalid element nesting
-     * @param {HTMLElement} parentElement - The parent element that will receive the content
-     * @returns {HTMLElement} A temporary container appropriate for the content type
-     */
-    Context.prototype.createTemporaryContainer = function(parentElement) {
-        const tagName = parentElement.tagName.toLowerCase();
-
-        switch(tagName) {
-            case 'table':
-            case 'tbody':
-            case 'thead':
-            case 'tfoot':
-                return document.createElement('tbody');
-
-            case 'tr':
-                return document.createElement('tr');
-
-            case 'ul':
-            case 'ol':
-                return document.createElement('ul');
-
-            case 'select':
-                return document.createElement('select');
-
-            default:
-                return document.createElement('div');
-        }
-    };
-
     // =============================================================================
     // CLEANUP OBSERVER
     // =============================================================================
