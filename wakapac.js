@@ -53,6 +53,12 @@
      */
     const _hooks = [];
 
+    /** Registry of partial templates; keys are names, values are raw textContent strings. @type {Map<string, string>} */
+    const _partials = new Map();
+
+    /** Guards collectPartials() so it only runs once. @type {boolean} */
+    let _partialsCollected = false;
+
     /**
      * Monotonically increasing counter used to generate unique hook handles.
      * Returned by installMessageHook() and used by uninstallMessageHook() to
@@ -94,36 +100,10 @@
     const WP_IF_CLOSE_COMMENT_REGEX = /^\s*\/wp-if\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
-    /**
-     * Attribute name that both defines and references partial templates.
-     * Definition: <div data-pac-partial="name">...template html...</div>
-     * Injection:  {{> name}} inside any partial's template string
-     * @type {string}
-     */
+    /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
 
-    /**
-     * Registry of named partial templates, collected once from the document
-     * on the first wakaPAC() call by collectPartials().
-     * Keys are partial names (data-pac-partial attribute values),
-     * values are raw innerHTML strings.
-     * @type {Map<string, string>}
-     */
-    const _partials = new Map();
-
-    /**
-     * Whether collectPartials() has already run.
-     * Partials are static — collection happens once only.
-     * @type {boolean}
-     */
-    let _partialsCollected = false;
-
-    /**
-     * Regex matching {{> name}} injection syntax inside partial template strings.
-     * Only used on raw JS strings — never on browser-parsed innerHTML — so the
-     * > character is never entity-encoded.
-     * @type {RegExp}
-     */
+    /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
     const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
 
     /**
@@ -6504,15 +6484,9 @@
     };
 
     /**
-     * Collects all partial template definitions from the document and populates
-     * the _partials map. Called once lazily on the first wakaPAC() invocation.
-     * Partials are assumed static — this never runs more than once.
-     *
-     * Partials are defined as <script type="text/template" data-pac-partial="name">
-     * elements. Using script tags ensures the browser treats the content as opaque
-     * text — textContent returns the raw unencoded string, so {{> name}} injection
-     * syntax is preserved exactly as written.
-     *
+     * Collects <script type="text/template" data-pac-partial="name"> elements into
+     * _partials once on the first wakaPAC() call. Uses textContent so {{> name}}
+     * is never entity-encoded.
      * @returns {void}
      */
     function collectPartials() {
@@ -6541,14 +6515,11 @@
     }
 
     /**
-     * Expands {{> name}} injection syntax in a raw HTML string.
-     * Expansion is recursive up to depth 10 to support partials referencing
-     * other partials, while guarding against circular references.
-     * Safe to run on raw strings — > is never entity-encoded outside the browser parser.
-     *
-     * @param {string} html - Raw HTML string possibly containing {{> name}} injections
-     * @param {number} [depth=0] - Current recursion depth (internal use)
-     * @returns {string} HTML string with all known partials expanded
+     * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
+     * Normalises {{&gt; to {{> first to handle strings captured via element.innerHTML.
+     * @param {string} html
+     * @param {number} [depth=0]
+     * @returns {string}
      */
     function expandPartialsInString(html, depth) {
         if (_partials.size === 0) {
@@ -6562,8 +6533,7 @@
             return html;
         }
 
-        // innerHTML encodes > as &gt;, so {{> name}} becomes {{&gt; name}} when
-        // a template is captured via element.innerHTML. Normalise before matching.
+        // Normalise &gt; encoding from innerHTML-captured templates
         html = html.replace(/\{\{&gt;/g, '{{>');
 
         // Quick check before paying regex cost
@@ -6593,11 +6563,9 @@
     }
 
     /**
-     * Expands {{> name}} injections inside a live DOM element's innerHTML.
-     * Reads innerHTML as a string, expands, writes back only if changed
-     * to avoid destroying live DOM nodes unnecessarily.
-     *
-     * @param {Element} element - The element to expand partials within
+     * Expands {{> name}} injections inside a live DOM element by walking its
+     * text nodes (textContent is never entity-encoded, unlike innerHTML).
+     * @param {Element} element
      * @returns {void}
      */
     function expandPartials(element) {
@@ -6605,13 +6573,10 @@
             return;
         }
 
-        // innerHTML encodes > as &gt; in text content, so {{> name}} becomes
-        // {{&gt; name}} and indexOf('{{>') never matches.
-        // Instead walk text nodes directly — textContent gives the raw decoded string.
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
         const hits = [];
-        let node;
 
+        let node;
         while ((node = walker.nextNode())) {
             if (node.textContent.indexOf('{{>') !== -1) {
                 hits.push(node);
@@ -6619,15 +6584,15 @@
         }
 
         if (hits.length === 0) {
-                return;
-                }
+            return;
+        }
 
-        hits.forEach(function(textNode) {
+        hits.forEach(function (textNode) {
             const expanded = expandPartialsInString(textNode.textContent, 0);
 
             if (expanded === textNode.textContent) {
                 return;
-        }
+            }
 
             // Replace the text node with parsed HTML nodes.
             // Create a temporary container, parse the expanded HTML into it,
