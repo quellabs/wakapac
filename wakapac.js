@@ -53,6 +53,12 @@
      */
     const _hooks = [];
 
+    /** Registry of partial templates; keys are names, values are raw textContent strings. @type {Map<string, string>} */
+    const _partials = new Map();
+
+    /** Guards collectPartials() so it only runs once. @type {boolean} */
+    let _partialsCollected = false;
+
     /**
      * Monotonically increasing counter used to generate unique hook handles.
      * Returned by installMessageHook() and used by uninstallMessageHook() to
@@ -66,14 +72,14 @@
      * Captures variable name/expression with global flag
      * @type {RegExp}
      */
-    const INTERPOLATION_REGEX = /\{\{\s*([^}]+)\s*}}/g;
+    const INTERPOLATION_REGEX = /\{\{(?!>)\s*([^}]+)\s*}}/g;
 
     /**
      * Tests for presence of interpolation syntax without capture groups
      * More efficient for boolean checks than INTERPOLATION_REGEX
      * @type {RegExp}
      */
-    const INTERPOLATION_TEST_REGEX = /\{\{.*?}}/;
+    const INTERPOLATION_TEST_REGEX = /\{\{(?!>).*?}}/;
 
     /**
      * Extracts foreach item metadata from PAC syntax
@@ -93,6 +99,12 @@
     const WP_IF_COMMENT_REGEX = /^\s*wp-if:\s*(.+?)\s*$/;
     const WP_IF_CLOSE_COMMENT_REGEX = /^\s*\/wp-if\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
+
+    /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
+    const PAC_PARTIAL_ATTR = 'data-pac-partial';
+
+    /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
+    const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
 
     /**
      * This regexp finds runs of dots and square brackets.
@@ -841,27 +853,6 @@
 
             return keysA.length === keysB.length &&
                 keysA.every(k => Object.hasOwn(b, k) && this.isEqual(a[k], b[k]));
-        },
-
-        /**
-         * Simple djb2 hash algorithm implementation
-         * Provides good distribution for typical string inputs
-         * @param {string} str - String to hash
-         * @returns {string} Hexadecimal hash string
-         */
-        djb2Hash(str) {
-            let hash = 5381;
-
-            for (let i = 0; i < str.length; i++) {
-                // hash * 33 + char_code
-                hash = ((hash << 5) + hash) + str.charCodeAt(i);
-
-                // Keep within 32-bit integer range
-                hash = hash & 0xffffffff;
-            }
-
-            // Convert to positive hex string
-            return (hash >>> 0).toString(16);
         },
 
         /**
@@ -5240,6 +5231,10 @@
     Context.prototype.scanAndRegisterNewElements = function(parentElement) {
         const self = this;
 
+        // Expand partial templates before scanning so injected markup
+        // is visible to scanBindings and scanTextBindings
+        expandPartials(parentElement);
+
         // Scan for new bound elements within this container
         const newBindings = this.scanBindings(parentElement);
         const newTextBindings = this.scanTextBindings(parentElement);
@@ -6450,6 +6445,131 @@
     };
 
     /**
+     * Collects <script type="text/template" data-pac-partial="name"> elements into
+     * _partials once on the first wakaPAC() call. Uses textContent so {{> name}}
+     * is never entity-encoded.
+     * @returns {void}
+     */
+    function collectPartials() {
+        if (_partialsCollected) {
+            return;
+        }
+
+        _partialsCollected = true;
+
+        // Find all partials
+        document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
+            // Extract name
+            const name = el.getAttribute(PAC_PARTIAL_ATTR);
+
+            // If none passed, ignore
+            if (!name) {
+                return;
+            }
+
+            // If already defined, warn the user and ignore
+            if (_partials.has(name)) {
+                console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
+                return;
+            }
+
+            // textContent gives the raw unencoded string — > is never encoded
+            // inside a script tag, so {{> name}} injection syntax is preserved
+            _partials.set(name, el.textContent);
+        });
+    }
+
+    /**
+     * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
+     * Normalizes {{&gt; to {{> first to handle strings captured via element.innerHTML.
+     * @param {string} html
+     * @param {number} [depth=0]
+     * @returns {string}
+     */
+    function expandPartialsInString(html, depth) {
+        if (_partials.size === 0) {
+            return html;
+        }
+
+        depth = depth || 0;
+
+        if (depth >= 10) {
+            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
+            return html;
+        }
+
+        // Normalize &gt; encoding from innerHTML-captured templates
+        html = html.replace(/\{\{&gt;/g, '{{>');
+
+        // Quick check before paying regex cost
+        if (html.indexOf('{{>') === -1) {
+            return html;
+        }
+
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name) {
+            if (!_partials.has(name)) {
+                console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
+                return match;
+            }
+
+            return _partials.get(name);
+        });
+
+        // Recurse only if something was replaced and depth allows
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        if (expanded !== html && expanded.indexOf('{{>') !== -1) {
+            return expandPartialsInString(expanded, depth + 1);
+        }
+
+        return expanded;
+    }
+
+    /**
+     * Expands {{> name}} injections inside a live DOM element by walking its
+     * text nodes (textContent is never entity-encoded, unlike innerHTML).
+     * @param {Element} element
+     * @returns {void}
+     */
+    function expandPartials(element) {
+        if (_partials.size === 0) {
+            return;
+        }
+
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const hits = [];
+
+        let node;
+        while ((node = walker.nextNode())) {
+            if (node.textContent.indexOf('{{>') !== -1) {
+                hits.push(node);
+            }
+        }
+
+        if (hits.length === 0) {
+            return;
+        }
+
+        hits.forEach(function (textNode) {
+            const expanded = expandPartialsInString(textNode.textContent, 0);
+
+            if (expanded === textNode.textContent) {
+                return;
+            }
+
+            // Replace the text node with parsed HTML nodes.
+            // Create a temporary container, parse the expanded HTML into it,
+            // then insert its children before the text node and remove it.
+            const temp = document.createElement('template');
+            temp.innerHTML = expanded;
+            const fragment = temp.content;
+            textNode.parentNode.replaceChild(fragment, textNode);
+        });
+    }
+
+    /**
      * Calls scanAndRegisterNewElements on every Element node in the given array.
      * Extracted as a module-level helper so it is defined once rather than
      * recreated as a closure on each updateCommentConditional call.
@@ -6953,6 +7073,10 @@
             // This prevents DOM corruption caused by repeated innerHTML += operations
             let completeHTML = '';
 
+            // Expand partial templates in the foreach template string once, up front,
+            // rather than on every iteration — partials are static markup
+            const expandedTemplate = expandPartialsInString(mappingData.template);
+
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
             const indexMap = self.buildIndexMap(sourceArray, array);
@@ -6963,7 +7087,7 @@
 
                 // Build the HTML for this item
                 completeHTML += self.buildForeachItemHTML(
-                    mappingData.foreachId, mappingData.template, originalIndex, renderIndex
+                    mappingData.foreachId, expandedTemplate, originalIndex, renderIndex
                 );
             });
 
@@ -7712,37 +7836,6 @@
             template +
             `<!-- /pac-foreach-item -->`;
     }
-
-    /**
-     * Creates an appropriate temporary container based on the parent element type
-     * This ensures the browser's HTML parser doesn't strip invalid element nesting
-     * @param {HTMLElement} parentElement - The parent element that will receive the content
-     * @returns {HTMLElement} A temporary container appropriate for the content type
-     */
-    Context.prototype.createTemporaryContainer = function(parentElement) {
-        const tagName = parentElement.tagName.toLowerCase();
-
-        switch(tagName) {
-            case 'table':
-            case 'tbody':
-            case 'thead':
-            case 'tfoot':
-                return document.createElement('tbody');
-
-            case 'tr':
-                return document.createElement('tr');
-
-            case 'ul':
-            case 'ol':
-                return document.createElement('ul');
-
-            case 'select':
-                return document.createElement('select');
-
-            default:
-                return document.createElement('div');
-        }
-    };
 
     // =============================================================================
     // CLEANUP OBSERVER
@@ -8649,6 +8742,9 @@
      * @returns {Object|Object[]|undefined} Single abstraction for ID, array for class/tag selectors
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
+        // Collect data-pac-partial elements from the document (once only)
+        collectPartials();
+
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
 
@@ -8707,7 +8803,7 @@
             // Let plugins augment the component
             _plugins.forEach(function(plugin) {
                 if (typeof plugin.onComponentCreated === 'function') {
-                    plugin.onComponentCreated(context.abstraction, pacId);
+                    plugin.onComponentCreated(context.abstraction, pacId, context.config);
                 }
             });
 
