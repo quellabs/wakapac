@@ -9269,7 +9269,7 @@
             // Let plugins augment the component
             _plugins.forEach(function(plugin) {
                 if (typeof plugin.onComponentCreated === 'function') {
-                    plugin.onComponentCreated(context.abstraction, pacId);
+                    plugin.onComponentCreated(context.abstraction, pacId, context.config);
                 }
             });
 
