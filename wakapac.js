@@ -6533,7 +6533,7 @@
             return html;
         }
 
-        // Normalise &gt; encoding from innerHTML-captured templates
+        // Normalize &gt; encoding from innerHTML-captured templates
         html = html.replace(/\{\{&gt;/g, '{{>');
 
         // Quick check before paying regex cost
@@ -8206,56 +8206,25 @@
                 mappingData.foreachId, mappingData.template, originalIndex, index
             );
 
-            // Create appropriate container based on parent element type
-            const tempContainer = this.createTemporaryContainer(element);
+            // Create appropriate container
+            const tempContainer = document.createElement('template');
             tempContainer.innerHTML = itemHTML;
 
             // Cache context on the newly created item elements
-            this.cacheContextOnItemElements(tempContainer);
+            this.cacheContextOnItemElements(tempContainer.content);
 
             // Find insertion point
             const insertPoint = this.findInsertionPoint(element, index);
 
             // Insert all nodes
-            while (tempContainer.firstChild) {
+            while (tempContainer.content.firstChild) {
                 if (insertPoint) {
-                    element.insertBefore(tempContainer.firstChild, insertPoint);
+                    element.insertBefore(tempContainer.content.firstChild, insertPoint);
                 } else {
-                    element.appendChild(tempContainer.firstChild);
+                    element.appendChild(tempContainer.content.firstChild);
                 }
             }
         });
-    };
-
-    /**
-     * Creates an appropriate temporary container based on the parent element type
-     * This ensures the browser's HTML parser doesn't strip invalid element nesting
-     * @param {HTMLElement} parentElement - The parent element that will receive the content
-     * @returns {HTMLElement} A temporary container appropriate for the content type
-     */
-    Context.prototype.createTemporaryContainer = function(parentElement) {
-        const tagName = parentElement.tagName.toLowerCase();
-
-        switch(tagName) {
-            case 'table':
-            case 'tbody':
-            case 'thead':
-            case 'tfoot':
-                return document.createElement('tbody');
-
-            case 'tr':
-                return document.createElement('tr');
-
-            case 'ul':
-            case 'ol':
-                return document.createElement('ul');
-
-            case 'select':
-                return document.createElement('select');
-
-            default:
-                return document.createElement('div');
-        }
     };
 
     /**
