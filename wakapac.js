@@ -9738,6 +9738,69 @@
     };
 
     /**
+     * Creates an off-screen context sized to match the canvas backing store.
+     * The component owns the returned DC; recreate it in MSG_SIZE after resizing.
+     * @param {string} pacId
+     * @returns {CanvasRenderingContext2D|null}
+     */
+    wakaPAC.createCompatibleDC = function(pacId) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container || !(container instanceof HTMLCanvasElement)) {
+            return null;
+        }
+
+        return /** @type {CanvasRenderingContext2D} */ (new OffscreenCanvas(container.width, container.height).getContext('2d'));
+    };
+
+    /**
+     * Blits srcDC onto destDC at (dx, dy). Optional dw/dh stretch the source;
+     * omit to copy at the source's natural dimensions.
+     * @param {CanvasRenderingContext2D} destDC
+     * @param {CanvasRenderingContext2D} srcDC
+     * @param {number} dx
+     * @param {number} dy
+     * @param {number} [dw]
+     * @param {number} [dh]
+     */
+    wakaPAC.bitBlt = function(destDC, srcDC, dx, dy, dw, dh) {
+        if (!destDC || !srcDC) {
+            return;
+        }
+
+        const source = srcDC.canvas;
+
+        destDC.drawImage(
+            source,
+            dx, dy,
+            dw ?? source.width,
+            dh ?? source.height
+        );
+    };
+
+    /**
+     * Releases a compatible DC. Zeros the OffscreenCanvas dimensions to free
+     * the pixel buffer promptly rather than waiting on GC.
+     * @param {CanvasRenderingContext2D} dc
+     */
+    wakaPAC.deleteCompatibleDC = function(dc) {
+        // OffscreenCanvas has no explicit destroy method — nulling the canvas
+        // width and height releases the pixel buffer immediately in most engines,
+        // allowing the GC to reclaim the backing store without waiting for a
+        // full collection cycle.
+        if (!dc) {
+            return;
+        }
+
+        const offscreen = dc.canvas;
+
+        if (offscreen instanceof OffscreenCanvas) {
+            offscreen.width  = 0;
+            offscreen.height = 0;
+        }
+    };
+
+    /**
      * Resizes the backing store of a canvas PAC container to the given dimensions.
      * @param {string} pacId  - data-pac-id of the target canvas container
      * @param {number} width  - New backing store width in pixels
