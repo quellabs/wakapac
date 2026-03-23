@@ -9724,28 +9724,17 @@
     /**
      * Returns the list of discrete invalidated rectangles for a canvas PAC
      * container, or null if no repaint is pending.
-     *
-     * Unlike getInvalidatedRect(), which returns the bounding union of all dirty
-     * areas, this returns the individual rectangles that were passed to
-     * invalidateRect(). Use it when you want to skip clear/redraw work in the
-     * gaps between dirty regions — for example, when two small corners of a large
-     * canvas are invalidated independently, iterating the region list lets you
-     * avoid clearing the untouched area between them.
-     *
-     * Incoming rects that are fully contained within an already-queued rect are
-     * not added to the list, so the array is free of strict duplicates and
-     * redundant sub-rects.
-     *
-     * The returned array is a shallow copy — mutating it has no effect on
-     * internal state.
-     *
      * @param {string} pacId - data-pac-id of the target canvas container
      * @returns {Array<{x:number, y:number, width:number, height:number}>|null}
      */
-    wakaPAC.getUpdateRgn = function(pacId) {
+    wakaPAC.getUpdateRgn = function (pacId) {
         const entry = _dirtyCanvases.get(pacId);
-        if (!entry) return null;
-        return entry.rects.map(r => ({ ...r }));
+
+        if (!entry) {
+            return null;
+        }
+
+        return entry.rects.map(r => ({...r}));
     };
 
     /**
