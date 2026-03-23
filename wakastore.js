@@ -10,65 +10,39 @@
  * ║                                                                                  ║
  * ║  WakaStore - Shared Reactive Store Plugin for wakaPAC                            ║
  * ║                                                                                  ║
- * ║  Provides a shared reactive state object that can be mounted on any              ║
- * ║  wakaPAC component abstraction under any property name. Changes to the           ║
- * ║  store propagate to all subscriber components automatically.                     ║
+ * ║  Shared reactive state for wakaPAC components. Mount a store under any key;      ║
+ * ║  mutations propagate to all subscribers automatically.                           ║
  * ║                                                                                  ║
- * ║  Usage:                                                                          ║
  * ║    wakaPAC.use(wakaStore);                                                       ║
- * ║                                                                                  ║
  * ║    const store = wakaStore.createStore({ user: { name: 'Floris' } });            ║
+ * ║    wakaPAC('#header', { session: store });   // {{session.user.name}}            ║
+ * ║    store.user.name = 'Jan';                  // all components update            ║
  * ║                                                                                  ║
- * ║    // Mount under any key name                                                   ║
- * ║    wakaPAC('#header', { session: store });                                       ║
- * ║    wakaPAC('#nav',    { currentUser: store });                                   ║
- * ║                                                                                  ║
- * ║    // In templates: {{session.user.name}}  or  {{currentUser.user.name}}         ║
- * ║                                                                                  ║
- * ║    // Direct mutation — all components update automatically:                     ║
- * ║    store.user.name = 'Jan';                                                      ║
- * ║                                                                                  ║
- * ║  Server sync:                                                                    ║
- * ║                                                                                  ║
- * ║    // Poll a JSON:API endpoint — store updates, DOM follows automatically:       ║
- * ║    store.poll('/api/users', { interval: 3000 });                                 ║
+ * ║  Poll / push:                                                                    ║
+ * ║    store.poll('/api/users', { interval: 3000 });   // GET, merge response        ║
+ * ║    store.push('/api/users/1');                     // PATCH, merge response      ║
  * ║    store.stopPoll();                                                             ║
+ * ║    // Custom merge: store.poll(url, { merge: function(r) { this.x = r.x; } });   ║
+ * ║    // Note: poll overwrites local mutations each cycle. Call push() first.       ║
  * ║                                                                                  ║
- * ║    // Push store state to server, merge JSON:API response back in:               ║
- * ║    store.push('/api/users/1').then(...).catch(...);                              ║
- * ║                                                                                  ║
- * ║    // Custom merge for non-JSON:API or envelope responses:                       ║
- * ║    store.poll('/api/data', {                                                     ║
- * ║        interval: 5000,                                                           ║
- * ║        merge: (response) => { this.items = response.data.items; }                ║
+ * ║  WebSocket:                                                                      ║
+ * ║    store.connect('wss://example.com/updates');   // auto-reconnects by default   ║
+ * ║    store.connect(url, {                                                          ║
+ * ║        merge:             function(data) { this.items = data.items; },           ║
+ * ║        onClose:           (e) => { if (e.code === 4001) return false; },         ║
+ * ║        reconnectDelay:    1000,    // base backoff in ms (default)               ║
+ * ║        reconnectDelayMax: 30000    // backoff cap in ms (default)                ║
  * ║    });                                                                           ║
+ * ║    store.disconnect();                                                           ║
  * ║                                                                                  ║
- * ║  Note: poll will overwrite local store mutations on the next cycle.              ║
- * ║  Call push() first to persist local changes before they are overwritten.         ║
- * ║                                                                                  ║
- * ║  Local persistence:                                                              ║
- * ║                                                                                  ║
- * ║    // Auto-save to localStorage on every mutation, rehydrate on creation:        ║
+ * ║  Persistence:                                                                    ║
  * ║    const store = wakaStore.createStore({ theme: 'dark' }, {                      ║
- * ║        persist: 'app-settings',                                                  ║
- * ║        autoload: true,                                                           ║
- * ║        autoSave: true                                                            ║
+ * ║        persist: 'app-settings', autoLoad: true, autoSave: true                   ║
  * ║    });                                                                           ║
- * ║                                                                                  ║
- * ║    // Or control persistence manually:                                           ║
- * ║    const store = wakaStore.createStore({ theme: 'dark' }, {                      ║
- * ║        persist: 'app-settings'                                                   ║
- * ║    });                                                                           ║
- * ║    store.load();           // rehydrate from localStorage                        ║
- * ║    store.save();           // write current state to localStorage                ║
- * ║    store.clearPersist();   // remove from localStorage                           ║
- * ║                                                                                  ║
- * ║  Note: persist without autoSave only rehydrates on creation. Subsequent          ║
- * ║  mutations are not saved automatically — call store.save() explicitly.           ║
+ * ║    store.save();  store.load();  store.clearPersist();                           ║
  * ║                                                                                  ║
  * ║  Cleanup:                                                                        ║
- * ║                                                                                  ║
- * ║    store.destroy();  // stop poll + autoSave listener. Call on SPA navigation.   ║
+ * ║    store.destroy();   // stopPoll + disconnect + stopAutoSave                    ║
  * ╚══════════════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -76,23 +50,19 @@
     "use strict";
 
     /** @type {string} */
-    const VERSION = '1.2.1';
+    const VERSION = '1.3.0';
 
     /**
-     * Event fired on document when any store mutation occurs.
-     * Carries the storeId and store-relative path of the change.
-     * No proxy objects in the payload — only the storeId and path are
-     * needed; subscribers re-render by reading through the store proxy.
+     * Fired on document when any store mutation occurs.
+     * Carries storeId and store-relative path; no proxy objects in payload.
+     * Subscribers re-render by reading through the store proxy directly.
      * @type {string}
      */
     const STORE_CHANGED_EVENT = 'pac:store-changed';
 
     /**
      * Non-enumerable flag set on every store proxy (root and nested).
-     * wakaPAC's proxyGetHandler checks this flag and returns the value
-     * as-is instead of wrapping it in a second reactive proxy.
-     * The name is intentionally generic — it means "this object already
-     * manages its own reactivity; do not proxy it again".
+     * wakaPAC's proxyGetHandler skips re-wrapping objects that carry this flag.
      * @type {string}
      */
     const EXTERNAL_PROXY_FLAG = '_externalProxy';
@@ -109,66 +79,8 @@
      * @type {Object}
      */
     const DEFAULT_FETCH_OPTIONS = {
-        headers: { 'Accept': 'application/vnd.api+json' }
+        headers: { 'Accept': 'application/json' }
     };
-
-    /**
-     * Deserializes a JSON:API response document into a plain object suitable
-     * for merging into the store via Object.assign.
-     *
-     * Convention: the JSON:API resource `type` is used as-is as the store key.
-     * The developer controls naming by choosing type names that match store keys.
-     *
-     * Handles both single resources ({ data: {...} }) and collections
-     * ({ data: [...] }). Flattens `id` and `attributes` into a plain object.
-     * Relationships and `included` are intentionally not resolved — use a
-     * custom `merge` callback for responses that require relationship handling.
-     *
-     * @param {Object} response - Parsed JSON:API response body
-     * @returns {Object} Plain object keyed by resource type
-     */
-    function deserializeJsonApi(response) {
-        if (!response || !response.data) {
-            throw new Error('wakaStore: JSON:API response missing `data` member');
-        }
-
-        // Normalize to array so we can iterate uniformly regardless of whether
-        // the server returned a single resource object or a resource collection.
-        const resources = Array.isArray(response.data) ? response.data : [response.data];
-        const result = {};
-
-        for (const resource of resources) {
-            if (!resource.type) {
-                throw new Error('wakaStore: JSON:API resource missing `type` member');
-            }
-
-            // `type` becomes the store key as-is. The developer controls naming
-            // by matching their JSON:API type names to their store property names.
-            const key = resource.type;
-
-            // Flatten id + attributes into a single plain object. This is the
-            // entire deserialization — relationships and included are out of scope.
-            const attrs = isPlainObject(resource.attributes) ? resource.attributes : {};
-            const record = Object.assign({ id: resource.id }, attrs);
-
-            if (Array.isArray(response.data)) {
-                // Collection response: accumulate records under the shared type key.
-                // Multiple types in one response are handled correctly because each
-                // type gets its own array bucket.
-                if (!result[key]) {
-                    result[key] = [];
-                }
-
-                result[key].push(record);
-            } else {
-                // Single resource response: store the record directly, not wrapped
-                // in an array, so store.user.name works instead of store.user[0].name.
-                result[key] = record;
-            }
-        }
-
-        return result;
-    }
 
     /**
      * Performs a fetch request and returns the parsed JSON body.
@@ -178,25 +90,21 @@
      * @returns {Promise<Object>}
      */
     function doFetch(url, fetchOptions) {
-        // Merge caller options on top of defaults, deep-merging headers so that
-        // both the Accept default and any caller-supplied headers survive.
+        // Deep-merge headers so the Accept default and caller-supplied headers both survive.
         const opts = Object.assign({}, DEFAULT_FETCH_OPTIONS, fetchOptions, {
             headers: Object.assign({}, DEFAULT_FETCH_OPTIONS.headers, fetchOptions && fetchOptions.headers)
         });
 
         return fetch(url, opts).then(function(response) {
             if (!response.ok) {
-                // Attach status and raw response to the error so onError callbacks
-                // and catch handlers can inspect them without re-fetching.
+                // Attach status + response so catch handlers can inspect without re-fetching.
                 const error = new Error('wakaStore: HTTP ' + response.status + ' for ' + url);
                 error.status = response.status;
                 error.response = response;
                 throw error;
             }
 
-            // Always parse as JSON. poll and push both expect JSON:API bodies.
-            // Non-JSON responses (e.g. 204 No Content) will reject here and
-            // reach the onError / catch path, which is the right behaviour.
+            // Non-JSON responses (e.g. 204 No Content) will reject and reach onError / catch.
             return response.json();
         });
     }
@@ -270,19 +178,11 @@
             }
 
             /**
-             * Handles pac:store-changed events fired by store proxies.
-             *
-             * Dispatches pac:change on each subscriber container so wakaPAC
-             * re-renders. The path in the event tells wakaPAC which bindings
-             * to update. No data is written here — wakaPAC reads the current
-             * value directly from the store proxy when it re-renders.
-             *
-             * newValue is intentionally omitted from the pac:change detail.
-             * Passing the store proxy as newValue would cause proxySetHandler
-             * to attempt wrapping it. wakaPAC's render methods read from
-             * this.abstraction directly and do not use event.detail.newValue
-             * for DOM updates.
-             *
+             * Handles pac:store-changed events from store proxies.
+             * Dispatches pac:change (or pac:array-change) on each subscriber
+             * container so wakaPAC re-renders the affected bindings.
+             * newValue is omitted from pac:change — wakaPAC reads from
+             * this.abstraction directly and ignores event.detail.newValue.
              * @param {CustomEvent} event
              */
             function onStoreChanged(event) {
@@ -300,8 +200,7 @@
                     const translatedPath = [key].concat(path);
 
                     if (isArrayChange) {
-                        // pac:array-change for foreach rebuilds.
-                        // handleArrayChange only reads detail.newValue — no write-back.
+                        // pac:array-change triggers foreach rebuilds; handleArrayChange reads newValue only.
                         container.dispatchEvent(new CustomEvent('pac:array-change', {
                             detail: {
                                 path: translatedPath,
@@ -331,10 +230,8 @@
                  * @param {string} pacId
                  */
                 onComponentCreated(abstraction, pacId) {
-                    // originalAbstraction holds the raw object passed to wakaPAC()
-                    // before it was proxied. Store references are identified by their
-                    // non-enumerable _wakaStoreId tag, which survives proxy wrapping
-                    // because findStoreReferences reads the raw object directly.
+                    // originalAbstraction holds the raw pre-proxy object. Store references
+                    // are identified by their non-enumerable _wakaStoreId tag.
                     const context = window.PACRegistry.get(pacId);
 
                     if (!context || !context.originalAbstraction) {
@@ -354,11 +251,9 @@
                             registry.set(storeId, new Map());
                         }
 
-                        // Register this component as a subscriber. key is the property
-                        // name under which the store is mounted on this component's
-                        // abstraction (e.g. 'session' in wakaPAC('#header', { session: store })).
-                        // onStoreChanged prepends it to the mutation path so wakaPAC
-                        // resolves the correct binding (e.g. ['session', 'user', 'name']).
+                        // key is the mount name (e.g. 'session' in { session: store }).
+                        // onStoreChanged prepends it to the path so wakaPAC resolves
+                        // the correct binding (e.g. ['session', 'user', 'name']).
                         registry.get(storeId).set(pacId, { key, container: context.container });
                     }
                 },
@@ -417,13 +312,12 @@
             const autoLoad = opts.autoLoad === true && persistKey !== null;
 
             /**
-             * Marks obj and all nested objects with _externalProxy = true as a
-             * real non-enumerable own property. This is what wakaPAC's
-             * proxyGetHandler reads via target[prop]._externalProxy — it reads
-             * the raw object directly, not through the store proxy's get trap,
-             * so the flag must exist on the raw object itself.
+             * Recursively marks obj and all nested objects with _externalProxy = true
+             * as a non-enumerable own property. wakaPAC reads this flag directly off
+             * the raw object (not through the proxy's get trap), so it must be on
+             * the raw target itself.
              * @param {Object|Array} obj
-             * @param {WeakSet} [seen] - Cycle guard; tracks already-visited objects to prevent infinite recursion on circular references
+             * @param {WeakSet} [seen] - Cycle guard
              */
             function markExternalProxy(obj, seen = new WeakSet()) {
                 if (!obj || typeof obj !== 'object' || obj[EXTERNAL_PROXY_FLAG] || seen.has(obj)) {
@@ -447,10 +341,8 @@
             }
 
             /**
-             * Reentrancy guard. True while a notification is being dispatched.
-             * Prevents write-backs from wakaPAC's watcher reconstruction
-             * (which writes oldValue back through the store proxy to rebuild
-             * the pre-change state for watcher callbacks) from re-triggering
+             * Reentrancy guard. Prevents wakaPAC's watcher reconstruction
+             * (which writes oldValue back through the proxy) from re-triggering
              * notify and causing an infinite loop.
              * @type {boolean}
              */
@@ -479,9 +371,8 @@
             }
 
             /**
-             * WeakMap cache so the same raw object always returns the same
-             * proxy. Stable references prevent spurious change detection when
-             * wakaPAC or other code reads nested properties multiple times.
+             * Cache so the same raw object always yields the same proxy.
+             * Stable references prevent spurious change detection on repeated reads.
              * @type {WeakMap<Object, Proxy>}
              */
             const proxyCache = new WeakMap();
@@ -498,22 +389,16 @@
                     return proxyCache.get(obj);
                 }
 
-                // Mark before creating the proxy so wakaPAC reads _externalProxy
-                // directly off the raw object and skips re-wrapping it.
+                // Mark before proxying so wakaPAC reads _externalProxy off the raw object.
                 markExternalProxy(obj);
 
                 const proxy = new Proxy(obj, {
                     /**
-                     * Intercepts property reads. Returns storeId for internal identification,
-                     * wraps mutating array methods to trigger notifications, and lazily
-                     * proxies nested objects for deep reactivity.
-                     * @param {Object|Array} target
-                     * @param {string|symbol} prop
-                     * @returns {*}
+                     * Intercepts reads: exposes storeId, wraps mutating array methods,
+                     * and lazily proxies nested objects for deep reactivity.
                      */
                     get(target, prop) {
-                        // Expose _wakaStoreId on the root proxy so the plugin
-                        // can identify store references in originalAbstraction.
+                        // Expose _wakaStoreId so the plugin can identify store references.
                         if (prop === '_wakaStoreId') {
                             return storeId;
                         }
@@ -539,12 +424,8 @@
                     },
 
                     /**
-                     * Intercepts property writes. Skips if value is unchanged.
-                     * Marks new object values as external proxies, then notifies.
-                     * @param {Object|Array} target
-                     * @param {string|symbol} prop
-                     * @param {*} newValue
-                     * @returns {boolean}
+                     * Intercepts writes. Skips unchanged values, marks new objects,
+                     * then fires a notification.
                      */
                     set(target, prop, newValue) {
                         const oldValue = target[prop];
@@ -568,10 +449,7 @@
                     },
 
                     /**
-                     * Intercepts property deletions and notifies with undefined as newValue.
-                     * @param {Object|Array} target
-                     * @param {string|symbol} prop
-                     * @returns {boolean}
+                     * Intercepts deletions and notifies with undefined as newValue.
                      */
                     deleteProperty(target, prop) {
                         if (!(prop in target)) {
@@ -593,9 +471,8 @@
                 return proxy;
             }
 
-            // Tag initialState so onComponentCreated can identify it when
-            // scanning originalAbstraction. Non-enumerable so it is invisible
-            // to template bindings and for..in loops.
+            // Tag initialState so the plugin can identify it in originalAbstraction.
+            // Non-enumerable — invisible to templates and for..in loops.
             Object.defineProperty(initialState, '_wakaStoreId', {
                 value: storeId,
                 enumerable: false,
@@ -603,12 +480,21 @@
                 configurable: false
             });
 
-            /**
-             * Internal poll state. Kept on initialState as non-enumerable
-             * so it survives proxy round-trips but is invisible to templates.
-             */
+            /** Internal poll state. */
             let _pollTimer = null;
             let _pollActive = false;
+
+            /** Active WebSocket instance. @type {WebSocket|null} */
+            let _ws = null;
+
+            /** True while a connect() session is active (survives reconnects). @type {boolean} */
+            let _wsActive = false;
+
+            /** Reconnect attempt counter; reset to 0 on successful open. @type {number} */
+            let _wsAttempt = 0;
+
+            /** Pending reconnect timer handle. @type {number|null} */
+            let _wsReconnectTimer = null;
 
             /**
              * Safe localStorage wrapper. Returns null on any error (private
@@ -642,7 +528,7 @@
             /** @type {number|null} Pending autoSave debounce timer */
             let _autoSaveTimer = null;
 
-            /** @type {Function|null} Bound document listener for autoSave, kept for removeEventListener */
+            /** @type {Function|null} autoSave listener reference, kept for removeEventListener */
             let _autoSaveListener = null;
 
             // Create proxy
@@ -673,14 +559,8 @@
             });
 
             /**
-             * Rehydrates the store from localStorage, merging stored values onto
-             * the proxy. Unknown keys in storage are silently ignored.
-             *
-             * Merge strategy: stored values overwrite current state for matching
-             * keys. Keys present in current state but absent in storage are left
-             * untouched — this handles new keys added after the first save without
-             * leaving them undefined.
-             *
+             * Rehydrates the store from localStorage. Stored values overwrite
+             * matching keys; keys absent from storage are left untouched.
              * @returns {boolean} True if stored data was found and applied
              */
             Object.defineProperty(proxy, 'load', {
@@ -712,9 +592,7 @@
                         return false;
                     }
 
-                    // Write through the proxy so reactivity fires for each key.
-                    // Only overwrite keys that exist in stored — do not delete keys
-                    // that are in initialState but absent from storage.
+                    // Write through proxy so reactivity fires for each key.
                     Object.assign(proxy, stored);
                     return true;
                 }
@@ -738,10 +616,7 @@
                 }
             });
 
-            // Wire autoSave: listen for this store's mutations on document and
-            // debounce writes to localStorage. Debouncing is important because
-            // Object.assign or a poll response can fire many consecutive mutations
-            // in a single tick — we only want one localStorage write per batch.
+            // Debounced autoSave: one localStorage write per mutation batch.
             if (autoSave) {
                 _autoSaveListener = function(event) {
                     if (event.detail.storeId !== storeId) {
@@ -761,47 +636,28 @@
                 document.addEventListener(STORE_CHANGED_EVENT, _autoSaveListener);
             }
 
-            // Rehydrate from localStorage if a persist key was supplied.
-            // This runs after the proxy is fully constructed but before any
-            // wakaPAC() component mounts, so pac:store-changed events fired
-            // by Object.assign hit an empty registry and produce no DOM updates.
-            // That is intentional — components read the already-rehydrated state
-            // when they mount, so no re-render is needed or missed.
+            // Rehydrate before any component mounts. pac:store-changed events fired
+            // here hit an empty registry, so no DOM updates occur — components read
+            // the already-rehydrated state when they mount.
             if (persistKey && autoLoad) {
                 proxy.load();
             }
 
             /**
-             * Starts polling an endpoint and merging the response into the store.
+             * Polls an endpoint and merges the response into the store.
+             * Default merge: Object.assign(store, response) — expects a plain JSON object.
+             * Uses recursive setTimeout so the next poll starts only after the current
+             * request settles. Pauses automatically when the tab is hidden.
              *
-             * Convention: the server returns a JSON:API document. The deserializer
-             * flattens each resource into a plain object keyed by its `type`, then
-             * Object.assign writes each key onto the store. DOM updates happen
-             * automatically through the existing proxy/event machinery.
-             *
-             * If your server does not speak JSON:API, supply a `merge` callback.
-             * The callback receives the store proxy and the raw parsed response body
-             * and is responsible for writing whatever it needs onto the store.
-             *
-             * Poll timing uses recursive setTimeout so the next poll only starts
-             * after the current request settles. This prevents request pile-up when
-             * the server is slow and avoids setInterval drift.
-             *
-             * The poll pauses automatically when the tab is hidden (Page Visibility
-             * API) and resumes when it becomes visible again. Call stopPoll() to
-             * stop permanently.
-             *
-             * Note: if you mutate the store locally while polling is active, the
-             * next poll cycle will overwrite those changes with server data. This is
-             * expected behaviour. To persist local changes, call push() first so
-             * the server reflects them before the next poll.
+             * Note: local mutations are overwritten on the next cycle. Call push() first
+             * to persist them before they are lost.
              *
              * @param {string} url - Endpoint to poll
              * @param {Object} [opts]
-             * @param {number} [opts.interval=5000] - Milliseconds between polls
-             * @param {Function} [opts.merge] - Custom merge: function(response), called with store as `this`
+             * @param {number}   [opts.interval=5000]  - Ms between polls
+             * @param {Function} [opts.merge]           - Custom merge: function(response), `this` = store
              * @param {Function} [opts.onError] - Error callback: (error) => void
-             * @param {Object} [opts.fetchOptions] - Options forwarded to fetch()
+             * @param {Object}   [opts.fetchOptions]    - Forwarded to fetch()
              */
             Object.defineProperty(proxy, 'poll', {
                 enumerable: false,
@@ -815,7 +671,6 @@
                     const fetchOptions = opts.fetchOptions || {};
 
                     // Calling poll() while already polling replaces the active poll.
-                    // stopPoll() clears the timer and resets the flag before we start fresh.
                     if (_pollActive) {
                         proxy.stopPoll();
                     }
@@ -823,9 +678,7 @@
                     _pollActive = true;
 
                     /**
-                     * Applies a server response to the store.
-                     * Uses the custom merge callback when provided, otherwise falls back
-                     * to the JSON:API deserializer + Object.assign convention.
+                     * Merges a response into the store.
                      * @param {Object} response - Parsed response body
                      */
                     function applyResponse(response) {
@@ -834,38 +687,33 @@
                             return;
                         }
 
-                        // deserializeJsonApi returns a plain object keyed by resource
-                        // type. Object.assign writes each key onto the store proxy,
-                        // which fires individual pac:store-changed events per key —
-                        // exactly the same path as a direct store mutation.
-                        const data = deserializeJsonApi(response);
-                        Object.assign(proxy, data);
+                        // Default: shallow-merge onto the proxy, firing pac:store-changed per key.
+                        if (response && typeof response === 'object' && !Array.isArray(response)) {
+                            Object.assign(proxy, response);
+                        } else {
+                            console.warn('wakaStore poll: default merge expects a plain object, got', typeof response, '— supply a merge callback for non-object responses');
+                        }
                     }
 
                     /**
-                     * Schedules the next poll cycle via setTimeout.
-                     * Skips the fetch if the tab is hidden and reschedules immediately.
-                     * Always reschedules in .finally() so errors don't break the loop.
+                     * Schedules the next poll via setTimeout.
+                     * Skips the fetch when the tab is hidden; reschedules in .finally()
+                     * so errors don't break the loop.
                      */
                     function schedulePoll() {
-                        // Guard: stopPoll() may have been called between the end of the
-                        // last request and schedulePoll() firing inside .finally().
+                        // Guard: stopPoll() may have fired between request end and this call.
                         if (!_pollActive) {
                             return;
                         }
 
-                        // Recursive setTimeout instead of setInterval: the next poll
-                        // only starts after the previous request has fully settled.
-                        // This prevents concurrent requests when the server is slow
-                        // and keeps the interval measured from response, not dispatch.
+                        // Recursive setTimeout: next poll starts only after current request settles,
+                        // preventing pile-up on slow servers and avoiding setInterval drift.
                         _pollTimer = setTimeout(function() {
-                            // Do nothing if there is no active poll
                             if (!_pollActive) {
                                 return;
                             }
 
-                            // Respect Page Visibility API — skip fetch when hidden,
-                            // reschedule immediately so we catch the next interval.
+                            // Skip fetch when tab is hidden; reschedule to catch the next interval.
                             if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
                                 schedulePoll();
                                 return;
@@ -873,26 +721,20 @@
 
                             doFetch(url, fetchOptions)
                                 .then(function(response) {
-                                    // Check _pollActive again — stopPoll() could have been
-                                    // called while the request was in flight.
+                                    // stopPoll() may have fired while the request was in flight.
                                     if (_pollActive) {
                                         applyResponse(response);
                                     }
                                 })
                                 .catch(function(error) {
                                     if (onError) {
-                                        // Swallow errors thrown inside the callback — they
-                                        // are the caller's problem, not the poll loop's.
                                         try { onError(error); } catch(_e) { /* swallow */ }
                                     } else {
                                         console.error('wakaStore poll error:', error);
                                     }
                                 })
                                 .finally(function() {
-                                    // Guard against the race where stopPoll() was called
-                                    // while the request was in flight. Without this check,
-                                    // .finally() would create a new timer even though
-                                    // _pollActive is false and _pollTimer was cleared.
+                                    // Guard against stopPoll() racing with .finally().
                                     if (_pollActive) {
                                         schedulePoll();
                                     }
@@ -912,16 +754,9 @@
                 enumerable: false,
                 configurable: true,
                 value: function() {
-                    // Setting _pollActive = false is the primary stop signal.
-                    // Any in-flight request will see this flag in its .then() and
-                    // skip applyResponse. schedulePoll() also checks it before
-                    // setting a new timer.
+                    // Primary stop signal — checked by in-flight .then() and schedulePoll().
                     _pollActive = false;
 
-                    // Clear any pending timer. Without this the scheduled callback
-                    // would still fire once more after stopPoll(), see _pollActive
-                    // is false, and exit cleanly — but clearing it is tidier and
-                    // avoids an unnecessary wakeup.
                     if (_pollTimer !== null) {
                         clearTimeout(_pollTimer);
                         _pollTimer = null;
@@ -930,10 +765,193 @@
             });
 
             /**
-             * Detaches the autoSave mutation listener and cancels any pending
-             * debounced write. The persist key and save()/load() methods remain
-             * available — only the automatic save-on-mutation behaviour stops.
-             * Safe to call when autoSave was not enabled.
+             * Opens a WebSocket connection and merges incoming JSON messages into the store.
+             * Default merge: Object.assign(store, data) — expects a plain JSON object.
+             * Reconnects automatically with exponential backoff; onClose returning false
+             * suppresses reconnect for that close event.
+             * Calling connect() while already connected replaces the existing socket.
+             *
+             * @param {string} url - WebSocket endpoint (ws:// or wss://)
+             * @param {Object} [opts]
+             * @param {string|string[]} [opts.protocols]             - Subprotocol(s) for the WebSocket constructor
+             * @param {Function}        [opts.merge]                 - Custom merge: function(data), `this` = store
+             * @param {Function}        [opts.onError]          - Error callback: (event) => void
+             * @param {Function}        [opts.onClose]               - Close callback: (CloseEvent) => void|false
+             * @param {boolean}         [opts.reconnect=true]        - Auto-reconnect on close
+             * @param {number}          [opts.reconnectDelay=1000]   - Base backoff delay in ms
+             * @param {number}          [opts.reconnectDelayMax=30000] - Backoff cap in ms
+             */
+            Object.defineProperty(proxy, 'connect', {
+                enumerable: false,
+                configurable: true,
+                value: function(url, opts) {
+                    opts = opts || {};
+
+                    const protocols        = opts.protocols       || undefined;
+                    const merge            = typeof opts.merge   === 'function' ? opts.merge   : null;
+                    const onError          = typeof opts.onError === 'function' ? opts.onError : null;
+                    const onClose          = typeof opts.onClose === 'function' ? opts.onClose : null;
+                    const reconnect        = opts.reconnect !== false;
+                    const reconnectDelay   = typeof opts.reconnectDelay    === 'number' ? Math.max(0, opts.reconnectDelay)    : 1000;
+                    const reconnectDelayMax = typeof opts.reconnectDelayMax === 'number' ? Math.max(0, opts.reconnectDelayMax) : 30000;
+
+                    // Replace any active connection. Pass false so _wsActive stays true
+                    // across the teardown — we're immediately setting it again below.
+                    if (_wsActive) {
+                        proxy.disconnect(false);
+                    }
+
+                    _wsActive  = true;
+                    _wsAttempt = 0;
+
+                    /** Exponential backoff: base * 2^attempt, capped at max. */
+                    function backoffDelay() {
+                        return Math.min(reconnectDelay * Math.pow(2, _wsAttempt), reconnectDelayMax);
+                    }
+
+                    /** Creates and wires a new WebSocket. Called on connect and each reconnect. */
+                    function openSocket() {
+                        // Guard: disconnect() may have fired during a backoff delay.
+                        if (!_wsActive) {
+                            return;
+                        }
+
+                        try {
+                            _ws = protocols !== undefined
+                                ? new WebSocket(url, protocols)
+                                : new WebSocket(url);
+                        } catch (e) {
+                            // Constructor throws synchronously on invalid URLs.
+                            if (onError) {
+                                try { onError(e); } catch (_e) { /* swallow */ }
+                            } else {
+                                console.error('wakaStore connect error:', e);
+                            }
+
+                            scheduleReconnect();
+                            return;
+                        }
+
+                        _ws.onopen = function() {
+                            // Reset backoff so the next reconnect starts from the base delay.
+                            _wsAttempt = 0;
+                        };
+
+                        _ws.onmessage = function(event) {
+                            if (!_wsActive) {
+                                return;
+                            }
+
+                            let data;
+
+                            try {
+                                data = JSON.parse(event.data);
+                            } catch (e) {
+                                console.error('wakaStore: received non-JSON message, ignoring', event.data);
+                                return;
+                            }
+
+                            if (merge) {
+                                merge.call(proxy, data);
+                            } else {
+                                // Default: shallow-merge onto the store — same convention as poll().
+                                if (data && typeof data === 'object' && !Array.isArray(data)) {
+                                    Object.assign(proxy, data);
+                                } else {
+                                    console.warn('wakaStore: default merge expects a plain object, got', typeof data, '— supply a merge callback for non-object messages');
+                                }
+                            }
+                        };
+
+                        _ws.onerror = function(event) {
+                            if (onError) {
+                                try { onError(event); } catch (_e) { /* swallow */ }
+                            } else {
+                                console.error('wakaStore WebSocket error:', event);
+                            }
+                            // onerror is always followed by onclose; reconnect logic lives there.
+                        };
+
+                        _ws.onclose = function(event) {
+                            _ws = null;
+
+                            if (!_wsActive) {
+                                return;
+                            }
+
+                            // onClose returning false vetoes reconnect for this event.
+                            if (onClose) {
+                                let result;
+                                try { result = onClose(event); } catch (_e) { /* swallow */ }
+                                if (result === false) {
+                                    _wsActive = false;
+                                    return;
+                                }
+                            }
+
+                            scheduleReconnect();
+                        };
+                    }
+
+                    /** Schedules the next reconnect after the backoff delay. */
+                    function scheduleReconnect() {
+                        if (!reconnect || !_wsActive) {
+                            return;
+                        }
+
+                        const delay = backoffDelay();
+                        _wsAttempt++;
+
+                        _wsReconnectTimer = setTimeout(function() {
+                            _wsReconnectTimer = null;
+                            openSocket();
+                        }, delay);
+                    }
+
+                    openSocket();
+                }
+            });
+
+            /**
+             * Closes the active WebSocket and cancels any pending reconnect.
+             * Safe to call when no connection is active. The store remains fully
+             * usable after disconnect().
+             *
+             * @param {boolean} [_setInactive=true] - Internal. Pass false when
+             *   replacing a connection inside connect() to skip the _wsActive toggle.
+             */
+            Object.defineProperty(proxy, 'disconnect', {
+                enumerable: false,
+                configurable: true,
+                value: function(_setInactive) {
+                    if (_setInactive !== false) {
+                        _wsActive = false;
+                    }
+
+                    // Cancel any pending reconnect before it opens a new socket.
+                    if (_wsReconnectTimer !== null) {
+                        clearTimeout(_wsReconnectTimer);
+                        _wsReconnectTimer = null;
+                    }
+
+                    if (_ws !== null) {
+                        // Null handlers before close() so onclose doesn't trigger a reconnect.
+                        _ws.onopen    = null;
+                        _ws.onmessage = null;
+                        _ws.onerror   = null;
+                        _ws.onclose   = null;
+                        _ws.close();
+                        _ws = null;
+                    }
+
+                    _wsAttempt = 0;
+                }
+            });
+
+            /**
+             * Detaches the autoSave listener and cancels any pending debounced write.
+             * save()/load()/clearPersist() remain available. Safe to call when autoSave
+             * was not enabled.
              */
             Object.defineProperty(proxy, 'stopAutoSave', {
                 enumerable: false,
@@ -952,46 +970,32 @@
             });
 
             /**
-             * Tears down all active background activity for this store.
-             * Stops any running poll, detaches the autoSave listener, and cancels
-             * any pending debounced write. Call this when the store is no longer
-             * needed — particularly important in SPAs where stores are created and
-             * discarded on navigation, to prevent listener accumulation.
-             *
-             * The store proxy remains usable after destroy() — in-memory state,
-             * save(), load(), and clearPersist() are unaffected.
+             * Tears down all background activity: stopPoll + disconnect + stopAutoSave.
+             * The store proxy remains usable — in-memory state and persistence methods
+             * are unaffected. Call on SPA navigation to prevent listener accumulation.
              */
             Object.defineProperty(proxy, 'destroy', {
                 enumerable: false,
                 configurable: true,
                 value: function() {
                     proxy.stopPoll();
+                    proxy.disconnect();
                     proxy.stopAutoSave();
                 }
             });
 
             /**
-             * Pushes store state to a server endpoint.
-             *
-             * By default, serializes the entire store as JSON and sends it as a
-             * PATCH request. Supply a `body` option to send a subset, or set
-             * `method` to override the HTTP verb.
-             *
-             * If the server returns a JSON:API document, the response is
-             * deserialized and merged back into the store automatically — useful
-             * when the server enriches the saved object with computed fields,
-             * timestamps, or generated IDs. Supply a custom `merge` callback if
-             * the response shape requires different handling.
-             *
-             * Returns the raw parsed response body for callers that need it.
+             * Sends store state to a server endpoint and merges the response back in.
+             * Default: PATCH with full store as body; plain JSON object response merged
+             * via Object.assign. Supply merge for custom response handling.
              *
              * @param {string} url - Endpoint to push to
              * @param {Object} [opts]
              * @param {string} [opts.method='PATCH'] - HTTP method
-             * @param {Object} [opts.body] - Body to send. Defaults to the full store state.
-             * @param {Function} [opts.merge] - Custom merge: function(response), called with store as `this`
+             * @param {Object}   [opts.body]             - Body to send; defaults to full store state
+             * @param {Function} [opts.merge]            - Custom merge: function(response), `this` = store
              * @param {Function} [opts.onError] - Error callback: (error) => void
-             * @param {Object} [opts.fetchOptions] - Extra options forwarded to fetch()
+             * @param {Object}   [opts.fetchOptions]     - Forwarded to fetch()
              * @returns {Promise<Object>} Resolves with the parsed response body
              */
             Object.defineProperty(proxy, 'push', {
@@ -1004,20 +1008,17 @@
                     const merge         = typeof opts.merge   === 'function' ? opts.merge   : null;
                     const onError       = typeof opts.onError === 'function' ? opts.onError : null;
 
-                    // Default body: snapshot the raw initialState via JSON round-trip.
-                    // This strips the proxy wrapper, non-enumerable internals (_wakaStoreId,
-                    // _externalProxy), and any _ / $ prefixed properties, leaving only
-                    // the plain data the template layer sees.
+                    // Snapshot via JSON round-trip: strips proxy wrapper, non-enumerable
+                    // internals (_wakaStoreId, _externalProxy), and _ / $ prefixed props.
                     const body = opts.body !== undefined
                         ? opts.body
                         : JSON.parse(JSON.stringify(initialState));
 
-                    // Build fetch options, ensuring Content-Type is set for JSON:API
-                    // and that any caller-supplied headers are deep-merged on top.
+                    // Deep-merge caller headers on top of Content-Type default.
                     const fetchOptions = Object.assign({}, opts.fetchOptions, {
                         method: method,
                         headers: Object.assign(
-                            { 'Content-Type': 'application/vnd.api+json' },
+                            { 'Content-Type': 'application/json' },
                             opts.fetchOptions && opts.fetchOptions.headers
                         ),
                         body: JSON.stringify(body)
@@ -1034,21 +1035,12 @@
                                 return response;
                             }
 
-                            try {
-                                // Fold the server response back into the store so that
-                                // server-generated fields (timestamps, IDs, computed
-                                // values) are reflected immediately without waiting for
-                                // the next poll cycle.
-                                const data = deserializeJsonApi(response);
-                                Object.assign(proxy, data);
-                            } catch(_e) {
-                                // Response may be empty or non-JSON:API (e.g. 204 No Content
-                                // parsed as null). Silently skip — caller can use a merge
-                                // callback if they need to handle the response shape.
+                            // Fold response back into the store (e.g. server-generated IDs,
+                            // timestamps). Skip gracefully for empty / non-object responses.
+                            if (response && typeof response === 'object' && !Array.isArray(response)) {
+                                Object.assign(proxy, response);
                             }
 
-                            // Return the raw response so callers can inspect it if needed,
-                            // e.g. to read a Location header or act on a specific status code.
                             return response;
                         })
                         .catch(function(error) {
@@ -1056,7 +1048,7 @@
                                 try { onError(error); } catch(_e) { /* swallow */ }
                             }
 
-                            // Re-throw so the caller's own .catch() / await try-catch still fires.
+                            // Re-throw so the caller's .catch() / try-catch still fires.
                             throw error;
                         });
                 }
