@@ -112,7 +112,7 @@
         // ─── Fake fetch helpers ──────────────────────────────────────────────────
 
         /**
-         * Installs a global fetch stub that resolves with a JSON:API response.
+         * Installs a global fetch stub that resolves with the given response body.
          * Returns a spy object with a `calls` counter.
          * Automatically restores the original fetch when restore() is called.
          */
@@ -144,106 +144,89 @@
             return new Promise(function (resolve) { setTimeout(resolve, ms); });
         }
 
-        // ─── JSON:API fixtures ────────────────────────────────────────────────────
+        // ─── Plain JSON fixtures ──────────────────────────────────────────────────
 
-        const COLLECTION_RESPONSE = {
-            data: [
-                { id: '1', type: 'user', attributes: { name: 'Floris', role: 'admin' } },
-                { id: '2', type: 'user', attributes: { name: 'Jan',    role: 'editor' } }
+        const USER_RESPONSE = { name: 'Floris', role: 'admin' };
+
+        const USERS_RESPONSE = {
+            users: [
+                { id: '1', name: 'Floris', role: 'admin' },
+                { id: '2', name: 'Jan',    role: 'editor' }
             ]
         };
 
-        const SINGLE_RESPONSE = {
-            data: { id: '1', type: 'user', attributes: { name: 'Floris', role: 'admin' } }
-        };
-
-        const UPDATED_COLLECTION = {
-            data: [
-                { id: '1', type: 'user', attributes: { name: 'Floris', role: 'superadmin' } }
-            ]
-        };
+        const UPDATED_USER_RESPONSE = { name: 'Floris', role: 'superadmin' };
 
         // ─── Test suites ──────────────────────────────────────────────────────────
 
         async function runAll() {
 
-            // ── 1. JSON:API deserialisation ───────────────────────────────────────
-            suite('JSON:API deserialisation');
+            // ── 1. Poll default merge (plain JSON) ────────────────────────────────
+            suite('Poll default merge');
 
-            await test('collection response populates store array', async function () {
-                const store = wakaStore.createStore({ user: [] });
-                const spy = stubFetch(COLLECTION_RESPONSE);
+            await test('plain object response is shallow-merged onto the store', async function () {
+                const store = wakaStore.createStore({ name: null, role: null });
+                const spy = stubFetch(USER_RESPONSE);
 
-                store.poll('/api/users', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(100);
                 store.stopPoll();
                 spy.restore();
 
-                assertEqual(store.user.length, 2, 'user length');
-                assertEqual(store.user[0], { id: '1', name: 'Floris', role: 'admin' }, 'user[0]');
-                assertEqual(store.user[1], { id: '2', name: 'Jan', role: 'editor' }, 'user[1]');
+                assertEqual(store.name, 'Floris', 'name');
+                assertEqual(store.role, 'admin',  'role');
             });
 
-            await test('single resource response stores object directly (not in array)', async function () {
-                const store = wakaStore.createStore({ user: null });
-                const spy = stubFetch(SINGLE_RESPONSE);
+            await test('only top-level keys from response are written to store', async function () {
+                const store = wakaStore.createStore({ name: null, role: null, extra: 'keep' });
+                const spy = stubFetch({ name: 'Jan' });
 
-                store.poll('/api/user/1', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(100);
                 store.stopPoll();
                 spy.restore();
 
-                assert(!Array.isArray(store.user), 'user should not be an array');
-                assertEqual(store.user, { id: '1', name: 'Floris', role: 'admin' }, 'user');
+                assertEqual(store.name,  'Jan',   'name updated');
+                assertEqual(store.extra, 'keep',  'extra key untouched');
             });
 
-            await test('id and attributes are flattened into one plain object', async function () {
-                const store = wakaStore.createStore({ user: null });
-                const spy = stubFetch(SINGLE_RESPONSE);
+            await test('response overwrites existing store values', async function () {
+                const store = wakaStore.createStore({ name: 'Old', role: 'guest' });
+                const spy = stubFetch(USER_RESPONSE);
 
-                store.poll('/api/user/1', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(100);
                 store.stopPoll();
                 spy.restore();
 
-                assert('id'   in store.user, 'id present');
-                assert('name' in store.user, 'name present');
-                assert('role' in store.user, 'role present');
+                assertEqual(store.name, 'Floris', 'name overwritten');
+                assertEqual(store.role, 'admin',  'role overwritten');
             });
 
-            await test('type is used as store key verbatim', async function () {
-                const store = wakaStore.createStore({ user: null });
-                const spy = stubFetch(SINGLE_RESPONSE);
+            await test('non-plain-object response logs a warning and does not crash', async function () {
+                const store = wakaStore.createStore({ items: [] });
+                const spy = stubFetch([1, 2, 3]); // array — not a plain object
+                const warnings = [];
+                const origWarn = console.warn;
+                console.warn = function () { warnings.push([].slice.call(arguments).join(' ')); };
 
-                store.poll('/api/user/1', { interval: 50 });
+                store.poll('/api/items', { interval: 50 });
                 await wait(100);
                 store.stopPoll();
                 spy.restore();
+                console.warn = origWarn;
 
-                // type = 'user' → store.user
-                assert(store.user !== null, 'store.user populated');
-            });
-
-            await test('resource with no attributes produces id-only record', async function () {
-                const store = wakaStore.createStore({ tag: null });
-                const spy = stubFetch({ data: { id: '42', type: 'tag' } });
-
-                store.poll('/api/tag/42', { interval: 50 });
-                await wait(100);
-                store.stopPoll();
-                spy.restore();
-
-                assertEqual(store.tag, { id: '42' }, 'tag');
+                assert(warnings.length > 0, 'console.warn called for non-object response');
             });
 
             // ── 2. Poll lifecycle ─────────────────────────────────────────────────
             suite('Poll lifecycle');
 
             await test('fetch is called after the interval elapses', async function () {
-                const store = wakaStore.createStore({ user: [] });
-                const spy = stubFetch(COLLECTION_RESPONSE);
+                const store = wakaStore.createStore({ name: null });
+                const spy = stubFetch(USER_RESPONSE);
 
-                store.poll('/api/users', { interval: 80 });
+                store.poll('/api/user', { interval: 80 });
 
                 // Not called yet — interval hasn't elapsed
                 await wait(40);
@@ -258,10 +241,10 @@
             });
 
             await test('fetch is called on each subsequent interval', async function () {
-                const store = wakaStore.createStore({ user: [] });
-                const spy = stubFetch(COLLECTION_RESPONSE);
+                const store = wakaStore.createStore({ name: null });
+                const spy = stubFetch(USER_RESPONSE);
 
-                store.poll('/api/users', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(180); // ~3 cycles at 50ms
                 store.stopPoll();
                 spy.restore();
@@ -270,10 +253,10 @@
             });
 
             await test('stopPoll() prevents further fetches', async function () {
-                const store = wakaStore.createStore({ user: [] });
-                const spy = stubFetch(COLLECTION_RESPONSE);
+                const store = wakaStore.createStore({ name: null });
+                const spy = stubFetch(USER_RESPONSE);
 
-                store.poll('/api/users', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(80);
                 store.stopPoll();
                 const callsAtStop = spy.calls;
@@ -285,29 +268,26 @@
             });
 
             await test('calling poll() again replaces the active poll', async function () {
-                const store = wakaStore.createStore({ user: [], product: [] });
-                const spy1 = stubFetch(COLLECTION_RESPONSE);
+                const store = wakaStore.createStore({ name: null, product: null });
+                const spy1 = stubFetch(USER_RESPONSE);
 
-                store.poll('/api/users', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(80);
                 spy1.restore();
 
                 // Replace with a new poll targeting a different endpoint
-                const spy2 = stubFetch({
-                    data: [{ id: '1', type: 'product', attributes: { name: 'Widget' } }]
-                });
+                const spy2 = stubFetch({ product: 'Widget' });
 
-                store.poll('/api/products', { interval: 50 });
+                store.poll('/api/product', { interval: 50 });
                 await wait(100);
                 store.stopPoll();
                 spy2.restore();
 
-                // Only the second poll's data should be present
-                assert(store.product.length > 0, 'product populated by new poll');
+                assertEqual(store.product, 'Widget', 'product populated by new poll');
             });
 
             await test('stopPoll() is safe to call when no poll is active', async function () {
-                const store = wakaStore.createStore({ user: [] });
+                const store = wakaStore.createStore({ name: null });
                 // Should not throw
                 store.stopPoll();
                 pass('no error thrown');
@@ -317,7 +297,7 @@
             suite('Store updates');
 
             await test('store is updated with latest server data on each cycle', async function () {
-                const store = wakaStore.createStore({ user: [] });
+                const store = wakaStore.createStore({ name: null });
                 let cycle = 0;
 
                 window.fetch = function () {
@@ -325,19 +305,17 @@
                     return Promise.resolve({
                         ok: true,
                         json: function () {
-                            return Promise.resolve({
-                                data: [{ id: String(cycle), type: 'user', attributes: { name: 'User ' + cycle } }]
-                            });
+                            return Promise.resolve({ name: 'User ' + cycle });
                         }
                     });
                 };
 
-                store.poll('/api/users', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(80);
-                const nameAfterFirst = store.user[0] && store.user[0].name;
+                const nameAfterFirst = store.name;
 
                 await wait(60);
-                const nameAfterSecond = store.user[0] && store.user[0].name;
+                const nameAfterSecond = store.name;
 
                 store.stopPoll();
                 window.fetch = undefined;
@@ -347,22 +325,22 @@
             });
 
             await test('local mutations are overwritten by the next poll cycle', async function () {
-                const store = wakaStore.createStore({ user: [] });
-                const spy = stubFetch(COLLECTION_RESPONSE);
+                const store = wakaStore.createStore({ name: null, role: null });
+                const spy = stubFetch(USER_RESPONSE);
 
-                store.poll('/api/users', { interval: 100 });
+                store.poll('/api/user', { interval: 100 });
                 await wait(120); // first cycle populates store
 
                 // Local mutation
-                store.user = [{ id: '99', name: 'Local', role: 'ghost' }];
-                assertEqual(store.user[0].name, 'Local', 'local mutation applied');
+                store.name = 'LocalOverride';
+                assertEqual(store.name, 'LocalOverride', 'local mutation applied');
 
                 await wait(110); // second cycle should overwrite
                 store.stopPoll();
                 spy.restore();
 
                 // Server data wins
-                assert(store.user[0].name !== 'Local', 'server data overwrites local mutation');
+                assert(store.name !== 'LocalOverride', 'server data overwrites local mutation');
             });
 
             // ── 4. Custom merge callback ──────────────────────────────────────────
@@ -395,10 +373,10 @@
                 assertEqual(store.total, 2, 'total');
             });
 
-            await test('merge callback bypasses JSON:API deserialiser', async function () {
+            await test('merge callback bypasses default Object.assign merge', async function () {
                 const store = wakaStore.createStore({ result: null });
 
-                // Non-JSON:API response shape — would throw if deserialised normally
+                // Envelope shape — would not be handled by default merge correctly
                 const spy = stubFetch({ weirdShape: { value: 42 } });
 
                 store.poll('/api/weird', {
@@ -500,8 +478,8 @@
             suite('Page Visibility API');
 
             await test('fetch is skipped while tab is hidden', async function () {
-                const store = wakaStore.createStore({ user: [] });
-                const spy = stubFetch(COLLECTION_RESPONSE);
+                const store = wakaStore.createStore({ name: null });
+                const spy = stubFetch(USER_RESPONSE);
 
                 // Hide the tab before polling starts
                 Object.defineProperty(document, 'visibilityState', {
@@ -509,7 +487,7 @@
                     get: () => 'hidden'
                 });
 
-                store.poll('/api/users', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(200);
                 store.stopPoll();
                 spy.restore();
@@ -524,8 +502,8 @@
             });
 
             await test('fetch resumes after tab becomes visible again', async function () {
-                const store = wakaStore.createStore({ user: [] });
-                const spy = stubFetch(COLLECTION_RESPONSE);
+                const store = wakaStore.createStore({ name: null });
+                const spy = stubFetch(USER_RESPONSE);
 
                 // Start hidden
                 Object.defineProperty(document, 'visibilityState', {
@@ -533,7 +511,7 @@
                     get: () => 'hidden'
                 });
 
-                store.poll('/api/users', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(150);
                 const callsWhileHidden = spy.calls;
 
@@ -764,10 +742,10 @@
             suite('destroy()');
 
             await test('destroy() stops an active poll', async function () {
-                const store = wakaStore.createStore({ user: [] });
-                const spy = stubFetch(COLLECTION_RESPONSE);
+                const store = wakaStore.createStore({ name: null });
+                const spy = stubFetch(USER_RESPONSE);
 
-                store.poll('/api/users', { interval: 50 });
+                store.poll('/api/user', { interval: 50 });
                 await wait(80);
                 store.destroy();
                 const callsAtDestroy = spy.calls;
@@ -816,9 +794,9 @@
                 const original = window.fetch;
                 window.fetch = function (url, opts) {
                     capturedMethod = opts && opts.method;
-                    return Promise.resolve({ ok: true, json: () => Promise.resolve(SINGLE_RESPONSE) });
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(USER_RESPONSE) });
                 };
-                const store = wakaStore.createStore({ user: null });
+                const store = wakaStore.createStore({ name: null });
                 await store.push('/api/user/1');
                 window.fetch = original;
                 assertEqual(capturedMethod, 'PATCH', 'method is PATCH');
@@ -829,7 +807,7 @@
                 const original = window.fetch;
                 window.fetch = function (url, opts) {
                     capturedBody = JSON.parse(opts.body);
-                    return Promise.resolve({ ok: true, json: () => Promise.resolve(SINGLE_RESPONSE) });
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(USER_RESPONSE) });
                 };
                 const store = wakaStore.createStore({ name: 'Floris', role: 'admin' });
                 await store.push('/api/user/1');
@@ -838,12 +816,26 @@
                 assertEqual(capturedBody.role, 'admin', 'role in body');
             });
 
-            await test('push() merges JSON:API response back into the store', async function () {
-                const spy = stubFetch(SINGLE_RESPONSE);
-                const store = wakaStore.createStore({ user: null });
+            await test('push() merges plain JSON response back into the store', async function () {
+                const spy = stubFetch(USER_RESPONSE);
+                const store = wakaStore.createStore({ name: null, role: null });
                 await store.push('/api/user/1');
                 spy.restore();
-                assertEqual(store.user, { id: '1', name: 'Floris', role: 'admin' }, 'store updated from response');
+                assertEqual(store.name, 'Floris', 'name merged from response');
+                assertEqual(store.role, 'admin',  'role merged from response');
+            });
+
+            await test('push() sends Content-Type: application/json', async function () {
+                let capturedContentType = null;
+                const original = window.fetch;
+                window.fetch = function (url, opts) {
+                    capturedContentType = opts && opts.headers && opts.headers['Content-Type'];
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(USER_RESPONSE) });
+                };
+                const store = wakaStore.createStore({ name: null });
+                await store.push('/api/user/1');
+                window.fetch = original;
+                assertEqual(capturedContentType, 'application/json', 'Content-Type header');
             });
 
             await test('push() accepts a custom HTTP method', async function () {
@@ -851,9 +843,9 @@
                 const original = window.fetch;
                 window.fetch = function (url, opts) {
                     capturedMethod = opts && opts.method;
-                    return Promise.resolve({ ok: true, json: () => Promise.resolve(SINGLE_RESPONSE) });
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(USER_RESPONSE) });
                 };
-                const store = wakaStore.createStore({ user: null });
+                const store = wakaStore.createStore({ name: null });
                 await store.push('/api/user/1', { method: 'PUT' });
                 window.fetch = original;
                 assertEqual(capturedMethod, 'PUT', 'method is PUT');
@@ -864,7 +856,7 @@
                 const original = window.fetch;
                 window.fetch = function (url, opts) {
                     capturedBody = JSON.parse(opts.body);
-                    return Promise.resolve({ ok: true, json: () => Promise.resolve(SINGLE_RESPONSE) });
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(USER_RESPONSE) });
                 };
                 const store = wakaStore.createStore({ name: 'Floris', role: 'admin' });
                 await store.push('/api/user/1', { body: { name: store.name } });
@@ -890,7 +882,7 @@
 
             await test('push() rejects and calls onError on HTTP error', async function () {
                 const spy = stubFetch(null, { fail: true, status: 422 });
-                const store = wakaStore.createStore({ user: null });
+                const store = wakaStore.createStore({ name: null });
                 let errorReceived = null;
                 let rejected = false;
                 await store.push('/api/user/1', {
@@ -900,6 +892,295 @@
                 assert(errorReceived !== null, 'onError called');
                 assert(rejected, 'promise rejected');
                 assert(errorReceived.status === 422, 'error carries status');
+            });
+
+            await test('push() skips merge for non-object response (e.g. 204 null)', async function () {
+                const original = window.fetch;
+                window.fetch = function () {
+                    return Promise.resolve({ ok: true, json: () => Promise.resolve(null) });
+                };
+                const store = wakaStore.createStore({ name: 'Floris' });
+                await store.push('/api/user/1');
+                window.fetch = original;
+                assertEqual(store.name, 'Floris', 'store unchanged after null response');
+            });
+
+            // ── 12. connect() / disconnect() ──────────────────────────────────────
+            suite('connect() / disconnect()');
+
+            /**
+             * Minimal fake WebSocket. Exposes send/close and allows tests to
+             * drive onopen / onmessage / onerror / onclose from outside.
+             */
+            function FakeWebSocket(url, protocols) {
+                this.url       = url;
+                this.protocols = protocols;
+                this.readyState = 0; // CONNECTING
+                this.onopen    = null;
+                this.onmessage = null;
+                this.onerror   = null;
+                this.onclose   = null;
+                this.closed    = false;
+                FakeWebSocket.last = this;
+                FakeWebSocket.instances.push(this);
+            }
+
+            FakeWebSocket.prototype.close = function () {
+                this.closed = true;
+                this.readyState = 3; // CLOSED
+            };
+
+            FakeWebSocket.prototype._open = function () {
+                this.readyState = 1;
+                if (this.onopen) this.onopen();
+            };
+
+            FakeWebSocket.prototype._message = function (data) {
+                if (this.onmessage) this.onmessage({ data: JSON.stringify(data) });
+            };
+
+            FakeWebSocket.prototype._messageRaw = function (raw) {
+                if (this.onmessage) this.onmessage({ data: raw });
+            };
+
+            FakeWebSocket.prototype._error = function (event) {
+                if (this.onerror) this.onerror(event || {});
+            };
+
+            FakeWebSocket.prototype._close = function (code, reason) {
+                this.readyState = 3;
+                if (this.onclose) this.onclose({ code: code || 1000, reason: reason || '' });
+            };
+
+            FakeWebSocket.instances = [];
+            FakeWebSocket.last = null;
+
+            function installFakeWebSocket() {
+                FakeWebSocket.instances = [];
+                FakeWebSocket.last = null;
+                window._realWebSocket = window.WebSocket;
+                window.WebSocket = FakeWebSocket;
+            }
+
+            function restoreFakeWebSocket() {
+                window.WebSocket = window._realWebSocket;
+            }
+
+            await test('connect() opens a WebSocket to the given URL', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ name: null });
+                store.connect('wss://example.com/updates');
+                const ws = FakeWebSocket.last;
+                store.disconnect();
+                restoreFakeWebSocket();
+                assert(ws !== null, 'WebSocket was created');
+                assertEqual(ws.url, 'wss://example.com/updates', 'URL');
+            });
+
+            await test('incoming message is merged into the store', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ name: null, role: null });
+                store.connect('wss://example.com/updates');
+                const ws = FakeWebSocket.last;
+                ws._open();
+                ws._message({ name: 'Floris', role: 'admin' });
+                store.disconnect();
+                restoreFakeWebSocket();
+                assertEqual(store.name, 'Floris', 'name merged');
+                assertEqual(store.role, 'admin',  'role merged');
+            });
+
+            await test('custom merge callback is called with store as this', async function () {
+                installFakeWebSocket();
+                let capturedThis = null;
+                const store = wakaStore.createStore({ items: [] });
+                store.connect('wss://example.com/updates', {
+                    merge: function (data) {
+                        capturedThis = this;
+                        this.items = data.items;
+                    }
+                });
+                const ws = FakeWebSocket.last;
+                ws._open();
+                ws._message({ items: ['a', 'b'] });
+                store.disconnect();
+                restoreFakeWebSocket();
+                assert(capturedThis === store, 'this === store');
+                assertEqual(store.items, ['a', 'b'], 'items merged via callback');
+            });
+
+            await test('non-JSON message logs an error and does not crash', async function () {
+                installFakeWebSocket();
+                const errors = [];
+                const origError = console.error;
+                console.error = function () { errors.push([].slice.call(arguments).join(' ')); };
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates');
+                const ws = FakeWebSocket.last;
+                ws._open();
+                ws._messageRaw('not-valid-json{{');
+                store.disconnect();
+                restoreFakeWebSocket();
+                console.error = origError;
+                assert(errors.length > 0, 'console.error called for invalid JSON');
+                assertEqual(store.x, 1, 'store unchanged');
+            });
+
+            await test('non-plain-object message warns and does not crash', async function () {
+                installFakeWebSocket();
+                const warnings = [];
+                const origWarn = console.warn;
+                console.warn = function () { warnings.push([].slice.call(arguments).join(' ')); };
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates');
+                const ws = FakeWebSocket.last;
+                ws._open();
+                ws._message([1, 2, 3]); // array — not a plain object
+                store.disconnect();
+                restoreFakeWebSocket();
+                console.warn = origWarn;
+                assert(warnings.length > 0, 'console.warn called for array message');
+            });
+
+            await test('onError callback receives the error event', async function () {
+                installFakeWebSocket();
+                let receivedEvent = null;
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates', {
+                    onError: function (e) { receivedEvent = e; }
+                });
+                const ws = FakeWebSocket.last;
+                ws._error({ type: 'error' });
+                store.disconnect();
+                restoreFakeWebSocket();
+                assert(receivedEvent !== null, 'onError called');
+            });
+
+            await test('disconnect() closes the socket and prevents further message merges', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ name: null });
+                store.connect('wss://example.com/updates');
+                const ws = FakeWebSocket.last;
+                ws._open();
+                store.disconnect();
+                ws._message({ name: 'ShouldNotAppear' });
+                restoreFakeWebSocket();
+                assert(ws.closed, 'socket was closed');
+                assert(store.name === null, 'message after disconnect was ignored');
+            });
+
+            await test('disconnect() is safe to call when not connected', async function () {
+                const store = wakaStore.createStore({ x: 1 });
+                store.disconnect(); // should not throw
+                pass('no error thrown');
+            });
+
+            await test('connect() while already connected replaces the socket', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ name: null });
+                store.connect('wss://example.com/first');
+                const ws1 = FakeWebSocket.last;
+                ws1._open();
+
+                store.connect('wss://example.com/second');
+                const ws2 = FakeWebSocket.last;
+                restoreFakeWebSocket();
+
+                assert(ws1.closed, 'first socket closed');
+                assert(ws1 !== ws2, 'a new socket was created');
+                store.disconnect();
+            });
+
+            await test('reconnect is attempted after close by default', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates', {
+                    reconnectDelay: 10,
+                    reconnectDelayMax: 50
+                });
+                const ws1 = FakeWebSocket.last;
+                ws1._open();
+                ws1._close(1006); // abnormal close
+                await wait(50); // let backoff fire
+                const ws2 = FakeWebSocket.last;
+                store.disconnect();
+                restoreFakeWebSocket();
+                assert(ws2 !== ws1, 'a new socket was opened after close');
+            });
+
+            await test('onClose returning false suppresses reconnect', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates', {
+                    reconnectDelay: 10,
+                    onClose: function (e) { return false; }
+                });
+                const ws1 = FakeWebSocket.last;
+                ws1._open();
+                ws1._close(4001);
+                await wait(50);
+                const ws2 = FakeWebSocket.last;
+                restoreFakeWebSocket();
+                assert(ws2 === ws1, 'no reconnect after onClose returned false');
+            });
+
+            await test('reconnect: false disables all reconnection', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates', {
+                    reconnect: false,
+                    reconnectDelay: 10
+                });
+                const ws1 = FakeWebSocket.last;
+                ws1._open();
+                ws1._close(1006);
+                await wait(50);
+                const ws2 = FakeWebSocket.last;
+                restoreFakeWebSocket();
+                assert(ws2 === ws1, 'no reconnect when reconnect: false');
+            });
+
+            await test('reconnect counter resets to 0 after successful open', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates', {
+                    reconnectDelay: 10,
+                    reconnectDelayMax: 100
+                });
+                const ws1 = FakeWebSocket.last;
+                ws1._open();
+                ws1._close(1006);
+                await wait(30); // reconnect fires
+                const ws2 = FakeWebSocket.last;
+                ws2._open(); // successful open — counter should reset
+                // Verify by closing again and checking a new socket appears promptly
+                ws2._close(1006);
+                await wait(30);
+                const ws3 = FakeWebSocket.last;
+                store.disconnect();
+                restoreFakeWebSocket();
+                assert(ws3 !== ws2, 'reconnect still works after counter reset');
+            });
+
+            await test('destroy() closes an active WebSocket connection', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates');
+                const ws = FakeWebSocket.last;
+                ws._open();
+                store.destroy();
+                restoreFakeWebSocket();
+                assert(ws.closed, 'socket closed by destroy');
+            });
+
+            await test('protocols option is passed to WebSocket constructor', async function () {
+                installFakeWebSocket();
+                const store = wakaStore.createStore({ x: 1 });
+                store.connect('wss://example.com/updates', { protocols: 'v1.json' });
+                const ws = FakeWebSocket.last;
+                store.disconnect();
+                restoreFakeWebSocket();
+                assertEqual(ws.protocols, 'v1.json', 'protocols forwarded');
             });
 
             // ── Summary ───────────────────────────────────────────────────────────
