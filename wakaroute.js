@@ -21,10 +21,15 @@
  * ║  Components with data-pac-route receive MSG_ROUTE_CHANGE with:                   ║
  * ║    { path, query, params }                                                       ║
  * ║                                                                                  ║
- * ║  matches contains the extracted URL params for that component's own pattern,     ║
+ * ║  query is a plain object of parsed query string values. Flag params              ║
+ * ║  (no value) are boolean true. PHP-style array params collect into arrays:        ║
+ * ║    ?tag[]=a&tag[]=b  →  { tag: ['a', 'b'] }                                      ║
+ * ║                                                                                  ║
+ * ║  params contains the extracted URL params for that component's own pattern,      ║
  * ║  or null if the pattern did not match the current path.                          ║
  * ║  Components without data-pac-route receive no message.                           ║
  * ║  wakaRoute.matchPattern() remains available for ad-hoc matching.                 ║
+ * ║  wakaRoute.destroy() removes the popstate listener and clears state.             ║
  * ║                                                                                  ║
  * ║  Declarative registration via HTML attribute:                                    ║
  * ║    <div data-pac-id="user-view" data-pac-route="/users/{id}">                    ║
@@ -148,9 +153,10 @@
 
     /**
      * Parses a URL search string into a plain object.
-     * Flag parameters (no value) are stored as boolean true.
+     * Flag parameters (no value) are boolean true. PHP-style bracket keys
+     * (?tag[]=a&tag[]=b) collect into an Array: { tag: ['a', 'b'] }.
      * @param {string} search - location.search value, e.g. '?foo=bar&baz=1'
-     * @returns {Object} Key/value map of query parameters
+     * @returns {Object}
      */
     function _parseQuery(search) {
         const query = {};
@@ -177,8 +183,21 @@
                 return;
             }
 
-            const key = decodeURIComponent(pair.slice(0, eqIndex));
-            query[key] = decodeURIComponent(pair.slice(eqIndex + 1));
+            const rawKey = decodeURIComponent(pair.slice(0, eqIndex));
+            const value  = decodeURIComponent(pair.slice(eqIndex + 1));
+
+            // PHP-style array syntax: key[] accumulates into an Array
+            if (rawKey.slice(-2) === '[]') {
+                const key = rawKey.slice(0, -2);
+
+                if (Object.prototype.hasOwnProperty.call(query, key) && Array.isArray(query[key])) {
+                    query[key].push(value);
+                } else {
+                    query[key] = [value];
+                }
+            } else {
+                query[rawKey] = value;
+            }
         });
 
         return query;
@@ -295,10 +314,13 @@
         // Preserve instance reference for use inside callbacks
         const self = this;
 
-        // Browser back/forward navigation
-        window.addEventListener('popstate', function () {
+        // Stored by reference so destroy() can remove it
+        this._popstateHandler = function () {
             _broadcastCurrentRoute(self);
-        });
+        };
+
+        // Browser back/forward navigation
+        window.addEventListener('popstate', this._popstateHandler);
 
         return {
             /**
@@ -334,7 +356,9 @@
 
                 // Fire MSG_ROUTE_CHANGE immediately so the component can decide
                 // its own initial visibility — identical behavior to any navigation.
+                // Capture before the timeout so the message reflects registration-time state.
                 const path = _normalizePath(location.pathname);
+                const query  = _parseQuery(location.search);
                 const params = self.matchPattern(pattern, path);
 
                 setTimeout(function () {
@@ -345,7 +369,7 @@
                         0,
                         {
                             path: path,
-                            query: _parseQuery(location.search),
+                            query:  query,
                             params: params
                         }
                     );
@@ -432,11 +456,12 @@
             return null;
         }
 
-        // Build params object from capture groups
+        // Only decode if percent-encoded — location.pathname is already decoded by the browser.
         const params = {};
 
         keys.forEach(function (key, index) {
-            params[key] = decodeURIComponent(match[index + 1]);
+            const raw = match[index + 1];
+            params[key] = raw.indexOf('%') !== -1 ? decodeURIComponent(raw) : raw;
         });
 
         return params;
@@ -458,6 +483,20 @@
         });
 
         return table;
+    };
+
+    /**
+     * Removes the popstate listener and clears all router state.
+     * Useful for testing teardown or if createPacPlugin() is called more than once.
+     */
+    WakaRoute.prototype.destroy = function () {
+        if (this._popstateHandler) {
+            window.removeEventListener('popstate', this._popstateHandler);
+            this._popstateHandler = null;
+        }
+
+        this._routeTable.clear();
+        this._pac = null;
     };
 
     // =========================================================================
