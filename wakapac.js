@@ -9917,6 +9917,41 @@
         }
     };
 
+    /**
+     * Saves the contents of a compatible DC to a PNG file.
+     * Equivalent to saving an HBITMAP to disk in Win32.
+     * @param {CanvasRenderingContext2D} dc                     - Source DC to save
+     * @param {string}                  [filename='bitmap.png'] - Output filename
+     * @returns {Promise<boolean>} true on success, false on failure
+     */
+    wakaPAC.saveBitmap = async function(dc, filename = 'bitmap.png') {
+        if (!dc) {
+            return false;
+        }
+
+        try {
+            let blob;
+
+            if (dc.canvas instanceof OffscreenCanvas) {
+                // OffscreenCanvas — compatible DCs created by createCompatibleDC()
+                blob = await dc.canvas.convertToBlob({ type: 'image/png' });
+            } else {
+                // HTMLCanvasElement — DCs backed by a regular on-DOM canvas
+                blob = await new Promise((resolve, reject) =>
+                    dc.canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
+                );
+            }
+
+            const url = URL.createObjectURL(blob);
+            const a   = Object.assign(document.createElement('a'), { href: url, download: filename });
+            a.click();
+            URL.revokeObjectURL(url);
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
