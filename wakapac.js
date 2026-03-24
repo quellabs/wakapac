@@ -9851,10 +9851,9 @@
     };
 
     /**
-     * Loads a bitmap from a variety of sources into a new DC sized to the bitmap's
-     * natural dimensions, ready for bitBlt. Unlike createCompatibleDC(), the returned
-     * DC is not sized to any canvas — it is sized to the source image.
-     * The caller owns the returned DC and must call deleteBitmap() when done.
+     * Loads a bitmap from a variety of sources, returning an opaque bitmap handle
+     * ready to pass to bitBlt, getBitmapSize, saveBitmap, and deleteBitmap.
+     * The caller owns the returned handle and must call deleteBitmap() when done.
      *
      * Accepted sources:
      *   - string               URL or data URI; fetched and decoded via createImageBitmap()
@@ -9866,7 +9865,7 @@
      *   - OffscreenCanvas      Snapshot of the offscreen canvas at call time
      *
      * @param {string|HTMLImageElement|ImageBitmap|ImageData|Blob|HTMLCanvasElement|OffscreenCanvas} source
-     * @returns {Promise<CanvasRenderingContext2D|null>} DC sized to the bitmap, or null on failure
+     * @returns {Promise<CanvasRenderingContext2D|null>} Bitmap handle, or null on failure
      */
     wakaPAC.loadBitmap = async function(source) {
         try {
@@ -9916,9 +9915,10 @@
     };
 
     /**
-     * Saves the contents of a DC to a PNG file, triggering a browser download.
-     * Handles both OffscreenCanvas-backed DCs (from createCompatibleDC) and
-     * HTMLCanvasElement-backed DCs (from getDC).
+     * Saves the contents of a DC or bitmap handle to a PNG file, triggering a browser download.
+     * Works with OffscreenCanvas-backed DCs (from createCompatibleDC), bitmap handles
+     * (from loadBitmap), and HTMLCanvasElement-backed DCs (from getDC).
+     * Only works in a browser context — not available in Web Workers.
      * @param {CanvasRenderingContext2D} dc                     - Source DC to save
      * @param {string}                  [filename='bitmap.png'] - Output filename
      * @returns {Promise<boolean>} true on success, false on failure
