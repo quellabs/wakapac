@@ -9851,8 +9851,10 @@
     };
 
     /**
-     * Loads a bitmap from a variety of sources into a new compatible DC, ready for
-     * bitBlt. The caller owns the returned DC and must call deleteCompatibleDC() when done.
+     * Loads a bitmap from a variety of sources into a new DC sized to the bitmap's
+     * natural dimensions, ready for bitBlt. Unlike createCompatibleDC(), the returned
+     * DC is not sized to any canvas — it is sized to the source image.
+     * The caller owns the returned DC and must call deleteBitmap() when done.
      *
      * Accepted sources:
      *   - string               URL or data URI; fetched and decoded via createImageBitmap()
@@ -9864,7 +9866,7 @@
      *   - OffscreenCanvas      Snapshot of the offscreen canvas at call time
      *
      * @param {string|HTMLImageElement|ImageBitmap|ImageData|Blob|HTMLCanvasElement|OffscreenCanvas} source
-     * @returns {Promise<CanvasRenderingContext2D|null>} DC with bitmap selected in, or null on failure
+     * @returns {Promise<CanvasRenderingContext2D|null>} DC sized to the bitmap, or null on failure
      */
     wakaPAC.loadBitmap = async function(source) {
         try {
@@ -9952,6 +9954,34 @@
         } catch {
             return false;
         }
+    };
+
+    /**
+     * Releases a bitmap DC created by loadBitmap().
+     * Alias for deleteCompatibleDC() — provided so call sites that use loadBitmap()
+     * can pair it with a semantically matching release call.
+     * @param {CanvasRenderingContext2D} dc
+     */
+    wakaPAC.deleteBitmap = function(dc) {
+        wakaPAC.deleteCompatibleDC(dc);
+    };
+
+    /**
+     * Returns the dimensions of a bitmap DC created by loadBitmap().
+     * Equivalent to calling GetObject(hBitmap) to retrieve BITMAP.bmWidth/bmHeight in Win32.
+     * Returns null if dc is invalid.
+     * @param {CanvasRenderingContext2D} dc
+     * @returns {{width: number, height: number}|null}
+     */
+    wakaPAC.getBitmapSize = function(dc) {
+        if (!dc) {
+            return null;
+        }
+
+        return {
+            width:  dc.canvas.width,
+            height: dc.canvas.height
+        };
     };
 
     // ========================================================================
