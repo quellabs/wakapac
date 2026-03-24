@@ -18,6 +18,8 @@
  * ║    wakaPAC.use(wakaRoute);                                                       ║
  * ║    wakaRoute.navigate('/users/42');                                              ║
  * ║                                                                                  ║
+ * ║  Components with data-pac-route receive MSG_ROUTE_BEFORE before each              ║
+ * ║  navigation. Returning false from msgProc cancels the navigation.                ║
  * ║  Components with data-pac-route receive MSG_ROUTE_CHANGE with:                   ║
  * ║    { path, query, params }                                                       ║
  * ║                                                                                  ║
@@ -215,6 +217,14 @@
     function WakaRoute() {
 
         /**
+         * Sent before a navigation commits. A component's msgProc may return false
+         * to cancel the navigation. Detail shape: { path, query, params }.
+         * Also attached to the wakaPAC instance as wakaPAC.MSG_ROUTE_BEFORE.
+         * @type {number}
+         */
+        this.MSG_ROUTE_BEFORE = 0x2001;
+
+        /**
          * Message identifier for route change notifications.
          * Occupies the first slot above MSG_USER (0x1001).
          * Also attached to the wakaPAC instance by createPacPlugin() so it is
@@ -292,9 +302,43 @@
         });
     }
 
-    // =========================================================================
-    // PLUGIN FACTORY
-    // =========================================================================
+    /**
+     * Broadcasts MSG_ROUTE_BEFORE to all registered components for the given path.
+     * Returns true if any component's msgProc returned false (i.e. navigation blocked).
+     * Components receive the same { path, query, params } detail as MSG_ROUTE_CHANGE.
+     * @param {WakaRoute} instance
+     * @param {string} path - The normalized target path
+     * @returns {boolean} true if navigation was blocked
+     * @private
+     */
+    function _broadcastBeforeRoute(instance, path) {
+        const query = _parseQuery(location.search);
+        let blocked = false;
+
+        instance._routeTable.forEach(function (pattern, pacId) {
+            const params = instance.matchPattern(pattern, path);
+
+            const result = instance._pac.sendMessage(
+                pacId,
+                instance.MSG_ROUTE_BEFORE,
+                params ? 1 : 0,
+                0,
+                {
+                    path:   path,
+                    query:  query,
+                    params: params
+                }
+            );
+
+            if (result === false) {
+                blocked = true;
+            }
+        });
+
+        return blocked;
+    }
+
+
 
     /**
      * wakaPAC plugin factory. Called by wakaPAC.use(wakaRoute).
@@ -307,8 +351,9 @@
     WakaRoute.prototype.createPacPlugin = function (pac) {
         this._pac = pac;
 
-        // Extend wakaPAC with the router message constant so component authors
-        // can reference it as wakaPAC.MSG_ROUTE_CHANGE alongside the built-in messages
+        // Extend wakaPAC with the router message constants so component authors
+        // can reference them as wakaPAC.MSG_ROUTE_BEFORE / wakaPAC.MSG_ROUTE_CHANGE
+        pac.MSG_ROUTE_BEFORE = this.MSG_ROUTE_BEFORE;
         pac.MSG_ROUTE_CHANGE = this.MSG_ROUTE_CHANGE;
 
         // Preserve instance reference for use inside callbacks
@@ -316,6 +361,16 @@
 
         // Stored by reference so destroy() can remove it
         this._popstateHandler = function () {
+            const path = _normalizePath(location.pathname);
+
+            if (_broadcastBeforeRoute(self, path)) {
+                // Undo the browser navigation. We can't know the direction reliably,
+                // so we go(1) — this works for back (the common case) and is a no-op
+                // for forward if the guard triggers there too.
+                history.go(1);
+                return;
+            }
+
             _broadcastCurrentRoute(self);
         };
 
@@ -394,15 +449,21 @@
     /**
      * Navigates to the given path by updating the browser history and
      * broadcasting MSG_ROUTE_CHANGE to all registered components.
+     * Before committing, broadcasts MSG_ROUTE_BEFORE — if any component's
+     * msgProc returns false the navigation is cancelled and history is unchanged.
      * @param {string} path - Target path, e.g. '/users/42'. Trailing slashes are normalized.
      * @param {Object} [options={}]
-     * @param {boolean} [options.replace=false] - Use replaceState instead of pushState,
-     *   replacing the current history entry rather than adding a new one
+     * @param {boolean} [options.replace=false] - Use replaceState instead of pushState
+     * @returns {boolean} false if navigation was blocked, true otherwise
      * @throws {Error} If called before wakaPAC.use(wakaRoute)
      */
     WakaRoute.prototype.navigate = function (path, options = {}) {
         if (!this._pac) {
             throw new Error('wakaRoute: call wakaPAC.use(wakaRoute) before navigating');
+        }
+
+        if (_broadcastBeforeRoute(this, _normalizePath(path))) {
+            return false;
         }
 
         if (options.replace) {
@@ -412,6 +473,7 @@
         }
 
         _broadcastCurrentRoute(this);
+        return true;
     };
 
     /**
@@ -472,7 +534,6 @@
      * Key: pacId, Value: registered pattern string.
      * Useful for debugging — lists all components that declared a
      * data-pac-route attribute and are currently registered.
-     *
      * @returns {Object}
      */
     WakaRoute.prototype.getRouteTable = function () {
@@ -487,7 +548,7 @@
 
     /**
      * Removes the popstate listener and clears all router state.
-     * Useful for testing teardown or if createPacPlugin() is called more than once.
+     * Useful for testing teardown.
      */
     WakaRoute.prototype.destroy = function () {
         if (this._popstateHandler) {
