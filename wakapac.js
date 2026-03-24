@@ -9850,6 +9850,73 @@
         };
     };
 
+    /**
+     * Loads a bitmap from a variety of sources into a new compatible DC, ready for
+     * bitBlt. The caller owns the returned DC and must call deleteCompatibleDC() when done.
+     *
+     * Accepted sources:
+     *   - string              URL or data URI; fetched and decoded via createImageBitmap()
+     *   - HTMLImageElement    Must be fully loaded (complete && naturalWidth > 0)
+     *   - ImageBitmap         Used directly; note: consumed and closed after loading
+     *   - ImageData           Raw RGBA pixel buffer; drawn at its own dimensions
+     *   - Blob                Decoded via createImageBitmap()
+     *   - HTMLCanvasElement   Snapshot of the canvas at call time
+     *   - OffscreenCanvas     Snapshot of the offscreen canvas at call time
+     *
+     * @param {string|HTMLImageElement|ImageBitmap|ImageData|Blob|HTMLCanvasElement|OffscreenCanvas} source
+     * @returns {Promise<CanvasRenderingContext2D|null>} DC with bitmap selected in, or null on failure
+     */
+    wakaPAC.loadBitmap = async function(source) {
+        try {
+            let bitmap;
+
+            // Already an ImageBitmap — use directly; caller retains ownership
+            // and is responsible for closing it
+            if (source instanceof ImageBitmap) {
+                const dc = new OffscreenCanvas(source.width, source.height).getContext('2d');
+                dc.drawImage(source, 0, 0);
+                return /** @type {CanvasRenderingContext2D} */ (dc);
+            }
+
+            // Handle other types
+            if (typeof source === 'string') {
+                // URL or data URI — fetch the resource and decode it;
+                // network or CORS failures propagate to the outer catch, returning null
+                bitmap = await createImageBitmap(await (await fetch(source)).blob());
+            } else if (source instanceof HTMLImageElement) {
+                // <img> element — must be fully decoded before we can read pixels
+                if (!source.complete || source.naturalWidth === 0) {
+                    return null;
+                }
+
+                bitmap = await createImageBitmap(source);
+            } else if (
+                source instanceof ImageData        ||
+                source instanceof Blob             ||
+                source instanceof HTMLCanvasElement ||
+                source instanceof OffscreenCanvas
+            ) {
+                // ImageData, Blob, canvas snapshot — all accepted directly by createImageBitmap()
+                bitmap = await createImageBitmap(source);
+            } else {
+                return null;
+            }
+
+            // Draw the bitmap into a fresh OffscreenCanvas-backed DC
+            const dc = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d');
+            dc.drawImage(bitmap, 0, 0);
+
+            // ImageBitmap holds GPU-side memory and must be explicitly released;
+            // unlike Image, it is not GC'd cleanly without an explicit close()
+            bitmap.close();
+            
+            // Cast result to CanvasRenderingContext2D
+            return /** @type {CanvasRenderingContext2D} */ (dc);
+        } catch {
+            return null;
+        }
+    };
+
     // ========================================================================
     // EXPORTS
     // ========================================================================
