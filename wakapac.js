@@ -1513,7 +1513,7 @@
 
                 mq.addEventListener('change', function onChange() {
                     mq.removeEventListener('change', onChange);
-                    
+
                     self.dispatchBrowserStateEvent('dpr', {
                         ratio: window.devicePixelRatio || 1
                     });
@@ -6252,7 +6252,7 @@
                 this.abstraction.browserDevicePixelRatio = stateData.ratio;
                 wakaPAC.sendMessage(this.abstraction.pacId, MSG_DPR_CHANGE, Math.round(stateData.ratio * 100), 0);
                 break;
-                
+
             default:
                 console.warn('Unknown browser state message ' + stateType);
                 break;
@@ -8729,6 +8729,133 @@
     }
 
     // ========================================================================
+    // PAINT INVALIDATION ENGINE
+    // ========================================================================
+
+    /**
+     * Tracks canvas containers that have been invalidated and are waiting for
+     * their MSG_PAINT to be dispatched on the next animation frame.
+     *
+     * Key:   pacId (string)
+     * Value: {
+     *   container: HTMLCanvasElement,
+     *   rcPaint:   {x, y, width, height}  — union of all dirty rects; used by getDC() for clipping
+     *   rects:     [{x, y, width, height}] — list of discrete dirty rects; exposed via getUpdateRgn()
+     * }
+     *
+     * A container is present in this map if and only if a rAF flush is already
+     * scheduled for it. Multiple invalidateRect() calls before the next frame
+     * are accumulated: rcPaint grows as the bounding union, while rects collects
+     * each distinct incoming rectangle (absorbed duplicates are dropped).
+     *
+     * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, width:number, height:number}, rects: Array<{x:number, y:number, width:number, height:number}>}>}
+     */
+    const _dirtyCanvases = new Map();
+
+    /**
+     * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
+     * the dirty set. Called once per animation frame by requestAnimationFrame.
+     */
+    function _flushPaintQueue() {
+        _dirtyCanvases.forEach(function(entry) {
+            const { container } = entry;
+
+            // Skip containers that were removed from the DOM before the frame fired
+            if (!container.isConnected) {
+                return;
+            }
+
+            // Mark as actively painting so getDC() knows to apply the clip
+            entry.painting = true;
+
+            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                MSG_PAINT,
+                null,   // No originating DOM event
+                0,      // wParam unused
+                0       // lParam unused
+            ));
+
+            // Clear the painting flag — releaseDC() uses this to decide whether
+            // to restore the context state
+            entry.painting = false;
+        });
+
+        _dirtyCanvases.clear();
+    }
+
+    /**
+     * Marks a canvas PAC container as needing repaint and schedules a
+     * requestAnimationFrame flush if one is not already pending.
+     *
+     * Multiple calls with different rects before the next frame are accumulated
+     * into a dirty region: rcPaint tracks the bounding union (used by getDC()
+     * for clipping), while rects collects each distinct incoming rectangle for
+     * getUpdateRgn(). Incoming rects that are fully contained within an already-
+     * queued rect are dropped to keep the list compact.
+     *
+     * @param {string} pacId  - data-pac-id of the target canvas container
+     * @param {{x:number, y:number, width:number, height:number}|null} [rect]
+     *   Rectangle to invalidate in canvas-local coordinates.
+     *   Pass null (or omit) to invalidate the entire canvas.
+     * @returns {void}
+     */
+    function _invalidateRect(pacId, rect) {
+        // Fetch the container
+        const container = wakaPAC.getContainerByPacId(pacId);
+
+        // If not found, bail
+        if (!container) {
+            return;
+        }
+
+        // Do nothing if the container is not a canvas
+        if (!(container instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        // Normalize: null rect means the whole canvas
+        const fullRect = {
+            x: 0,
+            y: 0,
+            width: container.width,
+            height: container.height
+        };
+
+        // Fetch the rect or default to the entire canvas if omitted
+        const incoming = rect || fullRect;
+
+        // Queue the repaint
+        if (_dirtyCanvases.has(pacId)) {
+            const existing = _dirtyCanvases.get(pacId);
+
+            // If the canvas is already fully invalidated there is nothing more to accumulate
+            if (existing.rcPaint.x === 0 && existing.rcPaint.y === 0 &&
+                existing.rcPaint.width === container.width &&
+                existing.rcPaint.height === container.height) {
+                return;
+            }
+
+            // Drop the incoming rect if it is fully contained within any rect already
+            // in the list — it adds no new dirty area
+            const absorbed = existing.rects.some(r =>
+                incoming.x >= r.x &&
+                incoming.y >= r.y &&
+                incoming.x + incoming.width <= r.x + r.width &&
+                incoming.y + incoming.height <= r.y + r.height
+            );
+
+            if (!absorbed) {
+                existing.rects.push(incoming);
+                existing.rcPaint = Utils.unionRect(existing.rcPaint, incoming);
+            }
+        } else {
+            // First invalidation this frame — schedule the flush
+            _dirtyCanvases.set(pacId, { container, rcPaint: incoming, rects: [incoming] });
+            requestAnimationFrame(_flushPaintQueue);
+        }
+    }
+
+    // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
 
@@ -9409,133 +9536,6 @@
     };
 
     // ========================================================================
-    // PAINT INVALIDATION ENGINE
-    // ========================================================================
-
-    /**
-     * Tracks canvas containers that have been invalidated and are waiting for
-     * their MSG_PAINT to be dispatched on the next animation frame.
-     *
-     * Key:   pacId (string)
-     * Value: {
-     *   container: HTMLCanvasElement,
-     *   rcPaint:   {x, y, width, height}  — union of all dirty rects; used by getDC() for clipping
-     *   rects:     [{x, y, width, height}] — list of discrete dirty rects; exposed via getUpdateRgn()
-     * }
-     *
-     * A container is present in this map if and only if a rAF flush is already
-     * scheduled for it. Multiple invalidateRect() calls before the next frame
-     * are accumulated: rcPaint grows as the bounding union, while rects collects
-     * each distinct incoming rectangle (absorbed duplicates are dropped).
-     *
-     * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, width:number, height:number}, rects: Array<{x:number, y:number, width:number, height:number}>}>}
-     */
-    const _dirtyCanvases = new Map();
-
-    /**
-     * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
-     * the dirty set. Called once per animation frame by requestAnimationFrame.
-     */
-    function _flushPaintQueue() {
-        _dirtyCanvases.forEach(function(entry) {
-            const { container } = entry;
-
-            // Skip containers that were removed from the DOM before the frame fired
-            if (!container.isConnected) {
-                return;
-            }
-
-            // Mark as actively painting so getDC() knows to apply the clip
-            entry.painting = true;
-
-            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                MSG_PAINT,
-                null,   // No originating DOM event
-                0,      // wParam unused
-                0       // lParam unused
-            ));
-
-            // Clear the painting flag — releaseDC() uses this to decide whether
-            // to restore the context state
-            entry.painting = false;
-        });
-
-        _dirtyCanvases.clear();
-    }
-
-    /**
-     * Marks a canvas PAC container as needing repaint and schedules a
-     * requestAnimationFrame flush if one is not already pending.
-     *
-     * Multiple calls with different rects before the next frame are accumulated
-     * into a dirty region: rcPaint tracks the bounding union (used by getDC()
-     * for clipping), while rects collects each distinct incoming rectangle for
-     * getUpdateRgn(). Incoming rects that are fully contained within an already-
-     * queued rect are dropped to keep the list compact.
-     *
-     * @param {string} pacId  - data-pac-id of the target canvas container
-     * @param {{x:number, y:number, width:number, height:number}|null} [rect]
-     *   Rectangle to invalidate in canvas-local coordinates.
-     *   Pass null (or omit) to invalidate the entire canvas.
-     * @returns {void}
-     */
-    function _invalidateRect(pacId, rect) {
-        // Fetch the container
-        const container = wakaPAC.getContainerByPacId(pacId);
-
-        // If not found, bail
-        if (!container) {
-            return;
-        }
-
-        // Do nothing if the container is not a canvas
-        if (!(container instanceof HTMLCanvasElement)) {
-            return;
-        }
-
-        // Normalize: null rect means the whole canvas
-        const fullRect = {
-            x: 0,
-            y: 0,
-            width: container.width,
-            height: container.height
-        };
-
-        // Fetch the rect or default to the entire canvas if omitted
-        const incoming = rect || fullRect;
-
-        // Queue the repaint
-        if (_dirtyCanvases.has(pacId)) {
-            const existing = _dirtyCanvases.get(pacId);
-
-            // If the canvas is already fully invalidated there is nothing more to accumulate
-            if (existing.rcPaint.x === 0 && existing.rcPaint.y === 0 &&
-                existing.rcPaint.width === container.width &&
-                existing.rcPaint.height === container.height) {
-                return;
-            }
-
-            // Drop the incoming rect if it is fully contained within any rect already
-            // in the list — it adds no new dirty area
-            const absorbed = existing.rects.some(r =>
-                incoming.x >= r.x &&
-                incoming.y >= r.y &&
-                incoming.x + incoming.width <= r.x + r.width &&
-                incoming.y + incoming.height <= r.y + r.height
-            );
-
-            if (!absorbed) {
-                existing.rects.push(incoming);
-                existing.rcPaint = Utils.unionRect(existing.rcPaint, incoming);
-            }
-        } else {
-            // First invalidation this frame — schedule the flush
-            _dirtyCanvases.set(pacId, { container, rcPaint: incoming, rects: [incoming] });
-            requestAnimationFrame(_flushPaintQueue);
-        }
-    }
-
-    // ========================================================================
     // PUBLIC ACCELERATOR API
     // ========================================================================
 
@@ -9754,6 +9754,28 @@
     };
 
     /**
+     * Releases a compatible DC. Zeros the OffscreenCanvas dimensions to free
+     * the pixel buffer promptly rather than waiting on GC.
+     * @param {CanvasRenderingContext2D} dc
+     */
+    wakaPAC.deleteCompatibleDC = function(dc) {
+        // OffscreenCanvas has no explicit destroy method — nulling the canvas
+        // width and height releases the pixel buffer immediately in most engines,
+        // allowing the GC to reclaim the backing store without waiting for a
+        // full collection cycle.
+        if (!dc) {
+            return;
+        }
+
+        const offscreen = dc.canvas;
+
+        if (offscreen instanceof OffscreenCanvas) {
+            offscreen.width  = 0;
+            offscreen.height = 0;
+        }
+    };
+
+    /**
      * Blits srcDC onto destDC at (dx, dy). Optional dw/dh stretch the source;
      * omit to copy at the source's natural dimensions.
      * @param {CanvasRenderingContext2D} destDC
@@ -9776,28 +9798,6 @@
             dw ?? source.width,
             dh ?? source.height
         );
-    };
-
-    /**
-     * Releases a compatible DC. Zeros the OffscreenCanvas dimensions to free
-     * the pixel buffer promptly rather than waiting on GC.
-     * @param {CanvasRenderingContext2D} dc
-     */
-    wakaPAC.deleteCompatibleDC = function(dc) {
-        // OffscreenCanvas has no explicit destroy method — nulling the canvas
-        // width and height releases the pixel buffer immediately in most engines,
-        // allowing the GC to reclaim the backing store without waiting for a
-        // full collection cycle.
-        if (!dc) {
-            return;
-        }
-
-        const offscreen = dc.canvas;
-
-        if (offscreen instanceof OffscreenCanvas) {
-            offscreen.width  = 0;
-            offscreen.height = 0;
-        }
     };
 
     /**
@@ -9847,6 +9847,144 @@
         return {
             width: container.width,
             height: container.height
+        };
+    };
+
+    /**
+     * Loads a bitmap from a variety of sources, returning an opaque bitmap handle
+     * ready to pass to bitBlt, getBitmapSize, saveBitmap, and deleteBitmap.
+     * The caller owns the returned handle and must call deleteBitmap() when done.
+     *
+     * Accepted sources:
+     *   - string               URL or data URI; fetched and decoded via createImageBitmap()
+     *   - HTMLImageElement     Must be fully loaded (complete && naturalWidth > 0)
+     *   - ImageBitmap          Used directly; caller retains ownership and must close it themselves
+     *   - ImageData            Raw RGBA pixel buffer; drawn at its own dimensions
+     *   - Blob                 Decoded via createImageBitmap()
+     *   - HTMLCanvasElement    Snapshot of the canvas at call time
+     *   - OffscreenCanvas      Snapshot of the offscreen canvas at call time
+     *
+     * @param {string|HTMLImageElement|ImageBitmap|ImageData|Blob|HTMLCanvasElement|OffscreenCanvas} source
+     * @returns {Promise<CanvasRenderingContext2D|null>} Bitmap handle, or null on failure
+     */
+    wakaPAC.loadBitmap = async function(source) {
+        try {
+            let bitmap;
+
+            if (typeof source === 'string') {
+                // URL or data URI — fetch the resource and decode it;
+                // network or CORS failures propagate to the outer catch, returning null
+                bitmap = await createImageBitmap(await (await fetch(source)).blob());
+            } else if (source instanceof HTMLImageElement) {
+                // <img> element — must be fully decoded before we can read pixels
+                if (!source.complete || source.naturalWidth === 0) {
+                    return null;
+                }
+
+                bitmap = await createImageBitmap(source);
+            } else if (source instanceof ImageBitmap) {
+                // Already an ImageBitmap — use directly; caller retains ownership
+                // and is responsible for closing it
+                const dc = new OffscreenCanvas(source.width, source.height).getContext('2d');
+                dc.drawImage(source, 0, 0);
+                return /** @type {CanvasRenderingContext2D} */ (dc);
+            } else if (
+                source instanceof ImageData        ||
+                source instanceof Blob             ||
+                source instanceof HTMLCanvasElement ||
+                source instanceof OffscreenCanvas
+            ) {
+                // ImageData, Blob, canvas snapshot — all accepted directly by createImageBitmap()
+                bitmap = await createImageBitmap(source);
+            } else {
+                return null;
+            }
+
+            // Draw the bitmap into a fresh OffscreenCanvas-backed DC
+            const dc = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d');
+            dc.drawImage(bitmap, 0, 0);
+
+            // ImageBitmap holds GPU-side memory and must be explicitly released;
+            // unlike Image, it is not GC'd cleanly without an explicit close()
+            bitmap.close();
+
+            return /** @type {CanvasRenderingContext2D} */ (dc);
+        } catch {
+            return null;
+        }
+    };
+
+    /**
+     * Saves the contents of a DC or bitmap handle to an image file, triggering a browser download.
+     * Works with DCs from createCompatibleDC, bitmap handles from loadBitmap, and DCs from getDC.
+     * The image format is derived from the filename extension: .png, .jpg/.jpeg, or .webp.
+     * Defaults to PNG if the extension is absent or unrecognized.
+     * @param {CanvasRenderingContext2D} dc                     - Source DC or bitmap handle to save
+     * @param {string}                  [filename='bitmap.png'] - Output filename
+     * @returns {Promise<boolean>} true on success, false on failure
+     */
+    wakaPAC.saveBitmap = async function(dc, filename = 'bitmap.png') {
+        if (!dc) {
+            return false;
+        }
+
+        // Derive MIME type from filename extension; fall back to PNG
+        const ext  = filename.split('.').pop().toLowerCase();
+        const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }[ext] ?? 'image/png';
+
+        try {
+            let blob;
+
+            if (dc.canvas instanceof OffscreenCanvas) {
+                // OffscreenCanvas — compatible DCs and bitmap handles
+                blob = await dc.canvas.convertToBlob({ type: mime });
+            } else {
+                // HTMLCanvasElement — DCs from getDC()
+                blob = await new Promise((resolve, reject) =>
+                    dc.canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), mime)
+                );
+            }
+
+            // createObjectURL creates a temporary URL pointing to the blob in memory.
+            // It must be revoked after use to release the memory; the download is
+            // already queued by the time revokeObjectURL is called so it is safe to
+            // revoke immediately.
+            const url = URL.createObjectURL(blob);
+            const a   = Object.assign(document.createElement('a'), { href: url, download: filename });
+
+            a.click();
+            URL.revokeObjectURL(url);
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
+    /**
+     * Releases a bitmap handle created by loadBitmap().
+     * Alias for deleteCompatibleDC() — provided so call sites that use loadBitmap()
+     * can pair it with a semantically matching release call.
+     * @param {CanvasRenderingContext2D} hBitmap
+     */
+    wakaPAC.deleteBitmap = function(hBitmap) {
+        wakaPAC.deleteCompatibleDC(hBitmap);
+    };
+
+    /**
+     * Returns the dimensions of a bitmap handle created by loadBitmap().
+     * Equivalent to calling GetObject(hBitmap) to retrieve BITMAP.bmWidth/bmHeight in Win32.
+     * Returns null if hBitmap is invalid.
+     * @param {CanvasRenderingContext2D} hBitmap
+     * @returns {{width: number, height: number}|null}
+     */
+    wakaPAC.getBitmapSize = function(hBitmap) {
+        if (!hBitmap) {
+            return null;
+        }
+
+        return {
+            width:  hBitmap.canvas.width,
+            height: hBitmap.canvas.height
         };
     };
 

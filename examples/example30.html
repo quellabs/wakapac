@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaPAC — loadBitmap / saveBitmap example</title>
+</head>
+<body>
+
+<!--
+    Single parent component owns the buttons, the source image, and the canvas.
+    data-pac-bind="click: methodName" resolves against the parent abstraction,
+    so the buttons can drive the canvas without separate PAC components.
+-->
+<div id="app" data-pac-id="app">
+
+    <button data-pac-bind="click: onLoadUrl">Load from URL</button>
+    <button data-pac-bind="click: onLoadImg">Load from &lt;img&gt;</button>
+    <button data-pac-bind="click: onSave">Save bitmap</button>
+
+    <!-- Source image generated locally — no CORS issues -->
+    <img id="sourceImg" alt="source" width="200">
+
+    <br>
+
+    <!-- Canvas is a child PAC component — owned by the parent hierarchy -->
+    <canvas id="viewport"
+            data-pac-id="viewport"
+            width="640"
+            height="480"
+            style="border:1px solid #000">
+    </canvas>
+
+</div>
+
+<script src="../wakapac.js"></script>
+<script>
+
+    // Generate the source <img> as a data URI so there are no CORS concerns.
+    // Draws a simple colour gradient with some shapes — purely for demonstration.
+    (function() {
+        const c = document.createElement('canvas');
+        c.width  = 320;
+        c.height = 240;
+        const ctx = c.getContext('2d');
+
+        // Background gradient
+        const grad = ctx.createLinearGradient(0, 0, 320, 240);
+        grad.addColorStop(0, '#1a1a2e');
+        grad.addColorStop(1, '#16213e');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 320, 240);
+
+        // Some coloured circles
+        const circles = [
+            { x: 80,  y: 80,  r: 60, color: '#e94560' },
+            { x: 200, y: 140, r: 70, color: '#0f3460' },
+            { x: 260, y: 60,  r: 40, color: '#533483' },
+        ];
+
+        for (const { x, y, r, color } of circles) {
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.8;
+            ctx.fill();
+        }
+
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText('Source image', 90, 210);
+
+        document.getElementById('sourceImg').src = c.toDataURL();
+    })();
+
+
+    const MSG_BITMAP_LOADED = wakaPAC.MSG_USER + 1;
+
+    // Generate a second test image as a data URI for the URL load path,
+    // avoiding CORS entirely — in real use this would be a same-origin URL.
+    const urlSource = (function() {
+        const c = document.createElement('canvas');
+        c.width  = 320;
+        c.height = 240;
+        const ctx = c.getContext('2d');
+
+        const grad = ctx.createLinearGradient(0, 320, 240, 0);
+        grad.addColorStop(0, '#2d6a4f');
+        grad.addColorStop(1, '#74c69d');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 320, 240);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText('Loaded from URL', 80, 120);
+
+        return c.toDataURL();
+    })();
+
+
+
+    // ----------------------------------------------------------------
+    // Canvas component — receives a bitmap DC from the parent via message
+    // ----------------------------------------------------------------
+    wakaPAC('#viewport', {
+
+        _bitmapDC: null,
+
+        msgProc(event) {
+            switch (event.message) {
+                case MSG_BITMAP_LOADED: return this.onBitmapLoaded(event);
+                case wakaPAC.MSG_PAINT:  return this.onPaint();
+            }
+        },
+
+        onBitmapLoaded(event) {
+            // Release the previous DC before replacing it
+            if (this._bitmapDC) {
+                wakaPAC.deleteCompatibleDC(this._bitmapDC);
+            }
+
+            // The parent passes the new DC in extended
+            this._bitmapDC = event.detail.dc;
+            wakaPAC.invalidateRect('viewport', null);
+        },
+
+        onPaint() {
+            const dc = wakaPAC.getDC('viewport');
+
+            dc.fillStyle = '#ffffff';
+            dc.fillRect(0, 0, dc.canvas.width, dc.canvas.height);
+
+            if (this._bitmapDC) {
+                wakaPAC.bitBlt(dc, this._bitmapDC, 0, 0, dc.canvas.width, dc.canvas.height);
+            } else {
+                dc.fillStyle = '#888888';
+                dc.font = '16px sans-serif';
+                dc.fillText('Click a button to load a bitmap.', 20, 40);
+            }
+
+            wakaPAC.releaseDC(dc);
+        }
+    });
+
+    // ----------------------------------------------------------------
+    // Parent component — owns button clicks, loads bitmaps, sends to canvas
+    // ----------------------------------------------------------------
+    wakaPAC('#app', {
+
+        async onLoadUrl() {
+            const dc = await wakaPAC.loadBitmap(urlSource);
+
+            wakaPAC.sendMessage('viewport', MSG_BITMAP_LOADED, 0, 0, { dc });
+        },
+
+        async onLoadImg() {
+            const img = document.getElementById('sourceImg');
+            await img.decode();
+
+            const dc = await wakaPAC.loadBitmap(img);
+            wakaPAC.sendMessage('viewport', MSG_BITMAP_LOADED, 0, 0, { dc });
+        },
+
+        async onSave() {
+            const dc = wakaPAC.getDC('viewport');
+            await wakaPAC.saveBitmap(dc, 'canvas-snapshot.png');
+            wakaPAC.releaseDC(dc);
+        }
+    });
+
+</script>
+</body>
+</html>
