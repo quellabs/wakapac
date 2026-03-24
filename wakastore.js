@@ -34,6 +34,8 @@
  * ║        reconnectDelayMax: 30000    // backoff cap in ms (default)                ║
  * ║    });                                                                           ║
  * ║    store.disconnect();                                                           ║
+ * ║    // Receive-only. Use push() to send data back; combine both for               ║
+ * ║    // full duplex: connect() for inbound push, push() for outbound writes.       ║
  * ║                                                                                  ║
  * ║  Persistence:                                                                    ║
  * ║    const store = wakaStore.createStore({ theme: 'dark' }, {                      ║
