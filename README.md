@@ -82,7 +82,7 @@ No build tooling required.
 
 ## Plugins
 
-**WakaStore** adds a shared reactive state layer across components. A store is created once and mounted on any number of components under any property name --- mutations to the store propagate automatically to every subscriber, keeping all components in sync without manual coordination. The plugin also supports server synchronization via polling and push to JSON:API endpoints, with optional custom merge logic for non-standard response formats.
+**WakaStore** adds shared reactive state to wakaPAC. Create a store once, mount it on any number of components — mutations propagate to every subscriber automatically. Supports server sync via polling and WebSocket for inbound updates, and push over HTTP for outbound writes, with custom merge callbacks for non-standard response shapes.
 
 **WakaForm** adds reactive form state and field-level validation. A form is defined from a schema of fields and composable rule objects, then mounted on a component like any other reactive property. Field validity is always accurate and updates whenever a value changes. Error visibility is controlled by the template --- bind against `field.valid` directly, write your error messages in HTML, and decide when to show them. Built-in rules cover the common cases (`NotBlank`, `Email`, `Min`, `Max`, `MinLength`, `MaxLength`, `Pattern`); custom rules are any object with a `validate(value)` method that returns `true` or `false`.
 
