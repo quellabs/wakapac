@@ -9915,11 +9915,11 @@
     };
 
     /**
-     * Saves the contents of a DC or bitmap handle to a PNG file, triggering a browser download.
-     * Works with OffscreenCanvas-backed DCs (from createCompatibleDC), bitmap handles
-     * (from loadBitmap), and HTMLCanvasElement-backed DCs (from getDC).
-     * Only works in a browser context — not available in Web Workers.
-     * @param {CanvasRenderingContext2D} dc                     - Source DC to save
+     * Saves the contents of a DC or bitmap handle to an image file, triggering a browser download.
+     * Works with DCs from createCompatibleDC, bitmap handles from loadBitmap, and DCs from getDC.
+     * The image format is derived from the filename extension: .png, .jpg/.jpeg, or .webp.
+     * Defaults to PNG if the extension is absent or unrecognized.
+     * @param {CanvasRenderingContext2D} dc                     - Source DC or bitmap handle to save
      * @param {string}                  [filename='bitmap.png'] - Output filename
      * @returns {Promise<boolean>} true on success, false on failure
      */
@@ -9928,16 +9928,20 @@
             return false;
         }
 
+        // Derive MIME type from filename extension; fall back to PNG
+        const ext  = filename.split('.').pop().toLowerCase();
+        const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }[ext] ?? 'image/png';
+
         try {
             let blob;
 
             if (dc.canvas instanceof OffscreenCanvas) {
-                // OffscreenCanvas — compatible DCs created by createCompatibleDC()
-                blob = await dc.canvas.convertToBlob({ type: 'image/png' });
+                // OffscreenCanvas — compatible DCs and bitmap handles
+                blob = await dc.canvas.convertToBlob({ type: mime });
             } else {
-                // HTMLCanvasElement — DCs backed by a regular on-DOM canvas
+                // HTMLCanvasElement — DCs from getDC()
                 blob = await new Promise((resolve, reject) =>
-                    dc.canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
+                    dc.canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), mime)
                 );
             }
 
@@ -9957,30 +9961,30 @@
     };
 
     /**
-     * Releases a bitmap DC created by loadBitmap().
+     * Releases a bitmap handle created by loadBitmap().
      * Alias for deleteCompatibleDC() — provided so call sites that use loadBitmap()
      * can pair it with a semantically matching release call.
-     * @param {CanvasRenderingContext2D} dc
+     * @param {CanvasRenderingContext2D} hBitmap
      */
-    wakaPAC.deleteBitmap = function(dc) {
-        wakaPAC.deleteCompatibleDC(dc);
+    wakaPAC.deleteBitmap = function(hBitmap) {
+        wakaPAC.deleteCompatibleDC(hBitmap);
     };
 
     /**
-     * Returns the dimensions of a bitmap DC created by loadBitmap().
+     * Returns the dimensions of a bitmap handle created by loadBitmap().
      * Equivalent to calling GetObject(hBitmap) to retrieve BITMAP.bmWidth/bmHeight in Win32.
-     * Returns null if dc is invalid.
-     * @param {CanvasRenderingContext2D} dc
+     * Returns null if hBitmap is invalid.
+     * @param {CanvasRenderingContext2D} hBitmap
      * @returns {{width: number, height: number}|null}
      */
-    wakaPAC.getBitmapSize = function(dc) {
-        if (!dc) {
+    wakaPAC.getBitmapSize = function(hBitmap) {
+        if (!hBitmap) {
             return null;
         }
 
         return {
-            width:  dc.canvas.width,
-            height: dc.canvas.height
+            width:  hBitmap.canvas.width,
+            height: hBitmap.canvas.height
         };
     };
 
