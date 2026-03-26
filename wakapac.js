@@ -216,9 +216,10 @@
      * Used for extracting modifier states from keyboard event lParam
      * These are at different bit positions than MK_* (which are for mouse wParam)
      */
-    const KM_SHIFT = (1 << 25);     // Shift key held down (lParam bit 25)
-    const KM_CONTROL = (1 << 26);   // Ctrl key held down (lParam bit 26)
-    const KM_ALT = (1 << 29);       // Alt key held down (lParam bit 29)
+    const KM_SHIFT   = (1 << 25);  // Shift key held down (lParam bit 25)
+    const KM_CONTROL = (1 << 26);  // Ctrl key held down (lParam bit 26)
+    const KM_META    = (1 << 27);  // Meta/Windows key, non-macOS only (lParam bit 27)
+    const KM_ALT     = (1 << 29);  // Alt key held down (lParam bit 29)
 
     /**
      * MSG_SIZE constants
@@ -3154,7 +3155,14 @@
                 lParam |= KM_CONTROL;
             }
 
-            // Bit 27-28: Reserved (not used)
+            // Bit 27: Meta key state (WakaPAC extension)
+            // On Windows/Linux: Windows key. On macOS: not set here (mapped to KM_CONTROL above).
+            // Note: Bit 27 remains reserved to stay aligned with potential future Win32 extensions.
+            if (!isMac && event.metaKey) {
+                lParam |= KM_META;
+            }
+
+            // Bit 28: Reserved (not used)
 
             // Bit 29: Context code (Alt key state)
             // 1 if Alt is pressed, 0 otherwise
