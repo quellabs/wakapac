@@ -204,12 +204,15 @@
      * Mouse and keyboard modifier key state flags
      * Used as bitmask - multiple flags can be OR'd together
      */
-    const MK_LBUTTON = 0x0001;      // Left mouse button held down
-    const MK_RBUTTON = 0x0002;      // Right mouse button held down
-    const MK_MBUTTON = 0x0004;      // Middle mouse button held down
-    const MK_SHIFT = 0x0008;        // Shift key held down
-    const MK_CONTROL = 0x0010;      // Ctrl key held down
-    const MK_ALT = 0x0020;          // Alt key held down
+    const MK_LBUTTON  = 0x0001;  // Left mouse button
+    const MK_RBUTTON  = 0x0002;  // Right mouse button
+    const MK_SHIFT    = 0x0004;  // Shift key
+    const MK_CONTROL  = 0x0008;  // Ctrl key
+    const MK_MBUTTON  = 0x0010;  // Middle mouse button
+    const MK_XBUTTON1 = 0x0020;  // First extra mouse button (browser back)
+    const MK_XBUTTON2 = 0x0040;  // Second extra mouse button (browser forward)
+    const MK_ALT      = 0x0080;  // Alt key (extension, not in Win32 wParam)
+    const MK_META     = 0x0100;  // Meta/Windows key (extension, not in Win32 wParam)
 
     /**
      * Keyboard lParam modifier key state flags
@@ -225,8 +228,8 @@
      * MSG_SIZE constants
      * @type {number}
      */
-    const SIZE_RESTORED = 0;   // Normal resize (user action, layout change)
-    const SIZE_HIDDEN = 1;     // Element became hidden (width/height = 0)
+    const SIZE_RESTORED   = 0; // Normal resize (user action, layout change)
+    const SIZE_HIDDEN     = 1; // Element became hidden (width/height = 0)
     const SIZE_FULLSCREEN = 2; // Element entered fullscreen mode
 
     /**
@@ -3026,6 +3029,10 @@
                 wParam |= MK_ALT;
             }
 
+            if (event.metaKey) {
+                wParam |= MK_META;
+            }
+
             if (event.buttons !== undefined) {
                 // Real mouse event
                 if (event.buttons & 1) {
@@ -3038,6 +3045,14 @@
 
                 if (event.buttons & 4) {
                     wParam |= MK_MBUTTON;
+                }
+
+                if (event.buttons & 8) {
+                    wParam |= MK_XBUTTON1;
+                }
+
+                if (event.buttons & 16) {
+                    wParam |= MK_XBUTTON2;
                 }
             } else if (event.touches && event.touches.length > 0) {
                 // Touch event with active touches = simulate left button
@@ -8884,14 +8899,28 @@
         // Initialize automatic cleanup observer
         CleanupObserver.initialize();
 
+        // Allow passing a pac-id directly instead of a CSS selector
+        const originalSelector = selector;
+        let isPacId = false;
+
+        if (
+            !selector.startsWith('#') &&
+            !selector.startsWith('.') &&
+            !selector.startsWith('[') &&
+            !/\s/.test(selector)
+        ) {
+            selector = `[data-pac-id="${selector}"]`;
+            isPacId = true;
+        }
+
         // Fetch all matching elements (supports both ID and class selectors)
         const containers = document.querySelectorAll(selector);
 
         // Determine if selector is for multiple elements (class, attribute, tag)
-        const isMultiSelector = !selector.startsWith('#');
+        const isMultiSelector = !selector.startsWith('#') && !isPacId;
 
         if (containers.length === 0) {
-            console.warn(`wakaPAC: No elements found for selector "${selector}"`);
+            console.warn(`wakaPAC: No elements found for selector "${originalSelector}"`);
             return isMultiSelector ? [] : undefined;
         }
 
