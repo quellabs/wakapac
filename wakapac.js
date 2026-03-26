@@ -8899,14 +8899,28 @@
         // Initialize automatic cleanup observer
         CleanupObserver.initialize();
 
+        // Allow passing a pac-id directly instead of a CSS selector
+        const originalSelector = selector;
+        let isPacId = false;
+
+        if (
+            !selector.startsWith('#') &&
+            !selector.startsWith('.') &&
+            !selector.startsWith('[') &&
+            !/\s/.test(selector)
+        ) {
+            selector = `[data-pac-id="${selector}"]`;
+            isPacId = true;
+        }
+
         // Fetch all matching elements (supports both ID and class selectors)
         const containers = document.querySelectorAll(selector);
 
         // Determine if selector is for multiple elements (class, attribute, tag)
-        const isMultiSelector = !selector.startsWith('#');
+        const isMultiSelector = !selector.startsWith('#') && !isPacId;
 
         if (containers.length === 0) {
-            console.warn(`wakaPAC: No elements found for selector "${selector}"`);
+            console.warn(`wakaPAC: No elements found for selector "${originalSelector}"`);
             return isMultiSelector ? [] : undefined;
         }
 
