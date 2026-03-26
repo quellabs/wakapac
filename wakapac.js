@@ -218,7 +218,7 @@
      */
     const KM_SHIFT   = (1 << 25);  // Shift key held down (lParam bit 25)
     const KM_CONTROL = (1 << 26);  // Ctrl key held down (lParam bit 26)
-    const KM_META    = (1 << 27);  // Meta/Windows key, non-macOS only (lParam bit 27)
+    const KM_META    = (1 << 27);  // Meta/Windows/Command key held down (lParam bit 27)
     const KM_ALT     = (1 << 29);  // Alt key held down (lParam bit 29)
 
     /**
@@ -3136,29 +3136,20 @@
                 lParam |= (1 << 24);
             }
 
-            // Bit 25: Shift key state (WakaPAC extension)
+            // Bit 25: Shift key state
             // 1 if Shift is pressed, 0 otherwise
             if (event.shiftKey) {
                 lParam |= KM_SHIFT;
             }
 
-            // Bit 26: Ctrl key state (WakaPAC extension)
+            // Bit 26: Ctrl key state
             // 1 if Ctrl is pressed, 0 otherwise
-            // On macOS, the primary modifier key for shortcuts is Command (⌘) (metaKey),
-            // whereas on Windows/Linux it is Ctrl. We normalize both to KM_CONTROL so
-            // that keyboard shortcuts behave consistently across platforms.
-            const isMac = navigator.userAgentData?.platform === 'macOS' // Modern API (Chromium-based browsers)
-                || /Mac/i.test(navigator.userAgent);                            // Fallback for Firefox/Safari
-
-            // Treat Command (⌘) on macOS as equivalent to Ctrl on other platforms
-            if (isMac ? event.metaKey : event.ctrlKey) {
+            if (event.ctrlKey) {
                 lParam |= KM_CONTROL;
             }
 
-            // Bit 27: Meta key state (WakaPAC extension)
-            // On Windows/Linux: Windows key. On macOS: not set here (mapped to KM_CONTROL above).
-            // Note: Bit 27 remains reserved to stay aligned with potential future Win32 extensions.
-            if (!isMac && event.metaKey) {
+            // Bit 27: Meta key state
+            if (event.metaKey) {
                 lParam |= KM_META;
             }
 
