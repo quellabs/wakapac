@@ -204,12 +204,15 @@
      * Mouse and keyboard modifier key state flags
      * Used as bitmask - multiple flags can be OR'd together
      */
-    const MK_LBUTTON = 0x0001;      // Left mouse button held down
-    const MK_RBUTTON = 0x0002;      // Right mouse button held down
-    const MK_MBUTTON = 0x0004;      // Middle mouse button held down
-    const MK_SHIFT = 0x0008;        // Shift key held down
-    const MK_CONTROL = 0x0010;      // Ctrl key held down
-    const MK_ALT = 0x0020;          // Alt key held down
+    const MK_LBUTTON  = 0x0001;  // Left mouse button
+    const MK_RBUTTON  = 0x0002;  // Right mouse button
+    const MK_SHIFT    = 0x0004;  // Shift key
+    const MK_CONTROL  = 0x0008;  // Ctrl key
+    const MK_MBUTTON  = 0x0010;  // Middle mouse button
+    const MK_XBUTTON1 = 0x0020;  // First extra mouse button (browser back)
+    const MK_XBUTTON2 = 0x0040;  // Second extra mouse button (browser forward)
+    const MK_ALT      = 0x0080;  // Alt key (extension, not in Win32 wParam)
+    const MK_META     = 0x0100;  // Meta/Windows key (extension, not in Win32 wParam)
 
     /**
      * Keyboard lParam modifier key state flags
@@ -3026,6 +3029,10 @@
                 wParam |= MK_ALT;
             }
 
+            if (event.metaKey) {
+                wParam |= MK_META;
+            }
+
             if (event.buttons !== undefined) {
                 // Real mouse event
                 if (event.buttons & 1) {
@@ -3038,6 +3045,14 @@
 
                 if (event.buttons & 4) {
                     wParam |= MK_MBUTTON;
+                }
+
+                if (event.buttons & 8) {
+                    wParam |= MK_XBUTTON1;
+                }
+
+                if (event.buttons & 16) {
+                    wParam |= MK_XBUTTON2;
                 }
             } else if (event.touches && event.touches.length > 0) {
                 // Touch event with active touches = simulate left button
