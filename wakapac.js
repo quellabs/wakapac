@@ -10046,9 +10046,10 @@
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
+        MK_XBUTTON1, MK_XBUTTON2, MK_META,
 
         // Keyboard modifier keys
-        KM_SHIFT, KM_CONTROL, KM_ALT,
+        KM_SHIFT, KM_CONTROL, KM_ALT, KM_META,
 
         // Constants for MSG_SIZE
         SIZE_RESTORED, SIZE_HIDDEN, SIZE_FULLSCREEN,
