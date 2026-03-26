@@ -3143,7 +3143,14 @@
 
             // Bit 26: Ctrl key state (WakaPAC extension)
             // 1 if Ctrl is pressed, 0 otherwise
-            if (event.ctrlKey) {
+            // On macOS, the primary modifier key for shortcuts is Command (⌘) (metaKey),
+            // whereas on Windows/Linux it is Ctrl. We normalize both to KM_CONTROL so
+            // that keyboard shortcuts behave consistently across platforms.
+            const isMac = navigator.userAgentData?.platform === 'macOS' // Modern API (Chromium-based browsers)
+                || /Mac/i.test(navigator.userAgent);                            // Fallback for Firefox/Safari
+
+            // Treat Command (⌘) on macOS as equivalent to Ctrl on other platforms
+            if (isMac ? event.metaKey : event.ctrlKey) {
                 lParam |= KM_CONTROL;
             }
 
