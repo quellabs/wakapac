@@ -228,8 +228,8 @@
      * MSG_SIZE constants
      * @type {number}
      */
-    const SIZE_RESTORED = 0;   // Normal resize (user action, layout change)
-    const SIZE_HIDDEN = 1;     // Element became hidden (width/height = 0)
+    const SIZE_RESTORED   = 0; // Normal resize (user action, layout change)
+    const SIZE_HIDDEN     = 1; // Element became hidden (width/height = 0)
     const SIZE_FULLSCREEN = 2; // Element entered fullscreen mode
 
     /**
