@@ -46,6 +46,13 @@
     const _plugins = [];
 
     /**
+     * Unit function registries keyed by unit name.
+     * Populated by plugins that return a `functions` object from createPacPlugin().
+     * @type {Object<string, Object>}
+     */
+    const _units = {};
+
+    /**
      * Registered message hooks, installed via wakaPAC.installMessageHook().
      * Each entry holds a handle (for removal) and the hook function.
      * Hooks are invoked in registration order before the message reaches its container.
@@ -3840,24 +3847,28 @@
                     if (this.check('IDENTIFIER')) {
                         const property = this.advance().value;
 
-                        // Distinguish between property access and method call by
-                        // looking ahead for an opening parenthesis.
                         if (this.match('LPAREN')) {
-                            // Method call: expr.name(args)
-                            // Arguments are comma-separated expressions parsed by
-                            // parseArgumentList, which returns an empty array for
-                            // zero-argument calls.
                             const args = this.parseArgumentList();
                             this.consume('RPAREN', 'Expected closing parenthesis');
 
-                            expr = {
-                                type: 'methodCall',
-                                object: expr,
-                                method: property,
-                                arguments: args
-                            };
+                            // Emit qualified_call only when the object is a bare root identifier.
+                            // Chained access (user.StringUtils.fn()) is unambiguously a methodCall.
+                            if (expr.type === 'identifier') {
+                                expr = {
+                                    type: 'qualified_call',
+                                    unit: expr.name,
+                                    method: property,
+                                    arguments: args
+                                };
+                            } else {
+                                expr = {
+                                    type: 'methodCall',
+                                    object: expr,
+                                    method: property,
+                                    arguments: args
+                                };
+                            }
                         } else {
-                            // Regular property access: expr.name
                             expr = {
                                 type: 'member',
                                 object: expr,
@@ -4132,6 +4143,8 @@
          * @returns {*} Evaluated result
          */
         evaluate(node, context, scope = null) {
+            const self = this;
+
             if (!node) {
                 return undefined;
             }
@@ -4234,12 +4247,55 @@
                     return undefined;
                 }
 
+                case 'qualified_call': {
+                    // Variable wins: if the identifier exists in the data context, treat as
+                    // a regular method call on that object.
+                    const obj = this.getProperty(node.unit, context, scope);
+
+                    if (obj !== undefined) {
+                        // Warn when a data variable is shadowing a registered unit
+                        if (_units[node.unit]) {
+                            console.warn(`WakaPAC: data property "${node.unit}" is shadowing a registered unit`);
+                        }
+
+                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+
+                        if (Array.isArray(obj)) {
+                            return this.evaluateArrayMethod(obj, node.method, args);
+                        }
+
+                        if (typeof obj[node.method] === 'function') {
+                            return obj[node.method](...args);
+                        }
+
+                        return undefined;
+                    }
+
+                    // Fall back to unit registry (namespaced call)
+                    const unit = _units[node.unit];
+
+                    if (unit && typeof unit[node.method] === 'function') {
+                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        return unit[node.method](...args);
+                    }
+
+                    console.warn(`WakaPAC: unknown qualified call ${node.unit}.${node.method}()`);
+                    return undefined;
+                }
+
                 case 'call': {
+                    // Check imported units first (from data-pac-uses flat import)
+                    const importedUnits = scope?.importedUnits;
+
+                    if (importedUnits && typeof importedUnits[node.name] === 'function') {
+                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        return importedUnits[node.name](...args);
+                    }
+
+                    // Fall back to registered functions (existing behaviour)
                     if (!this.functions || typeof this.functions[node.name] !== 'function') {
                         throw new Error('Unknown function: ' + node.name);
                     }
-
-                    const self = this;
 
                     return this.functions[node.name](node.arguments, {
                         compute(argNode) {
@@ -4816,11 +4872,13 @@
      * object literal at every call site and gives the minifier a single declaration to mangle.
      * @param {Function} normalizeFn - Bound normalizePath function (already bound to correct `this`)
      * @param {Element} element - The DOM element to use as path scope anchor
+     * @param importedUnits - List of imported units
      * @returns {{ resolveScopedPath: function(string): * }}
      */
-    function makeScopeResolver(normalizeFn, element) {
+    function makeScopeResolver(normalizeFn, element, importedUnits) {
         return {
-            resolveScopedPath: (path) => normalizeFn(path, element)
+            resolveScopedPath: (path) => normalizeFn(path, element),
+            importedUnits: importedUnits || {}
         };
     }
 
@@ -4840,14 +4898,17 @@
 
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
             try {
-                // Parse the expression
-                const parsed = ExpressionCache.parseExpression(expression);
-
-                // Resolve the scope - use parentElement for text nodes
-                const scopeResolver = makeScopeResolver(self.context.normalizePath.bind(self.context), element);
-
                 // Evaluate the expression using the scope resolver
-                const result = ExpressionParser.evaluate(parsed, self.context.abstraction, scopeResolver);
+                const result = ExpressionParser.evaluate(
+                    ExpressionCache.parseExpression(expression),
+                    self.context.abstraction,
+                    makeScopeResolver(
+                        self.context.normalizePath.bind(self.context),
+                        element,
+                        self.context.importedUnits
+                    )
+                );
+
                 return result != null ? String(result) : '';
             } catch (error) {
                 console.warn('Error in text interpolation:', expression, error);
@@ -4868,14 +4929,16 @@
      * @returns {*} The evaluated result of the binding expression
      */
     DomUpdater.prototype.resolveBindingValue = function (element, bindingData) {
-        // Parse (or retrieve cached) expression structure
-        const parsed = ExpressionCache.parseExpression(bindingData.target);
-
-        // Resolver translates scoped paths into normalized context paths
-        const scopeResolver = makeScopeResolver(this.context.normalizePath.bind(this.context), element);
-
         // Evaluate expression using the abstraction model and resolver
-        return ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
+        return ExpressionParser.evaluate(
+            ExpressionCache.parseExpression(bindingData.target),
+            this.context.abstraction,
+            makeScopeResolver(
+                this.context.normalizePath.bind(this.context),
+                element,
+                this.context.importedUnits
+            )
+        );
     };
 
     /**
@@ -4976,13 +5039,34 @@
         this.children = new Set();
         this.container = container;
         this.config = config;
-        this.abstraction = this.createReactiveAbstraction();
-        this.domUpdater = new DomUpdater(this);
-        this.dependencies = this.getDependencies();
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
         this.commentBindingMap = new Map();
         this._readyCalled = false;
+        this.abstraction = this.createReactiveAbstraction();
+        this.domUpdater = new DomUpdater(this);
+
+        // Resolve data-pac-uses into a flat function map for this component.
+        // Functions are merged in declaration order; last entry wins on collision.
+        this.importedUnits = {};
+        const usesAttr = container.getAttribute('data-pac-uses');
+
+        if (usesAttr) {
+            usesAttr.split(',').forEach(name => {
+                const unitName = name.trim();
+                const unit = _units[unitName];
+
+                if (!unit) {
+                    console.warn(`WakaPAC: data-pac-uses references unknown unit "${unitName}"`);
+                    return;
+                }
+
+                Object.assign(this.importedUnits, unit);
+            });
+        }
+
+        // Setup dependencies
+        this.dependencies = this.getDependencies();
 
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
@@ -5710,13 +5794,16 @@
 
             // Get the foreach configuration and set up scope resolution
             const foreachData = this.interpolationMap.get(foreachElement);
-            const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), event.target);
 
             // Evaluate the foreach expression to get the source array
             const array = ExpressionParser.evaluate(
                 ExpressionCache.parseExpression(foreachData.foreachExpr),
                 this.abstraction,
-                scopeResolver
+                makeScopeResolver(
+                    this.normalizePath.bind(this),
+                    event.target,
+                    this.importedUnits
+                )
             );
 
             // Call method with foreach context: (arrayItem, index, originalEvent)
@@ -5978,10 +6065,6 @@
                 return;
             }
 
-            // Build the scope resolver once per element rather than per binding,
-            // since it only depends on the element for path normalization
-            const scopeResolver = makeScopeResolver(self.normalizePath.bind(self), element);
-
             // Initialize the previous values store on first encounter.
             // Cache the reference to avoid repeated DOM element property access
             // inside the binding loop.
@@ -6007,8 +6090,16 @@
                 try {
                     // Parse and evaluate the binding expression
                     const bindingData = bindings[bindingType];
-                    const parsed = ExpressionCache.parseExpression(bindingData.target);
-                    const currentValue = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
+
+                    const currentValue = ExpressionParser.evaluate(
+                        ExpressionCache.parseExpression(bindingData.target),
+                        abstraction,
+                        makeScopeResolver(
+                            self.normalizePath.bind(self),
+                            element,
+                            self.importedUnits
+                        )
+                    );
 
                     // Only touch the DOM if the value actually changed.
                     // DOM writes are expensive, so we diff against the cached
@@ -6045,12 +6136,18 @@
 
                 // Build the scope resolver once per text node, not once per expression.
                 // The resolver only depends on the text node for path normalization.
-                const scopeResolver = makeScopeResolver(self.normalizePath.bind(self), textNode);
-
                 const newText = mappingData.template.replace(INTERPOLATION_REGEX, function(match, expression) {
                     try {
-                        const parsed = ExpressionCache.parseExpression(expression);
-                        const result = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
+                        const result = ExpressionParser.evaluate(
+                            ExpressionCache.parseExpression(expression),
+                            abstraction,
+                            makeScopeResolver(
+                                self.normalizePath.bind(self),
+                                textNode,
+                                self.importedUnits
+                            )
+                        );
+
                         return result != null ? String(result) : '';
                     } catch (error) {
                         console.warn('Error evaluating text interpolation:', expression, error);
@@ -7055,16 +7152,16 @@
         // This prevents memory leaks when re-rendering dynamic content
         this.cleanupForeachMaps(foreachElement);
 
-        // Create scope resolver for this foreach element
-        // This handles variable resolution in nested contexts (e.g., converting "todo.subs" to "todos[0].subs")
-        const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), foreachElement);
-
         try {
             // Evaluate the foreach expression (e.g., "todos" or "todo.subs")
             const array = ExpressionParser.evaluate(
                 ExpressionCache.parseExpression(mappingData.foreachExpr),
                 this.abstraction,
-                scopeResolver
+                makeScopeResolver(
+                    this.normalizePath.bind(this),
+                    foreachElement,
+                    this.importedUnits
+                )
             );
 
             // TIMING FIX: Handle the case where parent context doesn't exist yet
@@ -7493,14 +7590,15 @@
             return false;
         }
 
-        // Create scope resolver to handle scoped path resolution within foreach context
-        const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), foreachElement);
-
         // Evaluate the foreach expression to get the current array
         const newArray = ExpressionParser.evaluate(
             ExpressionCache.parseExpression(mappingData.foreachExpr),
             this.abstraction,
-            scopeResolver
+            makeScopeResolver(
+                this.normalizePath.bind(this),
+                foreachElement,
+                this.importedUnits
+            )
         );
 
         // If evaluation doesn't result in an array, no rebuild needed
@@ -9567,7 +9665,17 @@
         _registeredLibs.push(library);
 
         // Create the plugin and store
-        _plugins.push(library.createPacPlugin(wakaPAC));
+        const plugin = library.createPacPlugin(wakaPAC);
+        _plugins.push(plugin);
+
+        // If the plugin exposes named functions, register it as a unit
+        if (plugin.name && Utils.isPlainObject(plugin.functions)) {
+            if (_units[plugin.name]) {
+                console.warn(`WakaPAC: unit "${plugin.name}" is already registered`);
+            } else {
+                _units[plugin.name] = plugin.functions;
+            }
+        }
     };
 
     // ========================================================================
