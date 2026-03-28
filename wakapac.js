@@ -5007,7 +5007,7 @@
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
         this.commentBindingMap = new Map();
-        this._readyCalled = false;
+        this.readyCalled = false;
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
 
@@ -5036,13 +5036,13 @@
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
 
-        // Clean up observers
+        // Register container to shared observers
         DomUpdateTracker.observeContainer(this.container);
 
         // Add interval for checking updateQueue
         this.updateQueue = new Map();
-        this._updateQueueTimer = null;
-        this._updateQueueFireAt = 0;
+        this.updateQueueTimer = null;
+        this.updateQueueFireAt = 0;
 
         // Handle click events
         this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
@@ -5111,9 +5111,9 @@
         }
 
         // Clear updateQueueTimer
-        if (this._updateQueueTimer !== null) {
-            clearTimeout(this._updateQueueTimer);
-            this._updateQueueTimer = null;
+        if (this.updateQueueTimer !== null) {
+            clearTimeout(this.updateQueueTimer);
+            this.updateQueueTimer = null;
         }
 
         // Clear boundHandlePacEvent callback
@@ -5498,8 +5498,8 @@
      */
     Context.prototype.updateQueueHandler = function() {
         // Clear timer reference — this callback is now executing
-        this._updateQueueTimer = null;
-        this._updateQueueFireAt = 0;
+        this.updateQueueTimer = null;
+        this.updateQueueFireAt = 0;
 
         // Fast exit when nothing is queued
         if (this.updateQueue.size === 0) {
@@ -5569,18 +5569,18 @@
         const fireAt = Date.now() + clampedDelay;
 
         // If an existing timer already covers this deadline, keep it
-        if (this._updateQueueTimer !== null && this._updateQueueFireAt <= fireAt) {
+        if (this.updateQueueTimer !== null && this.updateQueueFireAt <= fireAt) {
             return;
         }
 
         // Cancel the existing timer — the new one fires sooner
-        if (this._updateQueueTimer !== null) {
-            clearTimeout(this._updateQueueTimer);
+        if (this.updateQueueTimer !== null) {
+            clearTimeout(this.updateQueueTimer);
         }
 
         // Run timeout
-        this._updateQueueFireAt = fireAt;
-        this._updateQueueTimer = setTimeout(function() {
+        this.updateQueueFireAt = fireAt;
+        this.updateQueueTimer = setTimeout(function() {
             self.updateQueueHandler();
         }, clampedDelay);
     };
@@ -7812,11 +7812,11 @@
         // Call ready() method if it exists after all bindings have been applied
         // Only call once per component instance
         if (
-            !this._readyCalled &&
+            !this.readyCalled &&
             this.abstraction.ready &&
             typeof this.abstraction.ready === 'function'
         ) {
-            this._readyCalled = true;
+            this.readyCalled = true;
 
             try {
                 this.abstraction.ready.call(this.abstraction);
