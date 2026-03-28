@@ -3438,7 +3438,6 @@
          */
         tokens: [],
         currentToken: 0,
-        functions: null,
 
         OPERATOR_PRECEDENCE: {
             '||': 1, '&&': 2,
@@ -4292,16 +4291,7 @@
                         return importedUnits[node.name](...args);
                     }
 
-                    // Fall back to registered functions (existing behaviour)
-                    if (!this.functions || typeof this.functions[node.name] !== 'function') {
-                        throw new Error('Unknown function: ' + node.name);
-                    }
-
-                    return this.functions[node.name](node.arguments, {
-                        compute(argNode) {
-                            return self.evaluate(argNode, context, scope);
-                        }
-                    });
+                    return undefined;
                 }
 
                 default:
