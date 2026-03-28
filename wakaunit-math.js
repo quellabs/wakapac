@@ -24,7 +24,7 @@
 (function() {
     "use strict";
 
-    window.WakaMath = {
+    window.wakaMath = {
 
         createPacPlugin(pac) {
             return {

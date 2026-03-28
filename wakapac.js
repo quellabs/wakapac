@@ -5137,7 +5137,7 @@
             try {
                 this.abstraction.destroy();
             } catch (e) {
-                console.error('Error in user destroy() hook:', e);
+                console.warn('Error in user destroy() hook:', e);
             }
         }
 
@@ -5783,7 +5783,7 @@
             // Call method with foreach context: (arrayItem, index, originalEvent)
             method.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
         } catch (error) {
-            console.error(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
+            console.warn(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
         }
     }
 
@@ -5815,7 +5815,7 @@
             method.call(this.abstraction, event);
         } catch (error) {
             // Log execution errors with context for debugging
-            console.error(`Error executing submit binding '${mappingData.bindings.submit.target}':`, error);
+            console.warn(`Error executing submit binding '${mappingData.bindings.submit.target}':`, error);
         }
     };
 
@@ -5882,7 +5882,7 @@
                     // Execute the bound method with the abstraction as context
                     method.call(this.abstraction, event);
                 } catch (error) {
-                    console.error(`Error executing change binding '${mappingData.bindings.change.target}':`, error);
+                    console.warn(`Error executing change binding '${mappingData.bindings.change.target}':`, error);
                 }
             }
         }
@@ -6272,7 +6272,7 @@
             try {
                 this.originalAbstraction.watch[property].call(this.abstraction, newValue, oldValue);
             } catch (error) {
-                console.error('Error in watcher for \'' + property + '\':', error);
+                console.warn('Error in watcher for \'' + property + '\':', error);
             }
         }
     };
@@ -7202,7 +7202,7 @@
             this.syncSelectAfterForeach(foreachElement);
 
         } catch (error) {
-            console.error(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
+            console.warn(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
             // Don't clear innerHTML on error during initial scan - preserve template
             // The error might resolve itself when parent context becomes available
         }
@@ -7821,7 +7821,7 @@
             try {
                 this.abstraction.ready.call(this.abstraction);
             } catch (error) {
-                console.error('Error in ready() method:', error);
+                console.warn('Error in ready() method:', error);
             }
         }
     };
@@ -9049,7 +9049,7 @@
                 try {
                     context.abstraction.init.call(context.abstraction);
                 } catch (error) {
-                    console.error('Error in init() method:', error);
+                    console.warn('Error in init() method:', error);
                 }
             }
 
