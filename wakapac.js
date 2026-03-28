@@ -4922,41 +4922,17 @@
     };
 
     /**
-     * Resolves the current value of a binding expression for a given element.
-     * Parses the expression, builds a scope resolver, and evaluates against the abstraction.
-     * @param {Element} element - The DOM element providing scope context
-     * @param {Object} bindingData - Binding configuration with a .target expression string
-     * @returns {*} The evaluated result of the binding expression
-     */
-    DomUpdater.prototype.resolveBindingValue = function (element, bindingData) {
-        // Evaluate expression using the abstraction model and resolver
-        return ExpressionParser.evaluate(
-            ExpressionCache.parseExpression(bindingData.target),
-            this.context.abstraction,
-            makeScopeResolver(
-                this.context.normalizePath.bind(this.context),
-                element,
-                this.context.importedUnits
-            )
-        );
-    };
-
-    /**
      * Updates an element's attribute or property based on data binding configuration.
      * Evaluates the binding expression and applies the result using the appropriate binding method.
      * @param {Element} element - The DOM element to update
      * @param {string} bindingType - Type of binding (value, checked, visible, class, style, or attribute name)
      * @param {Object} bindingData - Binding configuration object
      * @param {string} bindingData.target - Expression string to evaluate for the binding value
-     * @param {*} [precomputedValue] - Optional pre-evaluated value to skip redundant expression evaluation
+     * @param {*} [value] - Pre-evaluated value to skip redundant expression evaluation
      * @returns {void}
      */
-    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, precomputedValue) {
+    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, value) {
         try {
-            // Use precomputed value if available (from updateElementBindings change-detection),
-            // otherwise evaluate the expression (for initial render and other call sites)
-            const value = arguments.length >= 4 ? precomputedValue : this.resolveBindingValue(element, bindingData);
-
             // Use registered handler if available
             const handler = BindingHandlers[bindingType];
 
@@ -4971,29 +4947,18 @@
             }
 
             // Default: set as attribute for unrecognized binding types
-            this.applyAttributeBinding(element, bindingType, value);
+            if (bindingType === 'enable') {
+                // Handle 'enable' as reverse of 'disabled'
+                element.toggleAttribute('disabled', !value);
+            } else if (BOOLEAN_ATTRIBUTES.includes(bindingType)) {
+                element.toggleAttribute(bindingType, !!value);
+            } else if (value != null) {
+                element.setAttribute(bindingType, value);
+            } else {
+                element.removeAttribute(bindingType);
+            }
         } catch (error) {
             console.warn('Error updating binding:', bindingType, bindingData, error);
-        }
-    };
-
-    /**
-     * Applies attribute binding to an element with special handling for boolean attributes.
-     * Supports 'enable' as reverse of 'disabled' attribute.
-     * @param {Element} element - The DOM element to update
-     * @param {string} attribute - The attribute name to set
-     * @param {*} value - The attribute value (null/undefined removes attribute)
-     */
-    DomUpdater.prototype.applyAttributeBinding = function (element, attribute, value) {
-        if (attribute === 'enable') {
-            // Handle 'enable' as reverse of 'disabled'
-            element.toggleAttribute('disabled', !value);
-        } else if (BOOLEAN_ATTRIBUTES.includes(attribute)) {
-            element.toggleAttribute(attribute, !!value);
-        } else if (value != null) {
-            element.setAttribute(attribute, value);
-        } else {
-            element.removeAttribute(attribute);
         }
     };
 
@@ -5359,8 +5324,6 @@
         // Store comment bindings
         newCommentBindings.forEach((mappingData, commentNode) => {
             this.commentBindingMap.set(commentNode, mappingData);
-
-            // Apply initial state
             self.updateCommentConditional(commentNode, mappingData);
         });
 
@@ -5368,7 +5331,18 @@
         newBindings.forEach((mappingData, element) => {
             Object.keys(mappingData.bindings).forEach(bindingType => {
                 const bindingData = mappingData.bindings[bindingType];
-                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
+
+                const value = ExpressionParser.evaluate(
+                    ExpressionCache.parseExpression(bindingData.target),
+                    self.abstraction,
+                    makeScopeResolver(
+                        self.normalizePath.bind(self),
+                        element,
+                        self.importedUnits
+                    )
+                );
+
+                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
             });
         });
 
