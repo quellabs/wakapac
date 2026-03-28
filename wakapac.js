@@ -3852,7 +3852,7 @@
                             this.consume('RPAREN', 'Expected closing parenthesis');
 
                             // Emit qualified_call only when the object is a bare root identifier.
-                            // Chained access (user.StringUtils.fn()) is unambiguously a methodCall.
+                            // Chained access (user.StringUtils.fn()) is unambiguously a method_call.
                             if (expr.type === 'identifier') {
                                 expr = {
                                     type: 'qualified_call',
@@ -3862,7 +3862,7 @@
                                 };
                             } else {
                                 expr = {
-                                    type: 'methodCall',
+                                    type: 'method_call',
                                     object: expr,
                                     method: property,
                                     arguments: args
@@ -4232,7 +4232,7 @@
                     return obj && obj[node.property];
                 }
 
-                case 'methodCall': {
+                case 'method_call': {
                     const object = this.evaluate(node.object, context, scope);
 
                     // Handle array methods
