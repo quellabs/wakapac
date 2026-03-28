@@ -46,6 +46,13 @@
     const _plugins = [];
 
     /**
+     * Unit function registries keyed by unit name.
+     * Populated by plugins that return a `functions` object from createPacPlugin().
+     * @type {Object<string, Object>}
+     */
+    const _units = {};
+
+    /**
      * Registered message hooks, installed via wakaPAC.installMessageHook().
      * Each entry holds a handle (for removal) and the hook function.
      * Hooks are invoked in registration order before the message reaches its container.
@@ -3431,7 +3438,6 @@
          */
         tokens: [],
         currentToken: 0,
-        functions: null,
 
         OPERATOR_PRECEDENCE: {
             '||': 1, '&&': 2,
@@ -3840,24 +3846,28 @@
                     if (this.check('IDENTIFIER')) {
                         const property = this.advance().value;
 
-                        // Distinguish between property access and method call by
-                        // looking ahead for an opening parenthesis.
                         if (this.match('LPAREN')) {
-                            // Method call: expr.name(args)
-                            // Arguments are comma-separated expressions parsed by
-                            // parseArgumentList, which returns an empty array for
-                            // zero-argument calls.
                             const args = this.parseArgumentList();
                             this.consume('RPAREN', 'Expected closing parenthesis');
 
-                            expr = {
-                                type: 'methodCall',
-                                object: expr,
-                                method: property,
-                                arguments: args
-                            };
+                            // Emit qualified_call only when the object is a bare root identifier.
+                            // Chained access (user.StringUtils.fn()) is unambiguously a method_call.
+                            if (expr.type === 'identifier') {
+                                expr = {
+                                    type: 'qualified_call',
+                                    unit: expr.name,
+                                    method: property,
+                                    arguments: args
+                                };
+                            } else {
+                                expr = {
+                                    type: 'method_call',
+                                    object: expr,
+                                    method: property,
+                                    arguments: args
+                                };
+                            }
                         } else {
-                            // Regular property access: expr.name
                             expr = {
                                 type: 'member',
                                 object: expr,
@@ -4132,6 +4142,8 @@
          * @returns {*} Evaluated result
          */
         evaluate(node, context, scope = null) {
+            const self = this;
+
             if (!node) {
                 return undefined;
             }
@@ -4219,7 +4231,7 @@
                     return obj && obj[node.property];
                 }
 
-                case 'methodCall': {
+                case 'method_call': {
                     const object = this.evaluate(node.object, context, scope);
 
                     // Handle array methods
@@ -4234,18 +4246,52 @@
                     return undefined;
                 }
 
-                case 'call': {
-                    if (!this.functions || typeof this.functions[node.name] !== 'function') {
-                        throw new Error('Unknown function: ' + node.name);
+                case 'qualified_call': {
+                    // Variable wins: if the identifier exists in the data context, treat as
+                    // a regular method call on that object.
+                    const obj = this.getProperty(node.unit, context, scope);
+
+                    if (obj !== undefined) {
+                        // Warn when a data variable is shadowing a registered unit
+                        if (_units[node.unit]) {
+                            console.warn(`WakaPAC: data property "${node.unit}" is shadowing a registered unit`);
+                        }
+
+                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+
+                        if (Array.isArray(obj)) {
+                            return this.evaluateArrayMethod(obj, node.method, args);
+                        }
+
+                        if (typeof obj[node.method] === 'function') {
+                            return obj[node.method](...args);
+                        }
+
+                        return undefined;
                     }
 
-                    const self = this;
+                    // Fall back to unit registry (namespaced call)
+                    const unit = _units[node.unit];
 
-                    return this.functions[node.name](node.arguments, {
-                        compute(argNode) {
-                            return self.evaluate(argNode, context, scope);
-                        }
-                    });
+                    if (unit && typeof unit[node.method] === 'function') {
+                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        return unit[node.method](...args);
+                    }
+
+                    console.warn(`WakaPAC: unknown qualified call ${node.unit}.${node.method}()`);
+                    return undefined;
+                }
+
+                case 'call': {
+                    // Check imported units first (from data-pac-uses flat import)
+                    const importedUnits = scope?.importedUnits;
+
+                    if (importedUnits && typeof importedUnits[node.name] === 'function') {
+                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        return importedUnits[node.name](...args);
+                    }
+
+                    return undefined;
                 }
 
                 default:
@@ -4816,11 +4862,13 @@
      * object literal at every call site and gives the minifier a single declaration to mangle.
      * @param {Function} normalizeFn - Bound normalizePath function (already bound to correct `this`)
      * @param {Element} element - The DOM element to use as path scope anchor
+     * @param importedUnits - List of imported units
      * @returns {{ resolveScopedPath: function(string): * }}
      */
-    function makeScopeResolver(normalizeFn, element) {
+    function makeScopeResolver(normalizeFn, element, importedUnits) {
         return {
-            resolveScopedPath: (path) => normalizeFn(path, element)
+            resolveScopedPath: (path) => normalizeFn(path, element),
+            importedUnits: importedUnits || {}
         };
     }
 
@@ -4840,14 +4888,17 @@
 
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
             try {
-                // Parse the expression
-                const parsed = ExpressionCache.parseExpression(expression);
-
-                // Resolve the scope - use parentElement for text nodes
-                const scopeResolver = makeScopeResolver(self.context.normalizePath.bind(self.context), element);
-
                 // Evaluate the expression using the scope resolver
-                const result = ExpressionParser.evaluate(parsed, self.context.abstraction, scopeResolver);
+                const result = ExpressionParser.evaluate(
+                    ExpressionCache.parseExpression(expression),
+                    self.context.abstraction,
+                    makeScopeResolver(
+                        self.context.normalizePath.bind(self.context),
+                        element,
+                        self.context.importedUnits
+                    )
+                );
+
                 return result != null ? String(result) : '';
             } catch (error) {
                 console.warn('Error in text interpolation:', expression, error);
@@ -4861,39 +4912,17 @@
     };
 
     /**
-     * Resolves the current value of a binding expression for a given element.
-     * Parses the expression, builds a scope resolver, and evaluates against the abstraction.
-     * @param {Element} element - The DOM element providing scope context
-     * @param {Object} bindingData - Binding configuration with a .target expression string
-     * @returns {*} The evaluated result of the binding expression
-     */
-    DomUpdater.prototype.resolveBindingValue = function (element, bindingData) {
-        // Parse (or retrieve cached) expression structure
-        const parsed = ExpressionCache.parseExpression(bindingData.target);
-
-        // Resolver translates scoped paths into normalized context paths
-        const scopeResolver = makeScopeResolver(this.context.normalizePath.bind(this.context), element);
-
-        // Evaluate expression using the abstraction model and resolver
-        return ExpressionParser.evaluate(parsed, this.context.abstraction, scopeResolver);
-    };
-
-    /**
      * Updates an element's attribute or property based on data binding configuration.
      * Evaluates the binding expression and applies the result using the appropriate binding method.
      * @param {Element} element - The DOM element to update
      * @param {string} bindingType - Type of binding (value, checked, visible, class, style, or attribute name)
      * @param {Object} bindingData - Binding configuration object
      * @param {string} bindingData.target - Expression string to evaluate for the binding value
-     * @param {*} [precomputedValue] - Optional pre-evaluated value to skip redundant expression evaluation
+     * @param {*} [value] - Pre-evaluated value to skip redundant expression evaluation
      * @returns {void}
      */
-    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, precomputedValue) {
+    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, value) {
         try {
-            // Use precomputed value if available (from updateElementBindings change-detection),
-            // otherwise evaluate the expression (for initial render and other call sites)
-            const value = arguments.length >= 4 ? precomputedValue : this.resolveBindingValue(element, bindingData);
-
             // Use registered handler if available
             const handler = BindingHandlers[bindingType];
 
@@ -4908,29 +4937,18 @@
             }
 
             // Default: set as attribute for unrecognized binding types
-            this.applyAttributeBinding(element, bindingType, value);
+            if (bindingType === 'enable') {
+                // Handle 'enable' as reverse of 'disabled'
+                element.toggleAttribute('disabled', !value);
+            } else if (BOOLEAN_ATTRIBUTES.includes(bindingType)) {
+                element.toggleAttribute(bindingType, !!value);
+            } else if (value != null) {
+                element.setAttribute(bindingType, value);
+            } else {
+                element.removeAttribute(bindingType);
+            }
         } catch (error) {
             console.warn('Error updating binding:', bindingType, bindingData, error);
-        }
-    };
-
-    /**
-     * Applies attribute binding to an element with special handling for boolean attributes.
-     * Supports 'enable' as reverse of 'disabled' attribute.
-     * @param {Element} element - The DOM element to update
-     * @param {string} attribute - The attribute name to set
-     * @param {*} value - The attribute value (null/undefined removes attribute)
-     */
-    DomUpdater.prototype.applyAttributeBinding = function (element, attribute, value) {
-        if (attribute === 'enable') {
-            // Handle 'enable' as reverse of 'disabled'
-            element.toggleAttribute('disabled', !value);
-        } else if (BOOLEAN_ATTRIBUTES.includes(attribute)) {
-            element.toggleAttribute(attribute, !!value);
-        } else if (value != null) {
-            element.setAttribute(attribute, value);
-        } else {
-            element.removeAttribute(attribute);
         }
     };
 
@@ -4976,24 +4994,45 @@
         this.children = new Set();
         this.container = container;
         this.config = config;
-        this.abstraction = this.createReactiveAbstraction();
-        this.domUpdater = new DomUpdater(this);
-        this.dependencies = this.getDependencies();
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
         this.commentBindingMap = new Map();
-        this._readyCalled = false;
+        this.readyCalled = false;
+        this.abstraction = this.createReactiveAbstraction();
+        this.domUpdater = new DomUpdater(this);
+
+        // Resolve data-pac-uses into a flat function map for this component.
+        // Functions are merged in declaration order; last entry wins on collision.
+        this.importedUnits = {};
+        const usesAttr = container.getAttribute('data-pac-uses');
+
+        if (usesAttr) {
+            usesAttr.split(',').forEach(name => {
+                const unitName = name.trim();
+                const unit = _units[unitName];
+
+                if (!unit) {
+                    console.warn(`WakaPAC: data-pac-uses references unknown unit "${unitName}"`);
+                    return;
+                }
+
+                Object.assign(this.importedUnits, unit);
+            });
+        }
+
+        // Setup dependencies
+        this.dependencies = this.getDependencies();
 
         // Set up container-specific scroll tracking
         this.setupContainerScrollTracking();
 
-        // Clean up observers
+        // Register container to shared observers
         DomUpdateTracker.observeContainer(this.container);
 
         // Add interval for checking updateQueue
         this.updateQueue = new Map();
-        this._updateQueueTimer = null;
-        this._updateQueueFireAt = 0;
+        this.updateQueueTimer = null;
+        this.updateQueueFireAt = 0;
 
         // Handle click events
         this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
@@ -5062,9 +5101,9 @@
         }
 
         // Clear updateQueueTimer
-        if (this._updateQueueTimer !== null) {
-            clearTimeout(this._updateQueueTimer);
-            this._updateQueueTimer = null;
+        if (this.updateQueueTimer !== null) {
+            clearTimeout(this.updateQueueTimer);
+            this.updateQueueTimer = null;
         }
 
         // Clear boundHandlePacEvent callback
@@ -5088,7 +5127,7 @@
             try {
                 this.abstraction.destroy();
             } catch (e) {
-                console.error('Error in user destroy() hook:', e);
+                console.warn('Error in user destroy() hook:', e);
             }
         }
 
@@ -5275,8 +5314,6 @@
         // Store comment bindings
         newCommentBindings.forEach((mappingData, commentNode) => {
             this.commentBindingMap.set(commentNode, mappingData);
-
-            // Apply initial state
             self.updateCommentConditional(commentNode, mappingData);
         });
 
@@ -5284,7 +5321,18 @@
         newBindings.forEach((mappingData, element) => {
             Object.keys(mappingData.bindings).forEach(bindingType => {
                 const bindingData = mappingData.bindings[bindingType];
-                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData);
+
+                const value = ExpressionParser.evaluate(
+                    ExpressionCache.parseExpression(bindingData.target),
+                    self.abstraction,
+                    makeScopeResolver(
+                        self.normalizePath.bind(self),
+                        element,
+                        self.importedUnits
+                    )
+                );
+
+                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
             });
         });
 
@@ -5440,8 +5488,8 @@
      */
     Context.prototype.updateQueueHandler = function() {
         // Clear timer reference — this callback is now executing
-        this._updateQueueTimer = null;
-        this._updateQueueFireAt = 0;
+        this.updateQueueTimer = null;
+        this.updateQueueFireAt = 0;
 
         // Fast exit when nothing is queued
         if (this.updateQueue.size === 0) {
@@ -5511,18 +5559,18 @@
         const fireAt = Date.now() + clampedDelay;
 
         // If an existing timer already covers this deadline, keep it
-        if (this._updateQueueTimer !== null && this._updateQueueFireAt <= fireAt) {
+        if (this.updateQueueTimer !== null && this.updateQueueFireAt <= fireAt) {
             return;
         }
 
         // Cancel the existing timer — the new one fires sooner
-        if (this._updateQueueTimer !== null) {
-            clearTimeout(this._updateQueueTimer);
+        if (this.updateQueueTimer !== null) {
+            clearTimeout(this.updateQueueTimer);
         }
 
         // Run timeout
-        this._updateQueueFireAt = fireAt;
-        this._updateQueueTimer = setTimeout(function() {
+        this.updateQueueFireAt = fireAt;
+        this.updateQueueTimer = setTimeout(function() {
             self.updateQueueHandler();
         }, clampedDelay);
     };
@@ -5710,19 +5758,22 @@
 
             // Get the foreach configuration and set up scope resolution
             const foreachData = this.interpolationMap.get(foreachElement);
-            const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), event.target);
 
             // Evaluate the foreach expression to get the source array
             const array = ExpressionParser.evaluate(
                 ExpressionCache.parseExpression(foreachData.foreachExpr),
                 this.abstraction,
-                scopeResolver
+                makeScopeResolver(
+                    this.normalizePath.bind(this),
+                    event.target,
+                    this.importedUnits
+                )
             );
 
             // Call method with foreach context: (arrayItem, index, originalEvent)
             method.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
         } catch (error) {
-            console.error(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
+            console.warn(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
         }
     }
 
@@ -5754,7 +5805,7 @@
             method.call(this.abstraction, event);
         } catch (error) {
             // Log execution errors with context for debugging
-            console.error(`Error executing submit binding '${mappingData.bindings.submit.target}':`, error);
+            console.warn(`Error executing submit binding '${mappingData.bindings.submit.target}':`, error);
         }
     };
 
@@ -5821,7 +5872,7 @@
                     // Execute the bound method with the abstraction as context
                     method.call(this.abstraction, event);
                 } catch (error) {
-                    console.error(`Error executing change binding '${mappingData.bindings.change.target}':`, error);
+                    console.warn(`Error executing change binding '${mappingData.bindings.change.target}':`, error);
                 }
             }
         }
@@ -5978,10 +6029,6 @@
                 return;
             }
 
-            // Build the scope resolver once per element rather than per binding,
-            // since it only depends on the element for path normalization
-            const scopeResolver = makeScopeResolver(self.normalizePath.bind(self), element);
-
             // Initialize the previous values store on first encounter.
             // Cache the reference to avoid repeated DOM element property access
             // inside the binding loop.
@@ -6007,8 +6054,16 @@
                 try {
                     // Parse and evaluate the binding expression
                     const bindingData = bindings[bindingType];
-                    const parsed = ExpressionCache.parseExpression(bindingData.target);
-                    const currentValue = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
+
+                    const currentValue = ExpressionParser.evaluate(
+                        ExpressionCache.parseExpression(bindingData.target),
+                        abstraction,
+                        makeScopeResolver(
+                            self.normalizePath.bind(self),
+                            element,
+                            self.importedUnits
+                        )
+                    );
 
                     // Only touch the DOM if the value actually changed.
                     // DOM writes are expensive, so we diff against the cached
@@ -6045,12 +6100,18 @@
 
                 // Build the scope resolver once per text node, not once per expression.
                 // The resolver only depends on the text node for path normalization.
-                const scopeResolver = makeScopeResolver(self.normalizePath.bind(self), textNode);
-
                 const newText = mappingData.template.replace(INTERPOLATION_REGEX, function(match, expression) {
                     try {
-                        const parsed = ExpressionCache.parseExpression(expression);
-                        const result = ExpressionParser.evaluate(parsed, abstraction, scopeResolver);
+                        const result = ExpressionParser.evaluate(
+                            ExpressionCache.parseExpression(expression),
+                            abstraction,
+                            makeScopeResolver(
+                                self.normalizePath.bind(self),
+                                textNode,
+                                self.importedUnits
+                            )
+                        );
+
                         return result != null ? String(result) : '';
                     } catch (error) {
                         console.warn('Error evaluating text interpolation:', expression, error);
@@ -6201,7 +6262,7 @@
             try {
                 this.originalAbstraction.watch[property].call(this.abstraction, newValue, oldValue);
             } catch (error) {
-                console.error('Error in watcher for \'' + property + '\':', error);
+                console.warn('Error in watcher for \'' + property + '\':', error);
             }
         }
     };
@@ -7055,16 +7116,16 @@
         // This prevents memory leaks when re-rendering dynamic content
         this.cleanupForeachMaps(foreachElement);
 
-        // Create scope resolver for this foreach element
-        // This handles variable resolution in nested contexts (e.g., converting "todo.subs" to "todos[0].subs")
-        const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), foreachElement);
-
         try {
             // Evaluate the foreach expression (e.g., "todos" or "todo.subs")
             const array = ExpressionParser.evaluate(
                 ExpressionCache.parseExpression(mappingData.foreachExpr),
                 this.abstraction,
-                scopeResolver
+                makeScopeResolver(
+                    this.normalizePath.bind(this),
+                    foreachElement,
+                    this.importedUnits
+                )
             );
 
             // TIMING FIX: Handle the case where parent context doesn't exist yet
@@ -7131,7 +7192,7 @@
             this.syncSelectAfterForeach(foreachElement);
 
         } catch (error) {
-            console.error(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
+            console.warn(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
             // Don't clear innerHTML on error during initial scan - preserve template
             // The error might resolve itself when parent context becomes available
         }
@@ -7493,14 +7554,15 @@
             return false;
         }
 
-        // Create scope resolver to handle scoped path resolution within foreach context
-        const scopeResolver = makeScopeResolver(this.normalizePath.bind(this), foreachElement);
-
         // Evaluate the foreach expression to get the current array
         const newArray = ExpressionParser.evaluate(
             ExpressionCache.parseExpression(mappingData.foreachExpr),
             this.abstraction,
-            scopeResolver
+            makeScopeResolver(
+                this.normalizePath.bind(this),
+                foreachElement,
+                this.importedUnits
+            )
         );
 
         // If evaluation doesn't result in an array, no rebuild needed
@@ -7740,16 +7802,16 @@
         // Call ready() method if it exists after all bindings have been applied
         // Only call once per component instance
         if (
-            !this._readyCalled &&
+            !this.readyCalled &&
             this.abstraction.ready &&
             typeof this.abstraction.ready === 'function'
         ) {
-            this._readyCalled = true;
+            this.readyCalled = true;
 
             try {
                 this.abstraction.ready.call(this.abstraction);
             } catch (error) {
-                console.error('Error in ready() method:', error);
+                console.warn('Error in ready() method:', error);
             }
         }
     };
@@ -8977,7 +9039,7 @@
                 try {
                     context.abstraction.init.call(context.abstraction);
                 } catch (error) {
-                    console.error('Error in init() method:', error);
+                    console.warn('Error in init() method:', error);
                 }
             }
 
@@ -9567,7 +9629,17 @@
         _registeredLibs.push(library);
 
         // Create the plugin and store
-        _plugins.push(library.createPacPlugin(wakaPAC));
+        const plugin = library.createPacPlugin(wakaPAC);
+        _plugins.push(plugin);
+
+        // If the plugin exposes named functions, register it as a unit
+        if (plugin.name && Utils.isPlainObject(plugin.functions)) {
+            if (_units[plugin.name]) {
+                console.warn(`WakaPAC: unit "${plugin.name}" is already registered`);
+            } else {
+                _units[plugin.name] = plugin.functions;
+            }
+        }
     };
 
     // ========================================================================
