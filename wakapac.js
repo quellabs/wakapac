@@ -4142,8 +4142,6 @@
          * @returns {*} Evaluated result
          */
         evaluate(node, context, scope = null) {
-            const self = this;
-
             if (!node) {
                 return undefined;
             }
