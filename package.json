@@ -12,7 +12,8 @@
     "minify:wakatypeutils": "terser units/waka-unit-typeutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-typeutils.min.js --ecma 2020",
     "minify:wakaphputils": "terser units/waka-unit-phputils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-phputils.min.js --ecma 2020",
     "minify:wakanumberutils": "terser units/waka-unit-numberutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-numberutils.min.js --ecma 2020",
-    "minify": "npm run minify:wakapac && npm run minify:wakasync && npm run minify:wakastore && npm run minify:wakamotion && npm run minify:wakaroute && npm run minify:wakaform && npm run minify:wakamath && npm run minify:wakastringutils && npm run minify:wakadateutils && npm run minify:wakatypeutils  && npm run minify:wakaphputils  && npm run minify:wakanumberutils"
+    "minify:wakacollectionutils": "terser units/waka-unit-collectionutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-collectionutils.min.js --ecma 2020",
+    "minify": "npm run minify:wakapac && npm run minify:wakasync && npm run minify:wakastore && npm run minify:wakamotion && npm run minify:wakaroute && npm run minify:wakaform && npm run minify:wakamath && npm run minify:wakastringutils && npm run minify:wakadateutils && npm run minify:wakatypeutils  && npm run minify:wakaphputils  && npm run minify:wakanumberutils && npm run minify:wakacollectionutils"
   },
   "dependencies": {},
   "devDependencies": {
