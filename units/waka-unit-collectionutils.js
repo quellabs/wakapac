@@ -352,6 +352,20 @@
 
                         return result;
                     }
+                },
+
+                /**
+                 * Add unit to abstraction if instructed
+                 * @param abstraction
+                 * @param pacId
+                 * @param config
+                 */
+                onComponentCreated(abstraction, pacId, config) {
+                    const key = config.collectionUtils?.property;
+
+                    if (key && key in abstraction) {
+                        abstraction[key] = this.functions;
+                    }
                 }
             };
         }

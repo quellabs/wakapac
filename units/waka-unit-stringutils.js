@@ -211,6 +211,20 @@
                      * @returns {string}
                      */
                     reverseString: (s) => s.split('').reverse().join('')
+                },
+
+                /**
+                 * Add unit to abstraction if instructed
+                 * @param abstraction
+                 * @param pacId
+                 * @param config
+                 */
+                onComponentCreated(abstraction, pacId, config) {
+                    const key = config.stringUtils?.property;
+
+                    if (key && key in abstraction) {
+                        abstraction[key] = this.functions;
+                    }
                 }
             };
         }

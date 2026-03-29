@@ -182,6 +182,20 @@
 
                         return String(s ?? '').replace(reG, String(replacement ?? ''));
                     }
+                },
+
+                /**
+                 * Add unit to abstraction if instructed
+                 * @param abstraction
+                 * @param pacId
+                 * @param config
+                 */
+                onComponentCreated(abstraction, pacId, config) {
+                    const key = config.regexUtils?.property;
+
+                    if (key && key in abstraction) {
+                        abstraction[key] = this.functions;
+                    }
                 }
             };
         }
