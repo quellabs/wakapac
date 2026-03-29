@@ -123,7 +123,29 @@
                      * Note: re-evaluates on every render cycle — use sparingly in binds.
                      * @returns {number}
                      */
-                    random: () => Math.random()
+                    random: () => Math.random(),
+
+                    /**
+                     * Rounds a number to a given number of decimal places.
+                     * Equivalent to Delphi's Math.RoundTo().
+                     * @param {number} n
+                     * @param {number} decimals - Number of decimal places (0 or more)
+                     * @returns {number}
+                     */
+                    roundTo: (n, decimals) => {
+                        const factor = Math.pow(10, decimals);
+                        return Math.round(n * factor) / factor;
+                    },
+
+                    /**
+                     * Returns true if n is within the inclusive range [lo, hi].
+                     * Equivalent to Delphi's Math.InRange().
+                     * @param {number} n
+                     * @param {number} lo - Lower bound (inclusive)
+                     * @param {number} hi - Upper bound (inclusive)
+                     * @returns {boolean}
+                     */
+                    inRange: (n, lo, hi) => n >= lo && n <= hi
                 }
             };
         }

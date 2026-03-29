@@ -151,7 +151,66 @@
                      * @param {string} s
                      * @returns {string}
                      */
-                    slug: (s) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+                    slug: (s) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
+
+                    /**
+                     * Returns the number of non-overlapping occurrences of substr in s.
+                     * Case-sensitive. Returns 0 if substr is empty.
+                     * Equivalent to Delphi's StrUtils.CountStr().
+                     * @param {string} substr
+                     * @param {string} s
+                     * @returns {number}
+                     */
+                    countStr: (substr, s) => {
+                        if (!substr) {
+                            return 0;
+                        }
+
+                        let count = 0;
+                        let pos = 0;
+
+                        while ((pos = s.indexOf(substr, pos)) !== -1) {
+                            count++;
+                            pos += substr.length;
+                        }
+
+                        return count;
+                    },
+
+                    /**
+                     * Returns true if s contains substr, ignoring case.
+                     * Equivalent to Delphi's StrUtils.ContainsText().
+                     * @param {string} s
+                     * @param {string} substr
+                     * @returns {boolean}
+                     */
+                    containsText: (s, substr) => s.toLowerCase().includes(substr.toLowerCase()),
+
+                    /**
+                     * Returns true if s starts with substr, ignoring case.
+                     * Equivalent to Delphi's StrUtils.StartsText().
+                     * @param {string} s
+                     * @param {string} substr
+                     * @returns {boolean}
+                     */
+                    startsText: (s, substr) => s.toLowerCase().startsWith(substr.toLowerCase()),
+
+                    /**
+                     * Returns true if s ends with substr, ignoring case.
+                     * Equivalent to Delphi's StrUtils.EndsText().
+                     * @param {string} s
+                     * @param {string} substr
+                     * @returns {boolean}
+                     */
+                    endsText: (s, substr) => s.toLowerCase().endsWith(substr.toLowerCase()),
+
+                    /**
+                     * Reverses the characters in a string.
+                     * Equivalent to Delphi's StrUtils.ReverseString().
+                     * @param {string} s
+                     * @returns {string}
+                     */
+                    reverseString: (s) => s.split('').reverse().join('')
                 }
             };
         }

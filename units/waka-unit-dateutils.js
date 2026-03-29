@@ -15,11 +15,11 @@
  * ║  Backed entirely by the native Intl API — no external libraries required.            ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
- * ║    wakaPAC.use(dateUtils);                          // browser default locale        ║
- * ║    wakaPAC.use(dateUtils, { locale: 'nl-NL' });     // explicit locale               ║
+ * ║    wakaPAC.use(DateUtils);                          // browser default locale        ║
+ * ║    wakaPAC.use(DateUtils, { locale: 'nl-NL' });     // explicit locale               ║
  * ║                                                                                      ║
- * ║  Namespaced:  {{ dateUtils.formatShort(date) }}                                      ║
- * ║  Flat:        {{ formatShort(date) }}  (requires data-pac-uses="dateUtils")          ║
+ * ║  Namespaced:  {{ DateUtils.formatShort(date) }}                                      ║
+ * ║  Flat:        {{ formatShort(date) }}  (requires data-pac-uses="DateUtils")          ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -535,6 +535,63 @@
                     quarter: (date) => {
                         const d = toDate(date);
                         return d ? Math.ceil((d.getMonth() + 1) / 3) : null;
+                    },
+
+                    /**
+                     * Returns the number of whole years between two dates.
+                     * Positive if b is after a, negative if before.
+                     * Equivalent to Delphi's DateUtils.YearsBetween().
+                     * @param {Date|number|string} a
+                     * @param {Date|number|string} b
+                     * @returns {number|null}
+                     */
+                    yearsBetween: (a, b) => {
+                        const da = toDate(a);
+                        const db = toDate(b);
+
+                        if (!da || !db) {
+                            return null;
+                        }
+
+                        return Math.trunc((db.getTime() - da.getTime()) / 31557600000);
+                    },
+
+                    /**
+                     * Returns the number of whole months between two dates.
+                     * Positive if b is after a, negative if before.
+                     * Equivalent to Delphi's DateUtils.MonthsBetween().
+                     * @param {Date|number|string} a
+                     * @param {Date|number|string} b
+                     * @returns {number|null}
+                     */
+                    monthsBetween: (a, b) => {
+                        const da = toDate(a);
+                        const db = toDate(b);
+
+                        if (!da || !db) {
+                            return null;
+                        }
+
+                        return Math.trunc((db.getTime() - da.getTime()) / 2629800000);
+                    },
+
+                    /**
+                     * Returns the number of whole weeks between two dates.
+                     * Positive if b is after a, negative if before.
+                     * Equivalent to Delphi's DateUtils.WeeksBetween().
+                     * @param {Date|number|string} a
+                     * @param {Date|number|string} b
+                     * @returns {number|null}
+                     */
+                    weeksBetween: (a, b) => {
+                        const da = toDate(a);
+                        const db = toDate(b);
+
+                        if (!da || !db) {
+                            return null;
+                        }
+
+                        return Math.trunc((db.getTime() - da.getTime()) / 604800000);
                     }
                 }
             };
