@@ -4291,6 +4291,16 @@
                         return importedUnits[node.name](...args);
                     }
 
+                    // Fall back to the component's own data context
+                    const fn = this.getProperty(node.name, context, scope);
+
+                    if (typeof fn === 'function') {
+                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        return fn.call(context, ...args);
+                    }
+
+                    // Not found
+                    console.warn(`WakaPAC: unknown function call "${node.name}()" in template`);
                     return undefined;
                 }
 
