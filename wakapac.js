@@ -10336,7 +10336,7 @@
      * @param {number}        [offsetY=0] - Y offset passed to playMetaFile
      * @returns {*|null} The matching hitArea's data payload, or null
      */
-    wakaPAC.metaFileHitTest = function(dl, x, y, offsetX = 0, offsetY = 0) {
+    wakaPAC.metaFileHitTest = function (dl, x, y, offsetX = 0, offsetY = 0) {
         if (!Array.isArray(dl)) {
             return null;
         }
@@ -10354,56 +10354,79 @@
 
             const shape = op.shape ?? 'rect';
 
-            if (shape === 'rect') {
-                if (lx >= op.x && lx <= op.x + op.w &&
-                    ly >= op.y && ly <= op.y + op.h) {
-                    return op.data ?? null;
-                }
-            } else if (shape === 'sector') {
-                // Distance from centre
-                const dx   = lx - op.cx;
-                const dy   = ly - op.cy;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+            switch (shape) {
+                case 'rect':
+                    if (lx >= op.x && lx <= op.x + op.w &&
+                        ly >= op.y && ly <= op.y + op.h) {
+                        return op.data ?? null;
+                    }
+                    break;
 
-                if (dist > op.r) {
-                    continue;
-                }
+                case 'sector': {
+                    // Distance from centre
+                    const dx = lx - op.cx;
+                    const dy = ly - op.cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
 
-                // Inner radius for donut charts — 0 means full pie
-                if (op.innerR && dist < op.innerR) {
-                    continue;
-                }
+                    if (dist > op.r) {
+                        break;
+                    }
 
-                // Angle from center — atan2 returns [-π, π], normalise to [0, 2π]
-                let angle = Math.atan2(dy, dx);
+                    // Inner radius for donut charts — 0 means full pie
+                    if (op.innerR && dist < op.innerR) {
+                        break;
+                    }
 
-                if (angle < 0) {
-                    angle += Math.PI * 2;
-                }
+                    // Angle from centre — atan2 returns [-π, π], normalise to [0, 2π]
+                    let angle = Math.atan2(dy, dx);
 
-                // Normalise sector angles to [0, 2π] for consistent comparison
-                let start = op.startAngle % (Math.PI * 2);
-                let end = op.endAngle % (Math.PI * 2);
+                    if (angle < 0) {
+                        angle += Math.PI * 2;
+                    }
 
-                if (start < 0) {
-                    start += Math.PI * 2;
-                }
+                    // Normalise sector angles to [0, 2π] for consistent comparison
+                    let start = op.startAngle % (Math.PI * 2);
+                    let end = op.endAngle % (Math.PI * 2);
 
-                if (end < 0) {
-                    end += Math.PI * 2;
-                }
+                    if (start < 0) {
+                        start += Math.PI * 2;
+                    }
 
-                const inSector = start <= end
-                    ? angle >= start && angle <= end
-                    : angle >= start || angle <= end; // wraps past 2π
+                    if (end < 0) {
+                        end += Math.PI * 2;
+                    }
 
-                if (inSector) {
-                    return op.data ?? null;
+                    const inSector = start <= end
+                        ? angle >= start && angle <= end
+                        : angle >= start || angle <= end; // wraps past 2π
+
+                    if (inSector) {
+                        return op.data ?? null;
+                    }
+
+                    break;
                 }
             }
         }
 
         return null;
+    };
+
+    /**
+     * Returns true if the point falls within any hitArea entry in the display list.
+     * Equivalent to ptInElement() but for metafile hit areas.
+     *
+     * Pass the same offsetX/offsetY that were passed to playMetaFile.
+     *
+     * @param {Array<Object>} dl          - Display list to test against
+     * @param {number}        x           - X coordinate to test (container coordinates)
+     * @param {number}        y           - Y coordinate to test (container coordinates)
+     * @param {number}        [offsetX=0] - X offset passed to playMetaFile
+     * @param {number}        [offsetY=0] - Y offset passed to playMetaFile
+     * @returns {boolean}
+     */
+    wakaPAC.ptInMetaFile = function(dl, x, y, offsetX = 0, offsetY = 0) {
+        return wakaPAC.metaFileHitTest(dl, x, y, offsetX, offsetY) !== null;
     };
 
     // Registry file
