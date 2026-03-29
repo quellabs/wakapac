@@ -10325,18 +10325,25 @@
      *   rect   — { x, y, w, h } axis-aligned rectangle
      *   sector — { cx, cy, r, startAngle, endAngle } pie/donut sector
      *
-     * Coordinates must be in the same space as the display list (i.e. subtract
-     * the offsetX/offsetY passed to playMetaFile before calling this function).
+     * Pass the same offsetX/offsetY that were passed to playMetaFile — the function
+     * subtracts them from the test point internally so the caller works in container
+     * coordinates throughout.
      *
      * @param {Array<Object>} dl - Display list to test against
-     * @param {number} x - X coordinate to test (display list space)
-     * @param {number} y - Y coordinate to test (display list space)
+     * @param {number}        x        - X coordinate to test (container coordinates)
+     * @param {number}        y        - Y coordinate to test (container coordinates)
+     * @param {number}        [offsetX=0] - X offset passed to playMetaFile
+     * @param {number}        [offsetY=0] - Y offset passed to playMetaFile
      * @returns {*|null} The matching hitArea's data payload, or null
      */
-    wakaPAC.metaFileHitTest = function (dl, x, y) {
+    wakaPAC.metaFileHitTest = function(dl, x, y, offsetX = 0, offsetY = 0) {
         if (!Array.isArray(dl)) {
             return null;
         }
+
+        // Translate the test point into display list space
+        const lx = x - offsetX;
+        const ly = y - offsetY;
 
         for (let i = 0, len = dl.length; i < len; i++) {
             const op = dl[i];
@@ -10348,14 +10355,14 @@
             const shape = op.shape ?? 'rect';
 
             if (shape === 'rect') {
-                if (x >= op.x && x <= op.x + op.w &&
-                    y >= op.y && y <= op.y + op.h) {
+                if (lx >= op.x && lx <= op.x + op.w &&
+                    ly >= op.y && ly <= op.y + op.h) {
                     return op.data ?? null;
                 }
             } else if (shape === 'sector') {
                 // Distance from centre
-                const dx = x - op.cx;
-                const dy = y - op.cy;
+                const dx   = lx - op.cx;
+                const dy   = ly - op.cy;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
                 if (dist > op.r) {
@@ -10367,7 +10374,7 @@
                     continue;
                 }
 
-                // Angle from centre — atan2 returns [-π, π], normalise to [0, 2π]
+                // Angle from center — atan2 returns [-π, π], normalise to [0, 2π]
                 let angle = Math.atan2(dy, dx);
 
                 if (angle < 0) {
