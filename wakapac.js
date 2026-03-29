@@ -500,6 +500,48 @@
         right: 'ArrowRight'
     };
 
+
+    // ========================================================================
+    // METAFILE — Display list recording and playback
+    // ========================================================================
+
+    /**
+     * Maps metafile op names to their CanvasRenderingContext2D property names.
+     * Used by playMetaFile for direct property assignment: ctx[prop] = op.value.
+     * @type {Object<string, string>}
+     */
+    const _metaFileProps = {
+        setFillStyle:       'fillStyle',
+        setStrokeStyle:     'strokeStyle',
+        setLineWidth:       'lineWidth',
+        setLineCap:         'lineCap',
+        setLineJoin:        'lineJoin',
+        setLineDashOffset:  'lineDashOffset',
+        setMiterLimit:      'miterLimit',
+        setGlobalAlpha:     'globalAlpha',
+        setGlobalComposite: 'globalCompositeOperation',
+        setFont:            'font',
+        setTextAlign:       'textAlign',
+        setTextBaseline:    'textBaseline',
+        setTextRendering:   'textRendering',
+        setLetterSpacing:   'letterSpacing',
+        setWordSpacing:     'wordSpacing'
+    };
+
+    /**
+     * Maps metafile op names to their CanvasRenderingContext2D method names.
+     * Used by playMetaFile for no-argument method calls: ctx.method().
+     * @type {Object<string, string>}
+     */
+    const _metaFileMethods = {
+        save:           'save',
+        restore:        'restore',
+        beginPath:      'beginPath',
+        closePath:      'closePath',
+        stroke:         'stroke',
+        resetTransform: 'resetTransform'
+    };
+
     // =============================================================================
     // UTILITY FUNCTIONS
     // =============================================================================
@@ -10103,9 +10145,259 @@
         };
     };
 
-    // ========================================================================
-    // EXPORTS
-    // ========================================================================
+
+    /**
+     * Executes a display list (metafile) onto a canvas context.
+     * Equivalent to Win32's PlayEnhMetaFile() — plays back a recorded sequence
+     * of drawing operations produced by ChartUtils or any other display list producer.
+     *
+     * The offset is applied via ctx.translate so all coordinates in the display
+     * list are naturally relative to (0, 0). State is saved and restored around
+     * the entire playback so the caller's context is unaffected.
+     *
+     * Non-drawing instructions (op: 'hitArea') are silently skipped.
+     *
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {Array<Object>} dl - Display list returned by a chart or drawing function
+     * @param {number} [offsetX=0] - X offset to apply to the entire display list
+     * @param {number} [offsetY=0] - Y offset to apply to the entire display list
+     */
+    wakaPAC.playMetaFile = function(ctx, dl, offsetX = 0, offsetY = 0) {
+        if (!ctx || !Array.isArray(dl) || dl.length === 0) {
+            return;
+        }
+
+        ctx.save();
+
+        if (offsetX !== 0 || offsetY !== 0) {
+            ctx.translate(offsetX, offsetY);
+        }
+
+        for (let i = 0, len = dl.length; i < len; i++) {
+            const op = dl[i];
+
+            // Direct property assignments: op.value → ctx[property]
+            if (op.op in _metaFileProps) {
+                ctx[_metaFileProps[op.op]] = op.value;
+                continue;
+            }
+
+            // Direct no-argument method calls: ctx.method()
+            if (op.op in _metaFileMethods) {
+                ctx[_metaFileMethods[op.op]]();
+                continue;
+            }
+
+            // Ops requiring custom argument mapping
+            switch (op.op) {
+                case 'moveTo':
+                    ctx.moveTo(op.x, op.y);
+                    break;
+
+                case 'lineTo':
+                    ctx.lineTo(op.x, op.y);
+                    break;
+
+                case 'arc':
+                    ctx.arc(op.cx, op.cy, op.r, op.startAngle, op.endAngle, op.ccw ?? false);
+                    break;
+
+                case 'arcTo':
+                    ctx.arcTo(op.x1, op.y1, op.x2, op.y2, op.r);
+                    break;
+
+                case 'ellipse':
+                    ctx.ellipse(op.cx, op.cy, op.rx, op.ry, op.rotation, op.startAngle, op.endAngle, op.ccw ?? false);
+                    break;
+
+                case 'rect':
+                    ctx.rect(op.x, op.y, op.w, op.h);
+                    break;
+
+                case 'roundRect':
+                    ctx.roundRect(op.x, op.y, op.w, op.h, op.r);
+                    break;
+
+                case 'bezierCurveTo':
+                    ctx.bezierCurveTo(op.cp1x, op.cp1y, op.cp2x, op.cp2y, op.x, op.y);
+                    break;
+
+                case 'quadraticCurveTo':
+                    ctx.quadraticCurveTo(op.cpx, op.cpy, op.x, op.y);
+                    break;
+
+                case 'fill':
+                    ctx.fill(op.rule ?? 'nonzero');
+                    break;
+
+                case 'clip':
+                    ctx.clip(op.rule ?? 'nonzero');
+                    break;
+
+                case 'fillRect':
+                    ctx.fillRect(op.x, op.y, op.w, op.h);
+                    break;
+
+                case 'strokeRect':
+                    ctx.strokeRect(op.x, op.y, op.w, op.h);
+                    break;
+
+                case 'clearRect':
+                    ctx.clearRect(op.x, op.y, op.w, op.h);
+                    break;
+
+                case 'fillText':
+                    ctx.fillText(op.text, op.x, op.y, op.maxWidth);
+                    break;
+
+                case 'strokeText':
+                    ctx.strokeText(op.text, op.x, op.y, op.maxWidth);
+                    break;
+
+                case 'drawImage':
+                    ctx.drawImage(op.image, op.dx, op.dy, op.dw, op.dh);
+                    break;
+
+                case 'translate':
+                    ctx.translate(op.x, op.y);
+                    break;
+
+                case 'rotate':
+                    ctx.rotate(op.angle);
+                    break;
+
+                case 'scale':
+                    ctx.scale(op.x, op.y);
+                    break;
+
+                case 'transform':
+                    ctx.transform(op.a, op.b, op.c, op.d, op.e, op.f);
+                    break;
+
+                case 'setTransform':
+                    ctx.setTransform(op.a, op.b, op.c, op.d, op.e, op.f);
+                    break;
+
+                case 'setLineDash':
+                    ctx.setLineDash(op.value);
+                    break;
+
+                case 'setShadow':
+                    ctx.shadowColor = op.color;
+                    ctx.shadowBlur = op.blur;
+                    ctx.shadowOffsetX = op.offsetX ?? 0;
+                    ctx.shadowOffsetY = op.offsetY ?? 0;
+                    break;
+
+                case 'clearShadow':
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
+                    ctx.shadowOffsetX = 0;
+                    ctx.shadowOffsetY = 0;
+                    break;
+
+                case 'setImageSmoothing':
+                    ctx.imageSmoothingEnabled = op.enabled;
+
+                    if (op.quality) {
+                        ctx.imageSmoothingQuality = op.quality;
+                    }
+
+                    break;
+
+                case 'hitArea':
+                    break; // Non-drawing — skip
+
+                default:
+                    console.warn(`wakaPAC.playMetaFile: unknown op "${op.op}"`);
+                    break;
+            }
+        }
+
+        ctx.restore();
+    };
+
+    /**
+     * Hit-tests a point against the hitArea entries in a display list.
+     * Returns the data payload of the first matching hit area, or null if none matched.
+     *
+     * Supported hitArea shapes:
+     *   rect   — { x, y, w, h } axis-aligned rectangle
+     *   sector — { cx, cy, r, startAngle, endAngle } pie/donut sector
+     *
+     * Coordinates must be in the same space as the display list (i.e. subtract
+     * the offsetX/offsetY passed to playMetaFile before calling this function).
+     *
+     * @param {Array<Object>} dl - Display list to test against
+     * @param {number} x - X coordinate to test (display list space)
+     * @param {number} y - Y coordinate to test (display list space)
+     * @returns {*|null} The matching hitArea's data payload, or null
+     */
+    wakaPAC.metaFileHitTest = function (dl, x, y) {
+        if (!Array.isArray(dl)) {
+            return null;
+        }
+
+        for (let i = 0, len = dl.length; i < len; i++) {
+            const op = dl[i];
+
+            if (op.op !== 'hitArea') {
+                continue;
+            }
+
+            const shape = op.shape ?? 'rect';
+
+            if (shape === 'rect') {
+                if (x >= op.x && x <= op.x + op.w &&
+                    y >= op.y && y <= op.y + op.h) {
+                    return op.data ?? null;
+                }
+            } else if (shape === 'sector') {
+                // Distance from centre
+                const dx = x - op.cx;
+                const dy = y - op.cy;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > op.r) {
+                    continue;
+                }
+
+                // Inner radius for donut charts — 0 means full pie
+                if (op.innerR && dist < op.innerR) {
+                    continue;
+                }
+
+                // Angle from centre — atan2 returns [-π, π], normalise to [0, 2π]
+                let angle = Math.atan2(dy, dx);
+
+                if (angle < 0) {
+                    angle += Math.PI * 2;
+                }
+
+                // Normalise sector angles to [0, 2π] for consistent comparison
+                let start = op.startAngle % (Math.PI * 2);
+                let end = op.endAngle % (Math.PI * 2);
+
+                if (start < 0) {
+                    start += Math.PI * 2;
+                }
+
+                if (end < 0) {
+                    end += Math.PI * 2;
+                }
+
+                const inSector = start <= end
+                    ? angle >= start && angle <= end
+                    : angle >= start || angle <= end; // wraps past 2π
+
+                if (inSector) {
+                    return op.data ?? null;
+                }
+            }
+        }
+
+        return null;
+    };
 
     // Registry file
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
