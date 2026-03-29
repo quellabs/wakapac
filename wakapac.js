@@ -9638,7 +9638,7 @@
         _registeredLibs.push(library);
 
         // Create the plugin and store
-        const plugin = library.createPacPlugin();
+        const plugin = library.createPacPlugin(wakaPAC, options);
         _plugins.push(plugin);
 
         // If the plugin exposes named functions, register it as a unit
