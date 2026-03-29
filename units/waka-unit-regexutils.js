@@ -67,7 +67,7 @@
 
     window.RegexUtils = {
 
-        createPacPlugin(pac, options = {}) {
+        createPacPlugin() {
             return {
                 /** Unit namespace — accessible in binds as RegexUtils.fn() */
                 name: 'RegexUtils',

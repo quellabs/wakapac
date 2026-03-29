@@ -66,7 +66,7 @@
 
     window.CollectionUtils = {
 
-        createPacPlugin(pac, options = {}) {
+        createPacPlugin() {
             return {
                 /** Unit namespace — accessible in binds as CollectionUtils.fn() */
                 name: 'CollectionUtils',

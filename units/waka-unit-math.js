@@ -26,7 +26,7 @@
 
     window.WakaMath = {
 
-        createPacPlugin(pac) {
+        createPacPlugin() {
             return {
                 /** Unit namespace — accessible in binds as Math.fn() */
                 name: 'Math',

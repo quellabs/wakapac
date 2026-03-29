@@ -26,7 +26,7 @@
 
     window.TypeUtils = {
 
-        createPacPlugin(pac, options = {}) {
+        createPacPlugin() {
             return {
                 /** Unit namespace — accessible in binds as TypeUtils.fn() */
                 name: 'TypeUtils',

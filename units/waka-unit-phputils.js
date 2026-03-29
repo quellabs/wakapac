@@ -38,7 +38,7 @@
 
     window.PhpUtils = {
 
-        createPacPlugin(pac, options = {}) {
+        createPacPlugin() {
             return {
                 /** Unit namespace — accessible in binds as PhpUtils.fn() */
                 name: 'PhpUtils',

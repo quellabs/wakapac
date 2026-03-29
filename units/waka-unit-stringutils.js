@@ -26,7 +26,7 @@
 
     window.StringUtils = {
 
-        createPacPlugin(pac) {
+        createPacPlugin() {
             return {
                 /** Unit namespace — accessible in binds as StringUtils.fn() */
                 name: 'StringUtils',
