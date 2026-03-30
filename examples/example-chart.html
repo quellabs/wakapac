@@ -9,18 +9,31 @@
 <h1>WakaPAC ChartUtils — Pie Chart Demo</h1>
 <p>Click a slice to see hit testing in action.</p>
 
+<!-- Canvas component — handles painting and click events -->
 <canvas data-pac-id="pieDemo" width="500" height="400"></canvas>
 
-<p id="hitResult">Click a slice...</p>
+<!-- Result component — displays the hit result reactively via text interpolation -->
+<div data-pac-id="pieResult">
+    <p>{{ hitResult }}</p>
+</div>
 
 <script src="../wakapac.js"></script>
 <script src="../units/waka-unit-chartutils.js"></script>
 <script>
+    // Custom message constant — derived from MSG_USER to avoid collisions
+    // with built-in messages and other plugins.
+    // Sent by pieDemo to pieResult when a slice is clicked.
+    const MSG_CHART_HIT = wakaPAC.MSG_USER + 0x100;
+
+    // Register ChartUtils so it can be injected into components via config
     wakaPAC.use(ChartUtils);
 
+    // ── Canvas component ──────────────────────────────────────────────────────
+    // Owns the chart data, painting, and click handling.
+    // Communicates results to pieResult via postMessage.
     wakaPAC('pieDemo', {
-        _chart: null,
-        _lastDL: null,
+        _chart: null,    // Injected by ChartUtils via config.chartUtils.property
+        _lastDL: null,   // Last display list — retained for hit testing on click
 
         data: [
             { label: 'JavaScript', value: 38 },
@@ -30,32 +43,66 @@
             { label: 'Other',      value: 7  }
         ],
 
-        selected: null,
-
         init() {
+            // Schedule an initial paint — the canvas is blank until invalidated
             wakaPAC.invalidateRect(this.pacId);
         },
 
         msgProc(event) {
             switch (event.message) {
                 case wakaPAC.MSG_PAINT: {
+                    // Obtain the drawing context — automatically clipped to the
+                    // dirty region when called during a MSG_PAINT cycle
                     const ctx = wakaPAC.getDC(this.pacId);
-                    const dl  = this._chart.pieChart(ctx, this.data);
 
+                    // Build the display list — no drawing occurs here
+                    const dl = this._chart.pieChart(ctx, this.data);
+
+                    // Clear the canvas before repainting
                     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
+                    // Execute the display list — translates instructions to canvas calls
                     wakaPAC.playMetaFile(ctx, dl);
+
+                    // Release the context — restores clip state set by getDC
                     wakaPAC.releaseDC(ctx);
 
+                    // Retain the display list for hit testing in MSG_LCLICK
                     this._lastDL = dl;
                     break;
                 }
 
                 case wakaPAC.MSG_LCLICK: {
+                    // Extract click coordinates relative to the canvas container
                     const pos = wakaPAC.MAKEPOINTS(event.lParam);
+
+                    // Test the click against hitArea entries in the last display list.
+                    // Returns { index, label, value, percent } or null if no slice was hit.
                     const hit = wakaPAC.metaFileHitTest(this._lastDL, pos.x, pos.y);
 
-                    document.getElementById('hitResult').textContent = hit
+                    // Notify the result component — it owns the display, not us
+                    wakaPAC.postMessage('pieResult', MSG_CHART_HIT, 0, 0, { hit });
+                    break;
+                }
+            }
+        }
+    }, {
+        // Inject ChartUtils functions into this._chart
+        chartUtils: { property: '_chart' }
+    });
+
+    // ── Result component ──────────────────────────────────────────────────────
+    // Purely reactive — receives MSG_CHART_HIT and updates hitResult,
+    // which {{ hitResult }} reflects automatically in the DOM.
+    wakaPAC('pieResult', {
+        hitResult: 'Click a slice...',
+
+        msgProc(event) {
+            switch (event.message) {
+                case MSG_CHART_HIT: {
+                    const hit = event.detail.hit;
+
+                    this.hitResult = hit
                         ? `Clicked: ${hit.label} — ${hit.value} (${hit.percent}%)`
                         : 'Click a slice...';
 
@@ -63,8 +110,6 @@
                 }
             }
         }
-    }, {
-        chartUtils: { property: '_chart' }
     });
 </script>
 
