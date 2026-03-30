@@ -7252,7 +7252,7 @@
                 0,
                 {
                     arrayName: mappingData.foreachExpr,
-                    marker:    foreachElement.getAttribute('data-pac-foreach-marker') ?? null
+                    marker:    foreachElement.getAttribute('data-pac-marker') ?? null
                 }
             );
 
