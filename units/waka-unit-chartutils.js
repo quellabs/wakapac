@@ -441,6 +441,198 @@
                         }
 
                         return dl;
+                    },
+
+                    /**
+                     * Produces a display list for a line chart.
+                     *
+                     * Each data point emits a hitArea entry with:
+                     *   { index, label, value, percent }
+                     *
+                     * Line style is controlled by opts.smooth:
+                     *   false (default) — straight lines between points
+                     *   true            — smooth cubic bezier curve
+                     *
+                     * @param {CanvasRenderingContext2D} ctx - Context used only to measure text; no drawing occurs
+                     * @param {Array<number|{label:string,value:number}>} data
+                     * @param {Object} [opts] - Per-call overrides for any global default
+                     * @returns {Array<Object>} Display list
+                     */
+                    lineChart: (ctx, data, opts = {}) => {
+                        const o      = mergeOpts(defaults, opts);
+                        const points = toPoints(data);
+                        const dl     = [];
+
+                        if (points.length === 0) {
+                            return dl;
+                        }
+
+                        const pad    = o.padding;
+                        const w      = ctx.canvas.width;
+                        const h      = ctx.canvas.height;
+                        const maxVal = Math.max(...points.map(p => p.value));
+                        const total  = points.reduce((s, p) => s + p.value, 0);
+
+                        if (maxVal === 0) {
+                            return dl;
+                        }
+
+                        // ── Axis and label metrics ─────────────────────────────────────
+                        ctx.save();
+                        ctx.font = o.font;
+
+                        const tickCount = o.tickCount ?? 5;
+                        const tickStep  = maxVal / tickCount;
+                        let   yLabelW   = 0;
+
+                        for (let t = 0; t <= tickCount; t++) {
+                            const label = String(Math.round(tickStep * t));
+                            yLabelW = Math.max(yLabelW, ctx.measureText(label).width);
+                        }
+
+                        ctx.restore();
+
+                        // ── Chart area ────────────────────────────────────────────────
+                        const xLabelH = 20;
+                        const axisGap = 6;
+
+                        const chartX = pad + yLabelW + axisGap;
+                        const chartY = pad;
+                        const chartW = w - chartX - pad;
+                        const chartH = h - chartY - xLabelH - axisGap - pad;
+
+                        if (chartW <= 0 || chartH <= 0) {
+                            return dl;
+                        }
+
+                        const axisColor  = o.axisColor  ?? '#cccccc';
+                        const gridColor  = o.gridColor  ?? '#eeeeee';
+                        const lineColor  = o.lineColor  ?? o.colors[0];
+                        const lineWidth  = o.lineWidth  ?? 2;
+                        const pointR     = o.pointRadius ?? 4;
+                        const smooth     = o.smooth     ?? false;
+
+                        // ── Grid lines and Y-axis labels ──────────────────────────────
+                        dl.push({ op: 'setFont',         value: o.font });
+                        dl.push({ op: 'setTextAlign',    value: 'right' });
+                        dl.push({ op: 'setTextBaseline', value: 'middle' });
+
+                        for (let t = 0; t <= tickCount; t++) {
+                            const tickVal = tickStep * t;
+                            const tickY   = chartY + chartH - (tickVal / maxVal) * chartH;
+                            const label   = String(Math.round(tickVal));
+
+                            dl.push({ op: 'setFillStyle', value: o.legendColor ?? '#333333' });
+                            dl.push({ op: 'fillText',     text: label, x: chartX - axisGap, y: tickY });
+
+                            if (t > 0) {
+                                dl.push({ op: 'setStrokeStyle', value: gridColor });
+                                dl.push({ op: 'setLineWidth',   value: 1 });
+                                dl.push({ op: 'beginPath' });
+                                dl.push({ op: 'moveTo', x: chartX,          y: tickY });
+                                dl.push({ op: 'lineTo', x: chartX + chartW, y: tickY });
+                                dl.push({ op: 'stroke' });
+                            }
+                        }
+
+                        // ── Baseline ──────────────────────────────────────────────────
+                        const baseY = chartY + chartH;
+
+                        dl.push({ op: 'setStrokeStyle', value: axisColor });
+                        dl.push({ op: 'setLineWidth',   value: 1 });
+                        dl.push({ op: 'beginPath' });
+                        dl.push({ op: 'moveTo', x: chartX,          y: baseY });
+                        dl.push({ op: 'lineTo', x: chartX + chartW, y: baseY });
+                        dl.push({ op: 'stroke' });
+
+                        // ── Precompute point coordinates ──────────────────────────────
+                        const slotW = chartW / (points.length - 1 || 1);
+                        const coords = points.map((p, i) => ({
+                            x: chartX + i * slotW,
+                            y: baseY - (p.value / maxVal) * chartH
+                        }));
+
+                        // ── Line ──────────────────────────────────────────────────────
+                        dl.push({ op: 'setStrokeStyle', value: lineColor });
+                        dl.push({ op: 'setLineWidth',   value: lineWidth });
+                        dl.push({ op: 'setLineCap',     value: 'round' });
+                        dl.push({ op: 'setLineJoin',    value: 'round' });
+                        dl.push({ op: 'beginPath' });
+                        dl.push({ op: 'moveTo', x: coords[0].x, y: coords[0].y });
+
+                        if (smooth && coords.length > 1) {
+                            // Cubic bezier smooth curve — control points at 1/3 of the
+                            // horizontal distance between adjacent points
+                            for (let i = 1; i < coords.length; i++) {
+                                const prev = coords[i - 1];
+                                const curr = coords[i];
+                                const cpX  = (curr.x - prev.x) / 3;
+
+                                dl.push({
+                                    op:   'bezierCurveTo',
+                                    cp1x: prev.x + cpX,
+                                    cp1y: prev.y,
+                                    cp2x: curr.x - cpX,
+                                    cp2y: curr.y,
+                                    x:    curr.x,
+                                    y:    curr.y
+                                });
+                            }
+                        } else {
+                            for (let i = 1; i < coords.length; i++) {
+                                dl.push({ op: 'lineTo', x: coords[i].x, y: coords[i].y });
+                            }
+                        }
+
+                        dl.push({ op: 'stroke' });
+
+                        // ── Data point markers and hit areas ──────────────────────────
+                        for (let i = 0; i < points.length; i++) {
+                            const point = points[i];
+                            const cx    = coords[i].x;
+                            const cy    = coords[i].y;
+
+                            // Dot
+                            dl.push({ op: 'setFillStyle', value: lineColor });
+                            dl.push({ op: 'beginPath' });
+                            dl.push({ op: 'arc', cx, cy, r: pointR, startAngle: 0, endAngle: Math.PI * 2 });
+                            dl.push({ op: 'fill' });
+
+                            // White centre for a ring effect
+                            dl.push({ op: 'setFillStyle', value: o.background ?? '#ffffff' });
+                            dl.push({ op: 'beginPath' });
+                            dl.push({ op: 'arc', cx, cy, r: pointR / 2, startAngle: 0, endAngle: Math.PI * 2 });
+                            dl.push({ op: 'fill' });
+
+                            // Hit area — slightly larger than the visible dot for easier clicking
+                            dl.push({
+                                op:    'hitArea',
+                                shape: 'sector',
+                                cx,
+                                cy,
+                                r:     pointR * 2,
+                                innerR: 0,
+                                startAngle: 0,
+                                endAngle:   Math.PI * 2,
+                                data: {
+                                    index:   i,
+                                    label:   point.label,
+                                    value:   point.value,
+                                    percent: Math.round((point.value / total) * 1000) / 10
+                                }
+                            });
+
+                            // X-axis label
+                            if (point.label) {
+                                dl.push({ op: 'setFillStyle',    value: o.legendColor ?? '#333333' });
+                                dl.push({ op: 'setFont',         value: o.font });
+                                dl.push({ op: 'setTextAlign',    value: 'center' });
+                                dl.push({ op: 'setTextBaseline', value: 'top' });
+                                dl.push({ op: 'fillText',        text: point.label, x: cx, y: baseY + axisGap });
+                            }
+                        }
+
+                        return dl;
                     }
                 },
 
