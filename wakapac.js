@@ -205,7 +205,7 @@
     const MSG_TIMER = 0x0113;
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
-    const MSG_FOREACH_REBUILT = 0x0300;
+    const MSG_FOREACH_REBUILT = 0x0400;
     const MSG_USER = 0x1000;
 
     /**
