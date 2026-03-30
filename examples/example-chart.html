@@ -25,14 +25,14 @@
     // Sent by pieDemo to pieResult when a slice is clicked.
     const MSG_CHART_HIT = wakaPAC.MSG_USER + 0x100;
 
-    // Register ChartUtils so it can be injected into components via config
-    wakaPAC.use(ChartUtils);
+    // Register WakaChart so it can be injected into components via config
+    wakaPAC.use(WakaChart);
 
     // ── Canvas component ──────────────────────────────────────────────────────
     // Owns the chart data, painting, and click handling.
     // Communicates results to pieResult via postMessage.
     wakaPAC('pieDemo', {
-        _chart: null,    // Injected by ChartUtils via config.chartUtils.property
+        _chart: null,    // Injected by WakaChart via config.wakaChart.property
         _lastDL: null,   // Last display list — retained for hit testing on click
 
         data: [
@@ -56,7 +56,7 @@
                     const ctx = wakaPAC.getDC(this.pacId);
 
                     // Build the display list — no drawing occurs here
-                    const dl = this._chart.sparkline(ctx, this.data);
+                    const dl = this._chart.pieChart(ctx, this.data);
 
                     // Clear the canvas before repainting
                     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -87,8 +87,8 @@
             }
         }
     }, {
-        // Inject ChartUtils functions into this._chart
-        chartUtils: {
+        // Inject WakaChart functions into this._chart
+        wakaChart: {
             property:       '_chart',
             legendPosition: 'right',
             font:           '13px sans-serif'
