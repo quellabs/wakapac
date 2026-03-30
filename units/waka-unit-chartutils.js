@@ -633,6 +633,98 @@
                         }
 
                         return dl;
+                    },
+
+                    /**
+                     * Produces a display list for a sparkline — a minimal inline line chart
+                     * with no axes, labels, or legend. Designed to convey the shape of data
+                     * at a glance. No hit areas are emitted.
+                     *
+                     * @param {CanvasRenderingContext2D} ctx - Context used only for canvas dimensions
+                     * @param {Array<number|{label:string,value:number}>} data
+                     * @param {Object} [opts] - Per-call overrides for any global default
+                     * @returns {Array<Object>} Display list
+                     */
+                    sparkline: (ctx, data, opts = {}) => {
+                        const o      = mergeOpts(defaults, opts);
+                        const points = toPoints(data);
+                        const dl     = [];
+
+                        if (points.length < 2) {
+                            return dl;
+                        }
+
+                        const maxVal = Math.max(...points.map(p => p.value));
+                        const minVal = Math.min(...points.map(p => p.value));
+                        const range  = maxVal - minVal || 1; // avoid division by zero for flat data
+
+                        const pad    = o.padding;
+                        const w      = ctx.canvas.width;
+                        const h      = ctx.canvas.height;
+                        const chartX = pad;
+                        const chartY = pad;
+                        const chartW = w - pad * 2;
+                        const chartH = h - pad * 2;
+
+                        if (chartW <= 0 || chartH <= 0) {
+                            return dl;
+                        }
+
+                        const lineColor = o.lineColor  ?? o.colors[0];
+                        const lineWidth = o.lineWidth  ?? 2;
+                        const smooth    = o.smooth     ?? false;
+                        const slotW     = chartW / (points.length - 1);
+
+                        // Precompute coordinates — Y is inverted so higher values sit higher
+                        const coords = points.map((p, i) => ({
+                            x: chartX + i * slotW,
+                            y: chartY + chartH - ((p.value - minVal) / range) * chartH
+                        }));
+
+                        // ── Line ──────────────────────────────────────────────────────
+                        dl.push({ op: 'setStrokeStyle', value: lineColor });
+                        dl.push({ op: 'setLineWidth',   value: lineWidth });
+                        dl.push({ op: 'setLineCap',     value: 'round' });
+                        dl.push({ op: 'setLineJoin',    value: 'round' });
+                        dl.push({ op: 'beginPath' });
+                        dl.push({ op: 'moveTo', x: coords[0].x, y: coords[0].y });
+
+                        if (smooth) {
+                            for (let i = 1; i < coords.length; i++) {
+                                const prev = coords[i - 1];
+                                const curr = coords[i];
+                                const cpX  = (curr.x - prev.x) / 3;
+
+                                dl.push({
+                                    op:   'bezierCurveTo',
+                                    cp1x: prev.x + cpX,
+                                    cp1y: prev.y,
+                                    cp2x: curr.x - cpX,
+                                    cp2y: curr.y,
+                                    x:    curr.x,
+                                    y:    curr.y
+                                });
+                            }
+                        } else {
+                            for (let i = 1; i < coords.length; i++) {
+                                dl.push({ op: 'lineTo', x: coords[i].x, y: coords[i].y });
+                            }
+                        }
+
+                        dl.push({ op: 'stroke' });
+
+                        // ── End point marker — highlights the last value ───────────────
+                        if (o.showEndPoint ?? true) {
+                            const last  = coords[coords.length - 1];
+                            const dotR  = o.pointRadius ?? 3;
+
+                            dl.push({ op: 'setFillStyle', value: lineColor });
+                            dl.push({ op: 'beginPath' });
+                            dl.push({ op: 'arc', cx: last.x, cy: last.y, r: dotR, startAngle: 0, endAngle: Math.PI * 2 });
+                            dl.push({ op: 'fill' });
+                        }
+
+                        return dl;
                     }
                 },
 
