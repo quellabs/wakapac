@@ -19,7 +19,7 @@
  * ║    wakaPAC.use(WakaChart, { colors: ['#4a9', '#e74'], font: '12px sans-serif' });   ║
  * ║                                                                                     ║
  * ║  In msgProc MSG_PAINT:                                                              ║
- * ║    const dl = this._chart.pieChart(data, opts);                                     ║
+ * ║    const dl = this._chart.pieChart(ctx, this.data, opts);                           ║
  * ║    wakaPAC.playMetaFile(ctx, dl);                                                   ║
  * ║                                                                                     ║
  * ║  In msgProc MSG_LCLICK:                                                             ║
@@ -718,12 +718,8 @@
 
             return {
                 onComponentCreated(abstraction, pacId, config) {
-                    const key        = config.wakaChart?.property;
+                    const key = config.wakaChart?.property ?? '_chart';
                     const wakaChart = config.wakaChart ?? {};
-
-                    if (!key || !(key in abstraction)) {
-                        return;
-                    }
 
                     // Extract per-component chart options from config.wakaChart,
                     // excluding the reserved 'property' key which is consumed here.
@@ -741,7 +737,7 @@
                     const wrapped = Object.create(null);
 
                     for (const name of Object.keys(charts)) {
-                        wrapped[name] = function(ctx, data, opts) {
+                        wrapped[name] = function (ctx, data, opts) {
                             return charts[name](ctx, data, Object.assign({}, componentOpts, opts));
                         };
                     }
