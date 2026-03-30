@@ -1,12 +1,12 @@
 /*
  * ╔══════════════════════════════════════════════════════════════════════════════════════╗
  * ║                                                                                      ║
- * ║   ██████╗██╗  ██╗ █████╗ ██████╗ ████████╗██╗   ██╗████████╗██╗██╗     ███████╗      ║
- * ║  ██╔════╝██║  ██║██╔══██╗██╔══██╗╚══██╔══╝██║   ██║╚══██╔══╝██║██║     ██╔════╝      ║
- * ║  ██║     ███████║███████║██████╔╝   ██║   ██║   ██║   ██║   ██║██║     ███████╗      ║
- * ║  ██║     ██╔══██║██╔══██║██╔══██╗   ██║   ██║   ██║   ██║   ██║██║     ╚════██║      ║
- * ║  ╚██████╗██║  ██║██║  ██║██║  ██║   ██║   ╚██████╔╝   ██║   ██║███████╗███████║      ║
- * ║   ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝      ║
+ * ║   ██████╗██╗  ██╗ █████╗ ██████╗ ████████╗██╗   ██╗████████╗██╗██╗     ███████╗     ║
+ * ║  ██╔════╝██║  ██║██╔══██╗██╔══██╗╚══██╔══╝██║   ██║╚══██╔══╝██║██║     ██╔════╝     ║
+ * ║  ██║     ███████║███████║██████╔╝   ██║   ██║   ██║   ██║   ██║██║     ███████╗     ║
+ * ║  ██║     ██╔══██║██╔══██║██╔══██╗   ██║   ██║   ██║   ██║   ██║██║     ╚════██║     ║
+ * ║  ╚██████╗██║  ██║██║  ██║██║  ██║   ██║   ╚██████╔╝   ██║   ██║███████╗███████║     ║
+ * ║   ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝     ║
  * ║                                                                                      ║
  * ║  WakaPAC Unit — ChartUtils                                                           ║
  * ║                                                                                      ║
@@ -24,7 +24,7 @@
  * ║                                                                                      ║
  * ║  In msgProc MSG_LCLICK:                                                              ║
  * ║    const pos  = wakaPAC.MAKEPOINTS(event.lParam);                                    ║
- * ║    const hit  = wakaPAC.metaFileHitTest(this._lastDL, pos.x, pos.y);                 ║
+ * ║    const hit  = wakaPAC.metaFileHitTest(this._lastDL, pos.x, pos.y);                ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -274,6 +274,7 @@
                                 const itemY = ly + i * legendItemH + swatchSize / 2;
 
                                 dl.push({op: 'setFillStyle', value: color});
+
                                 dl.push({
                                     op: 'fillRect',
                                     x: lx,
@@ -284,6 +285,158 @@
 
                                 dl.push({op: 'setFillStyle', value: o.legendColor});
                                 dl.push({op: 'fillText', text: label, x: lx + swatchSize + swatchGap, y: itemY});
+                            }
+                        }
+
+                        return dl;
+                    },
+
+                    /**
+                     * Produces a display list for a vertical bar chart.
+                     *
+                     * Each bar emits a hitArea entry with:
+                     *   { index, label, value }
+                     *
+                     * @param {CanvasRenderingContext2D} ctx - Context used only to measure text; no drawing occurs
+                     * @param {Array<number|{label:string,value:number}>} data
+                     * @param {Object} [opts] - Per-call overrides for any global default
+                     * @returns {Array<Object>} Display list
+                     */
+                    barChart: (ctx, data, opts = {}) => {
+                        const o = mergeOpts(defaults, opts);
+                        const points = toPoints(data);
+                        const dl = [];
+
+                        if (points.length === 0) {
+                            return dl;
+                        }
+
+                        const colors = o.colors;
+                        const pad = o.padding;
+                        const w = ctx.canvas.width;
+                        const h = ctx.canvas.height;
+                        const maxVal = Math.max(...points.map(p => p.value));
+                        const total = points.reduce((s, p) => s + p.value, 0);
+
+                        if (maxVal === 0) {
+                            return dl;
+                        }
+
+                        // ── Axis and label metrics ─────────────────────────────────────
+                        ctx.save();
+                        ctx.font = o.font;
+
+                        // Measure the widest Y-axis label to reserve left margin
+                        const tickCount = o.tickCount ?? 5;
+                        const tickStep = maxVal / tickCount;
+                        let yLabelW = 0;
+
+                        for (let t = 0; t <= tickCount; t++) {
+                            const label = String(Math.round(tickStep * t));
+                            yLabelW = Math.max(yLabelW, ctx.measureText(label).width);
+                        }
+
+                        ctx.restore();
+
+                        // ── Chart area ────────────────────────────────────────────────
+                        const xLabelH = 20;  // height reserved for X-axis labels
+                        const valueLH = 16;  // height reserved for value labels above bars
+                        const axisGap = 6;   // gap between axis labels and chart area
+
+                        const chartX = pad + yLabelW + axisGap;
+                        const chartY = pad + valueLH;
+                        const chartW = w - chartX - pad;
+                        const chartH = h - chartY - xLabelH - axisGap - pad;
+
+                        if (chartW <= 0 || chartH <= 0) {
+                            return dl;
+                        }
+
+                        const barGap = o.barGap ?? 0.25; // fraction of slot used as gap
+                        const slotW = chartW / points.length;
+                        const barW = slotW * (1 - barGap);
+                        const barOffX = slotW * barGap / 2;
+
+                        // ── Grid lines and Y-axis labels ──────────────────────────────
+                        const axisColor = o.axisColor ?? '#cccccc';
+                        const gridColor = o.gridColor ?? '#eeeeee';
+
+                        dl.push({op: 'setFont', value: o.font});
+                        dl.push({op: 'setTextAlign', value: 'right'});
+                        dl.push({op: 'setTextBaseline', value: 'middle'});
+
+                        for (let t = 0; t <= tickCount; t++) {
+                            const tickVal = tickStep * t;
+                            const tickY = chartY + chartH - (tickVal / maxVal) * chartH;
+                            const label = String(Math.round(tickVal));
+
+                            // Y-axis label
+                            dl.push({op: 'setFillStyle', value: o.legendColor ?? '#333333'});
+                            dl.push({op: 'fillText', text: label, x: chartX - axisGap, y: tickY});
+
+                            // Horizontal grid line (skip baseline — drawn separately)
+                            if (t > 0) {
+                                dl.push({op: 'setStrokeStyle', value: gridColor});
+                                dl.push({op: 'setLineWidth', value: 1});
+                                dl.push({op: 'beginPath'});
+                                dl.push({op: 'moveTo', x: chartX, y: tickY});
+                                dl.push({op: 'lineTo', x: chartX + chartW, y: tickY});
+                                dl.push({op: 'stroke'});
+                            }
+                        }
+
+                        // ── Baseline ──────────────────────────────────────────────────
+                        const baseY = chartY + chartH;
+
+                        dl.push({op: 'setStrokeStyle', value: axisColor});
+                        dl.push({op: 'setLineWidth', value: 1});
+                        dl.push({op: 'beginPath'});
+                        dl.push({op: 'moveTo', x: chartX, y: baseY});
+                        dl.push({op: 'lineTo', x: chartX + chartW, y: baseY});
+                        dl.push({op: 'stroke'});
+
+                        // ── Bars ──────────────────────────────────────────────────────
+                        for (let i = 0; i < points.length; i++) {
+                            const point = points[i];
+                            const color = colors[i % colors.length];
+                            const barH = (point.value / maxVal) * chartH;
+                            const bx = chartX + i * slotW + barOffX;
+                            const by = baseY - barH;
+
+                            // Bar fill
+                            dl.push({op: 'setFillStyle', value: color});
+                            dl.push({op: 'fillRect', x: bx, y: by, w: barW, h: barH});
+
+                            // Hit area
+                            dl.push({
+                                op: 'hitArea',
+                                shape: 'rect',
+                                x: bx,
+                                y: by,
+                                w: barW,
+                                h: barH,
+                                data: {
+                                    index: i,
+                                    label: point.label,
+                                    value: point.value,
+                                    percent: Math.round((point.value / total) * 1000) / 10
+                                }
+                            });
+
+                            // Value label above bar
+                            dl.push({op: 'setFillStyle', value: o.legendColor ?? '#333333'});
+                            dl.push({op: 'setFont', value: o.font});
+                            dl.push({op: 'setTextAlign', value: 'center'});
+                            dl.push({op: 'setTextBaseline', value: 'bottom'});
+                            dl.push({op: 'fillText', text: String(point.value), x: bx + barW / 2, y: by - 2});
+
+                            // X-axis label
+                            if (point.label) {
+                                dl.push({op: 'setFillStyle', value: o.legendColor ?? '#333333'});
+                                dl.push({op: 'setFont', value: o.font});
+                                dl.push({op: 'setTextAlign', value: 'center'});
+                                dl.push({op: 'setTextBaseline', value: 'top'});
+                                dl.push({op: 'fillText', text: point.label, x: bx + barW / 2, y: baseY + axisGap});
                             }
                         }
 
@@ -312,11 +465,11 @@
 
                     // Otherwise wrap each function so component options are merged as
                     // defaults — per-call options still take precedence.
-                    const fns     = this.functions;
+                    const fns = this.functions;
                     const wrapped = Object.create(null);
 
                     for (const name of Object.keys(fns)) {
-                        wrapped[name] = function(ctx, data, opts) {
+                        wrapped[name] = function (ctx, data, opts) {
                             return fns[name](ctx, data, Object.assign({}, componentOpts, opts));
                         };
                     }
