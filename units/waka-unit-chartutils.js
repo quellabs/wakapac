@@ -293,10 +293,35 @@
 
                 onComponentCreated(abstraction, pacId, config) {
                     const key = config.chartUtils?.property;
+                    const chartUtils = config.chartUtils ?? {};
 
-                    if (key && key in abstraction) {
-                        abstraction[key] = this.functions;
+                    if (!key || !(key in abstraction)) {
+                        return;
                     }
+
+                    // Extract per-component chart options from config.chartUtils,
+                    // excluding the reserved 'property' key which is consumed here.
+                    const componentOpts = Object.assign({}, chartUtils);
+                    delete componentOpts.property;
+
+                    // If no component-level options were provided, inject functions directly
+                    if (Object.keys(componentOpts).length === 0) {
+                        abstraction[key] = this.functions;
+                        return;
+                    }
+
+                    // Otherwise wrap each function so component options are merged as
+                    // defaults — per-call options still take precedence.
+                    const fns     = this.functions;
+                    const wrapped = Object.create(null);
+
+                    for (const name of Object.keys(fns)) {
+                        wrapped[name] = function(ctx, data, opts) {
+                            return fns[name](ctx, data, Object.assign({}, componentOpts, opts));
+                        };
+                    }
+
+                    abstraction[key] = wrapped;
                 }
             };
         }

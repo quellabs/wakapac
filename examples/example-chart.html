@@ -88,7 +88,11 @@
         }
     }, {
         // Inject ChartUtils functions into this._chart
-        chartUtils: { property: '_chart' }
+        chartUtils: {
+            property:       '_chart',
+            legendPosition: 'right',
+            font:           '13px sans-serif'
+        }
     });
 
     // ── Result component ──────────────────────────────────────────────────────

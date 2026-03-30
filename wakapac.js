@@ -8997,8 +8997,6 @@
      * @param {string} selector - CSS selector ('#id' returns single, '.class' returns array)
      * @param {Object} [abstraction={}] - Reactive data model with properties and methods
      * @param {Object} [options={}] - Configuration options
-     * @param {string} [options.updateMode='immediate'] - Update strategy ('immediate' or 'debounced')
-     * @param {number} [options.delay=300] - Debounce delay in milliseconds
      * @returns {Object|Object[]|undefined} Single abstraction for ID, array for class/tag selectors
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
