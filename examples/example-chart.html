@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaPAC ChartUtils — Pie Chart Demo</title>
+</head>
+<body>
+
+<h1>WakaPAC ChartUtils — Pie Chart Demo</h1>
+<p>Click a slice to see hit testing in action.</p>
+
+<canvas data-pac-id="pieDemo" width="500" height="400"></canvas>
+
+<p id="hitResult">Click a slice...</p>
+
+<script src="../wakapac.js"></script>
+<script src="../units/waka-unit-chartutils.js"></script>
+<script>
+    wakaPAC.use(ChartUtils);
+
+    wakaPAC('pieDemo', {
+        _chart: null,
+        _lastDL: null,
+
+        data: [
+            { label: 'JavaScript', value: 38 },
+            { label: 'PHP',        value: 26 },
+            { label: 'Python',     value: 18 },
+            { label: 'TypeScript', value: 11 },
+            { label: 'Other',      value: 7  }
+        ],
+
+        selected: null,
+
+        init() {
+            wakaPAC.invalidateRect(this.pacId);
+        },
+
+        msgProc(event) {
+            switch (event.message) {
+                case wakaPAC.MSG_PAINT: {
+                    const ctx = wakaPAC.getDC(this.pacId);
+                    const dl  = this._chart.pieChart(ctx, this.data);
+
+                    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+                    wakaPAC.playMetaFile(ctx, dl);
+                    wakaPAC.releaseDC(ctx);
+
+                    this._lastDL = dl;
+                    break;
+                }
+
+                case wakaPAC.MSG_LCLICK: {
+                    const pos = wakaPAC.MAKEPOINTS(event.lParam);
+                    const hit = wakaPAC.metaFileHitTest(this._lastDL, pos.x, pos.y);
+
+                    document.getElementById('hitResult').textContent = hit
+                        ? `Clicked: ${hit.label} — ${hit.value} (${hit.percent}%)`
+                        : 'Click a slice...';
+
+                    break;
+                }
+            }
+        }
+    }, {
+        chartUtils: { property: '_chart' }
+    });
+</script>
+
+</body>
+</html>
