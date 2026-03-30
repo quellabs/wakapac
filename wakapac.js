@@ -4323,20 +4323,20 @@
                 }
 
                 case 'call': {
-                    // Check imported units first (from data-pac-uses flat import)
-                    const importedUnits = scope?.importedUnits;
-
-                    if (importedUnits && typeof importedUnits[node.name] === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
-                        return importedUnits[node.name](...args);
-                    }
-
-                    // Fall back to the component's own data context
+                    // Check the component's own data context first
                     const fn = this.getProperty(node.name, context, scope);
 
                     if (typeof fn === 'function') {
                         const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
                         return fn.call(context, ...args);
+                    }
+
+                    // Fall back to imported units (from data-pac-uses flat import)
+                    const importedUnits = scope?.importedUnits;
+
+                    if (importedUnits && typeof importedUnits[node.name] === 'function') {
+                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        return importedUnits[node.name](...args);
                     }
 
                     // Not found
@@ -9660,9 +9660,10 @@
      * All hooks are optional. Duplicate registrations are silently ignored.
      *
      * @param {Object} library - Library to integrate (e.g. wakaSync)
+     * @param {Object} [options={}] - Options forwarded to createPacPlugin (e.g. { locale: 'nl-NL' })
      * @throws {Error} If lib does not implement createPacPlugin()
      */
-    wakaPAC.use = function(library) {
+    wakaPAC.use = function(library, options = {}) {
         // Prevent duplicate registration
         if (_registeredLibs.indexOf(library) !== -1) {
             return;
@@ -9679,7 +9680,7 @@
         _registeredLibs.push(library);
 
         // Create the plugin and store
-        const plugin = library.createPacPlugin(wakaPAC);
+        const plugin = library.createPacPlugin(wakaPAC, options);
         _plugins.push(plugin);
 
         // If the plugin exposes named functions, register it as a unit

@@ -1,12 +1,12 @@
 /*
  * ╔══════════════════════════════════════════════════════════════════════════════════════╗
  * ║                                                                                      ║
- * ║        ██╗    ██╗ █████╗ ██╗  ██╗ █████╗ ███╗   ███╗ █████╗ ████████╗██╗  ██╗        ║
- * ║        ██║    ██║██╔══██╗██║ ██╔╝██╔══██╗████╗ ████║██╔══██╗╚══██╔══╝██║  ██║        ║
- * ║        ██║ █╗ ██║███████║█████╔╝ ███████║██╔████╔██║███████║   ██║   ███████║        ║
- * ║        ██║███╗██║██╔══██║██╔═██╗ ██╔══██║██║╚██╔╝██║██╔══██║   ██║   ██╔══██║        ║
- * ║        ╚███╔███╔╝██║  ██║██║  ██╗██║  ██║██║ ╚═╝ ██║██║  ██║   ██║   ██║  ██║        ║
- * ║         ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝        ║
+ * ║  ██╗    ██╗ █████╗ ██╗  ██╗ █████╗ ███╗   ███╗ █████╗ ████████╗██╗  ██╗              ║
+ * ║  ██║    ██║██╔══██╗██║ ██╔╝██╔══██╗████╗ ████║██╔══██╗╚══██╔══╝██║  ██║              ║
+ * ║  ██║ █╗ ██║███████║█████╔╝ ███████║██╔████╔██║███████║   ██║   ███████║              ║
+ * ║  ██║███╗██║██╔══██║██╔═██╗ ██╔══██║██║╚██╔╝██║██╔══██║   ██║   ██╔══██║              ║
+ * ║  ╚███╔███╔╝██║  ██║██║  ██╗██║  ██║██║ ╚═╝ ██║██║  ██║   ██║   ██║  ██║              ║
+ * ║   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝              ║
  * ║                                                                                      ║
  * ║  WakaPAC Unit — Math                                                                 ║
  * ║                                                                                      ║
@@ -24,9 +24,9 @@
 (function() {
     "use strict";
 
-    window.wakaMath = {
+    window.WakaMath = {
 
-        createPacPlugin(pac) {
+        createPacPlugin() {
             return {
                 /** Unit namespace — accessible in binds as Math.fn() */
                 name: 'Math',
@@ -123,7 +123,43 @@
                      * Note: re-evaluates on every render cycle — use sparingly in binds.
                      * @returns {number}
                      */
-                    random: () => Math.random()
+                    random: () => Math.random(),
+
+                    /**
+                     * Rounds a number to a given number of decimal places.
+                     * Equivalent to Delphi's Math.RoundTo().
+                     * @param {number} n
+                     * @param {number} decimals - Number of decimal places (0 or more)
+                     * @returns {number}
+                     */
+                    roundTo: (n, decimals) => {
+                        const factor = Math.pow(10, decimals);
+                        return Math.round(n * factor) / factor;
+                    },
+
+                    /**
+                     * Returns true if n is within the inclusive range [lo, hi].
+                     * Equivalent to Delphi's Math.InRange().
+                     * @param {number} n
+                     * @param {number} lo - Lower bound (inclusive)
+                     * @param {number} hi - Upper bound (inclusive)
+                     * @returns {boolean}
+                     */
+                    inRange: (n, lo, hi) => n >= lo && n <= hi
+                },
+
+                /**
+                 * Add unit to abstraction if instructed
+                 * @param abstraction
+                 * @param pacId
+                 * @param config
+                 */
+                onComponentCreated(abstraction, pacId, config) {
+                    const key = config.math?.property;
+
+                    if (key && key in abstraction) {
+                        abstraction[key] = this.functions;
+                    }
                 }
             };
         }
