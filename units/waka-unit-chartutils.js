@@ -199,19 +199,24 @@
                             const color = colors[i % colors.length];
                             const midAngle = startAngle + sliceAngle / 2;
 
-                            // Inset each slice slightly to create a visual gap
-                            const inset = o.gap > 0 ? o.gap / r : 0;
-                            const sa = startAngle + inset;
-                            const ea = endAngle - inset;
-
                             dl.push({op: 'setFillStyle', value: color});
                             dl.push({op: 'beginPath'});
                             dl.push({op: 'moveTo', x: cx, y: cy});
-                            dl.push({op: 'arc', cx, cy, r, startAngle: sa, endAngle: ea, ccw: false});
+                            dl.push({op: 'arc', cx, cy, r, startAngle, endAngle, ccw: false});
                             dl.push({op: 'closePath'});
                             dl.push({op: 'fill'});
 
-                            // Hit area for this slice
+                            // Draw a stroke in the background color to create a visual gap
+                            // between slices. This avoids the centre-point divergence that
+                            // angular insets produce.
+                            if (o.gap > 0) {
+                                dl.push({op: 'setStrokeStyle', value: o.background ?? '#ffffff'});
+                                dl.push({op: 'setLineWidth', value: o.gap});
+                                dl.push({op: 'stroke'});
+                            }
+
+                            // Hit area uses the full unmodified angles so the entire
+                            // slice — including the gap region — is hittable
                             dl.push({
                                 op: 'hitArea',
                                 shape: 'sector',
@@ -219,8 +224,8 @@
                                 cy,
                                 r,
                                 innerR: 0,
-                                startAngle: sa,
-                                endAngle: ea,
+                                startAngle,
+                                endAngle,
                                 data: {
                                     index: i,
                                     label: point.label,
@@ -276,6 +281,7 @@
                                     w: swatchSize,
                                     h: swatchSize
                                 });
+
                                 dl.push({op: 'setFillStyle', value: o.legendColor});
                                 dl.push({op: 'fillText', text: label, x: lx + swatchSize + swatchGap, y: itemY});
                             }
