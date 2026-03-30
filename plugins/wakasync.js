@@ -269,11 +269,12 @@
                  * @param {string} pacId - The component's data-pac-id
                  * @param config
                  */
-                onComponentCreated: function (abstraction, pacId, config) {
-                    abstraction._http = createHandle(pacId, config.http);
+                onComponentCreated(abstraction, pacId, config) {
+                    const key = config.wakaSync?.property ?? '_http';
+                    abstraction[key] = createHandle(pacId, config.wakaSync);
                 },
 
-                /**
+                /**already
                  * Called when a component is removed from the DOM.
                  * Cancels all in-flight requests scoped to this component.
                  * @param {string} pacId - The component's data-pac-id
