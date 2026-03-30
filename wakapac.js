@@ -205,6 +205,7 @@
     const MSG_TIMER = 0x0113;
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
+    const MSG_FOREACH_REBUILT = 0x0300;
     const MSG_USER = 0x1000;
 
     /**
@@ -7241,6 +7242,20 @@
             // a change event and all dependent bindings update naturally.
             this.syncSelectAfterForeach(foreachElement);
 
+            // Notify the component that this foreach has finished rendering.
+            // wParam carries the number of rendered items; detail carries the
+            // source array name so the handler can retrieve data and DOM elements.
+            wakaPAC.sendMessage(
+                this.abstraction.pacId,
+                MSG_FOREACH_REBUILT,
+                array.length,
+                0,
+                {
+                    arrayName: mappingData.foreachExpr,
+                    marker:    foreachElement.getAttribute('data-pac-foreach-marker') ?? null
+                }
+            );
+
         } catch (error) {
             console.warn(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
             // Don't clear innerHTML on error during initial scan - preserve template
@@ -9851,6 +9866,59 @@
     };
 
     /**
+     * Creates an off-screen context sized to match the canvas backing store.
+     * The component owns the returned DC; recreate it in MSG_SIZE after resizing.
+     * @param {string} pacId
+     * @returns {CanvasRenderingContext2D|null}
+     */
+    wakaPAC.createCompatibleDC = function(pacId) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container || !(container instanceof HTMLCanvasElement)) {
+            return null;
+        }
+
+        return /** @type {CanvasRenderingContext2D} */ (new OffscreenCanvas(container.width, container.height).getContext('2d'));
+    };
+
+    /**
+     * Releases a compatible DC. Zeros the OffscreenCanvas dimensions to free
+     * the pixel buffer promptly rather than waiting on GC.
+     * @param {CanvasRenderingContext2D} dc
+     */
+    wakaPAC.deleteCompatibleDC = function(dc) {
+        // OffscreenCanvas has no explicit destroy method — nulling the canvas
+        // width and height releases the pixel buffer immediately in most engines,
+        // allowing the GC to reclaim the backing store without waiting for a
+        // full collection cycle.
+        if (!dc) {
+            return;
+        }
+
+        const offscreen = dc.canvas;
+
+        if (offscreen instanceof OffscreenCanvas) {
+            offscreen.width  = 0;
+            offscreen.height = 0;
+        }
+    };
+
+    /**
+     * Returns the CanvasRenderingContext2D for any canvas element — not tied to
+     * a PAC container. Use this to get a drawing context for canvas elements
+     * inside foreach items or other non-container canvases.
+     * @param {HTMLCanvasElement} canvasElement
+     * @returns {CanvasRenderingContext2D|null}
+     */
+    wakaPAC.getDCFromElement = function(canvasElement) {
+        if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
+            return null;
+        }
+
+        return canvasElement.getContext('2d');
+    };
+
+    /**
      * Marks a canvas PAC container as needing repaint.
      * @param {string} pacId - data-pac-id of the target canvas container
      * @param {{x:number, y:number, width:number, height:number}|null} [rect]
@@ -9894,44 +9962,6 @@
     };
 
     /**
-     * Creates an off-screen context sized to match the canvas backing store.
-     * The component owns the returned DC; recreate it in MSG_SIZE after resizing.
-     * @param {string} pacId
-     * @returns {CanvasRenderingContext2D|null}
-     */
-    wakaPAC.createCompatibleDC = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
-
-        if (!container || !(container instanceof HTMLCanvasElement)) {
-            return null;
-        }
-
-        return /** @type {CanvasRenderingContext2D} */ (new OffscreenCanvas(container.width, container.height).getContext('2d'));
-    };
-
-    /**
-     * Releases a compatible DC. Zeros the OffscreenCanvas dimensions to free
-     * the pixel buffer promptly rather than waiting on GC.
-     * @param {CanvasRenderingContext2D} dc
-     */
-    wakaPAC.deleteCompatibleDC = function(dc) {
-        // OffscreenCanvas has no explicit destroy method — nulling the canvas
-        // width and height releases the pixel buffer immediately in most engines,
-        // allowing the GC to reclaim the backing store without waiting for a
-        // full collection cycle.
-        if (!dc) {
-            return;
-        }
-
-        const offscreen = dc.canvas;
-
-        if (offscreen instanceof OffscreenCanvas) {
-            offscreen.width  = 0;
-            offscreen.height = 0;
-        }
-    };
-
-    /**
      * Blits srcDC onto destDC at (dx, dy). Optional dw/dh stretch the source;
      * omit to copy at the source's natural dimensions.
      * @param {CanvasRenderingContext2D} destDC
@@ -9953,6 +9983,29 @@
             dx, dy,
             dw ?? source.width,
             dh ?? source.height
+        );
+    };
+
+    /**
+     * Blits srcDC onto destDC at (dx, dy) scaled to (dw, dh).
+     * Unlike bitBlt, the source is always stretched to fill the destination rect.
+     * Use this when the offscreen DC dimensions differ from the target canvas.
+     * @param {CanvasRenderingContext2D} destDC
+     * @param {CanvasRenderingContext2D} srcDC
+     * @param {number} dx - Destination X
+     * @param {number} dy - Destination Y
+     * @param {number} dw - Destination width
+     * @param {number} dh - Destination height
+     */
+    wakaPAC.stretchBlt = function(destDC, srcDC, dx, dy, dw, dh) {
+        if (!destDC || !srcDC) {
+            return;
+        }
+
+        destDC.drawImage(
+            srcDC.canvas,
+            0, 0, srcDC.canvas.width, srcDC.canvas.height,
+            dx, dy, dw, dh
         );
     };
 
@@ -10143,7 +10196,6 @@
             height: hBitmap.canvas.height
         };
     };
-
 
     /**
      * Executes a display list (metafile) onto a canvas context.
@@ -10419,9 +10471,7 @@
     /**
      * Returns true if the point falls within any hitArea entry in the display list.
      * Equivalent to ptInElement() but for metafile hit areas.
-     *
      * Pass the same offsetX/offsetY that were passed to playMetaFile.
-     *
      * @param {Array<Object>} dl          - Display list to test against
      * @param {number}        x           - X coordinate to test (container coordinates)
      * @param {number}        y           - Y coordinate to test (container coordinates)
@@ -10447,8 +10497,9 @@
         MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
         MSG_INPUT_COMPLETE, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
         MSG_ACCEL, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE,
-        MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
-        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
+        MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
+        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE,
+        MSG_DROP, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
