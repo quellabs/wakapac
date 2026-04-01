@@ -9802,6 +9802,105 @@
     };
 
     // ========================================================================
+    // METAFILE BUILDER
+    // ========================================================================
+
+    /**
+     * Fluent display list builder.
+     *
+     * Provides a chainable API for constructing display lists (metafiles) without
+     * manually pushing raw op objects onto an array. Mirrors the CanvasRenderingContext2D
+     * API so drawing code reads naturally.
+     *
+     * Usage:
+     *   const dl = new wakaPAC.MetaFile()
+     *       .setFillStyle('#4e79a7')
+     *       .beginPath()
+     *       .arc(cx, cy, r, startAngle, endAngle)
+     *       .fill()
+     *       .build();
+     *
+     * For conditional ops, break the chain:
+     *   const dl = new wakaPAC.MetaFile();
+     *   dl.setFillStyle('#4e79a7').beginPath().arc(cx, cy, r, 0, Math.PI * 2).fill();
+     *   if (o.gap > 0) {
+     *       dl.setStrokeStyle('#ffffff').setLineWidth(o.gap).stroke();
+     *   }
+     *   return dl.build();
+     */
+    function MetaFile() {
+        this._ops = [];
+    }
+
+    MetaFile.prototype.setFillStyle = function(value) { this._ops.push({op: 'setFillStyle', value}); return this; };
+    MetaFile.prototype.setStrokeStyle = function(value) { this._ops.push({op: 'setStrokeStyle', value}); return this; };
+    MetaFile.prototype.setLineWidth = function(value) { this._ops.push({op: 'setLineWidth', value}); return this; };
+    MetaFile.prototype.setLineCap = function(value) { this._ops.push({op: 'setLineCap', value}); return this; };
+    MetaFile.prototype.setLineJoin = function(value) { this._ops.push({op: 'setLineJoin', value}); return this; };
+    MetaFile.prototype.setLineDashOffset = function(value) { this._ops.push({op: 'setLineDashOffset', value}); return this; };
+    MetaFile.prototype.setMiterLimit = function(value) { this._ops.push({op: 'setMiterLimit', value}); return this; };
+    MetaFile.prototype.setGlobalAlpha = function(value) { this._ops.push({op: 'setGlobalAlpha', value}); return this; };
+    MetaFile.prototype.setGlobalComposite = function(value) { this._ops.push({op: 'setGlobalComposite', value}); return this; };
+    MetaFile.prototype.setFont = function(value) { this._ops.push({op: 'setFont', value}); return this; };
+    MetaFile.prototype.setTextAlign = function(value) { this._ops.push({op: 'setTextAlign', value}); return this; };
+    MetaFile.prototype.setTextBaseline = function(value) { this._ops.push({op: 'setTextBaseline', value}); return this; };
+    MetaFile.prototype.setTextRendering = function(value) { this._ops.push({op: 'setTextRendering', value}); return this; };
+    MetaFile.prototype.setLetterSpacing = function(value) { this._ops.push({op: 'setLetterSpacing', value}); return this; };
+    MetaFile.prototype.setWordSpacing = function(value) { this._ops.push({op: 'setWordSpacing', value}); return this; };
+
+    MetaFile.prototype.save = function() { this._ops.push({op: 'save'}); return this; };
+    MetaFile.prototype.restore = function() { this._ops.push({op: 'restore'}); return this; };
+    MetaFile.prototype.beginPath = function() { this._ops.push({op: 'beginPath'}); return this; };
+    MetaFile.prototype.closePath = function() { this._ops.push({op: 'closePath'}); return this; };
+    MetaFile.prototype.stroke = function() { this._ops.push({op: 'stroke'}); return this; };
+    MetaFile.prototype.resetTransform = function() { this._ops.push({op: 'resetTransform'}); return this; };
+    MetaFile.prototype.clearShadow = function() { this._ops.push({op: 'clearShadow'}); return this; };
+
+    MetaFile.prototype.moveTo = function(x, y) { this._ops.push({op: 'moveTo', x, y}); return this; };
+    MetaFile.prototype.lineTo = function(x, y) { this._ops.push({op: 'lineTo', x, y}); return this; };
+    MetaFile.prototype.arc = function(cx, cy, r, startAngle, endAngle, ccw = false) { this._ops.push({op: 'arc', cx, cy, r, startAngle, endAngle, ccw}); return this; };
+    MetaFile.prototype.arcTo = function(x1, y1, x2, y2, r) { this._ops.push({op: 'arcTo', x1, y1, x2, y2, r}); return this; };
+    MetaFile.prototype.ellipse = function(cx, cy, rx, ry, rotation, startAngle, endAngle, ccw = false) { this._ops.push({op: 'ellipse', cx, cy, rx, ry, rotation, startAngle, endAngle, ccw}); return this; };
+    MetaFile.prototype.rect = function(x, y, w, h) { this._ops.push({op: 'rect', x, y, w, h}); return this; };
+    MetaFile.prototype.roundRect = function(x, y, w, h, r) { this._ops.push({op: 'roundRect', x, y, w, h, r}); return this; };
+    MetaFile.prototype.fill = function(rule = 'nonzero') { this._ops.push({op: 'fill', rule}); return this; };
+    MetaFile.prototype.clip = function(rule = 'nonzero') { this._ops.push({op: 'clip', rule}); return this; };
+    MetaFile.prototype.fillRect = function(x, y, w, h) { this._ops.push({op: 'fillRect', x, y, w, h}); return this; };
+    MetaFile.prototype.strokeRect = function(x, y, w, h) { this._ops.push({op: 'strokeRect', x, y, w, h}); return this; };
+    MetaFile.prototype.clearRect = function(x, y, w, h) { this._ops.push({op: 'clearRect', x, y, w, h}); return this; };
+    MetaFile.prototype.fillText = function(text, x, y, maxWidth) { this._ops.push({op: 'fillText', text, x, y, maxWidth}); return this; };
+    MetaFile.prototype.strokeText = function(text, x, y, maxWidth) { this._ops.push({op: 'strokeText', text, x, y, maxWidth}); return this; };
+    MetaFile.prototype.bezierCurveTo = function(cp1x, cp1y, cp2x, cp2y, x, y) { this._ops.push({op: 'bezierCurveTo', cp1x, cp1y, cp2x, cp2y, x, y}); return this; };
+    MetaFile.prototype.quadraticCurveTo = function(cpx, cpy, x, y) { this._ops.push({op: 'quadraticCurveTo', cpx, cpy, x, y}); return this; };
+    MetaFile.prototype.drawImage = function(image, dx, dy, dw, dh) { this._ops.push({op: 'drawImage', image, dx, dy, dw, dh}); return this; };
+
+    MetaFile.prototype.translate = function(x, y) { this._ops.push({op: 'translate', x, y}); return this; };
+    MetaFile.prototype.rotate = function(angle) { this._ops.push({op: 'rotate', angle}); return this; };
+    MetaFile.prototype.scale = function(x, y) { this._ops.push({op: 'scale', x, y}); return this; };
+    MetaFile.prototype.transform = function(a, b, c, d, e, f) { this._ops.push({op: 'transform', a, b, c, d, e, f}); return this; };
+    MetaFile.prototype.setTransform = function(a, b, c, d, e, f) { this._ops.push({op: 'setTransform', a, b, c, d, e, f}); return this; };
+
+    MetaFile.prototype.setLineDash = function(value) { this._ops.push({op: 'setLineDash', value}); return this; };
+    MetaFile.prototype.setShadow = function(color, blur, offsetX = 0, offsetY = 0) { this._ops.push({op: 'setShadow', color, blur, offsetX, offsetY}); return this; };
+    MetaFile.prototype.setImageSmoothing = function(enabled, quality) { this._ops.push({op: 'setImageSmoothing', enabled, quality}); return this; };
+
+    /**
+     * Appends a hit area op. `shape` is 'rect' or 'sector'; `params` contains
+     * the shape-specific fields (x/y/w/h for rect, cx/cy/r/innerR/startAngle/endAngle
+     * for sector) plus a `data` payload returned by metaFileHitTest on a match.
+     * @param {string} shape
+     * @param {Object} params
+     */
+    MetaFile.prototype.hitArea = function(shape, params) { this._ops.push({op: 'hitArea', shape, ...params}); return this; };
+
+    /**
+     * Returns the completed display list array.
+     * The builder should not be used after calling build().
+     * @returns {Array<Object>}
+     */
+    MetaFile.prototype.build = function() { return this._ops; };
+
+    // ========================================================================
     // PUBLIC PAINT API
     // ========================================================================
 
@@ -10492,6 +10591,9 @@
 
     // Registry file
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
+
+    // Export Metafile
+    wakaPAC.MetaFile = MetaFile;
 
     // Export main function to global scope
     window.wakaPAC = wakaPAC;
