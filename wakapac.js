@@ -7086,11 +7086,16 @@
             y: 0           // scrollTop (alias)
         };
 
+        // Initialised to null — DOM state is not reliable at construction time.
+        // IntersectionObserver will set the real value asynchronously, guaranteeing
+        // a null → true/false transition that always triggers watchers, including
+        // for elements that are already in the viewport on page load.
+        abstraction.containerVisible = null;
+        abstraction.containerFullyVisible = null;
+
         // Per-container viewport visibility properties
         abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
         abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
-        abstraction.containerVisible = Utils.isElementVisible(this.container);
-        abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
         abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
         abstraction.containerWidth = this.container.clientWidth;
         abstraction.containerHeight = this.container.clientHeight;
