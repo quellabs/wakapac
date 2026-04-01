@@ -230,19 +230,17 @@
                             }
                         });
 
-                        // Percentage label inside slice
+                        // Value label inside slice
                         if (o.showLabels && sliceAngle >= o.minSliceAngle) {
                             const labelR = r * 0.65;
                             const labelX = cx + Math.cos(midAngle) * labelR;
                             const labelY = cy + Math.sin(midAngle) * labelR;
-                            const pct = Math.round(fraction * 1000) / 10;
-                            const pctText = pct % 1 === 0 ? `${pct}%` : `${pct.toFixed(1)}%`;
 
                             dl.push({op: 'setFillStyle', value: o.labelColor});
                             dl.push({op: 'setFont', value: o.font});
                             dl.push({op: 'setTextAlign', value: 'center'});
                             dl.push({op: 'setTextBaseline', value: 'middle'});
-                            dl.push({op: 'fillText', text: pctText, x: labelX, y: labelY});
+                            dl.push({op: 'fillText', text: String(point.value), x: labelX, y: labelY});
                         }
 
                         startAngle = endAngle;
