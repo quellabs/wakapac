@@ -1850,7 +1850,9 @@
 
                 // Dispatch normalized wheel message
                 self.dispatchToContainer(container, customEvent);
-            }, { passive: false }); // Allow preventDefault by consumers if needed
+            }, {
+                passive: true
+            });
         },
 
         /**
