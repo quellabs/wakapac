@@ -1,7 +1,7 @@
 ## WakaPAC
 
-A compact reactive UI runtime with a desktop-style event pipeline ---
-delivered as a single ~70KB drop-in script. No build tools, no CLI, no
+A compact reactive UI runtime with a desktop-style event pipeline —
+delivered as a single drop-in script. No build tools, no CLI, no
 node_modules.
 
 ## Why WakaPAC?
@@ -29,68 +29,34 @@ wakaPAC('#app', {
 
 Two-way binding, reactive updates, zero configuration.
 
-## The Message Pipeline
-
-WakaPAC unifies browser input, timers, and system events into a single
-component handler:
-
-``` javascript
-wakaPAC('#app', {
-    ticks: 0,
-    _timerId: null,
-
-    init() {
-        this._timerId = wakaPAC.setTimer(this.pacId, 1000);
-    },
-
-    msgProc(event) {
-        if (event.message === wakaPAC.MSG_TIMER && event.wParam === this._timerId) {
-            this.ticks++;
-        }
-
-        return true;
-    }
-});
-```
-
-Mouse input, keyboard events, timers, and gestures are normalized and
-delivered through the same pipeline --- simplifying complex UI behavior.
-
 ## Features
 
-**Core architecture**
+**Core**
+- Centralized message pipeline for all UI and system events
+- Reactive bindings, computed properties, watchers, deep reactive objects and arrays
+- Parent–child component messaging
 
--   Centralized message pipeline for all UI and system events
--   Normalized desktop-style event model
--   Parent--child component messaging
+**Interaction**
+- Mouse, keyboard, timers, gestures, clipboard, HTML5 drag & drop — all normalized through `msgProc`
 
-**Reactive system**
+**Canvas**
+- Win32-style paint cycle with dirty rect accumulation and automatic clipping
+- Metafile API: display list recording, playback, and hit testing
 
--   Declarative bindings with two-way inputs
--   Computed properties and watchers
--   Deep reactive objects and arrays
-
-**Interaction primitives**
-
--   Integrated timers with message delivery
--   Mouse capture for drag-style interactions
--   Built-in gesture recognition
--   Clipboard integration
--   HTML5 drag & drop with normalized behavior
-
-No build tooling required.
+**Units** — optional utility libraries callable from templates and component methods:
+Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, ChartUtils (pie, bar, line, sparkline)
 
 ## Plugins
 
-**WakaStore** adds shared reactive state to wakaPAC. Create a store once, mount it on any number of components — mutations propagate to every subscriber automatically. Supports server sync via polling and WebSocket for inbound updates, and push over HTTP for outbound writes, with custom merge callbacks for non-standard response shapes.
+**WakaStore** — shared reactive state across components, with server sync via polling, WebSocket, and HTTP push.
 
-**WakaForm** adds reactive form state and field-level validation. A form is defined from a schema of fields and composable rule objects, then mounted on a component like any other reactive property. Field validity is always accurate and updates whenever a value changes. Error visibility is controlled by the template --- bind against `field.valid` directly, write your error messages in HTML, and decide when to show them. Built-in rules cover the common cases (`NotBlank`, `Email`, `Min`, `Max`, `MinLength`, `MaxLength`, `Pattern`); custom rules are any object with a `validate(value)` method that returns `true` or `false`.
+**WakaForm** — reactive form state and field-level validation with composable rules.
 
-**WakaRoute** is a client-side router that delivers navigation events through WakaPAC's message pipeline. Components declare a route pattern via data-pac-route and receive `MSG_ROUTE_CHANGE` in their msgProc on every navigation — including browser back/forward and initial load. Each message carries the current path, parsed query parameters, and pre-extracted named segments for that component's own pattern. Supports single-segment (`{id}`) and multi-segment wildcard (`{rest:**}`) parameters.
+**WakaRoute** — client-side router delivering navigation events through `msgProc`.
 
-**WakaMotion** exposes device motion and orientation sensors as reactive properties injected into every component. It normalizes the browser's DeviceMotion API into tilt angles, raw acceleration, and rotation rates, handles the iOS 13+ permission flow, and provides a configurable threshold and axis inversion system to filter noise and correct for inconsistent sensor orientation across devices.
+**WakaMotion** — device motion and orientation sensors as reactive properties.
 
-**WakaSync** is a full-featured HTTP client built to integrate with wakaPAC's message pipeline. It supports request grouping and cancellation, automatic retries with fixed, linear, or exponential backoff, and request/response interceptors. Completed requests deliver `MSG_HTTP_SUCCESS`, `MSG_HTTP_ERROR`, or `MSG_HTTP_ABORT` messages directly to the component's `msgProc`, keeping HTTP responses in the same predictable event flow as the rest of the runtime.
+**WakaSync** — full-featured HTTP client with request grouping, cancellation, retries, and interceptors. Results delivered as `MSG_HTTP_SUCCESS`, `MSG_HTTP_ERROR`, or `MSG_HTTP_ABORT`.
 
 ## Documentation
 

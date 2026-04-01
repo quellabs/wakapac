@@ -6,6 +6,7 @@
     "minify:wakamotion": "terser plugins/wakamotion.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o plugins/wakamotion.min.js --ecma 2020",
     "minify:wakaroute": "terser plugins/wakaroute.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o plugins/wakaroute.min.js --ecma 2020",
     "minify:wakaform": "terser plugins/wakaform.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o plugins/wakaform.min.js --ecma 2020",
+    "minify:wakachart": "terser plugins/wakachart.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o plugins/wakachart.min.js --ecma 2020",
     "minify:wakamath": "terser units/waka-unit-math.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-math.min.js --ecma 2020",
     "minify:wakastringutils": "terser units/waka-unit-stringutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-stringutils.min.js --ecma 2020",
     "minify:wakadateutils": "terser units/waka-unit-dateutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-dateutils.min.js --ecma 2020",
@@ -14,7 +15,7 @@
     "minify:wakanumberutils": "terser units/waka-unit-numberutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-numberutils.min.js --ecma 2020",
     "minify:wakacollectionutils": "terser units/waka-unit-collectionutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-collectionutils.min.js --ecma 2020",
     "minify:wakaregexutils": "terser units/waka-unit-regexutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-regexutils.min.js --ecma 2020",
-    "minify": "npm run minify:wakapac && npm run minify:wakasync && npm run minify:wakastore && npm run minify:wakamotion && npm run minify:wakaroute && npm run minify:wakaform && npm run minify:wakamath && npm run minify:wakastringutils && npm run minify:wakadateutils && npm run minify:wakatypeutils  && npm run minify:wakaphputils  && npm run minify:wakanumberutils && npm run minify:wakacollectionutils && npm run minify:wakaregexutils"
+    "minify": "npm run minify:wakapac && npm run minify:wakasync && npm run minify:wakastore && npm run minify:wakamotion && npm run minify:wakaroute && npm run minify:wakaform && npm run minify:wakamath && npm run minify:wakastringutils && npm run minify:wakadateutils && npm run minify:wakatypeutils  && npm run minify:wakaphputils  && npm run minify:wakanumberutils && npm run minify:wakacollectionutils && npm run minify:wakaregexutils && npm run minify:wakachart"
   },
   "dependencies": {},
   "devDependencies": {

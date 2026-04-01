@@ -205,6 +205,7 @@
     const MSG_TIMER = 0x0113;
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
+    const MSG_FOREACH_REBUILT = 0x0400;
     const MSG_USER = 0x1000;
 
     /**
@@ -498,6 +499,48 @@
         down: 'ArrowDown',
         left: 'ArrowLeft',
         right: 'ArrowRight'
+    };
+
+
+    // ========================================================================
+    // METAFILE — Display list recording and playback
+    // ========================================================================
+
+    /**
+     * Maps metafile op names to their CanvasRenderingContext2D property names.
+     * Used by playMetaFile for direct property assignment: ctx[prop] = op.value.
+     * @type {Object<string, string>}
+     */
+    const _metaFileProps = {
+        setFillStyle:       'fillStyle',
+        setStrokeStyle:     'strokeStyle',
+        setLineWidth:       'lineWidth',
+        setLineCap:         'lineCap',
+        setLineJoin:        'lineJoin',
+        setLineDashOffset:  'lineDashOffset',
+        setMiterLimit:      'miterLimit',
+        setGlobalAlpha:     'globalAlpha',
+        setGlobalComposite: 'globalCompositeOperation',
+        setFont:            'font',
+        setTextAlign:       'textAlign',
+        setTextBaseline:    'textBaseline',
+        setTextRendering:   'textRendering',
+        setLetterSpacing:   'letterSpacing',
+        setWordSpacing:     'wordSpacing'
+    };
+
+    /**
+     * Maps metafile op names to their CanvasRenderingContext2D method names.
+     * Used by playMetaFile for no-argument method calls: ctx.method().
+     * @type {Object<string, string>}
+     */
+    const _metaFileMethods = {
+        save:           'save',
+        restore:        'restore',
+        beginPath:      'beginPath',
+        closePath:      'closePath',
+        stroke:         'stroke',
+        resetTransform: 'resetTransform'
     };
 
     // =============================================================================
@@ -1807,7 +1850,9 @@
 
                 // Dispatch normalized wheel message
                 self.dispatchToContainer(container, customEvent);
-            }, { passive: false }); // Allow preventDefault by consumers if needed
+            }, {
+                passive: true
+            });
         },
 
         /**
@@ -7041,11 +7086,16 @@
             y: 0           // scrollTop (alias)
         };
 
+        // Initialised to null — DOM state is not reliable at construction time.
+        // IntersectionObserver will set the real value asynchronously, guaranteeing
+        // a null → true/false transition that always triggers watchers, including
+        // for elements that are already in the viewport on page load.
+        abstraction.containerVisible = null;
+        abstraction.containerFullyVisible = null;
+
         // Per-container viewport visibility properties
         abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
         abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
-        abstraction.containerVisible = Utils.isElementVisible(this.container);
-        abstraction.containerFullyVisible = Utils.isElementFullyVisible(this.container);
         abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
         abstraction.containerWidth = this.container.clientWidth;
         abstraction.containerHeight = this.container.clientHeight;
@@ -7198,6 +7248,20 @@
             // is the source of truth — push it into the abstraction so the proxy fires
             // a change event and all dependent bindings update naturally.
             this.syncSelectAfterForeach(foreachElement);
+
+            // Notify the component that this foreach has finished rendering.
+            // wParam carries the number of rendered items; detail carries the
+            // source array name so the handler can retrieve data and DOM elements.
+            wakaPAC.sendMessage(
+                this.abstraction.pacId,
+                MSG_FOREACH_REBUILT,
+                array.length,
+                0,
+                {
+                    arrayName: mappingData.foreachExpr,
+                    marker:    foreachElement.getAttribute('data-pac-marker') ?? null
+                }
+            );
 
         } catch (error) {
             console.warn(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
@@ -8955,8 +9019,6 @@
      * @param {string} selector - CSS selector ('#id' returns single, '.class' returns array)
      * @param {Object} [abstraction={}] - Reactive data model with properties and methods
      * @param {Object} [options={}] - Configuration options
-     * @param {string} [options.updateMode='immediate'] - Update strategy ('immediate' or 'debounced')
-     * @param {number} [options.delay=300] - Debounce delay in milliseconds
      * @returns {Object|Object[]|undefined} Single abstraction for ID, array for class/tag selectors
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
@@ -9740,6 +9802,105 @@
     };
 
     // ========================================================================
+    // METAFILE BUILDER
+    // ========================================================================
+
+    /**
+     * Fluent display list builder.
+     *
+     * Provides a chainable API for constructing display lists (metafiles) without
+     * manually pushing raw op objects onto an array. Mirrors the CanvasRenderingContext2D
+     * API so drawing code reads naturally.
+     *
+     * Usage:
+     *   const dl = new wakaPAC.MetaFile()
+     *       .setFillStyle('#4e79a7')
+     *       .beginPath()
+     *       .arc(cx, cy, r, startAngle, endAngle)
+     *       .fill()
+     *       .build();
+     *
+     * For conditional ops, break the chain:
+     *   const dl = new wakaPAC.MetaFile();
+     *   dl.setFillStyle('#4e79a7').beginPath().arc(cx, cy, r, 0, Math.PI * 2).fill();
+     *   if (o.gap > 0) {
+     *       dl.setStrokeStyle('#ffffff').setLineWidth(o.gap).stroke();
+     *   }
+     *   return dl.build();
+     */
+    function MetaFile() {
+        this._ops = [];
+    }
+
+    MetaFile.prototype.setFillStyle = function(value) { this._ops.push({op: 'setFillStyle', value}); return this; };
+    MetaFile.prototype.setStrokeStyle = function(value) { this._ops.push({op: 'setStrokeStyle', value}); return this; };
+    MetaFile.prototype.setLineWidth = function(value) { this._ops.push({op: 'setLineWidth', value}); return this; };
+    MetaFile.prototype.setLineCap = function(value) { this._ops.push({op: 'setLineCap', value}); return this; };
+    MetaFile.prototype.setLineJoin = function(value) { this._ops.push({op: 'setLineJoin', value}); return this; };
+    MetaFile.prototype.setLineDashOffset = function(value) { this._ops.push({op: 'setLineDashOffset', value}); return this; };
+    MetaFile.prototype.setMiterLimit = function(value) { this._ops.push({op: 'setMiterLimit', value}); return this; };
+    MetaFile.prototype.setGlobalAlpha = function(value) { this._ops.push({op: 'setGlobalAlpha', value}); return this; };
+    MetaFile.prototype.setGlobalComposite = function(value) { this._ops.push({op: 'setGlobalComposite', value}); return this; };
+    MetaFile.prototype.setFont = function(value) { this._ops.push({op: 'setFont', value}); return this; };
+    MetaFile.prototype.setTextAlign = function(value) { this._ops.push({op: 'setTextAlign', value}); return this; };
+    MetaFile.prototype.setTextBaseline = function(value) { this._ops.push({op: 'setTextBaseline', value}); return this; };
+    MetaFile.prototype.setTextRendering = function(value) { this._ops.push({op: 'setTextRendering', value}); return this; };
+    MetaFile.prototype.setLetterSpacing = function(value) { this._ops.push({op: 'setLetterSpacing', value}); return this; };
+    MetaFile.prototype.setWordSpacing = function(value) { this._ops.push({op: 'setWordSpacing', value}); return this; };
+
+    MetaFile.prototype.save = function() { this._ops.push({op: 'save'}); return this; };
+    MetaFile.prototype.restore = function() { this._ops.push({op: 'restore'}); return this; };
+    MetaFile.prototype.beginPath = function() { this._ops.push({op: 'beginPath'}); return this; };
+    MetaFile.prototype.closePath = function() { this._ops.push({op: 'closePath'}); return this; };
+    MetaFile.prototype.stroke = function() { this._ops.push({op: 'stroke'}); return this; };
+    MetaFile.prototype.resetTransform = function() { this._ops.push({op: 'resetTransform'}); return this; };
+    MetaFile.prototype.clearShadow = function() { this._ops.push({op: 'clearShadow'}); return this; };
+
+    MetaFile.prototype.moveTo = function(x, y) { this._ops.push({op: 'moveTo', x, y}); return this; };
+    MetaFile.prototype.lineTo = function(x, y) { this._ops.push({op: 'lineTo', x, y}); return this; };
+    MetaFile.prototype.arc = function(cx, cy, r, startAngle, endAngle, ccw = false) { this._ops.push({op: 'arc', cx, cy, r, startAngle, endAngle, ccw}); return this; };
+    MetaFile.prototype.arcTo = function(x1, y1, x2, y2, r) { this._ops.push({op: 'arcTo', x1, y1, x2, y2, r}); return this; };
+    MetaFile.prototype.ellipse = function(cx, cy, rx, ry, rotation, startAngle, endAngle, ccw = false) { this._ops.push({op: 'ellipse', cx, cy, rx, ry, rotation, startAngle, endAngle, ccw}); return this; };
+    MetaFile.prototype.rect = function(x, y, w, h) { this._ops.push({op: 'rect', x, y, w, h}); return this; };
+    MetaFile.prototype.roundRect = function(x, y, w, h, r) { this._ops.push({op: 'roundRect', x, y, w, h, r}); return this; };
+    MetaFile.prototype.fill = function(rule = 'nonzero') { this._ops.push({op: 'fill', rule}); return this; };
+    MetaFile.prototype.clip = function(rule = 'nonzero') { this._ops.push({op: 'clip', rule}); return this; };
+    MetaFile.prototype.fillRect = function(x, y, w, h) { this._ops.push({op: 'fillRect', x, y, w, h}); return this; };
+    MetaFile.prototype.strokeRect = function(x, y, w, h) { this._ops.push({op: 'strokeRect', x, y, w, h}); return this; };
+    MetaFile.prototype.clearRect = function(x, y, w, h) { this._ops.push({op: 'clearRect', x, y, w, h}); return this; };
+    MetaFile.prototype.fillText = function(text, x, y, maxWidth) { this._ops.push({op: 'fillText', text, x, y, maxWidth}); return this; };
+    MetaFile.prototype.strokeText = function(text, x, y, maxWidth) { this._ops.push({op: 'strokeText', text, x, y, maxWidth}); return this; };
+    MetaFile.prototype.bezierCurveTo = function(cp1x, cp1y, cp2x, cp2y, x, y) { this._ops.push({op: 'bezierCurveTo', cp1x, cp1y, cp2x, cp2y, x, y}); return this; };
+    MetaFile.prototype.quadraticCurveTo = function(cpx, cpy, x, y) { this._ops.push({op: 'quadraticCurveTo', cpx, cpy, x, y}); return this; };
+    MetaFile.prototype.drawImage = function(image, dx, dy, dw, dh) { this._ops.push({op: 'drawImage', image, dx, dy, dw, dh}); return this; };
+
+    MetaFile.prototype.translate = function(x, y) { this._ops.push({op: 'translate', x, y}); return this; };
+    MetaFile.prototype.rotate = function(angle) { this._ops.push({op: 'rotate', angle}); return this; };
+    MetaFile.prototype.scale = function(x, y) { this._ops.push({op: 'scale', x, y}); return this; };
+    MetaFile.prototype.transform = function(a, b, c, d, e, f) { this._ops.push({op: 'transform', a, b, c, d, e, f}); return this; };
+    MetaFile.prototype.setTransform = function(a, b, c, d, e, f) { this._ops.push({op: 'setTransform', a, b, c, d, e, f}); return this; };
+
+    MetaFile.prototype.setLineDash = function(value) { this._ops.push({op: 'setLineDash', value}); return this; };
+    MetaFile.prototype.setShadow = function(color, blur, offsetX = 0, offsetY = 0) { this._ops.push({op: 'setShadow', color, blur, offsetX, offsetY}); return this; };
+    MetaFile.prototype.setImageSmoothing = function(enabled, quality) { this._ops.push({op: 'setImageSmoothing', enabled, quality}); return this; };
+
+    /**
+     * Appends a hit area op. `shape` is 'rect' or 'sector'; `params` contains
+     * the shape-specific fields (x/y/w/h for rect, cx/cy/r/innerR/startAngle/endAngle
+     * for sector) plus a `data` payload returned by metaFileHitTest on a match.
+     * @param {string} shape
+     * @param {Object} params
+     */
+    MetaFile.prototype.hitArea = function(shape, params) { this._ops.push({op: 'hitArea', shape, ...params}); return this; };
+
+    /**
+     * Returns the completed display list array.
+     * The builder should not be used after calling build().
+     * @returns {Array<Object>}
+     */
+    MetaFile.prototype.build = function() { return this._ops; };
+
+    // ========================================================================
     // PUBLIC PAINT API
     // ========================================================================
 
@@ -9811,6 +9972,59 @@
     };
 
     /**
+     * Creates an off-screen context sized to match the canvas backing store.
+     * The component owns the returned DC; recreate it in MSG_SIZE after resizing.
+     * @param {string} pacId
+     * @returns {CanvasRenderingContext2D|null}
+     */
+    wakaPAC.createCompatibleDC = function(pacId) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container || !(container instanceof HTMLCanvasElement)) {
+            return null;
+        }
+
+        return /** @type {CanvasRenderingContext2D} */ (new OffscreenCanvas(container.width, container.height).getContext('2d'));
+    };
+
+    /**
+     * Releases a compatible DC. Zeros the OffscreenCanvas dimensions to free
+     * the pixel buffer promptly rather than waiting on GC.
+     * @param {CanvasRenderingContext2D} dc
+     */
+    wakaPAC.deleteCompatibleDC = function(dc) {
+        // OffscreenCanvas has no explicit destroy method — nulling the canvas
+        // width and height releases the pixel buffer immediately in most engines,
+        // allowing the GC to reclaim the backing store without waiting for a
+        // full collection cycle.
+        if (!dc) {
+            return;
+        }
+
+        const offscreen = dc.canvas;
+
+        if (offscreen instanceof OffscreenCanvas) {
+            offscreen.width  = 0;
+            offscreen.height = 0;
+        }
+    };
+
+    /**
+     * Returns the CanvasRenderingContext2D for any canvas element — not tied to
+     * a PAC container. Use this to get a drawing context for canvas elements
+     * inside foreach items or other non-container canvases.
+     * @param {HTMLCanvasElement} canvasElement
+     * @returns {CanvasRenderingContext2D|null}
+     */
+    wakaPAC.getDCFromElement = function(canvasElement) {
+        if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
+            return null;
+        }
+
+        return canvasElement.getContext('2d');
+    };
+
+    /**
      * Marks a canvas PAC container as needing repaint.
      * @param {string} pacId - data-pac-id of the target canvas container
      * @param {{x:number, y:number, width:number, height:number}|null} [rect]
@@ -9854,44 +10068,6 @@
     };
 
     /**
-     * Creates an off-screen context sized to match the canvas backing store.
-     * The component owns the returned DC; recreate it in MSG_SIZE after resizing.
-     * @param {string} pacId
-     * @returns {CanvasRenderingContext2D|null}
-     */
-    wakaPAC.createCompatibleDC = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
-
-        if (!container || !(container instanceof HTMLCanvasElement)) {
-            return null;
-        }
-
-        return /** @type {CanvasRenderingContext2D} */ (new OffscreenCanvas(container.width, container.height).getContext('2d'));
-    };
-
-    /**
-     * Releases a compatible DC. Zeros the OffscreenCanvas dimensions to free
-     * the pixel buffer promptly rather than waiting on GC.
-     * @param {CanvasRenderingContext2D} dc
-     */
-    wakaPAC.deleteCompatibleDC = function(dc) {
-        // OffscreenCanvas has no explicit destroy method — nulling the canvas
-        // width and height releases the pixel buffer immediately in most engines,
-        // allowing the GC to reclaim the backing store without waiting for a
-        // full collection cycle.
-        if (!dc) {
-            return;
-        }
-
-        const offscreen = dc.canvas;
-
-        if (offscreen instanceof OffscreenCanvas) {
-            offscreen.width  = 0;
-            offscreen.height = 0;
-        }
-    };
-
-    /**
      * Blits srcDC onto destDC at (dx, dy). Optional dw/dh stretch the source;
      * omit to copy at the source's natural dimensions.
      * @param {CanvasRenderingContext2D} destDC
@@ -9913,6 +10089,29 @@
             dx, dy,
             dw ?? source.width,
             dh ?? source.height
+        );
+    };
+
+    /**
+     * Blits srcDC onto destDC at (dx, dy) scaled to (dw, dh).
+     * Unlike bitBlt, the source is always stretched to fill the destination rect.
+     * Use this when the offscreen DC dimensions differ from the target canvas.
+     * @param {CanvasRenderingContext2D} destDC
+     * @param {CanvasRenderingContext2D} srcDC
+     * @param {number} dx - Destination X
+     * @param {number} dy - Destination Y
+     * @param {number} dw - Destination width
+     * @param {number} dh - Destination height
+     */
+    wakaPAC.stretchBlt = function(destDC, srcDC, dx, dy, dw, dh) {
+        if (!destDC || !srcDC) {
+            return;
+        }
+
+        destDC.drawImage(
+            srcDC.canvas,
+            0, 0, srcDC.canvas.width, srcDC.canvas.height,
+            dx, dy, dw, dh
         );
     };
 
@@ -10104,12 +10303,297 @@
         };
     };
 
-    // ========================================================================
-    // EXPORTS
-    // ========================================================================
+    /**
+     * Executes a display list (metafile) onto a canvas context.
+     * Equivalent to Win32's PlayEnhMetaFile() — plays back a recorded sequence
+     * of drawing operations produced by ChartUtils or any other display list producer.
+     *
+     * The offset is applied via ctx.translate so all coordinates in the display
+     * list are naturally relative to (0, 0). State is saved and restored around
+     * the entire playback so the caller's context is unaffected.
+     *
+     * Non-drawing instructions (op: 'hitArea') are silently skipped.
+     *
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {Array<Object>} dl - Display list returned by a chart or drawing function
+     * @param {number} [offsetX=0] - X offset to apply to the entire display list
+     * @param {number} [offsetY=0] - Y offset to apply to the entire display list
+     */
+    wakaPAC.playMetaFile = function(ctx, dl, offsetX = 0, offsetY = 0) {
+        if (!ctx || !Array.isArray(dl) || dl.length === 0) {
+            return;
+        }
+
+        ctx.save();
+
+        if (offsetX !== 0 || offsetY !== 0) {
+            ctx.translate(offsetX, offsetY);
+        }
+
+        for (let i = 0, len = dl.length; i < len; i++) {
+            const op = dl[i];
+
+            // Direct property assignments: op.value → ctx[property]
+            if (op.op in _metaFileProps) {
+                ctx[_metaFileProps[op.op]] = op.value;
+                continue;
+            }
+
+            // Direct no-argument method calls: ctx.method()
+            if (op.op in _metaFileMethods) {
+                ctx[_metaFileMethods[op.op]]();
+                continue;
+            }
+
+            // Ops requiring custom argument mapping
+            switch (op.op) {
+                case 'moveTo':
+                    ctx.moveTo(op.x, op.y);
+                    break;
+
+                case 'lineTo':
+                    ctx.lineTo(op.x, op.y);
+                    break;
+
+                case 'arc':
+                    ctx.arc(op.cx, op.cy, op.r, op.startAngle, op.endAngle, op.ccw ?? false);
+                    break;
+
+                case 'arcTo':
+                    ctx.arcTo(op.x1, op.y1, op.x2, op.y2, op.r);
+                    break;
+
+                case 'ellipse':
+                    ctx.ellipse(op.cx, op.cy, op.rx, op.ry, op.rotation, op.startAngle, op.endAngle, op.ccw ?? false);
+                    break;
+
+                case 'rect':
+                    ctx.rect(op.x, op.y, op.w, op.h);
+                    break;
+
+                case 'roundRect':
+                    ctx.roundRect(op.x, op.y, op.w, op.h, op.r);
+                    break;
+
+                case 'bezierCurveTo':
+                    ctx.bezierCurveTo(op.cp1x, op.cp1y, op.cp2x, op.cp2y, op.x, op.y);
+                    break;
+
+                case 'quadraticCurveTo':
+                    ctx.quadraticCurveTo(op.cpx, op.cpy, op.x, op.y);
+                    break;
+
+                case 'fill':
+                    ctx.fill(op.rule ?? 'nonzero');
+                    break;
+
+                case 'clip':
+                    ctx.clip(op.rule ?? 'nonzero');
+                    break;
+
+                case 'fillRect':
+                    ctx.fillRect(op.x, op.y, op.w, op.h);
+                    break;
+
+                case 'strokeRect':
+                    ctx.strokeRect(op.x, op.y, op.w, op.h);
+                    break;
+
+                case 'clearRect':
+                    ctx.clearRect(op.x, op.y, op.w, op.h);
+                    break;
+
+                case 'fillText':
+                    ctx.fillText(op.text, op.x, op.y, op.maxWidth);
+                    break;
+
+                case 'strokeText':
+                    ctx.strokeText(op.text, op.x, op.y, op.maxWidth);
+                    break;
+
+                case 'drawImage':
+                    ctx.drawImage(op.image, op.dx, op.dy, op.dw, op.dh);
+                    break;
+
+                case 'translate':
+                    ctx.translate(op.x, op.y);
+                    break;
+
+                case 'rotate':
+                    ctx.rotate(op.angle);
+                    break;
+
+                case 'scale':
+                    ctx.scale(op.x, op.y);
+                    break;
+
+                case 'transform':
+                    ctx.transform(op.a, op.b, op.c, op.d, op.e, op.f);
+                    break;
+
+                case 'setTransform':
+                    ctx.setTransform(op.a, op.b, op.c, op.d, op.e, op.f);
+                    break;
+
+                case 'setLineDash':
+                    ctx.setLineDash(op.value);
+                    break;
+
+                case 'setShadow':
+                    ctx.shadowColor = op.color;
+                    ctx.shadowBlur = op.blur;
+                    ctx.shadowOffsetX = op.offsetX ?? 0;
+                    ctx.shadowOffsetY = op.offsetY ?? 0;
+                    break;
+
+                case 'clearShadow':
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
+                    ctx.shadowOffsetX = 0;
+                    ctx.shadowOffsetY = 0;
+                    break;
+
+                case 'setImageSmoothing':
+                    ctx.imageSmoothingEnabled = op.enabled;
+
+                    if (op.quality) {
+                        ctx.imageSmoothingQuality = op.quality;
+                    }
+
+                    break;
+
+                case 'hitArea':
+                    break; // Non-drawing — skip
+
+                default:
+                    console.warn(`wakaPAC.playMetaFile: unknown op "${op.op}"`);
+                    break;
+            }
+        }
+
+        ctx.restore();
+    };
+
+    /**
+     * Hit-tests a point against the hitArea entries in a display list.
+     * Returns the data payload of the first matching hit area, or null if none matched.
+     *
+     * Supported hitArea shapes:
+     *   rect   — { x, y, w, h } axis-aligned rectangle
+     *   sector — { cx, cy, r, startAngle, endAngle } pie/donut sector
+     *
+     * Pass the same offsetX/offsetY that were passed to playMetaFile — the function
+     * subtracts them from the test point internally so the caller works in container
+     * coordinates throughout.
+     *
+     * @param {Array<Object>} dl - Display list to test against
+     * @param {number}        x        - X coordinate to test (container coordinates)
+     * @param {number}        y        - Y coordinate to test (container coordinates)
+     * @param {number}        [offsetX=0] - X offset passed to playMetaFile
+     * @param {number}        [offsetY=0] - Y offset passed to playMetaFile
+     * @returns {*|null} The matching hitArea's data payload, or null
+     */
+    wakaPAC.metaFileHitTest = function (dl, x, y, offsetX = 0, offsetY = 0) {
+        if (!Array.isArray(dl)) {
+            return null;
+        }
+
+        // Translate the test point into display list space
+        const lx = x - offsetX;
+        const ly = y - offsetY;
+
+        for (let i = 0, len = dl.length; i < len; i++) {
+            const op = dl[i];
+
+            if (op.op !== 'hitArea') {
+                continue;
+            }
+
+            const shape = op.shape ?? 'rect';
+
+            switch (shape) {
+                case 'rect':
+                    if (lx >= op.x && lx <= op.x + op.w &&
+                        ly >= op.y && ly <= op.y + op.h) {
+                        return op.data ?? null;
+                    }
+                    break;
+
+                case 'sector': {
+                    // Distance from centre
+                    const dx = lx - op.cx;
+                    const dy = ly - op.cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist > op.r) {
+                        break;
+                    }
+
+                    // Inner radius for donut charts — 0 means full pie
+                    if (op.innerR && dist < op.innerR) {
+                        break;
+                    }
+
+                    // Full circle — any point within radius is a hit
+                    if (Math.abs(op.endAngle - op.startAngle) >= Math.PI * 2) {
+                        return op.data ?? null;
+                    }
+
+                    // Angle from centre — atan2 returns [-π, π], normalise to [0, 2π]
+                    let angle = Math.atan2(dy, dx);
+
+                    if (angle < 0) {
+                        angle += Math.PI * 2;
+                    }
+
+                    // Normalise sector angles to [0, 2π] for consistent comparison
+                    let start = op.startAngle % (Math.PI * 2);
+                    let end = op.endAngle % (Math.PI * 2);
+
+                    if (start < 0) {
+                        start += Math.PI * 2;
+                    }
+
+                    if (end < 0) {
+                        end += Math.PI * 2;
+                    }
+
+                    const inSector = start <= end
+                        ? angle >= start && angle <= end
+                        : angle >= start || angle <= end; // wraps past 2π
+
+                    if (inSector) {
+                        return op.data ?? null;
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        return null;
+    };
+
+    /**
+     * Returns true if the point falls within any hitArea entry in the display list.
+     * Equivalent to ptInElement() but for metafile hit areas.
+     * Pass the same offsetX/offsetY that were passed to playMetaFile.
+     * @param {Array<Object>} dl          - Display list to test against
+     * @param {number}        x           - X coordinate to test (container coordinates)
+     * @param {number}        y           - Y coordinate to test (container coordinates)
+     * @param {number}        [offsetX=0] - X offset passed to playMetaFile
+     * @param {number}        [offsetY=0] - Y offset passed to playMetaFile
+     * @returns {boolean}
+     */
+    wakaPAC.ptInMetaFile = function(dl, x, y, offsetX = 0, offsetY = 0) {
+        return wakaPAC.metaFileHitTest(dl, x, y, offsetX, offsetY) !== null;
+    };
 
     // Registry file
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
+
+    // Export Metafile
+    wakaPAC.MetaFile = MetaFile;
 
     // Export main function to global scope
     window.wakaPAC = wakaPAC;
@@ -10122,8 +10606,9 @@
         MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
         MSG_INPUT_COMPLETE, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
         MSG_ACCEL, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE,
-        MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
-        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
+        MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
+        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE,
+        MSG_DROP, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
