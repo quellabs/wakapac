@@ -835,49 +835,6 @@
         },
 
         /**
-         * Formats a value for display in text content
-         * @param {*} value - Value to format
-         * @returns {string} Formatted string
-         */
-        formatValue(value) {
-            return value !== null ? String(value) : '';
-        },
-
-        /**
-         * Sanitizes user input by stripping HTML tags and returning escaped HTML
-         * Uses the browser's built-in text content handling to safely process untrusted input
-         * @param {string} html - The potentially unsafe HTML string to sanitize
-         * @returns {string} The sanitized string with HTML tags stripped and special characters escaped
-         */
-        sanitizeUserInput(html) {
-            // Create a temporary div element to leverage browser's text content handling
-            const div = document.createElement('div');
-
-            // Set textContent (not innerHTML) to automatically strip all HTML tags
-            // The browser treats the input as plain text, removing any markup
-            div.textContent = html;
-
-            // Return the innerHTML, which gives us the text with HTML entities properly escaped
-            // This converts characters like < > & " ' into their HTML entity equivalents
-            return div.innerHTML;
-        },
-
-        /**
-         * Manually escapes HTML special characters to prevent XSS attacks
-         * Converts potentially dangerous characters into their HTML entity equivalents
-         * @param {string} str - The string containing characters that need to be escaped
-         * @returns {string} The escaped string safe for insertion into HTML
-         */
-        escapeHTML(str) {
-            return String(str)
-                .replace(/&/g, '&amp;')    // Replace & first (must be done before other entities)
-                .replace(/</g, '&lt;')     // Replace < with less-than entity
-                .replace(/>/g, '&gt;')     // Replace > with greater-than entity
-                .replace(/"/g, '&quot;')   // Replace double quotes with quote entity
-                .replace(/'/g, '&#39;');   // Replace single quotes with apostrophe entity
-        },
-
-        /**
          * Deep equality comparison optimized for performance
          * @param {*} a - First value
          * @param {*} b - Second value
@@ -6948,42 +6905,6 @@
         Object.defineProperties(proxiedReactive, {
 
             /**
-             * Formats a value for display in text content or UI elements
-             * Handles null/undefined, objects, arrays, and primitives appropriately
-             * @param {*} value - Value to format for display
-             * @returns {string} Human-readable formatted string
-             */
-            formatValue: {
-                value: (value) => Utils.formatValue(value),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Escapes HTML entities to prevent XSS when displaying user input
-             * Converts <, >, &, quotes to their HTML entity equivalents
-             * @param {string} str - String to escape HTML entities in
-             * @returns {string} HTML-safe escaped string
-             */
-            escapeHTML: {
-                value: (str) => Utils.escapeHTML(str),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Strips all HTML tags from user input to get plain text
-             * Use this for user-generated content that should not contain HTML
-             * @param {string} html - HTML string to sanitize
-             * @returns {string} Plain text with all HTML tags removed
-             */
-            sanitizeUserInput: {
-                value: (html) => Utils.sanitizeUserInput(html),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
              * Converts container-relative coordinates to viewport-absolute coordinates
              * Equivalent to Win32 ClientToScreen - converts client-area to screen coordinates
              * @param {number} x - Container-relative x coordinate
@@ -6993,6 +6914,7 @@
             containerToViewport: {
                 value: (x, y) => {
                     const rect = self.container.getBoundingClientRect();
+
                     return {
                         x: x + rect.left,
                         y: y + rect.top
@@ -7072,7 +6994,7 @@
         abstraction.browserContentHeight = document.documentElement.scrollHeight;
 
         // Container scroll properties
-        abstraction.containerIsScrollable =  false;                         // Can scroll in any direction
+        abstraction.containerIsScrollable = false;                         // Can scroll in any direction
         abstraction.containerScrollX = this.container.scrollLeft;           // Current horizontal scroll position
         abstraction.containerScrollY = this.container.scrollTop;            // Current vertical scroll position
         abstraction.containerContentWidth = this.container.scrollWidth;     // Total scrollable content width
@@ -7325,59 +7247,6 @@
 
         const rootArray = this.abstraction[rootName];
         return Array.isArray(rootArray) ? rootArray : currentArray;
-    };
-
-    /**
-     * Finds the original index of an item in the source array
-     * @param {*} item - The item to find
-     * @param {Array} sourceArray - The source array to search in
-     * @param {number} fallbackIndex - Fallback index if not found
-     * @returns {number} The original index in the source array
-     */
-    Context.prototype.findOriginalIndex = function(item, sourceArray, fallbackIndex) {
-        // For primitive arrays (like flatGrid with numbers), the renderIndex IS the correct index
-        // because the array items are primitives that appear in order
-        if (typeof item === 'number' || typeof item === 'string' || typeof item === 'boolean') {
-            return fallbackIndex;
-        }
-
-        // Pre-compute ID lookup capability once, outside the loop
-        const hasId = item && typeof item === 'object' && item.id !== undefined;
-        const itemId = hasId ? item.id : undefined;
-        const len = sourceArray.length;
-
-        // Single pass: reference equality (immediate return) + ID tracking (deferred)
-        let idMatch = -1;
-
-        for (let i = 0; i < len; i++) {
-            const sourceItem = sourceArray[i];
-
-            // Strategy 1: Direct reference comparison — highest priority, return immediately
-            if (sourceItem === item) {
-                return i;
-            }
-
-            // Strategy 2: Track first ID match for deferred return
-            if (hasId && idMatch === -1 &&
-                sourceItem && typeof sourceItem === 'object' && sourceItem.id === itemId) {
-                idMatch = i;
-            }
-        }
-
-        // Return ID match if found
-        if (idMatch !== -1) {
-            return idMatch;
-        }
-
-        // Strategy 3: Deep equality — expensive, only runs when reference and ID both failed
-        for (let i = 0; i < len; i++) {
-            if (Utils.isEqual(sourceArray[i], item)) {
-                return i;
-            }
-        }
-
-        // Strategy 4: Fallback to render index (maintains current behavior for edge cases)
-        return fallbackIndex;
     };
 
     /**
@@ -7928,54 +7797,6 @@
             child.parent = this;
             this.children.add(child);
         });
-    };
-
-    // =============================================================================
-    // ARRAY CHANGE TRACKING (Diffing & Minimal DOM Updates)
-    // =============================================================================
-
-    /**
-     * Creates a stable hash from content data, handling various data types
-     * @returns {string} A string representation suitable for hashing
-     * @param inputData
-     */
-    Context.prototype.createContentHash = function(inputData) {
-        /**
-         * Convert any data structure into a deterministic string representation.
-         * This ensures that logically equivalent objects produce the same hash string,
-         * regardless of key order or formatting differences.
-         */
-        function createStableRepresentation(value) {
-            // Handle null or undefined explicitly
-            if (value === null || value === undefined) {
-                return String(value);
-            }
-
-            // Handle primitive types (string, number, boolean, etc.)
-            if (typeof value !== "object") {
-                return String(value);
-            }
-
-            // Handle arrays: recursively hash each item in order
-            if (Array.isArray(value)) {
-                const arrayRepresentation = value.map(function (element) {
-                    return createStableRepresentation(element);
-                });
-
-                return "[" + arrayRepresentation.join(",") + "]";
-            }
-
-            // Handle objects: sort keys to ensure consistent ordering
-            const sortedKeys = Object.keys(value).sort();
-            const objectRepresentation = sortedKeys.map(function(key) {
-                return key + ":" + createStableRepresentation(value[key]);
-            });
-
-            return "{" + objectRepresentation.join(",") + "}";
-        }
-
-        // Entry point: return stable representation for the given input
-        return createStableRepresentation(inputData);
     };
 
     /**
