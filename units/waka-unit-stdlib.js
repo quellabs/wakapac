@@ -19,7 +19,7 @@
  * ║  Flat:        {{ beep() }}  (requires data-pac-uses="Stdlib")                        ║
  * ║                                                                                      ║
  * ║  Note: beep() is a side-effect function and is not meaningful in {{ }} expressions.  ║
- * ║  Use it in event bindings: data-pac-on:click="Stdlib.beep(440, 200)"                ║
+ * ║  Use it in event bindings: data-pac-bind="click: Stdlib.beep(440, 200)"              ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
