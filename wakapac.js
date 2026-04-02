@@ -110,6 +110,12 @@
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
 
+    /** Custom event names dispatched on PAC containers */
+    const EV_PAC_EVENT        = 'pac:event';
+    const EV_PAC_CHANGE       = 'pac:change';
+    const EV_PAC_ARRAY_CHANGE = 'pac:array-change';
+    const EV_PAC_BROWSER_STATE = 'pac:browser-state';
+
     /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
     const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
 
@@ -1125,7 +1131,7 @@
          */
         function dispatchArrayChangeEvents(path, oldValue, newValue, method) {
             // Dispatch array-specific event
-            container.dispatchEvent(new CustomEvent("pac:array-change", {
+            container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
                 detail: {
                     path: path,
                     oldValue: oldValue,
@@ -1135,7 +1141,7 @@
             }));
 
             // Also trigger computed property updates
-            container.dispatchEvent(new CustomEvent("pac:change", {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
                 detail: {
                     path: path,
                     oldValue: oldValue,
@@ -1294,7 +1300,7 @@
 
             // Dispatch array-specific event if this is an array assignment
             if (Array.isArray(newValue)) {
-                container.dispatchEvent(new CustomEvent("pac:array-change", {
+                container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
                     detail: {
                         path: propertyPath,
                         oldValue: oldValue,
@@ -1304,7 +1310,7 @@
                 }));
             }
 
-            container.dispatchEvent(new CustomEvent("pac:change", {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
                 detail: {
                     path: propertyPath,
                     oldValue: oldValue,
@@ -1344,7 +1350,7 @@
             delete target[prop];
 
             // Notify the DOM that this property is gone
-            container.dispatchEvent(new CustomEvent("pac:change", {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
                 detail: {
                     path: propertyPath,
                     oldValue: oldValue,
@@ -2793,7 +2799,7 @@
          */
         wrapDomEventAsMessage(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}, targetOverride = null) {
             // Create custom event with extended data in detail (optional)
-            const customEvent = new CustomEvent('pac:event', {
+            const customEvent = new CustomEvent(EV_PAC_EVENT, {
                 bubbles: true,
                 cancelable: true,
                 detail: extended
@@ -3003,7 +3009,7 @@
          */
         dispatchBrowserStateEvent(stateType, stateData) {
             window.PACRegistry.components.forEach((context) => {
-                const customEvent = new CustomEvent('pac:browser-state', {
+                const customEvent = new CustomEvent(EV_PAC_BROWSER_STATE, {
                     detail: {
                         target: context.container,
                         stateType: stateType,
@@ -5047,10 +5053,10 @@
         this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
 
         // Add listeners using the stored references
-        this.container.addEventListener('pac:event', this.boundHandlePacEvent);
-        this.container.addEventListener('pac:change', this.boundHandlePacEvent);
-        this.container.addEventListener('pac:array-change', this.boundHandlePacEvent);
-        this.container.addEventListener('pac:browser-state', this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
 
         // Add timers
         this.timers = new Map();
@@ -5098,10 +5104,10 @@
         DomUpdateTracker.unObserveContainer(this.container);
 
         // Remove event listeners
-        this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
 
         // Clear debounce timer if exists
         if (this.debounceTimer) {
@@ -8996,7 +9002,7 @@
         }
 
         // Create a custom wakapac event that carries Win32-style message data.
-        const event = new CustomEvent('pac:event', {
+        const event = new CustomEvent(EV_PAC_EVENT, {
             bubbles: false,
             cancelable: true,
             detail: extended
@@ -9681,24 +9687,26 @@
     }
 
     // Single-value setters: method(value) → push {op, value}
-    const singleValueSetters = [
+    [
         'setFillStyle', 'setStrokeStyle', 'setLineWidth', 'setLineCap', 'setLineJoin',
         'setLineDashOffset', 'setMiterLimit', 'setGlobalAlpha', 'setGlobalComposite',
         'setFont', 'setTextAlign', 'setTextBaseline', 'setTextRendering',
         'setLetterSpacing', 'setWordSpacing', 'setLineDash',
-    ];
-
-    singleValueSetters.forEach(function(name) {
-        MetaFile.prototype[name] = function(value) { this._ops.push({op: name, value}); return this; };
+    ].forEach(function (name) {
+        MetaFile.prototype[name] = function (value) {
+            this._ops.push({op: name, value});
+            return this;
+        };
     });
 
     // No-argument state ops: method() → push {op}
-    const noArgumentOps = [
+    [
         'save', 'restore', 'beginPath', 'closePath', 'stroke', 'resetTransform', 'clearShadow',
-    ];
-
-    noArgumentOps.forEach(function(name) {
-        MetaFile.prototype[name] = function() { this._ops.push({op: name}); return this; };
+    ].forEach(function (name) {
+        MetaFile.prototype[name] = function () {
+            this._ops.push({op: name});
+            return this;
+        };
     });
 
     // Other ops
