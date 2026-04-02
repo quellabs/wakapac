@@ -53,7 +53,7 @@
 
     window.DateUtils = {
 
-        createPacPlugin() {
+        createPacPlugin(pac, options) {
             const locale = options.locale ?? navigator.language;
 
             return {
