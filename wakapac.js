@@ -5668,7 +5668,7 @@
             const cancellableEvents = [
                 MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
                 MSG_LCLICK, MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU,
-                MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE,
+                MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE, MSG_CHAR,
                 MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP
             ];
 

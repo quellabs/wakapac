@@ -108,6 +108,37 @@
                      */
                     isFunction: (value) => typeof value === 'function',
 
+                    /**
+                     * Returns true if the value is a string containing only digits (0–9).
+                     * Rejects empty strings, non-strings, and strings with signs,
+                     * decimals, or whitespace.
+                     * @param {*} value
+                     * @returns {boolean}
+                     */
+                    isDigits: (value) => typeof value === 'string' && /^[0-9]+$/.test(value),
+
+                    /**
+                     * Returns true if the value is numeric, mirroring PHP's is_numeric().
+                     * Accepts: integers, floats, scientific notation, leading/trailing
+                     * whitespace, and optional leading sign (+ or -).
+                     * Also returns true for actual number values (int or float).
+                     * Returns false for NaN, Infinity, non-string/non-number types,
+                     * and empty strings.
+                     * @param {*} value
+                     * @returns {boolean}
+                     */
+                    isNumeric: (value) => {
+                        if (typeof value === 'number') {
+                            return isFinite(value);
+                        }
+
+                        if (typeof value !== 'string' || value.trim() === '') {
+                            return false;
+                        }
+
+                        return /^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*$/.test(value);
+                    },
+
                     // ─── Emptiness ────────────────────────────────────────────────────
 
                     /**
