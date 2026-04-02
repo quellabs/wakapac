@@ -123,11 +123,11 @@
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
-    const BOOLEAN_ATTRIBUTES = [
+    const BOOLEAN_ATTRIBUTES = new Set([
         "readonly", "required", "selected", "checked", "hidden", "multiple", "autofocus",
         "disabled", "async", "defer", "formnovalidate", "ismap", "novalidate",
         "open", "reversed", "scoped", "seamless", "truespeed"
-    ];
+    ]);
 
     // List of extended keys
     const EXTENDED_KEYS = new Set([
@@ -500,7 +500,6 @@
         left: 'ArrowLeft',
         right: 'ArrowRight'
     };
-
 
     // ========================================================================
     // METAFILE — Display list recording and playback
@@ -4950,7 +4949,7 @@
             if (bindingType === 'enable') {
                 // Handle 'enable' as reverse of 'disabled'
                 element.toggleAttribute('disabled', !value);
-            } else if (BOOLEAN_ATTRIBUTES.includes(bindingType)) {
+            } else if (BOOLEAN_ATTRIBUTES.has(bindingType)) {
                 element.toggleAttribute(bindingType, !!value);
             } else if (value != null) {
                 element.setAttribute(bindingType, value);
@@ -9681,30 +9680,28 @@
         this._ops = [];
     }
 
-    MetaFile.prototype.setFillStyle = function(value) { this._ops.push({op: 'setFillStyle', value}); return this; };
-    MetaFile.prototype.setStrokeStyle = function(value) { this._ops.push({op: 'setStrokeStyle', value}); return this; };
-    MetaFile.prototype.setLineWidth = function(value) { this._ops.push({op: 'setLineWidth', value}); return this; };
-    MetaFile.prototype.setLineCap = function(value) { this._ops.push({op: 'setLineCap', value}); return this; };
-    MetaFile.prototype.setLineJoin = function(value) { this._ops.push({op: 'setLineJoin', value}); return this; };
-    MetaFile.prototype.setLineDashOffset = function(value) { this._ops.push({op: 'setLineDashOffset', value}); return this; };
-    MetaFile.prototype.setMiterLimit = function(value) { this._ops.push({op: 'setMiterLimit', value}); return this; };
-    MetaFile.prototype.setGlobalAlpha = function(value) { this._ops.push({op: 'setGlobalAlpha', value}); return this; };
-    MetaFile.prototype.setGlobalComposite = function(value) { this._ops.push({op: 'setGlobalComposite', value}); return this; };
-    MetaFile.prototype.setFont = function(value) { this._ops.push({op: 'setFont', value}); return this; };
-    MetaFile.prototype.setTextAlign = function(value) { this._ops.push({op: 'setTextAlign', value}); return this; };
-    MetaFile.prototype.setTextBaseline = function(value) { this._ops.push({op: 'setTextBaseline', value}); return this; };
-    MetaFile.prototype.setTextRendering = function(value) { this._ops.push({op: 'setTextRendering', value}); return this; };
-    MetaFile.prototype.setLetterSpacing = function(value) { this._ops.push({op: 'setLetterSpacing', value}); return this; };
-    MetaFile.prototype.setWordSpacing = function(value) { this._ops.push({op: 'setWordSpacing', value}); return this; };
+    // Single-value setters: method(value) → push {op, value}
+    const singleValueSetters = [
+        'setFillStyle', 'setStrokeStyle', 'setLineWidth', 'setLineCap', 'setLineJoin',
+        'setLineDashOffset', 'setMiterLimit', 'setGlobalAlpha', 'setGlobalComposite',
+        'setFont', 'setTextAlign', 'setTextBaseline', 'setTextRendering',
+        'setLetterSpacing', 'setWordSpacing', 'setLineDash',
+    ];
 
-    MetaFile.prototype.save = function() { this._ops.push({op: 'save'}); return this; };
-    MetaFile.prototype.restore = function() { this._ops.push({op: 'restore'}); return this; };
-    MetaFile.prototype.beginPath = function() { this._ops.push({op: 'beginPath'}); return this; };
-    MetaFile.prototype.closePath = function() { this._ops.push({op: 'closePath'}); return this; };
-    MetaFile.prototype.stroke = function() { this._ops.push({op: 'stroke'}); return this; };
-    MetaFile.prototype.resetTransform = function() { this._ops.push({op: 'resetTransform'}); return this; };
-    MetaFile.prototype.clearShadow = function() { this._ops.push({op: 'clearShadow'}); return this; };
+    singleValueSetters.forEach(function(name) {
+        MetaFile.prototype[name] = function(value) { this._ops.push({op: name, value}); return this; };
+    });
 
+    // No-argument state ops: method() → push {op}
+    const noArgumentOps = [
+        'save', 'restore', 'beginPath', 'closePath', 'stroke', 'resetTransform', 'clearShadow',
+    ];
+
+    noArgumentOps.forEach(function(name) {
+        MetaFile.prototype[name] = function() { this._ops.push({op: name}); return this; };
+    });
+
+    // Other ops
     MetaFile.prototype.moveTo = function(x, y) { this._ops.push({op: 'moveTo', x, y}); return this; };
     MetaFile.prototype.lineTo = function(x, y) { this._ops.push({op: 'lineTo', x, y}); return this; };
     MetaFile.prototype.arc = function(cx, cy, r, startAngle, endAngle, ccw = false) { this._ops.push({op: 'arc', cx, cy, r, startAngle, endAngle, ccw}); return this; };
@@ -9722,14 +9719,11 @@
     MetaFile.prototype.bezierCurveTo = function(cp1x, cp1y, cp2x, cp2y, x, y) { this._ops.push({op: 'bezierCurveTo', cp1x, cp1y, cp2x, cp2y, x, y}); return this; };
     MetaFile.prototype.quadraticCurveTo = function(cpx, cpy, x, y) { this._ops.push({op: 'quadraticCurveTo', cpx, cpy, x, y}); return this; };
     MetaFile.prototype.drawImage = function(image, dx, dy, dw, dh) { this._ops.push({op: 'drawImage', image, dx, dy, dw, dh}); return this; };
-
     MetaFile.prototype.translate = function(x, y) { this._ops.push({op: 'translate', x, y}); return this; };
     MetaFile.prototype.rotate = function(angle) { this._ops.push({op: 'rotate', angle}); return this; };
     MetaFile.prototype.scale = function(x, y) { this._ops.push({op: 'scale', x, y}); return this; };
     MetaFile.prototype.transform = function(a, b, c, d, e, f) { this._ops.push({op: 'transform', a, b, c, d, e, f}); return this; };
     MetaFile.prototype.setTransform = function(a, b, c, d, e, f) { this._ops.push({op: 'setTransform', a, b, c, d, e, f}); return this; };
-
-    MetaFile.prototype.setLineDash = function(value) { this._ops.push({op: 'setLineDash', value}); return this; };
     MetaFile.prototype.setShadow = function(color, blur, offsetX = 0, offsetY = 0) { this._ops.push({op: 'setShadow', color, blur, offsetX, offsetY}); return this; };
     MetaFile.prototype.setImageSmoothing = function(enabled, quality) { this._ops.push({op: 'setImageSmoothing', enabled, quality}); return this; };
 
