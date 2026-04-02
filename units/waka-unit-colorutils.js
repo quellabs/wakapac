@@ -56,7 +56,7 @@
                 }
 
                 if (hex.length === 3) {
-                    hex = hex.split('').map(c => c + c).join('');
+                    return hex.split('').map(c => c + c).join('');
                 } else {
                     return hex.toLowerCase();
                 }
