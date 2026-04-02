@@ -5330,6 +5330,12 @@
         // Apply initial bindings to new elements
         newBindings.forEach((mappingData, element) => {
             Object.keys(mappingData.bindings).forEach(bindingType => {
+                // Skip event bindings — they are never evaluated eagerly, only on user interaction.
+                if (bindingType === 'click' || bindingType === 'submit') {
+                    return;
+                }
+
+                // Evaluate the expression
                 const bindingData = mappingData.bindings[bindingType];
 
                 const value = ExpressionParser.evaluate(
@@ -5733,57 +5739,79 @@
      * @param {Element} event.target - The DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
-    Context.prototype.handleDomClicks = function(event) {
+    Context.prototype.handleDomClicks = function (event) {
         // Get interpolation data for the clicked element
         const mappingData = this.interpolationMap.get(event.target);
         if (!mappingData?.bindings?.click) {
             return;
         }
 
-        // Resolve the target method from the abstraction object
-        const method = this.abstraction[mappingData.bindings.click.target];
-        if (typeof method !== 'function') {
-            return;
-        }
+        const bindingTarget = mappingData.bindings.click.target;
 
         try {
             // Check if click occurred within a foreach loop context
             const contextInfo = this.extractClosestForeachContext(event.target);
 
-            // Simple case: call method with just the event
-            if (!contextInfo) {
-                method.call(this.abstraction, event);
-                return;
-            }
-
-            // Find the foreach element that contains this click target
-            const foreachElement = Array.from(this.interpolationMap.entries())
-                .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
-
-            if (!foreachElement) {
-                // Fallback to simple call if foreach element not found
-                method.call(this.abstraction, event);
-                return;
-            }
-
-            // Get the foreach configuration and set up scope resolution
-            const foreachData = this.interpolationMap.get(foreachElement);
-
-            // Evaluate the foreach expression to get the source array
-            const array = ExpressionParser.evaluate(
-                ExpressionCache.parseExpression(foreachData.foreachExpr),
-                this.abstraction,
-                makeScopeResolver(
-                    this.normalizePath.bind(this),
-                    event.target,
-                    this.importedUnits
-                )
+            // Build scope resolver once, shared across all evaluations below
+            const scopeResolver = makeScopeResolver(
+                this.normalizePath.bind(this),
+                event.target,
+                this.importedUnits
             );
 
-            // Call method with foreach context: (arrayItem, index, originalEvent)
-            method.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
+            if (contextInfo) {
+                // Find the foreach element that contains this click target
+                const foreachElement = Array.from(this.interpolationMap.entries())
+                    .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
+
+                if (foreachElement) {
+                    // Evaluate the foreach expression to get the source array
+                    const foreachData = this.interpolationMap.get(foreachElement);
+                    const array = ExpressionParser.evaluate(
+                        ExpressionCache.parseExpression(foreachData.foreachExpr),
+                        this.abstraction,
+                        scopeResolver
+                    );
+
+                    // Inject foreach context into scope so expressions can reference $item, $index, $event
+                    const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                        $item: array[contextInfo.index],
+                        $index: contextInfo.index,
+                        $event: event
+                    });
+
+                    const foreachResult = ExpressionParser.evaluate(
+                        ExpressionCache.parseExpression(bindingTarget),
+                        scopedAbstraction,
+                        scopeResolver
+                    );
+
+                    // Fallback: bare method name — call with (item, index, event)
+                    if (typeof foreachResult === 'function') {
+                        foreachResult.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
+                    }
+
+                    return;
+                }
+            }
+
+            // Simple case: evaluate expression with $event in scope
+            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                $event: event
+            });
+
+            const result = ExpressionParser.evaluate(
+                ExpressionCache.parseExpression(bindingTarget),
+                scopedAbstraction,
+                scopeResolver
+            );
+
+            // Fallback: bare method name — call with (event)
+            if (typeof result === 'function') {
+                result.call(this.abstraction, event);
+            }
         } catch (error) {
-            console.warn(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
+            console.warn(`Error executing click binding '${bindingTarget}':`, error);
         }
     }
 
