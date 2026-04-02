@@ -51,15 +51,15 @@
 
                 hex = hex.replace('#', '');
 
-                if (hex.length === 3) {
-                    hex = hex.split('').map(c => c + c).join('');
-                }
-
-                if (hex.length !== 6) {
+                if ((hex.length !== 3)  && (hex.length !== 6)) {
                     return null;
                 }
 
-                return hex.toLowerCase();
+                if (hex.length === 3) {
+                    hex = hex.split('').map(c => c + c).join('');
+                } else {
+                    return hex.toLowerCase();
+                }
             }
 
             /**
