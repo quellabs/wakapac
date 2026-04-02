@@ -138,31 +138,6 @@
                     },
 
                     /**
-                     * Returns true if the value is not empty (inverse of isEmpty).
-                     * @param {*} value
-                     * @returns {boolean}
-                     */
-                    isNotEmpty: (value) => {
-                        if (value === null || value === undefined) {
-                            return false;
-                        }
-
-                        if (typeof value === 'string' || Array.isArray(value)) {
-                            return value.length > 0;
-                        }
-
-                        if (typeof value === 'object' && !(value instanceof Date)) {
-                            return Object.keys(value).length > 0;
-                        }
-
-                        if (typeof value === 'number') {
-                            return value !== 0;
-                        }
-
-                        return true;
-                    },
-
-                    /**
                      * Returns true if the value is NaN.
                      * @param {*} value
                      * @returns {boolean}
@@ -210,14 +185,7 @@
 
                         if (typeof value === 'string') {
                             const s = value.trim().toLowerCase();
-
-                            if (s === 'true' || s === '1' || s === 'yes' || s === 'on') {
-                                return true;
-                            }
-
-                            if (s === 'false' || s === '0' || s === 'no' || s === 'off') {
-                                return false;
-                            }
+                            return s === 'true' || s === '1' || s === 'yes' || s === 'on';
                         }
 
                         return Boolean(value);
