@@ -13,13 +13,13 @@
  * ║  General-purpose standard library functions as a WakaPAC unit.                       ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
- * ║    wakaPAC.use(WakaStdlib);                                                          ║
+ * ║    wakaPAC.use(Stdlib);                                                              ║
  * ║                                                                                      ║
- * ║  Namespaced:  {{ Stdlib.beep() }}                                                    ║
- * ║  Flat:        {{ beep() }}  (requires data-pac-uses="Stdlib")                        ║
+ * ║  Namespaced:  {{ Stdlib.log(value) }}                                                ║
+ * ║  Flat:        {{ log(value) }}  (requires data-pac-uses="Stdlib")                    ║
  * ║                                                                                      ║
- * ║  Note: beep() is a side-effect function and is not meaningful in {{ }} expressions.  ║
- * ║  Use it in event bindings: data-pac-bind="click: Stdlib.beep(440, 200)"              ║
+ * ║  Note: log() and beep() are side-effect functions; use them in event bindings:       ║
+ * ║    data-pac-bind="click: Stdlib.beep(440, 200)"                                      ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
