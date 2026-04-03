@@ -43,12 +43,12 @@
             }
 
             if (message.message === wakaPAC.MSG_KEYUP) {
-                if (message.originalEvent.key === 'ArrowUp') {
+                if (message.wParam === wakaPAC.VK_UP) {
                     this.increment();
                     return true;
                 }
 
-                if (message.originalEvent.key === 'ArrowDown') {
+                if (message.wParam === wakaPAC.VK_DOWN) {
                     this.decrement();
                     return true;
                 }

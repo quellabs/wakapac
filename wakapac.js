@@ -112,8 +112,6 @@
 
     /** Custom event names dispatched on PAC containers */
     const EV_PAC_EVENT        = 'pac:event';
-    const EV_PAC_CHANGE       = 'pac:change';
-    const EV_PAC_ARRAY_CHANGE = 'pac:array-change';
     const EV_PAC_BROWSER_STATE = 'pac:browser-state';
 
     /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
@@ -172,6 +170,7 @@
      * Hex values match Win32 API message identifiers
      */
     const MSG_UNKNOWN = 0x0000;
+    const MSG_VALUE_CHANGED = 0x0001;
     const MSG_SIZE = 0x0005;
     const MSG_PAINT = 0x000F;
     const MSG_DPR_CHANGE = 0x0010;
@@ -1054,6 +1053,37 @@
             const right  = Math.max(a.x + a.width,  b.x + b.width);
             const bottom = Math.max(a.y + a.height, b.y + b.height);
             return { x, y, width: right - x, height: bottom - y };
+        },
+
+        /**
+         * Returns a debounced version of fn that delays invocation until after `delay`
+         * milliseconds have elapsed since the last call. Any pending invocation is
+         * cancelled when the debounced function is called again before the timer fires.
+         *
+         * The returned function exposes a .cancel() method to abort a pending call,
+         * which is required for proper cleanup (e.g. component teardown).
+         *
+         * @param {Function} fn    - Function to debounce
+         * @param {number}   delay - Quiet period in milliseconds
+         * @returns {Function} Debounced wrapper with a .cancel() method
+         */
+        debounce(fn, delay) {
+            let timer = null;
+
+            function debounced(...args) {
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    timer = null;
+                    fn.apply(this, args);
+                }, delay);
+            }
+
+            debounced.cancel = function() {
+                clearTimeout(timer);
+                timer = null;
+            };
+
+            return debounced;
         }
     }
 
@@ -1115,39 +1145,16 @@
                 }
 
                 // Dispatch events for the array change
-                dispatchArrayChangeEvents(currentPath, oldArray, target, methodName);
+                container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                    path: currentPath,
+                    oldValue: oldArray,
+                    newValue: target,
+                    origin: 'wakaPAC'
+                }));
 
                 // Return the result
                 return result;
             };
-        }
-
-        /**
-         * Dispatches array change and general change events
-         * @param {Array} path - Property path where change occurred
-         * @param {*} oldValue - Previous value
-         * @param {*} newValue - New value
-         * @param {string} method - Method or operation that triggered the change
-         */
-        function dispatchArrayChangeEvents(path, oldValue, newValue, method) {
-            // Dispatch array-specific event
-            container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
-                detail: {
-                    path: path,
-                    oldValue: oldValue,
-                    newValue: newValue,
-                    method: method
-                }
-            }));
-
-            // Also trigger computed property updates
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: path,
-                    oldValue: oldValue,
-                    newValue: newValue
-                }
-            }));
         }
 
         /**
@@ -1172,12 +1179,12 @@
             target.length = newLength;
 
             // Dispatch events
-            dispatchArrayChangeEvents(
-                currentPath,
-                oldArray,
-                Array.prototype.slice.call(target),
-                'length'
-            );
+            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                path: currentPath,
+                oldValue: oldArray,
+                newValue: Array.prototype.slice.call(target),
+                origin: 'wakaPAC'
+            }));
 
             return true;
         }
@@ -1245,7 +1252,7 @@
                 proxiedVal._isReactive = true;
 
                 // Write directly to target without going through the proxy set trap.
-                // This caches the proxy without firing pac:change.
+                // This caches the proxy without firing MSG_VALUE_CHANGED.
                 Object.defineProperty(target, prop, {
                     value: proxiedVal,
                     writable: true,
@@ -1299,23 +1306,11 @@
             }
 
             // Dispatch array-specific event if this is an array assignment
-            if (Array.isArray(newValue)) {
-                container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
-                    detail: {
-                        path: propertyPath,
-                        oldValue: oldValue,
-                        newValue: target[prop],
-                        method: 'assignment'
-                    }
-                }));
-            }
-
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: propertyPath,
-                    oldValue: oldValue,
-                    newValue: target[prop]
-                }
+            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                path: propertyPath,
+                oldValue: oldValue,
+                newValue: target[prop],
+                origin: 'wakaPAC'
             }));
 
             return true;
@@ -1323,7 +1318,7 @@
 
         /**
          * Proxy deleteProperty trap handler.
-         * Fires a pac:change event when a reactive property is deleted,
+         * Fires a MSG_VALUE_CHANGED event when a reactive property is deleted,
          * allowing the DOM to update in response.
          * @param {Object|Array} target - The object being proxied
          * @param {string|symbol} prop - Property being deleted
@@ -1350,12 +1345,11 @@
             delete target[prop];
 
             // Notify the DOM that this property is gone
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: propertyPath,
-                    oldValue: oldValue,
-                    newValue: undefined
-                }
+            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                path: propertyPath,
+                oldValue: oldValue,
+                newValue: undefined,
+                origin: 'wakaPAC'
             }));
 
             return true;
@@ -1546,33 +1540,67 @@
          * @returns {void}
          */
         _setupFocusEvents() {
-            // Preserve instance reference for use inside DOM callbacks
             const self = this;
 
-            // Focus in
-            // Fires when an element gains focus anywhere in the document
+            // Pending focus messages keyed by container element.
+            // Within a single tick, a KILLFOCUS followed by SETFOCUS on the same
+            // container nets to no change and both are dropped.
+            const pending = new Map();
+
+            // Single shared debounce timer for all focus events.
+            // Restarted on every focusin/focusout so the flush always happens
+            // after the last event in a burst has been processed.
+            let debounceTimer = null;
+
+            function scheduleFlush() {
+                // Cancel the previous pending flush — we haven't seen the full
+                // picture yet, more focus events may arrive in this tick
+                if (debounceTimer !== null) {
+                    clearTimeout(debounceTimer);
+                }
+
+                // Defer to the next task so both focusout and focusin have fired
+                // before we dispatch anything. By then pending holds the net state.
+                debounceTimer = setTimeout(function() {
+                    debounceTimer = null;
+
+                    // Dispatch only the net message per container — intermediate
+                    // transitions that cancelled out are never seen by msgProc
+                    for (const [container, { message, domEvent }] of pending) {
+                        const customEvent = self.wrapDomEventAsMessage(message, domEvent);
+                        self.dispatchToContainer(container, customEvent);
+                    }
+
+                    // Reset for the next focus burst
+                    pending.clear();
+                }, 0);
+            }
+
             document.addEventListener('focusin', function(event) {
-                // Resolve container responsible for the focused element
                 const container = self.getContainerForEvent(MSG_SETFOCUS, event);
 
-                // Wrap DOM focus event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(MSG_SETFOCUS, event);
+                // Overwrite any pending KILLFOCUS for this container — if focus moved
+                // within the same container the net result is that focus stayed,
+                // so the kill is cancelled and only SETFOCUS remains
+                pending.set(container, { message: MSG_SETFOCUS, domEvent: event });
 
-                // Dispatch normalized focus message
-                self.dispatchToContainer(container, customEvent);
+                // Flush change
+                scheduleFlush();
             });
 
-            // Focus out
-            // Fires when an element loses focus
             document.addEventListener('focusout', function(event) {
-                // Resolve container responsible for the blurred element
                 const container = self.getContainerForEvent(MSG_KILLFOCUS, event);
 
-                // Wrap DOM blur event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(MSG_KILLFOCUS, event);
+                // Only write KILLFOCUS if no SETFOCUS is already pending for this
+                // container. A pending SETFOCUS means focusin already fired (or will
+                // fire) in the same tick, so the kill would be cancelled anyway —
+                // skip it to avoid overwriting the more recent state.
+                if (!pending.has(container)) {
+                    pending.set(container, { message: MSG_KILLFOCUS, domEvent: event });
+                }
 
-                // Dispatch normalized blur message
-                self.dispatchToContainer(container, customEvent);
+                // Flush change
+                scheduleFlush();
             });
         },
 
@@ -4997,6 +5025,122 @@
         }
     };
 
+    // =============================================================================
+    // RAF Scheduler for timers
+    // =============================================================================
+
+    /**
+     * Shared requestAnimationFrame-based timer engine.
+     * Replaces setInterval for all WakaPAC component timers to avoid Firefox
+     * throttling issues that cause irregular MSG_TIMER delivery.
+     *
+     * All active timers across all components share a single rAF loop.
+     * The loop starts automatically when the first timer is added and stops
+     * itself when the last timer is removed — no idle overhead.
+     *
+     * Timer IDs are globally unique across all components, eliminating the need
+     * for compound keys or per-context ID sequences.
+     */
+    const RafTimerEngine = {
+        /** @type {number|null} Current rAF handle, null when loop is not running */
+        rafId: null,
+
+        /** @type {number} Global timer ID counter, incremented on each add() call */
+        nextTimerId: 1,
+
+        /** @type {Map<number, {context: Context, timerId: number, elapse: number, lastFired: number}>} */
+        timers: new Map(),
+
+        /**
+         * Registers a new timer entry and returns its globally unique ID.
+         * Starts the rAF loop if it wasn't already running.
+         * @param {Context} context - Owning context, used to resolve pacId for sendMessage
+         * @param {number} elapse - Desired interval in milliseconds
+         * @returns {number} Globally unique timer ID
+         */
+        add(context, elapse) {
+            // Generate a globally unique timer ID across all components
+            const timerId = this.nextTimerId++;
+
+            this.timers.set(timerId, {
+                context,
+                timerId,
+                elapse,
+                // Initialize to now so the first fire happens after one full interval,
+                // matching setInterval semantics rather than firing immediately
+                lastFired: performance.now()
+            });
+
+            // Start the loop only if it isn't already running
+            if (this.rafId === null) {
+                this.rafId = requestAnimationFrame(this.loop.bind(this));
+            }
+
+            // Return the ID so the context can store it for killTimer lookups
+            return timerId;
+        },
+
+        /**
+         * Removes a timer entry by its globally unique ID.
+         * Stops the rAF loop if no timers remain, avoiding idle rAF calls.
+         * @param {number} timerId - Globally unique timer ID to remove
+         */
+        remove(timerId) {
+            this.timers.delete(timerId);
+
+            // No timers left — stop the loop to avoid running it idle
+            if (this.timers.size === 0 && this.rafId !== null) {
+                cancelAnimationFrame(this.rafId);
+                this.rafId = null;
+            }
+        },
+
+        /**
+         * Removes all timers belonging to a specific context.
+         * Called by killAllTimers to clean up when a component is destroyed.
+         * @param {Context} context - The context whose timers should be removed
+         */
+        removeAllForContext(context) {
+            // Match entries by context reference — globally unique IDs make this safe
+            for (const [timerId, entry] of this.timers) {
+                if (entry.context === context) {
+                    this.timers.delete(timerId);
+                }
+            }
+
+            // Stop loop if no timers remain after the purge
+            if (this.timers.size === 0 && this.rafId !== null) {
+                cancelAnimationFrame(this.rafId);
+                this.rafId = null;
+            }
+        },
+
+        /**
+         * The rAF loop tick. Checks every registered timer against elapsed time
+         * and dispatches MSG_TIMER for any that have reached their interval.
+         * Reschedules itself as long as timers remain active.
+         * @param {number} now - Timestamp provided by requestAnimationFrame (via performance.now())
+         */
+        loop(now) {
+            for (const [, entry] of this.timers) {
+                if (now - entry.lastFired >= entry.elapse) {
+                    // Update lastFired before dispatch so that any re-entrant timer
+                    // operations inside msgProc see a consistent state
+                    entry.lastFired = now;
+                    wakaPAC.sendMessage(entry.context.abstraction.pacId, MSG_TIMER, entry.timerId, 0);
+                }
+            }
+
+            // Reschedule only if timers still exist — a killTimer inside msgProc
+            // may have emptied the map, in which case we let the loop die naturally
+            if (this.timers.size > 0) {
+                this.rafId = requestAnimationFrame(this.loop.bind(this));
+            } else {
+                this.rafId = null;
+            }
+        }
+    };
+
     // ========================================================================
     // CONTEXT
     // ========================================================================
@@ -5054,13 +5198,7 @@
 
         // Add listeners using the stored references
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
-        this.container.addEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
-        this.container.addEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
-
-        // Add timers
-        this.timers = new Map();
-        this.nextTimerId = 1;
     }
 
     // =============================================================================
@@ -5105,15 +5243,7 @@
 
         // Remove event listeners
         this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
-        this.container.removeEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
-        this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
-
-        // Clear debounce timer if exists
-        if (this.debounceTimer) {
-            clearTimeout(this.debounceTimer);
-            this.debounceTimer = null;
-        }
 
         // Clear updateQueueTimer
         if (this.updateQueueTimer !== null) {
@@ -5124,9 +5254,9 @@
         // Clear boundHandlePacEvent callback
         this.boundHandlePacEvent = null;
 
-        // Clean up container scroll listener and the timeout for it
+        // Clean up container scroll listener and cancel any pending debounced call
         if (this.containerScrollHandler) {
-            clearTimeout(this.scrollTimeout);
+            this.containerScrollHandler.cancel();
             this.container.removeEventListener('scroll', this.containerScrollHandler);
             this.containerScrollHandler = null;
         }
@@ -5177,58 +5307,37 @@
     /**
      * Sets a timer for this component, similar to Win32 SetTimer.
      * Sends MSG_TIMER messages to the component's msgProc at the specified interval.
-     * Timer IDs are auto-generated and unique per component instance.
+     * Uses a shared requestAnimationFrame loop instead of setInterval to avoid
+     * Firefox timer throttling causing irregular MSG_TIMER delivery.
+     * Timer IDs are globally unique across all components.
      * @param {number} elapse - Timer interval in milliseconds
-     * @returns {number} The auto-generated timer ID (use this to kill the timer later)
+     * @returns {number} The globally unique timer ID (use this to kill the timer later)
      */
     Context.prototype.setTimer = function(elapse) {
-        // Generate unique timer ID for this component
-        const timerId = this.nextTimerId++;
-
-        // Create interval that sends MSG_TIMER message to component
-        const intervalId = setInterval(() => {
-            wakaPAC.sendMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
-        }, elapse);
-
-        // Store mapping of timerId -> intervalId for later cleanup
-        this.timers.set(timerId, intervalId);
-
-        // Return the timerId
-        return timerId;
+        // Delegate ID generation and registration to the engine
+        return RafTimerEngine.add(this, elapse);
     };
 
     /**
      * Kills a specific timer for this component, similar to Win32 KillTimer.
      * Stops the timer from sending further MSG_TIMER messages.
      * @param {number} timerId - The timer ID returned from setTimer()
-     * @returns {boolean} True if timer was found and killed, false if timer ID not found
+     * @returns {void}
      */
     Context.prototype.killTimer = function(timerId) {
-        // Look up the browser's interval ID
-        const intervalId = this.timers.get(timerId);
-
-        // Do nothing if the timer does not exist
-        if (!intervalId) {
-            return false;
-        }
-
-        // Stop the interval and remove from registry
-        clearInterval(intervalId);
-        this.timers.delete(timerId);
-        return true;
+        // Delegate directly to the engine — timer IDs are globally unique
+        return RafTimerEngine.remove(timerId);
     };
 
     /**
      * Kills all timers for this component.
-     * Useful for cleanup or when resetting component state.
-     * Automatically called when component is destroyed.
-     * @returns {number} Number of timers that were killed
+     * Called automatically on component destruction to prevent MSG_TIMER delivery
+     * to a context that no longer exists.
+     * @returns {void}
      */
     Context.prototype.killAllTimers = function() {
-        const count = this.timers.size;
-        this.timers.forEach(clearInterval);
-        this.timers.clear();
-        return count;
+        // Delegate bulk removal to the engine, which matches by context reference
+        return RafTimerEngine.removeAllForContext(this);
     };
 
     // =============================================================================
@@ -5247,18 +5356,16 @@
         // First time setup
         requestAnimationFrame(() => this.updateContainerScrollState());
 
-        // Inline debounce implementation
-        const scrollHandler = () => {
-            clearTimeout(this.scrollTimeout); // Use instance property
-            this.scrollTimeout = setTimeout(() => {
-                this.updateContainerScrollState();
-            }, 16);
-        };
+        // Debounce scroll updates to ~1 frame (16 ms) so rapid scroll events
+        // are coalesced rather than triggering a state update on every pixel.
+        const scrollHandler = Utils.debounce(() => {
+            this.updateContainerScrollState();
+        }, 16);
 
         // Add scroll listener to this container
         this.container.addEventListener('scroll', scrollHandler, { passive: true });
 
-        // Store reference for cleanup
+        // Store reference for cleanup (scrollHandler.cancel() is called on teardown)
         this.containerScrollHandler = scrollHandler;
     }
 
@@ -5637,15 +5744,6 @@
                 break;
 
             // Handle array modification events (insertions, deletions, reordering)
-            case 'pac:array-change':
-                this.handleArrayChange(event);
-                break;
-
-            // Handle reactive data binding changes (property updates, computed value changes)
-            case 'pac:change':
-                this.handleReactiveChange(event);
-                break;
-
             // Handle browser state changes (navigation, history, URL changes)
             case 'pac:browser-state':
                 this.handleBrowserStateEvent(event);
@@ -5694,13 +5792,30 @@
             return;
         }
 
-        // Update reactive focus properties
-        if (event.message === MSG_SETFOCUS || event.message === MSG_KILLFOCUS) {
-            this.updateFocusProperties();
-        }
-
         // Call built in event handlers
         switch(event.message) {
+            // Handle reactive data binding changes (property updates, computed value changes)
+            case MSG_VALUE_CHANGED:
+                if (Array.isArray(event.detail.newValue)) {
+                    this.handleArrayChange(event);
+                }
+
+                this.updateElementBindings();
+                this.updateTextInterpolations();
+                this.updateCommentConditionals();
+                this.handleWatchersForChange(event);
+                this.handleForeachRebuildForChange(event);
+                break;
+
+            case MSG_SETFOCUS:
+                this.updateFocusProperties();
+                break;
+
+            case MSG_KILLFOCUS:
+                this.updateFocusProperties();
+                this.handleDomBlur(event);
+                break;
+
             case MSG_LCLICK:
                 // Mouse button up events - handle DOM clicks
                 this.handleDomClicks(event);
@@ -5719,11 +5834,6 @@
             case MSG_INPUT_COMPLETE:
                 // Post-mutation input (input event - value is updated)
                 this.handleDomInputComplete(event);
-                break;
-
-            case MSG_KILLFOCUS:
-                // Blur events - handle change mode updates and other blur logic
-                this.handleDomBlur(event);
                 break;
         }
     }
@@ -6030,24 +6140,6 @@
         });
     };
 
-    /**
-     * Handles reactive data binding changes triggered by property updates
-     * Orchestrates updates to all binding types: element attributes, text interpolations,
-     * comment conditionals, watchers, and foreach loops
-     * @param {CustomEvent} event - The pac:change event containing change details
-     * @param {Object} event.detail - Event payload
-     * @param {string[]} event.detail.path - Array representing the property path that changed (e.g., ['todos', '0', 'completed'])
-     * @param {*} event.detail.oldValue - The previous value before the change
-     * @param {*} event.detail.newValue - The new value after the change
-     */
-    Context.prototype.handleReactiveChange = function (event) {
-        this.updateElementBindings();
-        this.updateTextInterpolations();
-        this.updateCommentConditionals();
-        this.handleWatchersForChange(event);
-        this.handleForeachRebuildForChange(event);
-    };
-
     // =============================================================================
     // DOM UPDATE METHODS (Reactive Data → DOM Sync)
     // =============================================================================
@@ -6187,7 +6279,7 @@
      * Triggers watchers for property changes
      * Handles both root-level and nested property changes, passing appropriate before/after values
      * Note: Does not trigger for array element changes - arrays are handled by foreach rebuilds
-     * @param {CustomEvent} event - The pac:change event with change details
+     * @param {CustomEvent} event - The MSG_VALUE_CHANGED event with change details
      */
     Context.prototype.handleWatchersForChange = function(event) {
         // Root-level change (e.g., this.count = 5)
@@ -6244,7 +6336,7 @@
      * either because they're bound directly to the changed array, or because
      * they're bound to a computed property that depends on the changed property
      * (e.g., changing 'filter' triggers rebuild of foreach bound to 'filteredTodos').
-     * @param {CustomEvent} event - The pac:change event containing change details
+     * @param {CustomEvent} event - The MSG_VALUE_CHANGED event containing change details
      * @param {string[]} event.detail.path - Property path that changed
      */
     Context.prototype.handleForeachRebuildForChange = function(event) {
@@ -6256,7 +6348,7 @@
         }
 
         // Only handles computed/filtered foreach dependencies (e.g., filter → filteredTodos).
-        // Direct array assignments go through handleArrayChange via pac:array-change.
+        // Direct array assignments go through handleArrayChange via MSG_VALUE_CHANGED
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
 
@@ -7158,8 +7250,12 @@
                 return;
             }
 
-            // Get the source array to find original indices
-            const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array, mappingData);
+            // Resolve the source array for index mapping.
+            // For filtered/sorted expressions the foreach may render a subset of a larger
+            // array — fall back to the evaluated array itself when no root can be found.
+            const sourceRootName = mappingData.sourceArray || this.inferArrayRoot(mappingData.foreachExpr);
+            const sourceRootArray = sourceRootName && this.abstraction[sourceRootName];
+            const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;
 
             // Store array to be able to compare later
             foreachElement._pacPreviousArray = array;
@@ -7214,7 +7310,7 @@
                 0,
                 {
                     arrayName: mappingData.foreachExpr,
-                    marker:    foreachElement.getAttribute('data-pac-marker') ?? null
+                    marker: foreachElement.getAttribute('data-pac-marker') ?? null
                 }
             );
 
@@ -7229,7 +7325,7 @@
      * Syncs a <select> element's DOM value back into the model after its
      * child <option> elements were rebuilt by a foreach. The browser reconciles
      * the selection against the new option set; this method reads the resulting
-     * .value and writes it into the abstraction so the proxy fires a pac:change
+     * .value and writes it into the abstraction so the proxy fires a MSG_VALUE_CHANGED
      * event and dependent bindings stay in sync.
      * @param {Element} foreachElement - The element whose foreach just rebuilt
      */
@@ -7262,24 +7358,6 @@
 
         // Write the DOM value into the abstraction — the proxy handles the change event
         Utils.setNestedProperty(resolvedPath, domValue, this.abstraction);
-    };
-
-    /**
-     * Gets the source array for a potentially filtered expression
-     * @param {string} foreachExpr - The foreach expression (e.g., "filteredTodos")
-     * @param {Array} currentArray - The current evaluated array
-     * @param mappingData
-     * @returns {Array} The source array or current array if no source found
-     */
-    Context.prototype.getSourceArrayForFiltered = function (foreachExpr, currentArray, mappingData) {
-        const rootName = (mappingData && mappingData.sourceArray) || this.inferArrayRoot(foreachExpr);
-
-        if (!rootName) {
-            return currentArray;
-        }
-
-        const rootArray = this.abstraction[rootName];
-        return Array.isArray(rootArray) ? rootArray : currentArray;
     };
 
     /**
@@ -7380,24 +7458,6 @@
     };
 
     /**
-     * Count how many leading "parent" tokens appear in a path.
-     * These tokens indicate how many foreach scopes should be climbed.
-     * @param {Array<string|number>} path - Tokenized path.
-     * @returns {number} Number of parent climbs requested.
-     */
-    Context.prototype.extractParentClimbs = function (path) {
-        // Tracks how many scope levels to climb
-        let climbs = 0;
-
-        // Count consecutive "parent" tokens from the start
-        while (climbs < path.length && path[climbs] === "parent") {
-            climbs++;
-        }
-
-        return climbs;
-    };
-
-    /**
      * Build a scoped variable map from foreach frames.
      * @param {Array<Object>} frames - Effective foreach frames (outer → inner).
      * @returns {Map<string, string|number>} Scoped variable map.
@@ -7436,28 +7496,10 @@
     };
 
     /**
-     * Select the active foreach frames after applying parent climbs.
-     * Frames are returned in outer → inner order for correct scope resolution.
-     * @param {HTMLElement} element - Element inside a foreach hierarchy.
-     * @param {number} climbs - Number of scopes to climb.
-     * @returns {Array<Object>} Effective frame list.
-     */
-    Context.prototype.getEffectiveFrames = function (element, climbs) {
-        // Retrieve full foreach chain for the element
-        const frames = this.getForeachChain(element);
-
-        // Clamp climb count to available frames
-        if (climbs > frames.length) {
-            console.warn(`Cannot climb ${climbs} levels - only ${frames.length} available`);
-            climbs = frames.length;
-        }
-
-        // Remove climbed frames and reverse for dependency-safe processing
-        return frames.slice(climbs).reverse();
-    };
-
-    /**
      * Normalize a scoped path to a fully-qualified global data path.
+     * Counts leading "parent" tokens to determine how many foreach scopes to
+     * climb, selects the remaining frames, builds a scope map, and resolves
+     * the path through it.
      * @param {string|Array<string|number>} pathSegments - Local path expression.
      * @param {HTMLElement} element - Element inside a foreach hierarchy.
      * @returns {string|number} Fully-qualified path or direct numeric index.
@@ -7471,14 +7513,23 @@
             return "";
         }
 
-        // Determine how many leading "parent" tokens climb the scope chain
-        const climbs = this.extractParentClimbs(path);
+        // Count consecutive leading "parent" tokens — each one climbs one foreach scope
+        let climbs = 0;
+        while (climbs < path.length && path[climbs] === "parent") {
+            climbs++;
+        }
 
-        // Select the active foreach frames after climbing
-        const frames = this.getEffectiveFrames(element, climbs);
+        // Retrieve full foreach chain and apply parent climbs
+        const chain = this.getForeachChain(element);
+        if (climbs > chain.length) {
+            console.warn(`Cannot climb ${climbs} levels - only ${chain.length} available`);
+            climbs = chain.length;
+        }
 
-        // Fast path: if no foreach frames apply, skip scope resolution entirely.
-        // This avoids building an empty Map and running resolveScopedTokens as a no-op.
+        // Frames after climbing, reversed to outer → inner order for scope resolution
+        const frames = chain.slice(climbs).reverse();
+
+        // Fast path: no foreach frames in scope — return remaining path directly
         if (frames.length === 0) {
             const remaining = path.slice(climbs);
 
@@ -7615,14 +7666,33 @@
     };
 
     /**
+     * Parses a comment node as a foreach item marker.
+     * @param {Comment} commentNode - The DOM comment node to parse
+     * @returns {{foreachId: string, index: number, renderIndex: number}|null}
+     */
+    Context.parseForeachComment = function(commentNode) {
+        const match = commentNode.textContent.trim().match(FOREACH_INDEX_REGEX);
+
+        if (!match) {
+            return null;
+        }
+
+        return {
+            foreachId: match[1].trim(),
+            index: parseInt(match[2], 10),
+            renderIndex: parseInt(match[3], 10)
+        };
+    };
+
+    /**
      * Extracts the closest foreach context information by walking up the DOM tree
      * from a starting element, looking for comment markers that identify foreach items.
      * Checks cache first for O(1) lookup before falling back to comment parsing.
      * @param {Element} startElement - The DOM element to start searching from
-     * @returns {Object|null} Foreach context object with foreachId, index, and renderIndex or null
+     * @returns {number|null} Foreach context object with foreachId, index, and renderIndex or null
      * @returns {string} returns.foreachId - The identifier of the foreach loop
      * @returns {number} returns.index - The logical index in the data array
-     * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
+     * @returns {number|null} returns.renderIndex - The rendering index (may differ from logical index)
      */
     Context.prototype.extractClosestForeachContext = function(startElement) {
         // Cache container
@@ -7646,21 +7716,12 @@
             while (sibling) {
                 // Only process comment nodes
                 if (sibling.nodeType === COMMENT_NODE) {
-                    const match = sibling.textContent.trim().match(FOREACH_INDEX_REGEX);
+                    const context = Context.parseForeachComment(sibling);
 
-                    if (match) {
-                        // Build the context object from the regex capture groups
-                        const context = {
-                            foreachId: match[1].trim(),
-                            index: parseInt(match[2], 10),
-                            renderIndex: parseInt(match[3], 10)
-                        };
-
+                    if (context) {
                         // Cache on the starting element so subsequent lookups
                         // from the same element or its descendants are O(1)
                         startElement._pacForeachContext = context;
-
-                        // Return the context
                         return context;
                     }
                 }
@@ -7684,21 +7745,18 @@
      * @param {HTMLElement} foreachElement - The foreach container element
      */
     Context.prototype.cacheContextOnItemElements = function(foreachElement) {
-        const walker = document.createTreeWalker(foreachElement, NodeFilter.SHOW_ALL);
         let node;
         let currentContext = null;
 
+        const walker = document.createTreeWalker(foreachElement, NodeFilter.SHOW_ALL);
+
         while ((node = walker.nextNode())) {
             if (node.nodeType === Node.COMMENT_NODE) {
-                const match = node.textContent.match(FOREACH_INDEX_REGEX);
+                const context = Context.parseForeachComment(node);
 
-                if (match) {
+                if (context) {
                     // Found start marker - prepare context for next element
-                    currentContext = {
-                        foreachId: match[1].trim(),
-                        index: parseInt(match[2], 10),
-                        renderIndex: parseInt(match[3], 10)
-                    };
+                    currentContext = context;
                 } else if (node.textContent.trim() === '/pac-foreach-item') {
                     // Found end marker - clear context
                     currentContext = null;
@@ -7738,7 +7796,7 @@
             // Clean up cached state to prevent memory leaks
             delete element._pacPreviousValues;
             delete element._pacPreviousArray;
-            delete element._pacDynamicClass;
+            delete element._pacDynamicClasses;
             delete element._pacForeachChain;
             delete element._pacForeachContext;
         });
@@ -8386,8 +8444,13 @@
         /** @type {Set<Context>} Components waiting for hierarchy establishment */
         this.pendingHierarchy = new Set();
 
-        /** @type {number|null} Timer reference for batched hierarchy processing */
-        this.hierarchyTimer = null;
+        /**
+         * Debounced wrapper around establishAllHierarchies().
+         * Batches rapid registrations (e.g. from a single wakaPAC() call that mounts
+         * many child components) into one hierarchy pass 10 ms after the last one.
+         * @type {Function}
+         */
+        this._scheduleHierarchy = Utils.debounce(() => this.establishAllHierarchies(), 10);
     }
 
     ComponentRegistry.prototype = {
@@ -8400,13 +8463,8 @@
             this.components.set(selector, context);
             this.pendingHierarchy.add(context);
 
-            // Clear existing timer and start new one
-            clearTimeout(this.hierarchyTimer);
-
-            // Establish hierarchies
-            this.hierarchyTimer = setTimeout(() => {
-                this.establishAllHierarchies();
-            }, 10);
+            // Batch rapid registrations — hierarchy is established once the burst settles
+            this._scheduleHierarchy();
         },
 
         /**
@@ -8488,15 +8546,9 @@
             // Check if any new components were registered during processing
             // This happens when parent components dynamically create children
             if (this.pendingHierarchy.size > 0) {
-                // Cancel any pending hierarchy processing to avoid duplicate runs
-                clearTimeout(this.hierarchyTimer);
-
-                // Schedule another round after a brief delay
-                // The 10ms delay allows multiple rapid registrations to batch together
-                // rather than processing them one at a time
-                this.hierarchyTimer = setTimeout(() => {
-                    this.establishAllHierarchies();
-                }, 10);
+                // Schedule another pass — _scheduleHierarchy() will debounce any
+                // additional registrations that arrive before the 10 ms window closes
+                this._scheduleHierarchy();
             }
         },
 
@@ -9020,6 +9072,15 @@
 
         // Return the constructed message for delivery by postMessage or sendMessage.
         return event;
+    };
+
+    /**
+     * Resolve a WakaPAC component by its data-pac-id.
+     * @param {string} pacId Identifier of the target container
+     * @returns {HTMLElement|null} The resolved container element, or null
+     */
+    wakaPAC.getContextByPacId = function (pacId) {
+        return window.PACRegistry.get(pacId);
     };
 
     /**
@@ -10452,14 +10513,13 @@
     // Attach message type constants to wakaPAC
     Object.assign(wakaPAC, {
         // Message types
-        MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
-        MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK,
-        MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT,
-        MSG_INPUT_COMPLETE, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER,
-        MSG_ACCEL, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE,
-        MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
-        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE,
-        MSG_DROP, MSG_DPR_CHANGE,
+        MSG_UNKNOWN, MSG_VALUE_CHANGED, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
+        MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
+        MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
+        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL, MSG_COPY, MSG_PASTE,
+        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE,
+        MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER,
+        MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,

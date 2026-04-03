@@ -303,7 +303,7 @@
          *
          * Architecture mirrors WakaStore: form proxies fire pac:form-changed on
          * document on every mutation. The plugin listener translates the formId
-         * to subscriber containers and dispatches pac:change on each one.
+         * to subscriber containers and dispatches MSG_VALUE_CHANGED on each one.
          *
          * Required change in wakaPAC's proxyGetHandler (same as wakaStore):
          *
@@ -311,8 +311,9 @@
          *
          * @returns {Object} Plugin descriptor
          */
-        createPacPlugin() {
+        createPacPlugin(pac) {
             const registry = this._registry;
+            const wakaPAC = pac;
 
             /**
              * Scans the raw abstraction for form references.
@@ -339,32 +340,39 @@
 
             /**
              * Handles pac:form-changed events fired by form proxies.
-             * Dispatches pac:change on each subscriber container so wakaPAC
+             * Dispatches MSG_VALUE_CHANGED on each subscriber container so wakaPAC
              * re-renders the relevant bindings.
              * @param {CustomEvent} event
              */
             function onFormChanged(event) {
                 const { formId, path, oldValue, newValue } = event.detail;
-                const subscribers = registry.get(formId);
+
+                // Do nothing if the value did not change
+                if (oldValue === newValue) {
+                    return;
+                }
 
                 // No subscribers for this form — nothing to do.
+                const subscribers = registry.get(formId);
+
                 if (!subscribers || subscribers.size === 0) {
                     return;
                 }
 
-                subscribers.forEach(function ({ key, container }) {
+                // Notify all subscribers
+                subscribers.forEach(function ({key, container}) {
                     // Prepend the abstraction key so wakaPAC resolves the path
                     // from the component root, e.g. ['form', 'username', 'value'].
-                    container.dispatchEvent(new CustomEvent('pac:change', {
-                        detail: {
-                            path:     [key].concat(path),
-                            oldValue: oldValue,
-                            newValue: newValue
-                        }
+                    container.dispatchEvent(wakaPAC.createPacMessage(wakaPAC.MSG_VALUE_CHANGED, 0, 0, {
+                        path: [key].concat(path),
+                        oldValue: oldValue,
+                        newValue: newValue,
+                        origin: 'wakaForm'
                     }));
                 });
             }
 
+            // Listen to pac:form-changed event
             document.addEventListener(FORM_CHANGED_EVENT, onFormChanged);
 
             return {
@@ -525,7 +533,7 @@
              * Architectural note: notify() fires before derived state (valid, dirty)
              * has been updated. Listeners that re-read state through the proxy — as
              * wakaPAC's renderer does — will always see a consistent snapshot because
-             * the renderer re-evaluates all bindings on every pac:change event.
+             * the renderer re-evaluates all bindings on every MSG_VALUE_CHANGED event.
              * Listeners that consume event.detail directly and expect derived state
              * to already be updated will see stale valid/dirty values.
              *

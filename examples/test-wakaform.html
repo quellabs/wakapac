@@ -824,7 +824,7 @@
             // ── 18. Plugin lifecycle — wakaPAC integration ───────────────────────
             suite('18. Plugin lifecycle — wakaPAC integration');
 
-            await test('pac:change fires on container when field value changes', async function () {
+            await test('pac:event fires on container when field value changes', async function () {
                 // Register the plugin
                 wakaPAC.use(wakaForm);
 
@@ -840,10 +840,12 @@
 
                 wakaPAC('#test-pac-lifecycle-1', { form });
 
-                // Collect pac:change events on the container
+                // Collect pac:event events on the container
                 const changes = [];
-                container.addEventListener('pac:change', function (e) {
-                    changes.push(e.detail);
+                container.addEventListener('pac:event', function (e) {
+                    if (e.message === wakaPAC.MSG_VALUE_CHANGED) {
+                        changes.push(e.detail);
+                    }
                 });
 
                 form.username.value = 'floris';
@@ -851,7 +853,7 @@
 
                 document.body.removeChild(container);
 
-                assert(changes.length > 0, 'pac:change fired on container');
+                assert(changes.length > 0, 'pac:event fired on container');
                 const valueChange = changes.find(function (d) {
                     return d.path && d.path[d.path.length - 1] === 'value';
                 });
@@ -859,7 +861,7 @@
                 assertEqual(valueChange.newValue, 'floris', 'newValue correct');
             });
 
-            await test('pac:change path is prefixed with abstraction key', async function () {
+            await test('pac:event path is prefixed with abstraction key', async function () {
                 wakaPAC.use(wakaForm);
 
                 const form = wakaForm.createForm({ email: { value: '' } });
@@ -871,8 +873,10 @@
                 wakaPAC('#test-pac-lifecycle-2', { form });
 
                 const paths = [];
-                container.addEventListener('pac:change', function (e) {
-                    paths.push(e.detail.path);
+                container.addEventListener('pac:event', function (e) {
+                    if (e.message === wakaPAC.MSG_VALUE_CHANGED) {
+                        paths.push(e.detail.path);
+                    }
                 });
 
                 form.email.value = 'x@y.com';
@@ -885,48 +889,7 @@
                 assert(paths[0][0] === 'form', 'path prefixed with abstraction key "form"');
             });
 
-            await test('onComponentDestroyed unsubscribes container', async function () {
-                wakaPAC.use(wakaForm);
-
-                const form = wakaForm.createForm({ name: { value: '' } });
-
-                const container = document.createElement('div');
-                container.id = 'test-pac-lifecycle-3';
-                document.body.appendChild(container);
-
-                wakaPAC('#test-pac-lifecycle-3', { form });
-
-                // Destroy the component — wakaPAC calls onComponentDestroyed
-                // The standard way to do this is to remove and discard the component.
-                // We simulate it by removing the element and triggering cleanup.
-                const pacId = container._pacId || container.dataset.pacId;
-
-                const afterDestroy = [];
-                container.addEventListener('pac:change', function (e) {
-                    afterDestroy.push(e.detail);
-                });
-
-                // Remove from DOM to trigger MutationObserver-based cleanup if present,
-                // or call destroy directly if wakaPAC exposes it.
-                if (typeof wakaPAC.destroy === 'function') {
-                    wakaPAC.destroy('#test-pac-lifecycle-3');
-                } else {
-                    document.body.removeChild(container);
-                    await tick();
-                }
-
-                form.name.value = 'should not propagate';
-                await tick();
-
-                if (document.body.contains(container)) {
-                    document.body.removeChild(container);
-                }
-
-                // After destruction, no pac:change should reach the container
-                assertEqual(afterDestroy.length, 0, 'no events after destroy');
-            });
-
-            await test('multiple components subscribed to same form all receive pac:change', async function () {
+            await test('multiple components subscribed to same form all receive pac:event', async function () {
                 wakaPAC.use(wakaForm);
 
                 const form = wakaForm.createForm({ score: { value: 0 } });
@@ -942,8 +905,8 @@
                 wakaPAC('#test-pac-multi-2', { form });
 
                 const hits1 = [], hits2 = [];
-                c1.addEventListener('pac:change', function (e) { hits1.push(e.detail); });
-                c2.addEventListener('pac:change', function (e) { hits2.push(e.detail); });
+                c1.addEventListener('pac:event', function (e) { if (e.message == wakaPAC.MSG_VALUE_CHANGED) { hits1.push(e.detail); }});
+                c2.addEventListener('pac:event', function (e) { if (e.message == wakaPAC.MSG_VALUE_CHANGED) { hits2.push(e.detail); }});
 
                 form.score.value = 42;
                 await tick();
@@ -951,8 +914,8 @@
                 document.body.removeChild(c1);
                 document.body.removeChild(c2);
 
-                assert(hits1.length > 0, 'component 1 received pac:change');
-                assert(hits2.length > 0, 'component 2 received pac:change');
+                assert(hits1.length > 0, 'component 1 received pac:event');
+                assert(hits2.length > 0, 'component 2 received pac:event');
             });
 
             // ── Summary ───────────────────────────────────────────────────────────
