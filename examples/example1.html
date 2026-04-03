@@ -38,12 +38,16 @@
         },
 
         msgProc(message) {
+            if (message.message === wakaPAC.MSG_VALUE_CHANGED) {
+                console.log(message.detail);
+            }
+
             if (message.message === wakaPAC.MSG_TIMER) {
                 this.timerCounter++;
             }
 
             if (message.message === wakaPAC.MSG_KEYUP) {
-                if (message.originalEvent.key === 'ArrowUp') {
+                if (message.wParam === wakaPAC.VK_UP) {
                     this.increment();
                     return true;
                 }
