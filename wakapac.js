@@ -112,7 +112,6 @@
 
     /** Custom event names dispatched on PAC containers */
     const EV_PAC_EVENT        = 'pac:event';
-    const EV_PAC_CHANGE       = 'pac:change';
     const EV_PAC_ARRAY_CHANGE = 'pac:array-change';
     const EV_PAC_BROWSER_STATE = 'pac:browser-state';
 
@@ -172,7 +171,7 @@
      * Hex values match Win32 API message identifiers
      */
     const MSG_UNKNOWN = 0x0000;
-    const MSG_VALUE_CHANGE = 0x0001;
+    const MSG_VALUE_CHANGED = 0x0001;
     const MSG_SIZE = 0x0005;
     const MSG_PAINT = 0x000F;
     const MSG_DPR_CHANGE = 0x0010;
@@ -1142,12 +1141,10 @@
             }));
 
             // Also trigger computed property updates
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: path,
-                    oldValue: oldValue,
-                    newValue: newValue
-                }
+            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                path: path,
+                oldValue: oldValue,
+                newValue: newValue
             }));
         }
 
@@ -1311,12 +1308,10 @@
                 }));
             }
 
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: propertyPath,
-                    oldValue: oldValue,
-                    newValue: target[prop]
-                }
+            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                path: propertyPath,
+                oldValue: oldValue,
+                newValue: target[prop]
             }));
 
             return true;
@@ -1351,12 +1346,10 @@
             delete target[prop];
 
             // Notify the DOM that this property is gone
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: propertyPath,
-                    oldValue: oldValue,
-                    newValue: undefined
-                }
+            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                path: propertyPath,
+                oldValue: oldValue,
+                newValue: undefined
             }));
 
             return true;
@@ -2977,8 +2970,6 @@
                     // All hooks have been traversed — deliver the message to the container.
                     // This triggers the 'pac:event' listener on the container element,
                     // which routes to Context.handlePacEvent() and ultimately msgProc().
-                    const context = wakaPAC.getContainerByPacId(event.pacId);
-
                     container.dispatchEvent(event);
                 }
             };
@@ -5057,7 +5048,6 @@
 
         // Add listeners using the stored references
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
-        this.container.addEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
 
@@ -5109,7 +5099,6 @@
         // Remove event listeners
         this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
-        this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
 
         // Clear debounce timer if exists
@@ -5754,11 +5743,6 @@
                 this.handleArrayChange(event);
                 break;
 
-            // Handle reactive data binding changes (property updates, computed value changes)
-            case 'pac:change':
-                this.handleReactiveChange(event);
-                break;
-
             // Handle browser state changes (navigation, history, URL changes)
             case 'pac:browser-state':
                 this.handleBrowserStateEvent(event);
@@ -5814,6 +5798,15 @@
 
         // Call built in event handlers
         switch(event.message) {
+            // Handle reactive data binding changes (property updates, computed value changes)
+            case MSG_VALUE_CHANGED:
+                this.updateElementBindings();
+                this.updateTextInterpolations();
+                this.updateCommentConditionals();
+                this.handleWatchersForChange(event);
+                this.handleForeachRebuildForChange(event);
+                break;
+
             case MSG_LCLICK:
                 // Mouse button up events - handle DOM clicks
                 this.handleDomClicks(event);
@@ -6141,26 +6134,6 @@
                 this.updateQueue.delete(update.path);
             }
         });
-    };
-
-    /**
-     * Handles reactive data binding changes triggered by property updates
-     * Orchestrates updates to all binding types: element attributes, text interpolations,
-     * comment conditionals, watchers, and foreach loops
-     * @param {CustomEvent} event - The pac:change event containing change details
-     * @param {Object} event.detail - Event payload
-     * @param {string[]} event.detail.path - Array representing the property path that changed (e.g., ['todos', '0', 'completed'])
-     * @param {*} event.detail.oldValue - The previous value before the change
-     * @param {*} event.detail.newValue - The new value after the change
-     */
-    Context.prototype.handleReactiveChange = function (event) {
-        this.updateElementBindings();
-        this.updateTextInterpolations();
-        this.updateCommentConditionals();
-        this.handleWatchersForChange(event);
-        this.handleForeachRebuildForChange(event);
-
-        //wakaPAC.sendMessage(this.abstraction.pacId, MSG_VALUE_CHANGE, 0, 0, event.detail);
     };
 
     // =============================================================================
