@@ -155,8 +155,9 @@
          * Creates a wakaPAC plugin descriptor.
          * @returns {Object} Plugin descriptor
          */
-        createPacPlugin() {
+        createPacPlugin(pac) {
             const registry = this._registry;
+            const wakaPAC = pac;
 
             /**
              * Scans the raw abstraction for store references.
@@ -181,48 +182,39 @@
 
             /**
              * Handles pac:store-changed events from store proxies.
-             * Dispatches pac:change (or pac:array-change) on each subscriber
+             * Dispatches MSG_VALUE_CHANGED on each subscriber
              * container so wakaPAC re-renders the affected bindings.
-             * newValue is omitted from pac:change — wakaPAC reads from
+             * newValue is omitted from MSG_VALUE_CHANGED — wakaPAC reads from
              * this.abstraction directly and ignores event.detail.newValue.
              * @param {CustomEvent} event
              */
             function onStoreChanged(event) {
                 const { storeId, path, oldValue, newValue } = event.detail;
-                const subscribers = registry.get(storeId);
+
+                // Do nothing if the value did not change
+                if (oldValue === newValue) {
+                    return;
+                }
 
                 // Do nothing when no subscribers present
+                const subscribers = registry.get(storeId);
+
                 if (!subscribers || subscribers.size === 0) {
                     return;
                 }
 
-                const isArrayChange = Array.isArray(newValue);
-
+                // Notify all subscribers
                 subscribers.forEach(function({ key, container }) {
-                    const translatedPath = [key].concat(path);
-
-                    if (isArrayChange) {
-                        // pac:array-change triggers foreach rebuilds; handleArrayChange reads newValue only.
-                        container.dispatchEvent(new CustomEvent('pac:array-change', {
-                            detail: {
-                                path: translatedPath,
-                                oldValue: oldValue,
-                                newValue: newValue
-                            }
-                        }));
-                    } else {
-                        container.dispatchEvent(new CustomEvent('pac:change', {
-                            detail: {
-                                path: translatedPath,
-                                oldValue: oldValue,
-                                newValue: newValue
-                            }
-                        }));
-                    }
+                    container.dispatchEvent(wakaPAC.createPacMessage(wakaPAC.MSG_VALUE_CHANGED, 0, 0, {
+                        path: [key].concat(path),
+                        oldValue: oldValue,
+                        newValue: newValue,
+                        origin: 'wakaStore'
+                    }));
                 });
             }
 
-            // Listen to STORE_CHANGED_EVENT events
+            // Listen to pac:store-changed event
             document.addEventListener(STORE_CHANGED_EVENT, onStoreChanged);
 
             return {

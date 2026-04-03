@@ -1118,7 +1118,7 @@
                     path: currentPath,
                     oldValue: oldArray,
                     newValue: target,
-                    method: methodName
+                    origin: 'wakaPAC'
                 }));
 
                 // Return the result
@@ -1152,7 +1152,7 @@
                 path: currentPath,
                 oldValue: oldArray,
                 newValue: Array.prototype.slice.call(target),
-                method: 'length'
+                origin: 'wakaPAC'
             }));
 
             return true;
@@ -1279,7 +1279,7 @@
                 path: propertyPath,
                 oldValue: oldValue,
                 newValue: target[prop],
-                method: Array.isArray(newValue) ? 'assignment' : null
+                origin: 'wakaPAC'
             }));
 
             return true;
@@ -1317,7 +1317,8 @@
             container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
                 path: propertyPath,
                 oldValue: oldValue,
-                newValue: undefined
+                newValue: undefined,
+                origin: 'wakaPAC'
             }));
 
             return true;
@@ -5210,10 +5211,6 @@
         // Add listeners using the stored references
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
-
-        // Add timers
-        this.timers = new Map();
-        this.nextTimerId = 1;
     }
 
     // =============================================================================
@@ -5259,12 +5256,6 @@
         // Remove event listeners
         this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
-
-        // Clear debounce timer if exists
-        if (this.debounceTimer) {
-            clearTimeout(this.debounceTimer);
-            this.debounceTimer = null;
-        }
 
         // Clear updateQueueTimer
         if (this.updateQueueTimer !== null) {
@@ -5843,7 +5834,7 @@
         switch(event.message) {
             // Handle reactive data binding changes (property updates, computed value changes)
             case MSG_VALUE_CHANGED:
-                if (event.detail.method) {
+                if (Array.isArray(event.detail.newValue)) {
                     this.handleArrayChange(event);
                 }
 
@@ -6183,24 +6174,6 @@
                 this.updateQueue.delete(update.path);
             }
         });
-    };
-
-    /**
-     * Handles reactive data binding changes triggered by property updates
-     * Orchestrates updates to all binding types: element attributes, text interpolations,
-     * comment conditionals, watchers, and foreach loops
-     * @param {CustomEvent} event - The pac:change event containing change details
-     * @param {Object} event.detail - Event payload
-     * @param {string[]} event.detail.path - Array representing the property path that changed (e.g., ['todos', '0', 'completed'])
-     * @param {*} event.detail.oldValue - The previous value before the change
-     * @param {*} event.detail.newValue - The new value after the change
-     */
-    Context.prototype.handleReactiveChange = function (event) {
-        this.updateElementBindings();
-        this.updateTextInterpolations();
-        this.updateCommentConditionals();
-        this.handleWatchersForChange(event);
-        this.handleForeachRebuildForChange(event);
     };
 
     // =============================================================================
