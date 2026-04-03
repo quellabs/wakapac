@@ -7250,8 +7250,12 @@
                 return;
             }
 
-            // Get the source array to find original indices
-            const sourceArray = this.getSourceArrayForFiltered(mappingData.foreachExpr, array, mappingData);
+            // Resolve the source array for index mapping.
+            // For filtered/sorted expressions the foreach may render a subset of a larger
+            // array — fall back to the evaluated array itself when no root can be found.
+            const sourceRootName = mappingData.sourceArray || this.inferArrayRoot(mappingData.foreachExpr);
+            const sourceRootArray = sourceRootName && this.abstraction[sourceRootName];
+            const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;
 
             // Store array to be able to compare later
             foreachElement._pacPreviousArray = array;
@@ -7357,24 +7361,6 @@
     };
 
     /**
-     * Gets the source array for a potentially filtered expression
-     * @param {string} foreachExpr - The foreach expression (e.g., "filteredTodos")
-     * @param {Array} currentArray - The current evaluated array
-     * @param mappingData
-     * @returns {Array} The source array or current array if no source found
-     */
-    Context.prototype.getSourceArrayForFiltered = function (foreachExpr, currentArray, mappingData) {
-        const rootName = (mappingData && mappingData.sourceArray) || this.inferArrayRoot(foreachExpr);
-
-        if (!rootName) {
-            return currentArray;
-        }
-
-        const rootArray = this.abstraction[rootName];
-        return Array.isArray(rootArray) ? rootArray : currentArray;
-    };
-
-    /**
      * Walks up the DOM from a given element and collects all enclosing
      * foreach contexts, starting from the closest one.
      * @param {Element} element
@@ -7472,24 +7458,6 @@
     };
 
     /**
-     * Count how many leading "parent" tokens appear in a path.
-     * These tokens indicate how many foreach scopes should be climbed.
-     * @param {Array<string|number>} path - Tokenized path.
-     * @returns {number} Number of parent climbs requested.
-     */
-    Context.prototype.extractParentClimbs = function (path) {
-        // Tracks how many scope levels to climb
-        let climbs = 0;
-
-        // Count consecutive "parent" tokens from the start
-        while (climbs < path.length && path[climbs] === "parent") {
-            climbs++;
-        }
-
-        return climbs;
-    };
-
-    /**
      * Build a scoped variable map from foreach frames.
      * @param {Array<Object>} frames - Effective foreach frames (outer → inner).
      * @returns {Map<string, string|number>} Scoped variable map.
@@ -7528,28 +7496,10 @@
     };
 
     /**
-     * Select the active foreach frames after applying parent climbs.
-     * Frames are returned in outer → inner order for correct scope resolution.
-     * @param {HTMLElement} element - Element inside a foreach hierarchy.
-     * @param {number} climbs - Number of scopes to climb.
-     * @returns {Array<Object>} Effective frame list.
-     */
-    Context.prototype.getEffectiveFrames = function (element, climbs) {
-        // Retrieve full foreach chain for the element
-        const frames = this.getForeachChain(element);
-
-        // Clamp climb count to available frames
-        if (climbs > frames.length) {
-            console.warn(`Cannot climb ${climbs} levels - only ${frames.length} available`);
-            climbs = frames.length;
-        }
-
-        // Remove climbed frames and reverse for dependency-safe processing
-        return frames.slice(climbs).reverse();
-    };
-
-    /**
      * Normalize a scoped path to a fully-qualified global data path.
+     * Counts leading "parent" tokens to determine how many foreach scopes to
+     * climb, selects the remaining frames, builds a scope map, and resolves
+     * the path through it.
      * @param {string|Array<string|number>} pathSegments - Local path expression.
      * @param {HTMLElement} element - Element inside a foreach hierarchy.
      * @returns {string|number} Fully-qualified path or direct numeric index.
@@ -7563,14 +7513,23 @@
             return "";
         }
 
-        // Determine how many leading "parent" tokens climb the scope chain
-        const climbs = this.extractParentClimbs(path);
+        // Count consecutive leading "parent" tokens — each one climbs one foreach scope
+        let climbs = 0;
+        while (climbs < path.length && path[climbs] === "parent") {
+            climbs++;
+        }
 
-        // Select the active foreach frames after climbing
-        const frames = this.getEffectiveFrames(element, climbs);
+        // Retrieve full foreach chain and apply parent climbs
+        const chain = this.getForeachChain(element);
+        if (climbs > chain.length) {
+            console.warn(`Cannot climb ${climbs} levels - only ${chain.length} available`);
+            climbs = chain.length;
+        }
 
-        // Fast path: if no foreach frames apply, skip scope resolution entirely.
-        // This avoids building an empty Map and running resolveScopedTokens as a no-op.
+        // Frames after climbing, reversed to outer → inner order for scope resolution
+        const frames = chain.slice(climbs).reverse();
+
+        // Fast path: no foreach frames in scope — return remaining path directly
         if (frames.length === 0) {
             const remaining = path.slice(climbs);
 
