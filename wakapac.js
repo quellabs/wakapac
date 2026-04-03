@@ -1509,33 +1509,65 @@
          * @returns {void}
          */
         _setupFocusEvents() {
-            // Preserve instance reference for use inside DOM callbacks
             const self = this;
 
-            // Focus in
-            // Fires when an element gains focus anywhere in the document
+            // Pending focus messages keyed by container element.
+            // Within a single tick, a KILLFOCUS followed by SETFOCUS on the same
+            // container nets to no change and both are dropped.
+            const pending = new Map();
+
+            // Single shared debounce timer for all focus events.
+            // Restarted on every focusin/focusout so the flush always happens
+            // after the last event in a burst has been processed.
+            let debounceTimer = null;
+
+            function scheduleFlush() {
+                // Cancel the previous pending flush — we haven't seen the full
+                // picture yet, more focus events may arrive in this tick
+                if (debounceTimer !== null) {
+                    clearTimeout(debounceTimer);
+                }
+
+                // Defer to the next task so both focusout and focusin have fired
+                // before we dispatch anything. By then pending holds the net state.
+                debounceTimer = setTimeout(function() {
+                    debounceTimer = null;
+
+                    // Dispatch only the net message per container — intermediate
+                    // transitions that cancelled out are never seen by msgProc
+                    for (const [container, { message, domEvent }] of pending) {
+                        const customEvent = self.wrapDomEventAsMessage(message, domEvent);
+                        self.dispatchToContainer(container, customEvent);
+                    }
+
+                    // Reset for the next focus burst
+                    pending.clear();
+                }, 0);
+            }
+
             document.addEventListener('focusin', function(event) {
-                // Resolve container responsible for the focused element
                 const container = self.getContainerForEvent(MSG_SETFOCUS, event);
 
-                // Wrap DOM focus event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(MSG_SETFOCUS, event);
+                // Overwrite any pending KILLFOCUS for this container — if focus moved
+                // within the same container the net result is that focus stayed,
+                // so the kill is cancelled and only SETFOCUS remains
+                pending.set(container, { message: MSG_SETFOCUS, domEvent: event });
 
-                // Dispatch normalized focus message
-                self.dispatchToContainer(container, customEvent);
+                scheduleFlush();
             });
 
-            // Focus out
-            // Fires when an element loses focus
             document.addEventListener('focusout', function(event) {
-                // Resolve container responsible for the blurred element
                 const container = self.getContainerForEvent(MSG_KILLFOCUS, event);
 
-                // Wrap DOM blur event into unified message format
-                const customEvent = self.wrapDomEventAsMessage(MSG_KILLFOCUS, event);
+                // Only write KILLFOCUS if no SETFOCUS is already pending for this
+                // container. A pending SETFOCUS means focusin already fired (or will
+                // fire) in the same tick, so the kill would be cancelled anyway —
+                // skip it to avoid overwriting the more recent state.
+                if (!pending.has(container)) {
+                    pending.set(container, { message: MSG_KILLFOCUS, domEvent: event });
+                }
 
-                // Dispatch normalized blur message
-                self.dispatchToContainer(container, customEvent);
+                scheduleFlush();
             });
         },
 
@@ -5077,83 +5109,6 @@
     };
 
     // ========================================================================
-    // FOCUS DEBOUNCER
-    // ========================================================================
-
-    /**
-     * Debounces focus-related browser state property updates to prevent spurious
-     * MSG_VALUE_CHANGED events when focus moves between elements within the same
-     * container. Without debouncing, a click on a button inside a focused container
-     * produces a blur/focus pair that briefly makes containerFocusWithin appear to
-     * change even though focus never left the container.
-     *
-     * Works by collecting property updates per container within the same tick and
-     * applying only the net result — if a property goes false then true within one
-     * tick, no MSG_VALUE_CHANGED fires at all.
-     *
-     * Keyed by pacId to correctly handle nested containers, where multiple containers
-     * may receive focus events within the same tick.
-     */
-    const FocusDebouncer = {
-        /** @type {number|null} Pending setTimeout handle, null when no flush is scheduled */
-        timer: null,
-
-        /** @type {Map<string, {context: Context, updates: Object}>} Pending updates keyed by pacId */
-        pending: new Map(),
-
-        /**
-         * Schedules a debounced application of focus-related property updates.
-         * Multiple calls within the same tick are coalesced per container — only
-         * the net state per property is applied when the timeout fires.
-         * @param {Context} context - Owning context whose abstraction properties will be updated
-         * @param {Object} updates - Map of property names to their new values
-         */
-        schedule(context, updates) {
-            const pacId = context.abstraction.pacId;
-
-            // Retrieve or create the pending entry for this container
-            if (!this.pending.has(pacId)) {
-                this.pending.set(pacId, { context, updates: {} });
-            }
-
-            // Merge incoming updates — last write per property wins within the same tick
-            Object.assign(this.pending.get(pacId).updates, updates);
-
-            // Cancel previous pending flush and reschedule
-            if (this.timer !== null) {
-                clearTimeout(this.timer);
-            }
-
-            // Defer to next tick — by then both blur and focus events will have fired
-            // for all containers, so pending holds the net state rather than intermediate transitions
-            this.timer = setTimeout(() => this.flush(), 0);
-        },
-
-        /**
-         * Applies accumulated property updates to each container's abstraction.
-         * Skips properties whose net value matches the current state, preventing
-         * unnecessary MSG_VALUE_CHANGED events for properties that didn't actually change.
-         */
-        flush() {
-            // Clear timer reference before applying updates — re-entrant calls
-            // from inside a watcher or msgProc will schedule a fresh debounce
-            this.timer = null;
-
-            for (const [, { context, updates }] of this.pending) {
-                for (const [key, value] of Object.entries(updates)) {
-                    // Only assign if the net value differs from current state
-                    if (context.abstraction[key] !== value) {
-                        context.abstraction[key] = value;
-                    }
-                }
-            }
-
-            // Reset pending map for the next cycle
-            this.pending = new Map();
-        }
-    };
-
-    // ========================================================================
     // CONTEXT
     // ========================================================================
 
@@ -5825,11 +5780,6 @@
             return;
         }
 
-        // Update reactive focus properties
-        if (event.message === MSG_SETFOCUS || event.message === MSG_KILLFOCUS) {
-            this.updateFocusProperties();
-        }
-
         // Call built in event handlers
         switch(event.message) {
             // Handle reactive data binding changes (property updates, computed value changes)
@@ -5843,6 +5793,15 @@
                 this.updateCommentConditionals();
                 this.handleWatchersForChange(event);
                 this.handleForeachRebuildForChange(event);
+                break;
+
+            case MSG_SETFOCUS:
+                this.updateFocusProperties();
+                break;
+
+            case MSG_KILLFOCUS:
+                this.updateFocusProperties();
+                this.handleDomBlur(event);
                 break;
 
             case MSG_LCLICK:
@@ -5864,11 +5823,6 @@
                 // Post-mutation input (input event - value is updated)
                 this.handleDomInputComplete(event);
                 break;
-
-            case MSG_KILLFOCUS:
-                // Blur events - handle change mode updates and other blur logic
-                this.handleDomBlur(event);
-                break;
         }
     }
 
@@ -5877,10 +5831,8 @@
      * Called automatically after MSG_SETFOCUS/MSG_KILLFOCUS events
      */
     Context.prototype.updateFocusProperties = function() {
-        FocusDebouncer.schedule(this, {
-            containerFocus: Utils.isElementDirectlyFocused(this.container),
-            containerFocusWithin: Utils.isElementFocusWithin(this.container)
-        });
+        this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
+        this.abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
     }
 
     /**
