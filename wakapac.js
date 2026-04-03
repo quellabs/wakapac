@@ -1053,6 +1053,37 @@
             const right  = Math.max(a.x + a.width,  b.x + b.width);
             const bottom = Math.max(a.y + a.height, b.y + b.height);
             return { x, y, width: right - x, height: bottom - y };
+        },
+
+        /**
+         * Returns a debounced version of fn that delays invocation until after `delay`
+         * milliseconds have elapsed since the last call. Any pending invocation is
+         * cancelled when the debounced function is called again before the timer fires.
+         *
+         * The returned function exposes a .cancel() method to abort a pending call,
+         * which is required for proper cleanup (e.g. component teardown).
+         *
+         * @param {Function} fn    - Function to debounce
+         * @param {number}   delay - Quiet period in milliseconds
+         * @returns {Function} Debounced wrapper with a .cancel() method
+         */
+        debounce(fn, delay) {
+            let timer = null;
+
+            function debounced(...args) {
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    timer = null;
+                    fn.apply(this, args);
+                }, delay);
+            }
+
+            debounced.cancel = function() {
+                clearTimeout(timer);
+                timer = null;
+            };
+
+            return debounced;
         }
     }
 
@@ -4590,37 +4621,6 @@
                 type: key,
                 target: value
             });
-        },
-
-        /**
-         * Returns a debounced version of fn that delays invocation until after `delay`
-         * milliseconds have elapsed since the last call. Any pending invocation is
-         * cancelled when the debounced function is called again before the timer fires.
-         *
-         * The returned function exposes a .cancel() method to abort a pending call,
-         * which is required for proper cleanup (e.g. component teardown).
-         *
-         * @param {Function} fn    - Function to debounce
-         * @param {number}   delay - Quiet period in milliseconds
-         * @returns {Function} Debounced wrapper with a .cancel() method
-         */
-        debounce(fn, delay) {
-            let timer = null;
-
-            function debounced(...args) {
-                clearTimeout(timer);
-                timer = setTimeout(() => {
-                    timer = null;
-                    fn.apply(this, args);
-                }, delay);
-            }
-
-            debounced.cancel = function () {
-                clearTimeout(timer);
-                timer = null;
-            };
-
-            return debounced;
         }
     };
 
@@ -7707,14 +7707,33 @@
     };
 
     /**
+     * Parses a comment node as a foreach item marker.
+     * @param {Comment} commentNode - The DOM comment node to parse
+     * @returns {{foreachId: string, index: number, renderIndex: number}|null}
+     */
+    Context.parseForeachComment = function(commentNode) {
+        const match = commentNode.textContent.trim().match(FOREACH_INDEX_REGEX);
+
+        if (!match) {
+            return null;
+        }
+
+        return {
+            foreachId: match[1].trim(),
+            index: parseInt(match[2], 10),
+            renderIndex: parseInt(match[3], 10)
+        };
+    };
+
+    /**
      * Extracts the closest foreach context information by walking up the DOM tree
      * from a starting element, looking for comment markers that identify foreach items.
      * Checks cache first for O(1) lookup before falling back to comment parsing.
      * @param {Element} startElement - The DOM element to start searching from
-     * @returns {Object|null} Foreach context object with foreachId, index, and renderIndex or null
+     * @returns {number|null} Foreach context object with foreachId, index, and renderIndex or null
      * @returns {string} returns.foreachId - The identifier of the foreach loop
      * @returns {number} returns.index - The logical index in the data array
-     * @returns {number} returns.renderIndex - The rendering index (may differ from logical index)
+     * @returns {number|null} returns.renderIndex - The rendering index (may differ from logical index)
      */
     Context.prototype.extractClosestForeachContext = function(startElement) {
         // Cache container
@@ -7738,21 +7757,12 @@
             while (sibling) {
                 // Only process comment nodes
                 if (sibling.nodeType === COMMENT_NODE) {
-                    const match = sibling.textContent.trim().match(FOREACH_INDEX_REGEX);
+                    const context = Context.parseForeachComment(sibling);
 
-                    if (match) {
-                        // Build the context object from the regex capture groups
-                        const context = {
-                            foreachId: match[1].trim(),
-                            index: parseInt(match[2], 10),
-                            renderIndex: parseInt(match[3], 10)
-                        };
-
+                    if (context) {
                         // Cache on the starting element so subsequent lookups
                         // from the same element or its descendants are O(1)
                         startElement._pacForeachContext = context;
-
-                        // Return the context
                         return context;
                     }
                 }
@@ -7776,21 +7786,18 @@
      * @param {HTMLElement} foreachElement - The foreach container element
      */
     Context.prototype.cacheContextOnItemElements = function(foreachElement) {
-        const walker = document.createTreeWalker(foreachElement, NodeFilter.SHOW_ALL);
         let node;
         let currentContext = null;
 
+        const walker = document.createTreeWalker(foreachElement, NodeFilter.SHOW_ALL);
+
         while ((node = walker.nextNode())) {
             if (node.nodeType === Node.COMMENT_NODE) {
-                const match = node.textContent.match(FOREACH_INDEX_REGEX);
+                const context = Context.parseForeachComment(node);
 
-                if (match) {
+                if (context) {
                     // Found start marker - prepare context for next element
-                    currentContext = {
-                        foreachId: match[1].trim(),
-                        index: parseInt(match[2], 10),
-                        renderIndex: parseInt(match[3], 10)
-                    };
+                    currentContext = context;
                 } else if (node.textContent.trim() === '/pac-foreach-item') {
                     // Found end marker - clear context
                     currentContext = null;
