@@ -112,7 +112,6 @@
 
     /** Custom event names dispatched on PAC containers */
     const EV_PAC_EVENT        = 'pac:event';
-    const EV_PAC_ARRAY_CHANGE = 'pac:array-change';
     const EV_PAC_BROWSER_STATE = 'pac:browser-state';
 
     /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
@@ -1115,37 +1114,16 @@
                 }
 
                 // Dispatch events for the array change
-                dispatchArrayChangeEvents(currentPath, oldArray, target, methodName);
+                container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                    path: currentPath,
+                    oldValue: oldArray,
+                    newValue: target,
+                    method: methodName
+                }));
 
                 // Return the result
                 return result;
             };
-        }
-
-        /**
-         * Dispatches array change and general change events
-         * @param {Array} path - Property path where change occurred
-         * @param {*} oldValue - Previous value
-         * @param {*} newValue - New value
-         * @param {string} method - Method or operation that triggered the change
-         */
-        function dispatchArrayChangeEvents(path, oldValue, newValue, method) {
-            // Dispatch array-specific event
-            container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
-                detail: {
-                    path: path,
-                    oldValue: oldValue,
-                    newValue: newValue,
-                    method: method
-                }
-            }));
-
-            // Also trigger computed property updates
-            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
-                path: path,
-                oldValue: oldValue,
-                newValue: newValue
-            }));
         }
 
         /**
@@ -1170,12 +1148,12 @@
             target.length = newLength;
 
             // Dispatch events
-            dispatchArrayChangeEvents(
-                currentPath,
-                oldArray,
-                Array.prototype.slice.call(target),
-                'length'
-            );
+            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
+                path: currentPath,
+                oldValue: oldArray,
+                newValue: Array.prototype.slice.call(target),
+                method: 'length'
+            }));
 
             return true;
         }
@@ -1297,21 +1275,11 @@
             }
 
             // Dispatch array-specific event if this is an array assignment
-            if (Array.isArray(newValue)) {
-                container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
-                    detail: {
-                        path: propertyPath,
-                        oldValue: oldValue,
-                        newValue: target[prop],
-                        method: 'assignment'
-                    }
-                }));
-            }
-
             container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
                 path: propertyPath,
                 oldValue: oldValue,
-                newValue: target[prop]
+                newValue: target[prop],
+                method: Array.isArray(newValue) ? 'assignment' : null
             }));
 
             return true;
@@ -5048,7 +5016,6 @@
 
         // Add listeners using the stored references
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
-        this.container.addEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
 
         // Add timers
@@ -5098,7 +5065,6 @@
 
         // Remove event listeners
         this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
-        this.container.removeEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
 
         // Clear debounce timer if exists
@@ -5739,10 +5705,6 @@
                 break;
 
             // Handle array modification events (insertions, deletions, reordering)
-            case 'pac:array-change':
-                this.handleArrayChange(event);
-                break;
-
             // Handle browser state changes (navigation, history, URL changes)
             case 'pac:browser-state':
                 this.handleBrowserStateEvent(event);
@@ -5800,6 +5762,10 @@
         switch(event.message) {
             // Handle reactive data binding changes (property updates, computed value changes)
             case MSG_VALUE_CHANGED:
+                if (event.detail.method) {
+                    this.handleArrayChange(event);
+                }
+
                 this.updateElementBindings();
                 this.updateTextInterpolations();
                 this.updateCommentConditionals();
@@ -6134,6 +6100,24 @@
                 this.updateQueue.delete(update.path);
             }
         });
+    };
+
+    /**
+     * Handles reactive data binding changes triggered by property updates
+     * Orchestrates updates to all binding types: element attributes, text interpolations,
+     * comment conditionals, watchers, and foreach loops
+     * @param {CustomEvent} event - The pac:change event containing change details
+     * @param {Object} event.detail - Event payload
+     * @param {string[]} event.detail.path - Array representing the property path that changed (e.g., ['todos', '0', 'completed'])
+     * @param {*} event.detail.oldValue - The previous value before the change
+     * @param {*} event.detail.newValue - The new value after the change
+     */
+    Context.prototype.handleReactiveChange = function (event) {
+        this.updateElementBindings();
+        this.updateTextInterpolations();
+        this.updateCommentConditionals();
+        this.handleWatchersForChange(event);
+        this.handleForeachRebuildForChange(event);
     };
 
     // =============================================================================
