@@ -44,9 +44,11 @@ Two-way binding, reactive updates, zero configuration.
 - Metafile API: display list recording, playback, and hit testing
 
 **Units** — optional utility libraries callable from templates and component methods:
-Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, ChartUtils (pie, bar, line, sparkline)
+Stdlib, Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, EscapeUtils, ColorUtils 
 
 ## Plugins
+
+**WakaChart** — renders pie, bar, line, and sparkline charts onto WakaPAC canvas components via the metafile/display list API. Global defaults (colors, font, padding) are set at registration time; all options can be overridden per call.
 
 **WakaStore** — shared reactive state across components, with server sync via polling, WebSocket, and HTTP push.
 

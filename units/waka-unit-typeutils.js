@@ -108,6 +108,37 @@
                      */
                     isFunction: (value) => typeof value === 'function',
 
+                    /**
+                     * Returns true if the value is a string containing only digits (0–9).
+                     * Rejects empty strings, non-strings, and strings with signs,
+                     * decimals, or whitespace.
+                     * @param {*} value
+                     * @returns {boolean}
+                     */
+                    isDigits: (value) => typeof value === 'string' && /^[0-9]+$/.test(value),
+
+                    /**
+                     * Returns true if the value is numeric, mirroring PHP's is_numeric().
+                     * Accepts: integers, floats, scientific notation, leading/trailing
+                     * whitespace, and optional leading sign (+ or -).
+                     * Also returns true for actual number values (int or float).
+                     * Returns false for NaN, Infinity, non-string/non-number types,
+                     * and empty strings.
+                     * @param {*} value
+                     * @returns {boolean}
+                     */
+                    isNumeric: (value) => {
+                        if (typeof value === 'number') {
+                            return isFinite(value);
+                        }
+
+                        if (typeof value !== 'string' || value.trim() === '') {
+                            return false;
+                        }
+
+                        return /^\s*[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*$/.test(value);
+                    },
+
                     // ─── Emptiness ────────────────────────────────────────────────────
 
                     /**
@@ -135,31 +166,6 @@
                         }
 
                         return false;
-                    },
-
-                    /**
-                     * Returns true if the value is not empty (inverse of isEmpty).
-                     * @param {*} value
-                     * @returns {boolean}
-                     */
-                    isNotEmpty: (value) => {
-                        if (value === null || value === undefined) {
-                            return false;
-                        }
-
-                        if (typeof value === 'string' || Array.isArray(value)) {
-                            return value.length > 0;
-                        }
-
-                        if (typeof value === 'object' && !(value instanceof Date)) {
-                            return Object.keys(value).length > 0;
-                        }
-
-                        if (typeof value === 'number') {
-                            return value !== 0;
-                        }
-
-                        return true;
                     },
 
                     /**
@@ -210,14 +216,7 @@
 
                         if (typeof value === 'string') {
                             const s = value.trim().toLowerCase();
-
-                            if (s === 'true' || s === '1' || s === 'yes' || s === 'on') {
-                                return true;
-                            }
-
-                            if (s === 'false' || s === '0' || s === 'no' || s === 'off') {
-                                return false;
-                            }
+                            return s === 'true' || s === '1' || s === 'yes' || s === 'on';
                         }
 
                         return Boolean(value);

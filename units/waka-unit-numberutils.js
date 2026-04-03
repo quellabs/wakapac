@@ -28,7 +28,7 @@
 
     window.NumberUtils = {
 
-        createPacPlugin() {
+        createPacPlugin(pac, options) {
             const locale = options.locale ?? navigator.language;
 
             return {

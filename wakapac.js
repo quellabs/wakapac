@@ -110,6 +110,12 @@
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
 
+    /** Custom event names dispatched on PAC containers */
+    const EV_PAC_EVENT        = 'pac:event';
+    const EV_PAC_CHANGE       = 'pac:change';
+    const EV_PAC_ARRAY_CHANGE = 'pac:array-change';
+    const EV_PAC_BROWSER_STATE = 'pac:browser-state';
+
     /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
     const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
 
@@ -123,11 +129,11 @@
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
-    const BOOLEAN_ATTRIBUTES = [
+    const BOOLEAN_ATTRIBUTES = new Set([
         "readonly", "required", "selected", "checked", "hidden", "multiple", "autofocus",
         "disabled", "async", "defer", "formnovalidate", "ismap", "novalidate",
         "open", "reversed", "scoped", "seamless", "truespeed"
-    ];
+    ]);
 
     // List of extended keys
     const EXTENDED_KEYS = new Set([
@@ -501,7 +507,6 @@
         right: 'ArrowRight'
     };
 
-
     // ========================================================================
     // METAFILE — Display list recording and playback
     // ========================================================================
@@ -835,49 +840,6 @@
         },
 
         /**
-         * Formats a value for display in text content
-         * @param {*} value - Value to format
-         * @returns {string} Formatted string
-         */
-        formatValue(value) {
-            return value !== null ? String(value) : '';
-        },
-
-        /**
-         * Sanitizes user input by stripping HTML tags and returning escaped HTML
-         * Uses the browser's built-in text content handling to safely process untrusted input
-         * @param {string} html - The potentially unsafe HTML string to sanitize
-         * @returns {string} The sanitized string with HTML tags stripped and special characters escaped
-         */
-        sanitizeUserInput(html) {
-            // Create a temporary div element to leverage browser's text content handling
-            const div = document.createElement('div');
-
-            // Set textContent (not innerHTML) to automatically strip all HTML tags
-            // The browser treats the input as plain text, removing any markup
-            div.textContent = html;
-
-            // Return the innerHTML, which gives us the text with HTML entities properly escaped
-            // This converts characters like < > & " ' into their HTML entity equivalents
-            return div.innerHTML;
-        },
-
-        /**
-         * Manually escapes HTML special characters to prevent XSS attacks
-         * Converts potentially dangerous characters into their HTML entity equivalents
-         * @param {string} str - The string containing characters that need to be escaped
-         * @returns {string} The escaped string safe for insertion into HTML
-         */
-        escapeHTML(str) {
-            return String(str)
-                .replace(/&/g, '&amp;')    // Replace & first (must be done before other entities)
-                .replace(/</g, '&lt;')     // Replace < with less-than entity
-                .replace(/>/g, '&gt;')     // Replace > with greater-than entity
-                .replace(/"/g, '&quot;')   // Replace double quotes with quote entity
-                .replace(/'/g, '&#39;');   // Replace single quotes with apostrophe entity
-        },
-
-        /**
          * Deep equality comparison optimized for performance
          * @param {*} a - First value
          * @param {*} b - Second value
@@ -1169,7 +1131,7 @@
          */
         function dispatchArrayChangeEvents(path, oldValue, newValue, method) {
             // Dispatch array-specific event
-            container.dispatchEvent(new CustomEvent("pac:array-change", {
+            container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
                 detail: {
                     path: path,
                     oldValue: oldValue,
@@ -1179,7 +1141,7 @@
             }));
 
             // Also trigger computed property updates
-            container.dispatchEvent(new CustomEvent("pac:change", {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
                 detail: {
                     path: path,
                     oldValue: oldValue,
@@ -1338,7 +1300,7 @@
 
             // Dispatch array-specific event if this is an array assignment
             if (Array.isArray(newValue)) {
-                container.dispatchEvent(new CustomEvent("pac:array-change", {
+                container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
                     detail: {
                         path: propertyPath,
                         oldValue: oldValue,
@@ -1348,7 +1310,7 @@
                 }));
             }
 
-            container.dispatchEvent(new CustomEvent("pac:change", {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
                 detail: {
                     path: propertyPath,
                     oldValue: oldValue,
@@ -1388,7 +1350,7 @@
             delete target[prop];
 
             // Notify the DOM that this property is gone
-            container.dispatchEvent(new CustomEvent("pac:change", {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
                 detail: {
                     path: propertyPath,
                     oldValue: oldValue,
@@ -2837,7 +2799,7 @@
          */
         wrapDomEventAsMessage(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}, targetOverride = null) {
             // Create custom event with extended data in detail (optional)
-            const customEvent = new CustomEvent('pac:event', {
+            const customEvent = new CustomEvent(EV_PAC_EVENT, {
                 bubbles: true,
                 cancelable: true,
                 detail: extended
@@ -3047,7 +3009,7 @@
          */
         dispatchBrowserStateEvent(stateType, stateData) {
             window.PACRegistry.components.forEach((context) => {
-                const customEvent = new CustomEvent('pac:browser-state', {
+                const customEvent = new CustomEvent(EV_PAC_BROWSER_STATE, {
                     detail: {
                         target: context.container,
                         stateType: stateType,
@@ -4993,7 +4955,7 @@
             if (bindingType === 'enable') {
                 // Handle 'enable' as reverse of 'disabled'
                 element.toggleAttribute('disabled', !value);
-            } else if (BOOLEAN_ATTRIBUTES.includes(bindingType)) {
+            } else if (BOOLEAN_ATTRIBUTES.has(bindingType)) {
                 element.toggleAttribute(bindingType, !!value);
             } else if (value != null) {
                 element.setAttribute(bindingType, value);
@@ -5091,10 +5053,10 @@
         this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
 
         // Add listeners using the stored references
-        this.container.addEventListener('pac:event', this.boundHandlePacEvent);
-        this.container.addEventListener('pac:change', this.boundHandlePacEvent);
-        this.container.addEventListener('pac:array-change', this.boundHandlePacEvent);
-        this.container.addEventListener('pac:browser-state', this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
 
         // Add timers
         this.timers = new Map();
@@ -5142,10 +5104,10 @@
         DomUpdateTracker.unObserveContainer(this.container);
 
         // Remove event listeners
-        this.container.removeEventListener('pac:browser-state', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:array-change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:change', this.boundHandlePacEvent);
-        this.container.removeEventListener('pac:event', this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
 
         // Clear debounce timer if exists
         if (this.debounceTimer) {
@@ -5373,6 +5335,12 @@
         // Apply initial bindings to new elements
         newBindings.forEach((mappingData, element) => {
             Object.keys(mappingData.bindings).forEach(bindingType => {
+                // Skip event bindings — they are never evaluated eagerly, only on user interaction.
+                if (bindingType === 'click' || bindingType === 'submit') {
+                    return;
+                }
+
+                // Evaluate the expression
                 const bindingData = mappingData.bindings[bindingType];
 
                 const value = ExpressionParser.evaluate(
@@ -5711,7 +5679,7 @@
             const cancellableEvents = [
                 MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
                 MSG_LCLICK, MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU,
-                MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE,
+                MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE, MSG_CHAR,
                 MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP
             ];
 
@@ -5776,57 +5744,79 @@
      * @param {Element} event.target - The DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
-    Context.prototype.handleDomClicks = function(event) {
+    Context.prototype.handleDomClicks = function (event) {
         // Get interpolation data for the clicked element
         const mappingData = this.interpolationMap.get(event.target);
         if (!mappingData?.bindings?.click) {
             return;
         }
 
-        // Resolve the target method from the abstraction object
-        const method = this.abstraction[mappingData.bindings.click.target];
-        if (typeof method !== 'function') {
-            return;
-        }
+        const bindingTarget = mappingData.bindings.click.target;
 
         try {
             // Check if click occurred within a foreach loop context
             const contextInfo = this.extractClosestForeachContext(event.target);
 
-            // Simple case: call method with just the event
-            if (!contextInfo) {
-                method.call(this.abstraction, event);
-                return;
-            }
-
-            // Find the foreach element that contains this click target
-            const foreachElement = Array.from(this.interpolationMap.entries())
-                .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
-
-            if (!foreachElement) {
-                // Fallback to simple call if foreach element not found
-                method.call(this.abstraction, event);
-                return;
-            }
-
-            // Get the foreach configuration and set up scope resolution
-            const foreachData = this.interpolationMap.get(foreachElement);
-
-            // Evaluate the foreach expression to get the source array
-            const array = ExpressionParser.evaluate(
-                ExpressionCache.parseExpression(foreachData.foreachExpr),
-                this.abstraction,
-                makeScopeResolver(
-                    this.normalizePath.bind(this),
-                    event.target,
-                    this.importedUnits
-                )
+            // Build scope resolver once, shared across all evaluations below
+            const scopeResolver = makeScopeResolver(
+                this.normalizePath.bind(this),
+                event.target,
+                this.importedUnits
             );
 
-            // Call method with foreach context: (arrayItem, index, originalEvent)
-            method.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
+            if (contextInfo) {
+                // Find the foreach element that contains this click target
+                const foreachElement = Array.from(this.interpolationMap.entries())
+                    .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
+
+                if (foreachElement) {
+                    // Evaluate the foreach expression to get the source array
+                    const foreachData = this.interpolationMap.get(foreachElement);
+                    const array = ExpressionParser.evaluate(
+                        ExpressionCache.parseExpression(foreachData.foreachExpr),
+                        this.abstraction,
+                        scopeResolver
+                    );
+
+                    // Inject foreach context into scope so expressions can reference $item, $index, $event
+                    const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                        $item: array[contextInfo.index],
+                        $index: contextInfo.index,
+                        $event: event
+                    });
+
+                    const foreachResult = ExpressionParser.evaluate(
+                        ExpressionCache.parseExpression(bindingTarget),
+                        scopedAbstraction,
+                        scopeResolver
+                    );
+
+                    // Fallback: bare method name — call with (item, index, event)
+                    if (typeof foreachResult === 'function') {
+                        foreachResult.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
+                    }
+
+                    return;
+                }
+            }
+
+            // Simple case: evaluate expression with $event in scope
+            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                $event: event
+            });
+
+            const result = ExpressionParser.evaluate(
+                ExpressionCache.parseExpression(bindingTarget),
+                scopedAbstraction,
+                scopeResolver
+            );
+
+            // Fallback: bare method name — call with (event)
+            if (typeof result === 'function') {
+                result.call(this.abstraction, event);
+            }
         } catch (error) {
-            console.warn(`Error executing click binding '${mappingData.bindings.click.target}':`, error);
+            console.warn(`Error executing click binding '${bindingTarget}':`, error);
         }
     }
 
@@ -6948,42 +6938,6 @@
         Object.defineProperties(proxiedReactive, {
 
             /**
-             * Formats a value for display in text content or UI elements
-             * Handles null/undefined, objects, arrays, and primitives appropriately
-             * @param {*} value - Value to format for display
-             * @returns {string} Human-readable formatted string
-             */
-            formatValue: {
-                value: (value) => Utils.formatValue(value),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Escapes HTML entities to prevent XSS when displaying user input
-             * Converts <, >, &, quotes to their HTML entity equivalents
-             * @param {string} str - String to escape HTML entities in
-             * @returns {string} HTML-safe escaped string
-             */
-            escapeHTML: {
-                value: (str) => Utils.escapeHTML(str),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
-             * Strips all HTML tags from user input to get plain text
-             * Use this for user-generated content that should not contain HTML
-             * @param {string} html - HTML string to sanitize
-             * @returns {string} Plain text with all HTML tags removed
-             */
-            sanitizeUserInput: {
-                value: (html) => Utils.sanitizeUserInput(html),
-                writable: false,
-                enumerable: false
-            },
-
-            /**
              * Converts container-relative coordinates to viewport-absolute coordinates
              * Equivalent to Win32 ClientToScreen - converts client-area to screen coordinates
              * @param {number} x - Container-relative x coordinate
@@ -6993,6 +6947,7 @@
             containerToViewport: {
                 value: (x, y) => {
                     const rect = self.container.getBoundingClientRect();
+
                     return {
                         x: x + rect.left,
                         y: y + rect.top
@@ -7072,7 +7027,7 @@
         abstraction.browserContentHeight = document.documentElement.scrollHeight;
 
         // Container scroll properties
-        abstraction.containerIsScrollable =  false;                         // Can scroll in any direction
+        abstraction.containerIsScrollable = false;                         // Can scroll in any direction
         abstraction.containerScrollX = this.container.scrollLeft;           // Current horizontal scroll position
         abstraction.containerScrollY = this.container.scrollTop;            // Current vertical scroll position
         abstraction.containerContentWidth = this.container.scrollWidth;     // Total scrollable content width
@@ -7325,59 +7280,6 @@
 
         const rootArray = this.abstraction[rootName];
         return Array.isArray(rootArray) ? rootArray : currentArray;
-    };
-
-    /**
-     * Finds the original index of an item in the source array
-     * @param {*} item - The item to find
-     * @param {Array} sourceArray - The source array to search in
-     * @param {number} fallbackIndex - Fallback index if not found
-     * @returns {number} The original index in the source array
-     */
-    Context.prototype.findOriginalIndex = function(item, sourceArray, fallbackIndex) {
-        // For primitive arrays (like flatGrid with numbers), the renderIndex IS the correct index
-        // because the array items are primitives that appear in order
-        if (typeof item === 'number' || typeof item === 'string' || typeof item === 'boolean') {
-            return fallbackIndex;
-        }
-
-        // Pre-compute ID lookup capability once, outside the loop
-        const hasId = item && typeof item === 'object' && item.id !== undefined;
-        const itemId = hasId ? item.id : undefined;
-        const len = sourceArray.length;
-
-        // Single pass: reference equality (immediate return) + ID tracking (deferred)
-        let idMatch = -1;
-
-        for (let i = 0; i < len; i++) {
-            const sourceItem = sourceArray[i];
-
-            // Strategy 1: Direct reference comparison — highest priority, return immediately
-            if (sourceItem === item) {
-                return i;
-            }
-
-            // Strategy 2: Track first ID match for deferred return
-            if (hasId && idMatch === -1 &&
-                sourceItem && typeof sourceItem === 'object' && sourceItem.id === itemId) {
-                idMatch = i;
-            }
-        }
-
-        // Return ID match if found
-        if (idMatch !== -1) {
-            return idMatch;
-        }
-
-        // Strategy 3: Deep equality — expensive, only runs when reference and ID both failed
-        for (let i = 0; i < len; i++) {
-            if (Utils.isEqual(sourceArray[i], item)) {
-                return i;
-            }
-        }
-
-        // Strategy 4: Fallback to render index (maintains current behavior for edge cases)
-        return fallbackIndex;
     };
 
     /**
@@ -7928,54 +7830,6 @@
             child.parent = this;
             this.children.add(child);
         });
-    };
-
-    // =============================================================================
-    // ARRAY CHANGE TRACKING (Diffing & Minimal DOM Updates)
-    // =============================================================================
-
-    /**
-     * Creates a stable hash from content data, handling various data types
-     * @returns {string} A string representation suitable for hashing
-     * @param inputData
-     */
-    Context.prototype.createContentHash = function(inputData) {
-        /**
-         * Convert any data structure into a deterministic string representation.
-         * This ensures that logically equivalent objects produce the same hash string,
-         * regardless of key order or formatting differences.
-         */
-        function createStableRepresentation(value) {
-            // Handle null or undefined explicitly
-            if (value === null || value === undefined) {
-                return String(value);
-            }
-
-            // Handle primitive types (string, number, boolean, etc.)
-            if (typeof value !== "object") {
-                return String(value);
-            }
-
-            // Handle arrays: recursively hash each item in order
-            if (Array.isArray(value)) {
-                const arrayRepresentation = value.map(function (element) {
-                    return createStableRepresentation(element);
-                });
-
-                return "[" + arrayRepresentation.join(",") + "]";
-            }
-
-            // Handle objects: sort keys to ensure consistent ordering
-            const sortedKeys = Object.keys(value).sort();
-            const objectRepresentation = sortedKeys.map(function(key) {
-                return key + ":" + createStableRepresentation(value[key]);
-            });
-
-            return "{" + objectRepresentation.join(",") + "}";
-        }
-
-        // Entry point: return stable representation for the given input
-        return createStableRepresentation(inputData);
     };
 
     /**
@@ -9148,7 +9002,7 @@
         }
 
         // Create a custom wakapac event that carries Win32-style message data.
-        const event = new CustomEvent('pac:event', {
+        const event = new CustomEvent(EV_PAC_EVENT, {
             bubbles: false,
             cancelable: true,
             detail: extended
@@ -9832,30 +9686,30 @@
         this._ops = [];
     }
 
-    MetaFile.prototype.setFillStyle = function(value) { this._ops.push({op: 'setFillStyle', value}); return this; };
-    MetaFile.prototype.setStrokeStyle = function(value) { this._ops.push({op: 'setStrokeStyle', value}); return this; };
-    MetaFile.prototype.setLineWidth = function(value) { this._ops.push({op: 'setLineWidth', value}); return this; };
-    MetaFile.prototype.setLineCap = function(value) { this._ops.push({op: 'setLineCap', value}); return this; };
-    MetaFile.prototype.setLineJoin = function(value) { this._ops.push({op: 'setLineJoin', value}); return this; };
-    MetaFile.prototype.setLineDashOffset = function(value) { this._ops.push({op: 'setLineDashOffset', value}); return this; };
-    MetaFile.prototype.setMiterLimit = function(value) { this._ops.push({op: 'setMiterLimit', value}); return this; };
-    MetaFile.prototype.setGlobalAlpha = function(value) { this._ops.push({op: 'setGlobalAlpha', value}); return this; };
-    MetaFile.prototype.setGlobalComposite = function(value) { this._ops.push({op: 'setGlobalComposite', value}); return this; };
-    MetaFile.prototype.setFont = function(value) { this._ops.push({op: 'setFont', value}); return this; };
-    MetaFile.prototype.setTextAlign = function(value) { this._ops.push({op: 'setTextAlign', value}); return this; };
-    MetaFile.prototype.setTextBaseline = function(value) { this._ops.push({op: 'setTextBaseline', value}); return this; };
-    MetaFile.prototype.setTextRendering = function(value) { this._ops.push({op: 'setTextRendering', value}); return this; };
-    MetaFile.prototype.setLetterSpacing = function(value) { this._ops.push({op: 'setLetterSpacing', value}); return this; };
-    MetaFile.prototype.setWordSpacing = function(value) { this._ops.push({op: 'setWordSpacing', value}); return this; };
+    // Single-value setters: method(value) → push {op, value}
+    [
+        'setFillStyle', 'setStrokeStyle', 'setLineWidth', 'setLineCap', 'setLineJoin',
+        'setLineDashOffset', 'setMiterLimit', 'setGlobalAlpha', 'setGlobalComposite',
+        'setFont', 'setTextAlign', 'setTextBaseline', 'setTextRendering',
+        'setLetterSpacing', 'setWordSpacing', 'setLineDash',
+    ].forEach(function (name) {
+        MetaFile.prototype[name] = function (value) {
+            this._ops.push({op: name, value});
+            return this;
+        };
+    });
 
-    MetaFile.prototype.save = function() { this._ops.push({op: 'save'}); return this; };
-    MetaFile.prototype.restore = function() { this._ops.push({op: 'restore'}); return this; };
-    MetaFile.prototype.beginPath = function() { this._ops.push({op: 'beginPath'}); return this; };
-    MetaFile.prototype.closePath = function() { this._ops.push({op: 'closePath'}); return this; };
-    MetaFile.prototype.stroke = function() { this._ops.push({op: 'stroke'}); return this; };
-    MetaFile.prototype.resetTransform = function() { this._ops.push({op: 'resetTransform'}); return this; };
-    MetaFile.prototype.clearShadow = function() { this._ops.push({op: 'clearShadow'}); return this; };
+    // No-argument state ops: method() → push {op}
+    [
+        'save', 'restore', 'beginPath', 'closePath', 'stroke', 'resetTransform', 'clearShadow',
+    ].forEach(function (name) {
+        MetaFile.prototype[name] = function () {
+            this._ops.push({op: name});
+            return this;
+        };
+    });
 
+    // Other ops
     MetaFile.prototype.moveTo = function(x, y) { this._ops.push({op: 'moveTo', x, y}); return this; };
     MetaFile.prototype.lineTo = function(x, y) { this._ops.push({op: 'lineTo', x, y}); return this; };
     MetaFile.prototype.arc = function(cx, cy, r, startAngle, endAngle, ccw = false) { this._ops.push({op: 'arc', cx, cy, r, startAngle, endAngle, ccw}); return this; };
@@ -9873,14 +9727,11 @@
     MetaFile.prototype.bezierCurveTo = function(cp1x, cp1y, cp2x, cp2y, x, y) { this._ops.push({op: 'bezierCurveTo', cp1x, cp1y, cp2x, cp2y, x, y}); return this; };
     MetaFile.prototype.quadraticCurveTo = function(cpx, cpy, x, y) { this._ops.push({op: 'quadraticCurveTo', cpx, cpy, x, y}); return this; };
     MetaFile.prototype.drawImage = function(image, dx, dy, dw, dh) { this._ops.push({op: 'drawImage', image, dx, dy, dw, dh}); return this; };
-
     MetaFile.prototype.translate = function(x, y) { this._ops.push({op: 'translate', x, y}); return this; };
     MetaFile.prototype.rotate = function(angle) { this._ops.push({op: 'rotate', angle}); return this; };
     MetaFile.prototype.scale = function(x, y) { this._ops.push({op: 'scale', x, y}); return this; };
     MetaFile.prototype.transform = function(a, b, c, d, e, f) { this._ops.push({op: 'transform', a, b, c, d, e, f}); return this; };
     MetaFile.prototype.setTransform = function(a, b, c, d, e, f) { this._ops.push({op: 'setTransform', a, b, c, d, e, f}); return this; };
-
-    MetaFile.prototype.setLineDash = function(value) { this._ops.push({op: 'setLineDash', value}); return this; };
     MetaFile.prototype.setShadow = function(color, blur, offsetX = 0, offsetY = 0) { this._ops.push({op: 'setShadow', color, blur, offsetX, offsetY}); return this; };
     MetaFile.prototype.setImageSmoothing = function(enabled, quality) { this._ops.push({op: 'setImageSmoothing', enabled, quality}); return this; };
 
