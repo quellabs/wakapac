@@ -172,6 +172,7 @@
      * Hex values match Win32 API message identifiers
      */
     const MSG_UNKNOWN = 0x0000;
+    const MSG_VALUE_CHANGE = 0x0001;
     const MSG_SIZE = 0x0005;
     const MSG_PAINT = 0x000F;
     const MSG_DPR_CHANGE = 0x0010;
@@ -2976,6 +2977,8 @@
                     // All hooks have been traversed — deliver the message to the container.
                     // This triggers the 'pac:event' listener on the container element,
                     // which routes to Context.handlePacEvent() and ultimately msgProc().
+                    const context = wakaPAC.getContainerByPacId(event.pacId);
+
                     container.dispatchEvent(event);
                 }
             };
@@ -5175,25 +5178,134 @@
     // =============================================================================
 
     /**
+     * Shared requestAnimationFrame-based timer engine.
+     * Replaces setInterval for all WakaPAC component timers to avoid Firefox
+     * throttling issues that cause irregular MSG_TIMER delivery.
+     *
+     * All active timers across all components share a single rAF loop.
+     * The loop starts automatically when the first timer is added and stops
+     * itself when the last timer is removed — no idle overhead.
+     *
+     * Timer IDs are globally unique across all components, eliminating the need
+     * for compound keys or per-context ID sequences.
+     */
+    const RafTimerEngine = {
+        /** @type {number|null} Current rAF handle, null when loop is not running */
+        rafId: null,
+
+        /** @type {number} Global timer ID counter, incremented on each add() call */
+        nextTimerId: 1,
+
+        /** @type {Map<number, {context: Context, timerId: number, elapse: number, lastFired: number}>} */
+        timers: new Map(),
+
+        /**
+         * Registers a new timer entry and returns its globally unique ID.
+         * Starts the rAF loop if it wasn't already running.
+         * @param {Context} context - Owning context, used to resolve pacId for sendMessage
+         * @param {number} elapse - Desired interval in milliseconds
+         * @returns {number} Globally unique timer ID
+         */
+        add(context, elapse) {
+            // Generate a globally unique timer ID across all components
+            const timerId = this.nextTimerId++;
+
+            this.timers.set(timerId, {
+                context,
+                timerId,
+                elapse,
+                // Initialize to now so the first fire happens after one full interval,
+                // matching setInterval semantics rather than firing immediately
+                lastFired: performance.now()
+            });
+
+            // Start the loop only if it isn't already running
+            if (this.rafId === null) {
+                this.rafId = requestAnimationFrame(this.loop.bind(this));
+            }
+
+            // Return the ID so the context can store it for killTimer lookups
+            return timerId;
+        },
+
+        /**
+         * Removes a timer entry by its globally unique ID.
+         * Stops the rAF loop if no timers remain, avoiding idle rAF calls.
+         * @param {number} timerId - Globally unique timer ID to remove
+         */
+        remove(timerId) {
+            this.timers.delete(timerId);
+
+            // No timers left — stop the loop to avoid running it idle
+            if (this.timers.size === 0 && this.rafId !== null) {
+                cancelAnimationFrame(this.rafId);
+                this.rafId = null;
+            }
+        },
+
+        /**
+         * Removes all timers belonging to a specific context.
+         * Called by killAllTimers to clean up when a component is destroyed.
+         * @param {Context} context - The context whose timers should be removed
+         */
+        removeAllForContext(context) {
+            // Match entries by context reference — globally unique IDs make this safe
+            for (const [timerId, entry] of this.timers) {
+                if (entry.context === context) {
+                    this.timers.delete(timerId);
+                }
+            }
+
+            // Stop loop if no timers remain after the purge
+            if (this.timers.size === 0 && this.rafId !== null) {
+                cancelAnimationFrame(this.rafId);
+                this.rafId = null;
+            }
+        },
+
+        /**
+         * The rAF loop tick. Checks every registered timer against elapsed time
+         * and dispatches MSG_TIMER for any that have reached their interval.
+         * Reschedules itself as long as timers remain active.
+         * @param {number} now - Timestamp provided by requestAnimationFrame (via performance.now())
+         */
+        loop(now) {
+            for (const [, entry] of this.timers) {
+                if (now - entry.lastFired >= entry.elapse) {
+                    // Update lastFired before dispatch so that any re-entrant timer
+                    // operations inside msgProc see a consistent state
+                    entry.lastFired = now;
+                    wakaPAC.sendMessage(entry.context.abstraction.pacId, MSG_TIMER, entry.timerId, 0);
+                }
+            }
+
+            // Reschedule only if timers still exist — a killTimer inside msgProc
+            // may have emptied the map, in which case we let the loop die naturally
+            if (this.timers.size > 0) {
+                this.rafId = requestAnimationFrame(this.loop.bind(this));
+            } else {
+                this.rafId = null;
+            }
+        }
+    };
+
+    /**
      * Sets a timer for this component, similar to Win32 SetTimer.
      * Sends MSG_TIMER messages to the component's msgProc at the specified interval.
-     * Timer IDs are auto-generated and unique per component instance.
+     * Uses a shared requestAnimationFrame loop instead of setInterval to avoid
+     * Firefox timer throttling causing irregular MSG_TIMER delivery.
+     * Timer IDs are globally unique across all components.
      * @param {number} elapse - Timer interval in milliseconds
-     * @returns {number} The auto-generated timer ID (use this to kill the timer later)
+     * @returns {number} The globally unique timer ID (use this to kill the timer later)
      */
     Context.prototype.setTimer = function(elapse) {
-        // Generate unique timer ID for this component
-        const timerId = this.nextTimerId++;
+        // Delegate ID generation and registration to the engine
+        const timerId = RafTimerEngine.add(this, elapse);
 
-        // Create interval that sends MSG_TIMER message to component
-        const intervalId = setInterval(() => {
-            wakaPAC.sendMessage(this.abstraction.pacId, MSG_TIMER, timerId, 0);
-        }, elapse);
+        // Store timerId in the context's own map for killTimer/killAllTimers lookups
+        this.timers.set(timerId, timerId);
 
-        // Store mapping of timerId -> intervalId for later cleanup
-        this.timers.set(timerId, intervalId);
-
-        // Return the timerId
+        // Return timer id
         return timerId;
     };
 
@@ -5204,30 +5316,31 @@
      * @returns {boolean} True if timer was found and killed, false if timer ID not found
      */
     Context.prototype.killTimer = function(timerId) {
-        // Look up the browser's interval ID
-        const intervalId = this.timers.get(timerId);
-
         // Do nothing if the timer does not exist
-        if (!intervalId) {
+        if (!this.timers.has(timerId)) {
             return false;
         }
 
-        // Stop the interval and remove from registry
-        clearInterval(intervalId);
+        // Remove from both the engine and the context's local map
+        RafTimerEngine.remove(timerId);
         this.timers.delete(timerId);
         return true;
     };
 
     /**
      * Kills all timers for this component.
-     * Useful for cleanup or when resetting component state.
-     * Automatically called when component is destroyed.
+     * Called automatically on component destruction to prevent MSG_TIMER delivery
+     * to a context that no longer exists.
      * @returns {number} Number of timers that were killed
      */
     Context.prototype.killAllTimers = function() {
         const count = this.timers.size;
-        this.timers.forEach(clearInterval);
+
+        // Delegate bulk removal to the engine, which matches by context reference
+        RafTimerEngine.removeAllForContext(this);
         this.timers.clear();
+
+        // Return number of timers removed
         return count;
     };
 
@@ -6046,6 +6159,8 @@
         this.updateCommentConditionals();
         this.handleWatchersForChange(event);
         this.handleForeachRebuildForChange(event);
+
+        //wakaPAC.sendMessage(this.abstraction.pacId, MSG_VALUE_CHANGE, 0, 0, event.detail);
     };
 
     // =============================================================================
@@ -9020,6 +9135,15 @@
 
         // Return the constructed message for delivery by postMessage or sendMessage.
         return event;
+    };
+
+    /**
+     * Resolve a WakaPAC component by its data-pac-id.
+     * @param {string} pacId Identifier of the target container
+     * @returns {HTMLElement|null} The resolved container element, or null
+     */
+    wakaPAC.getContextByPacId = function (pacId) {
+        return window.PACRegistry.get(pacId);
     };
 
     /**
