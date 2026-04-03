@@ -302,19 +302,21 @@
 
                 window.fetch = function () {
                     cycle++;
+                    const name = 'User ' + cycle;
                     return Promise.resolve({
                         ok: true,
                         json: function () {
-                            return Promise.resolve({ name: 'User ' + cycle });
+                            return Promise.resolve({ name: name });
                         }
                     });
                 };
 
-                store.poll('/api/user', { interval: 50 });
-                await wait(80);
+                store.poll('/api/user', { interval: 100 });
+
+                await wait(130);  // past first cycle (100ms), before second (200ms)
                 const nameAfterFirst = store.name;
 
-                await wait(60);
+                await wait(110);  // past second cycle (200ms), before third (300ms)
                 const nameAfterSecond = store.name;
 
                 store.stopPoll();
