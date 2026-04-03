@@ -4959,6 +4959,199 @@
         }
     };
 
+    // =============================================================================
+    // RAF Scheduler for timers
+    // =============================================================================
+
+    /**
+     * Shared requestAnimationFrame-based timer engine.
+     * Replaces setInterval for all WakaPAC component timers to avoid Firefox
+     * throttling issues that cause irregular MSG_TIMER delivery.
+     *
+     * All active timers across all components share a single rAF loop.
+     * The loop starts automatically when the first timer is added and stops
+     * itself when the last timer is removed — no idle overhead.
+     *
+     * Timer IDs are globally unique across all components, eliminating the need
+     * for compound keys or per-context ID sequences.
+     */
+    const RafTimerEngine = {
+        /** @type {number|null} Current rAF handle, null when loop is not running */
+        rafId: null,
+
+        /** @type {number} Global timer ID counter, incremented on each add() call */
+        nextTimerId: 1,
+
+        /** @type {Map<number, {context: Context, timerId: number, elapse: number, lastFired: number}>} */
+        timers: new Map(),
+
+        /**
+         * Registers a new timer entry and returns its globally unique ID.
+         * Starts the rAF loop if it wasn't already running.
+         * @param {Context} context - Owning context, used to resolve pacId for sendMessage
+         * @param {number} elapse - Desired interval in milliseconds
+         * @returns {number} Globally unique timer ID
+         */
+        add(context, elapse) {
+            // Generate a globally unique timer ID across all components
+            const timerId = this.nextTimerId++;
+
+            this.timers.set(timerId, {
+                context,
+                timerId,
+                elapse,
+                // Initialize to now so the first fire happens after one full interval,
+                // matching setInterval semantics rather than firing immediately
+                lastFired: performance.now()
+            });
+
+            // Start the loop only if it isn't already running
+            if (this.rafId === null) {
+                this.rafId = requestAnimationFrame(this.loop.bind(this));
+            }
+
+            // Return the ID so the context can store it for killTimer lookups
+            return timerId;
+        },
+
+        /**
+         * Removes a timer entry by its globally unique ID.
+         * Stops the rAF loop if no timers remain, avoiding idle rAF calls.
+         * @param {number} timerId - Globally unique timer ID to remove
+         */
+        remove(timerId) {
+            this.timers.delete(timerId);
+
+            // No timers left — stop the loop to avoid running it idle
+            if (this.timers.size === 0 && this.rafId !== null) {
+                cancelAnimationFrame(this.rafId);
+                this.rafId = null;
+            }
+        },
+
+        /**
+         * Removes all timers belonging to a specific context.
+         * Called by killAllTimers to clean up when a component is destroyed.
+         * @param {Context} context - The context whose timers should be removed
+         */
+        removeAllForContext(context) {
+            // Match entries by context reference — globally unique IDs make this safe
+            for (const [timerId, entry] of this.timers) {
+                if (entry.context === context) {
+                    this.timers.delete(timerId);
+                }
+            }
+
+            // Stop loop if no timers remain after the purge
+            if (this.timers.size === 0 && this.rafId !== null) {
+                cancelAnimationFrame(this.rafId);
+                this.rafId = null;
+            }
+        },
+
+        /**
+         * The rAF loop tick. Checks every registered timer against elapsed time
+         * and dispatches MSG_TIMER for any that have reached their interval.
+         * Reschedules itself as long as timers remain active.
+         * @param {number} now - Timestamp provided by requestAnimationFrame (via performance.now())
+         */
+        loop(now) {
+            for (const [, entry] of this.timers) {
+                if (now - entry.lastFired >= entry.elapse) {
+                    // Update lastFired before dispatch so that any re-entrant timer
+                    // operations inside msgProc see a consistent state
+                    entry.lastFired = now;
+                    wakaPAC.sendMessage(entry.context.abstraction.pacId, MSG_TIMER, entry.timerId, 0);
+                }
+            }
+
+            // Reschedule only if timers still exist — a killTimer inside msgProc
+            // may have emptied the map, in which case we let the loop die naturally
+            if (this.timers.size > 0) {
+                this.rafId = requestAnimationFrame(this.loop.bind(this));
+            } else {
+                this.rafId = null;
+            }
+        }
+    };
+
+    // ========================================================================
+    // FOCUS DEBOUNCER
+    // ========================================================================
+
+    /**
+     * Debounces focus-related browser state property updates to prevent spurious
+     * MSG_VALUE_CHANGED events when focus moves between elements within the same
+     * container. Without debouncing, a click on a button inside a focused container
+     * produces a blur/focus pair that briefly makes containerFocusWithin appear to
+     * change even though focus never left the container.
+     *
+     * Works by collecting property updates per container within the same tick and
+     * applying only the net result — if a property goes false then true within one
+     * tick, no MSG_VALUE_CHANGED fires at all.
+     *
+     * Keyed by pacId to correctly handle nested containers, where multiple containers
+     * may receive focus events within the same tick.
+     */
+    const FocusDebouncer = {
+        /** @type {number|null} Pending setTimeout handle, null when no flush is scheduled */
+        timer: null,
+
+        /** @type {Map<string, {context: Context, updates: Object}>} Pending updates keyed by pacId */
+        pending: new Map(),
+
+        /**
+         * Schedules a debounced application of focus-related property updates.
+         * Multiple calls within the same tick are coalesced per container — only
+         * the net state per property is applied when the timeout fires.
+         * @param {Context} context - Owning context whose abstraction properties will be updated
+         * @param {Object} updates - Map of property names to their new values
+         */
+        schedule(context, updates) {
+            const pacId = context.abstraction.pacId;
+
+            // Retrieve or create the pending entry for this container
+            if (!this.pending.has(pacId)) {
+                this.pending.set(pacId, { context, updates: {} });
+            }
+
+            // Merge incoming updates — last write per property wins within the same tick
+            Object.assign(this.pending.get(pacId).updates, updates);
+
+            // Cancel previous pending flush and reschedule
+            if (this.timer !== null) {
+                clearTimeout(this.timer);
+            }
+
+            // Defer to next tick — by then both blur and focus events will have fired
+            // for all containers, so pending holds the net state rather than intermediate transitions
+            this.timer = setTimeout(() => this.flush(), 0);
+        },
+
+        /**
+         * Applies accumulated property updates to each container's abstraction.
+         * Skips properties whose net value matches the current state, preventing
+         * unnecessary MSG_VALUE_CHANGED events for properties that didn't actually change.
+         */
+        flush() {
+            // Clear timer reference before applying updates — re-entrant calls
+            // from inside a watcher or msgProc will schedule a fresh debounce
+            this.timer = null;
+
+            for (const [, { context, updates }] of this.pending) {
+                for (const [key, value] of Object.entries(updates)) {
+                    // Only assign if the net value differs from current state
+                    if (context.abstraction[key] !== value) {
+                        context.abstraction[key] = value;
+                    }
+                }
+            }
+
+            // Reset pending map for the next cycle
+            this.pending = new Map();
+        }
+    };
+
     // ========================================================================
     // CONTEXT
     // ========================================================================
@@ -5131,118 +5324,6 @@
     // =============================================================================
     // TIMERS
     // =============================================================================
-
-    /**
-     * Shared requestAnimationFrame-based timer engine.
-     * Replaces setInterval for all WakaPAC component timers to avoid Firefox
-     * throttling issues that cause irregular MSG_TIMER delivery.
-     *
-     * All active timers across all components share a single rAF loop.
-     * The loop starts automatically when the first timer is added and stops
-     * itself when the last timer is removed — no idle overhead.
-     *
-     * Timer IDs are globally unique across all components, eliminating the need
-     * for compound keys or per-context ID sequences.
-     */
-    const RafTimerEngine = {
-        /** @type {number|null} Current rAF handle, null when loop is not running */
-        rafId: null,
-
-        /** @type {number} Global timer ID counter, incremented on each add() call */
-        nextTimerId: 1,
-
-        /** @type {Map<number, {context: Context, timerId: number, elapse: number, lastFired: number}>} */
-        timers: new Map(),
-
-        /**
-         * Registers a new timer entry and returns its globally unique ID.
-         * Starts the rAF loop if it wasn't already running.
-         * @param {Context} context - Owning context, used to resolve pacId for sendMessage
-         * @param {number} elapse - Desired interval in milliseconds
-         * @returns {number} Globally unique timer ID
-         */
-        add(context, elapse) {
-            // Generate a globally unique timer ID across all components
-            const timerId = this.nextTimerId++;
-
-            this.timers.set(timerId, {
-                context,
-                timerId,
-                elapse,
-                // Initialize to now so the first fire happens after one full interval,
-                // matching setInterval semantics rather than firing immediately
-                lastFired: performance.now()
-            });
-
-            // Start the loop only if it isn't already running
-            if (this.rafId === null) {
-                this.rafId = requestAnimationFrame(this.loop.bind(this));
-            }
-
-            // Return the ID so the context can store it for killTimer lookups
-            return timerId;
-        },
-
-        /**
-         * Removes a timer entry by its globally unique ID.
-         * Stops the rAF loop if no timers remain, avoiding idle rAF calls.
-         * @param {number} timerId - Globally unique timer ID to remove
-         */
-        remove(timerId) {
-            this.timers.delete(timerId);
-
-            // No timers left — stop the loop to avoid running it idle
-            if (this.timers.size === 0 && this.rafId !== null) {
-                cancelAnimationFrame(this.rafId);
-                this.rafId = null;
-            }
-        },
-
-        /**
-         * Removes all timers belonging to a specific context.
-         * Called by killAllTimers to clean up when a component is destroyed.
-         * @param {Context} context - The context whose timers should be removed
-         */
-        removeAllForContext(context) {
-            // Match entries by context reference — globally unique IDs make this safe
-            for (const [timerId, entry] of this.timers) {
-                if (entry.context === context) {
-                    this.timers.delete(timerId);
-                }
-            }
-
-            // Stop loop if no timers remain after the purge
-            if (this.timers.size === 0 && this.rafId !== null) {
-                cancelAnimationFrame(this.rafId);
-                this.rafId = null;
-            }
-        },
-
-        /**
-         * The rAF loop tick. Checks every registered timer against elapsed time
-         * and dispatches MSG_TIMER for any that have reached their interval.
-         * Reschedules itself as long as timers remain active.
-         * @param {number} now - Timestamp provided by requestAnimationFrame (via performance.now())
-         */
-        loop(now) {
-            for (const [, entry] of this.timers) {
-                if (now - entry.lastFired >= entry.elapse) {
-                    // Update lastFired before dispatch so that any re-entrant timer
-                    // operations inside msgProc see a consistent state
-                    entry.lastFired = now;
-                    wakaPAC.sendMessage(entry.context.abstraction.pacId, MSG_TIMER, entry.timerId, 0);
-                }
-            }
-
-            // Reschedule only if timers still exist — a killTimer inside msgProc
-            // may have emptied the map, in which case we let the loop die naturally
-            if (this.timers.size > 0) {
-                this.rafId = requestAnimationFrame(this.loop.bind(this));
-            } else {
-                this.rafId = null;
-            }
-        }
-    };
 
     /**
      * Sets a timer for this component, similar to Win32 SetTimer.
@@ -5805,8 +5886,10 @@
      * Called automatically after MSG_SETFOCUS/MSG_KILLFOCUS events
      */
     Context.prototype.updateFocusProperties = function() {
-        this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
-        this.abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
+        FocusDebouncer.schedule(this, {
+            containerFocus: Utils.isElementDirectlyFocused(this.container),
+            containerFocusWithin: Utils.isElementFocusWithin(this.container)
+        });
     }
 
     /**
