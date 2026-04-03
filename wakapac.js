@@ -7342,7 +7342,7 @@
                 0,
                 {
                     arrayName: mappingData.foreachExpr,
-                    marker:    foreachElement.getAttribute('data-pac-marker') ?? null
+                    marker: foreachElement.getAttribute('data-pac-marker') ?? null
                 }
             );
 
@@ -7866,7 +7866,7 @@
             // Clean up cached state to prevent memory leaks
             delete element._pacPreviousValues;
             delete element._pacPreviousArray;
-            delete element._pacDynamicClass;
+            delete element._pacDynamicClasses;
             delete element._pacForeachChain;
             delete element._pacForeachContext;
         });
