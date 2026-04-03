@@ -4590,6 +4590,37 @@
                 type: key,
                 target: value
             });
+        },
+
+        /**
+         * Returns a debounced version of fn that delays invocation until after `delay`
+         * milliseconds have elapsed since the last call. Any pending invocation is
+         * cancelled when the debounced function is called again before the timer fires.
+         *
+         * The returned function exposes a .cancel() method to abort a pending call,
+         * which is required for proper cleanup (e.g. component teardown).
+         *
+         * @param {Function} fn    - Function to debounce
+         * @param {number}   delay - Quiet period in milliseconds
+         * @returns {Function} Debounced wrapper with a .cancel() method
+         */
+        debounce(fn, delay) {
+            let timer = null;
+
+            function debounced(...args) {
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    timer = null;
+                    fn.apply(this, args);
+                }, delay);
+            }
+
+            debounced.cancel = function () {
+                clearTimeout(timer);
+                timer = null;
+            };
+
+            return debounced;
         }
     };
 
@@ -5223,9 +5254,9 @@
         // Clear boundHandlePacEvent callback
         this.boundHandlePacEvent = null;
 
-        // Clean up container scroll listener and the timeout for it
+        // Clean up container scroll listener and cancel any pending debounced call
         if (this.containerScrollHandler) {
-            clearTimeout(this.scrollTimeout);
+            this.containerScrollHandler.cancel();
             this.container.removeEventListener('scroll', this.containerScrollHandler);
             this.containerScrollHandler = null;
         }
@@ -5325,18 +5356,16 @@
         // First time setup
         requestAnimationFrame(() => this.updateContainerScrollState());
 
-        // Inline debounce implementation
-        const scrollHandler = () => {
-            clearTimeout(this.scrollTimeout); // Use instance property
-            this.scrollTimeout = setTimeout(() => {
-                this.updateContainerScrollState();
-            }, 16);
-        };
+        // Debounce scroll updates to ~1 frame (16 ms) so rapid scroll events
+        // are coalesced rather than triggering a state update on every pixel.
+        const scrollHandler = Utils.debounce(() => {
+            this.updateContainerScrollState();
+        }, 16);
 
         // Add scroll listener to this container
         this.container.addEventListener('scroll', scrollHandler, { passive: true });
 
-        // Store reference for cleanup
+        // Store reference for cleanup (scrollHandler.cancel() is called on teardown)
         this.containerScrollHandler = scrollHandler;
     }
 
@@ -8449,8 +8478,13 @@
         /** @type {Set<Context>} Components waiting for hierarchy establishment */
         this.pendingHierarchy = new Set();
 
-        /** @type {number|null} Timer reference for batched hierarchy processing */
-        this.hierarchyTimer = null;
+        /**
+         * Debounced wrapper around establishAllHierarchies().
+         * Batches rapid registrations (e.g. from a single wakaPAC() call that mounts
+         * many child components) into one hierarchy pass 10 ms after the last one.
+         * @type {Function}
+         */
+        this._scheduleHierarchy = Utils.debounce(() => this.establishAllHierarchies(), 10);
     }
 
     ComponentRegistry.prototype = {
@@ -8463,13 +8497,8 @@
             this.components.set(selector, context);
             this.pendingHierarchy.add(context);
 
-            // Clear existing timer and start new one
-            clearTimeout(this.hierarchyTimer);
-
-            // Establish hierarchies
-            this.hierarchyTimer = setTimeout(() => {
-                this.establishAllHierarchies();
-            }, 10);
+            // Batch rapid registrations — hierarchy is established once the burst settles
+            this._scheduleHierarchy();
         },
 
         /**
@@ -8551,15 +8580,9 @@
             // Check if any new components were registered during processing
             // This happens when parent components dynamically create children
             if (this.pendingHierarchy.size > 0) {
-                // Cancel any pending hierarchy processing to avoid duplicate runs
-                clearTimeout(this.hierarchyTimer);
-
-                // Schedule another round after a brief delay
-                // The 10ms delay allows multiple rapid registrations to batch together
-                // rather than processing them one at a time
-                this.hierarchyTimer = setTimeout(() => {
-                    this.establishAllHierarchies();
-                }, 10);
+                // Schedule another pass — _scheduleHierarchy() will debounce any
+                // additional registrations that arrive before the 10 ms window closes
+                this._scheduleHierarchy();
             }
         },
 
