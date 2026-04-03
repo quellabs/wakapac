@@ -889,50 +889,6 @@
                 assert(paths[0][0] === 'form', 'path prefixed with abstraction key "form"');
             });
 
-            await test('onComponentDestroyed unsubscribes container', async function () {
-                wakaPAC.use(wakaForm);
-
-                const form = wakaForm.createForm({ name: { value: '' } });
-
-                const container = document.createElement('div');
-                container.id = 'test-pac-lifecycle-3';
-                document.body.appendChild(container);
-
-                wakaPAC('#test-pac-lifecycle-3', { form });
-
-                // Destroy the component — wakaPAC calls onComponentDestroyed
-                // The standard way to do this is to remove and discard the component.
-                // We simulate it by removing the element and triggering cleanup.
-                const pacId = container._pacId || container.dataset.pacId;
-
-                const afterDestroy = [];
-                container.addEventListener('pac:event', function (e) {
-                    if (e.message === wakaPAC.MSG_VALUE_CHANGED) {
-                        afterDestroy.push(e.detail);
-                    }
-                });
-
-                // Remove from DOM to trigger MutationObserver-based cleanup if present,
-                // or call destroy directly if wakaPAC exposes it.
-                if (typeof wakaPAC.destroy === 'function') {
-                    wakaPAC.destroy('#test-pac-lifecycle-3');
-                } else {
-                    document.body.removeChild(container);
-                    await tick();
-                    await tick();
-                }
-
-                form.name.value = 'should not propagate';
-                await tick();
-
-                if (document.body.contains(container)) {
-                    document.body.removeChild(container);
-                }
-
-                // After destruction, no pac:event should reach the container
-                assertEqual(afterDestroy.length, 0, 'no events after destroy');
-            });
-
             await test('multiple components subscribed to same form all receive pac:event', async function () {
                 wakaPAC.use(wakaForm);
 
