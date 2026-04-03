@@ -1221,7 +1221,7 @@
                 proxiedVal._isReactive = true;
 
                 // Write directly to target without going through the proxy set trap.
-                // This caches the proxy without firing pac:change.
+                // This caches the proxy without firing MSG_VALUE_CHANGED.
                 Object.defineProperty(target, prop, {
                     value: proxiedVal,
                     writable: true,
@@ -1287,7 +1287,7 @@
 
         /**
          * Proxy deleteProperty trap handler.
-         * Fires a pac:change event when a reactive property is deleted,
+         * Fires a MSG_VALUE_CHANGED event when a reactive property is deleted,
          * allowing the DOM to update in response.
          * @param {Object|Array} target - The object being proxied
          * @param {string|symbol} prop - Property being deleted
@@ -6315,7 +6315,7 @@
      * Triggers watchers for property changes
      * Handles both root-level and nested property changes, passing appropriate before/after values
      * Note: Does not trigger for array element changes - arrays are handled by foreach rebuilds
-     * @param {CustomEvent} event - The pac:change event with change details
+     * @param {CustomEvent} event - The MSG_VALUE_CHANGED event with change details
      */
     Context.prototype.handleWatchersForChange = function(event) {
         // Root-level change (e.g., this.count = 5)
@@ -6372,7 +6372,7 @@
      * either because they're bound directly to the changed array, or because
      * they're bound to a computed property that depends on the changed property
      * (e.g., changing 'filter' triggers rebuild of foreach bound to 'filteredTodos').
-     * @param {CustomEvent} event - The pac:change event containing change details
+     * @param {CustomEvent} event - The MSG_VALUE_CHANGED event containing change details
      * @param {string[]} event.detail.path - Property path that changed
      */
     Context.prototype.handleForeachRebuildForChange = function(event) {
@@ -6384,7 +6384,7 @@
         }
 
         // Only handles computed/filtered foreach dependencies (e.g., filter → filteredTodos).
-        // Direct array assignments go through handleArrayChange via pac:array-change.
+        // Direct array assignments go through handleArrayChange via MSG_VALUE_CHANGED
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
 
@@ -7357,7 +7357,7 @@
      * Syncs a <select> element's DOM value back into the model after its
      * child <option> elements were rebuilt by a foreach. The browser reconciles
      * the selection against the new option set; this method reads the resulting
-     * .value and writes it into the abstraction so the proxy fires a pac:change
+     * .value and writes it into the abstraction so the proxy fires a MSG_VALUE_CHANGED
      * event and dependent bindings stay in sync.
      * @param {Element} foreachElement - The element whose foreach just rebuilt
      */
