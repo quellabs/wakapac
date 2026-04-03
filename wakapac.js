@@ -5284,48 +5284,29 @@
      */
     Context.prototype.setTimer = function(elapse) {
         // Delegate ID generation and registration to the engine
-        const timerId = RafTimerEngine.add(this, elapse);
-
-        // Store timerId in the context's own map for killTimer/killAllTimers lookups
-        this.timers.set(timerId, timerId);
-
-        // Return timer id
-        return timerId;
+        return RafTimerEngine.add(this, elapse);
     };
 
     /**
      * Kills a specific timer for this component, similar to Win32 KillTimer.
      * Stops the timer from sending further MSG_TIMER messages.
      * @param {number} timerId - The timer ID returned from setTimer()
-     * @returns {boolean} True if timer was found and killed, false if timer ID not found
+     * @returns {void}
      */
     Context.prototype.killTimer = function(timerId) {
-        // Do nothing if the timer does not exist
-        if (!this.timers.has(timerId)) {
-            return false;
-        }
-
-        // Remove from both the engine and the context's local map
-        RafTimerEngine.remove(timerId);
-        this.timers.delete(timerId);
-        return true;
+        // Delegate directly to the engine — timer IDs are globally unique
+        return RafTimerEngine.remove(timerId);
     };
 
     /**
      * Kills all timers for this component.
      * Called automatically on component destruction to prevent MSG_TIMER delivery
      * to a context that no longer exists.
-     * @returns {number} Number of timers that were killed
+     * @returns {void}
      */
     Context.prototype.killAllTimers = function() {
-        const count = this.timers.size;
-
         // Delegate bulk removal to the engine, which matches by context reference
-        RafTimerEngine.removeAllForContext(this);
-        this.timers.clear();
-
-        // Return number of timers removed
-        return count;
+        return RafTimerEngine.removeAllForContext(this);
     };
 
     // =============================================================================
