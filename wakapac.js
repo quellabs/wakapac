@@ -1553,6 +1553,7 @@
                 // so the kill is cancelled and only SETFOCUS remains
                 pending.set(container, { message: MSG_SETFOCUS, domEvent: event });
 
+                // Flush change
                 scheduleFlush();
             });
 
@@ -1567,6 +1568,7 @@
                     pending.set(container, { message: MSG_KILLFOCUS, domEvent: event });
                 }
 
+                // Flush change
                 scheduleFlush();
             });
         },
