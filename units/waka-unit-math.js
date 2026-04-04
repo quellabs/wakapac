@@ -147,21 +147,7 @@
                      */
                     inRange: (n, lo, hi) => n >= lo && n <= hi
                 },
-
-                /**
-                 * Add unit to abstraction if instructed
-                 * @param abstraction
-                 * @param pacId
-                 * @param config
-                 */
-                onComponentCreated(abstraction, pacId, config) {
-                    const key = config.math?.property;
-
-                    if (key && key in abstraction) {
-                        abstraction[key] = this.functions;
-                    }
-                }
-            };
+            }
         }
     };
 
