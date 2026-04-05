@@ -37,14 +37,17 @@
  * ║    MSG_VIDEO_PLAY         — playback started                                        ║
  * ║    MSG_VIDEO_PAUSE        — playback paused                                         ║
  * ║    MSG_VIDEO_ENDED        — playback reached the end                                ║
- * ║    MSG_VIDEO_SEEK         — seek completed; extended.currentTime (actual position)  ║
- * ║    MSG_VIDEO_LOADED       — video ready; extended.duration/videoWidth/              ║
- * ║                             videoHeight/volume/muted/playbackRate                   ║
+ * ║    MSG_VIDEO_SEEK         — seek completed; wParam = ms (truncated),                ║
+ * ║                             extended.currentTime (fractional seconds)               ║
+ * ║    MSG_VIDEO_LOADED       — video ready; extended.duration/videoWidth/videoHeight   ║
  * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; wParam = volume (0–100),      ║
  * ║                              lParam = muted (1/0); extended.volume/muted            ║
  * ║    MSG_VIDEO_RATE_CHANGE  — playback rate changed; extended.playbackRate            ║
  * ║    MSG_VIDEO_WAITING      — buffering started (bufferstart event)                   ║
  * ║    MSG_VIDEO_CANPLAY      — buffering ended (bufferend event)                       ║
+ * ║    MSG_VIDEO_TIMEUPDATE   — fired via timeupdate (~250 ms) during playback;         ║
+ * ║                             wParam = ms (truncated),                                ║
+ * ║                             extended.currentTime (fractional seconds)               ║
  * ║    MSG_VIDEO_ERROR        — playback error; extended.message                        ║
  * ║                                                                                     ║
  * ║  API — all methods take pacId as first argument:                                    ║
@@ -56,13 +59,9 @@
  * ║    WakaVimeo.setPlaybackRate(pacId, rate)   — set playback rate (0.5–2)             ║
  * ║                                                                                     ║
  * ║  Reactive properties injected on the abstraction:                                   ║
- * ║    currentTime   — updated via timeupdate event (~250 ms) during playback           ║
  * ║    duration      — set when MSG_VIDEO_LOADED fires                                  ║
  * ║    videoWidth    — set when MSG_VIDEO_LOADED fires                                  ║
  * ║    videoHeight   — set when MSG_VIDEO_LOADED fires                                  ║
- * ║    volume        — 0–100; updated on MSG_VIDEO_VOLUME_CHANGE                        ║
- * ║    muted         — updated on MSG_VIDEO_VOLUME_CHANGE                               ║
- * ║    playbackRate  — updated on MSG_VIDEO_RATE_CHANGE                                 ║
  * ║                                                                                     ║
  * ╚═════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -212,12 +211,14 @@
             return;
         }
 
+        // Instantiate the Vimeo player in the container
         const player = new Vimeo.Player(container, {
             id,
             dnt: true,            // privacy-enhanced embed; no tracking cookies
             ...embedOptions
         });
 
+        // Register the component
         const entry = {pac, player, abstraction, msgConstants};
         _registry.set(pacId, entry);
 
@@ -231,25 +232,18 @@
             Promise.all([
                 player.getDuration(),
                 player.getVideoWidth(),
-                player.getVideoHeight(),
-                player.getVolume(),
-                player.getMuted(),
-                player.getPlaybackRate()
-            ]).then(function ([duration, videoWidth, videoHeight, volume, muted, playbackRate]) {
+                player.getVideoHeight()
+            ]).then(function ([duration, videoWidth, videoHeight]) {
+                // Update the abstraction
                 abstraction.duration = duration;
                 abstraction.videoWidth = videoWidth;
                 abstraction.videoHeight = videoHeight;
-                abstraction.volume = volume * 100;
-                abstraction.muted = muted;
-                abstraction.playbackRate = playbackRate;
 
+                // Notify msgProc
                 pac.sendMessage(pacId, msgConstants.MSG_VIDEO_LOADED, 0, 0, {
                     duration,
                     videoWidth,
-                    videoHeight,
-                    volume: volume * 100,
-                    muted,
-                    playbackRate
+                    videoHeight
                 });
             }).catch(function (err) {
                 pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, 0, 0, {
@@ -263,13 +257,19 @@
          * data: { seconds, percent, duration }
          */
         player.on('timeupdate', function (data) {
-            abstraction.currentTime = data.seconds;
+            const t = data.seconds;
+
+            // Notify msgProc of the current playback position
+            pac.sendMessage(pacId, msgConstants.MSG_VIDEO_TIMEUPDATE, Math.trunc(t * 1000), 0, {
+                currentTime: t
+            });
         });
 
         /**
          * Fires when playback starts
          */
         player.on('play', function () {
+            // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PLAY, 0, 0);
         });
 
@@ -277,7 +277,7 @@
          * Fires when playback is paused. data: { seconds, percent, duration }
          */
         player.on('pause', function (data) {
-            abstraction.currentTime = data.seconds;
+            // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PAUSE, 0, 0);
         });
 
@@ -285,7 +285,7 @@
          * Fires when playback reaches the end of the video. data: { seconds, percent, duration }
          */
         player.on('ended', function (data) {
-            abstraction.currentTime = data.seconds;
+            // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ENDED, 0, 0);
         });
 
@@ -295,9 +295,11 @@
          * data: { seconds, percent, duration }
          */
         player.on('seeked', function (data) {
-            abstraction.currentTime = data.seconds;
-            pac.sendMessage(pacId, msgConstants.MSG_VIDEO_SEEK, 0, 0, {
-                currentTime: data.seconds
+            const t = data.seconds;
+
+            // Notify msgProc of the landed position
+            pac.sendMessage(pacId, msgConstants.MSG_VIDEO_SEEK, Math.trunc(t * 1000), 0, {
+                currentTime: t
             });
         });
 
@@ -310,9 +312,7 @@
             const volume = data.volume * 100;
             const muted = data.muted ? 1 : 0;
 
-            abstraction.volume = volume;
-            abstraction.muted = data.muted;
-
+            // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_VOLUME_CHANGE, volume, muted, {
                 volume: volume,
                 muted: data.muted
@@ -323,8 +323,7 @@
          * Fires when the playback rate changes. data: { playbackRate }
          */
         player.on('playbackratechange', function (data) {
-            abstraction.playbackRate = data.playbackRate;
-
+            // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_RATE_CHANGE, 0, 0, {
                 playbackRate: data.playbackRate
             });
@@ -334,6 +333,7 @@
          * Fires when the player starts buffering.
          */
         player.on('bufferstart', function () {
+            // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_WAITING, 0, 0);
         });
 
@@ -341,6 +341,7 @@
          * Fires when buffering ends and playback can resume.
          */
         player.on('bufferend', function () {
+            // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_CANPLAY, 0, 0);
         });
 
@@ -348,6 +349,7 @@
          *  Fires on playback errors. data: { message, method, name }
          */
         player.on('error', function (data) {
+            // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, 0, 0, {
                 message: data.message ?? 'Unknown Vimeo error'
             });
@@ -375,6 +377,7 @@
             const MSG_VIDEO_RATE_CHANGE = pac.MSG_PLUGIN + 0x109;
             const MSG_VIDEO_WAITING = pac.MSG_PLUGIN + 0x10A;
             const MSG_VIDEO_CANPLAY = pac.MSG_PLUGIN + 0x10B;
+            const MSG_VIDEO_TIMEUPDATE = pac.MSG_PLUGIN + 0x10C;
 
             // Attach constants so components can reference WakaVimeo.MSG_VIDEO_PLAY etc.
             this.MSG_VIDEO_PLAY = MSG_VIDEO_PLAY;
@@ -387,6 +390,7 @@
             this.MSG_VIDEO_RATE_CHANGE = MSG_VIDEO_RATE_CHANGE;
             this.MSG_VIDEO_WAITING = MSG_VIDEO_WAITING;
             this.MSG_VIDEO_CANPLAY = MSG_VIDEO_CANPLAY;
+            this.MSG_VIDEO_TIMEUPDATE = MSG_VIDEO_TIMEUPDATE;
 
             const msgConstants = {
                 MSG_VIDEO_PLAY,
@@ -398,7 +402,8 @@
                 MSG_VIDEO_VOLUME_CHANGE,
                 MSG_VIDEO_RATE_CHANGE,
                 MSG_VIDEO_WAITING,
-                MSG_VIDEO_CANPLAY
+                MSG_VIDEO_CANPLAY,
+                MSG_VIDEO_TIMEUPDATE
             };
 
             // Plugin-level embed option defaults, set via wakaPAC.use(WakaVimeo, { ... }).
@@ -442,14 +447,11 @@
                     };
 
                     // Seed the abstraction with neutral initial values.
-                    abstraction.currentTime = 0;
                     abstraction.duration = NaN;
                     abstraction.videoWidth = null;
                     abstraction.videoHeight = null;
-                    abstraction.volume = 100;
-                    abstraction.muted = false;
-                    abstraction.playbackRate = 1;
 
+                    // Inject the SDK script if not already done, then create the player
                     ensureApiLoaded();
 
                     if (_apiReady) {
@@ -468,6 +470,7 @@
                  * @param {string} pacId
                  */
                 onComponentDestroyed(abstraction, pacId) {
+                    // Remove from the pending queue if the SDK has not loaded yet
                     const pendingIndex = _pendingInits.findIndex(p => p.pacId === pacId);
 
                     if (pendingIndex !== -1) {
@@ -486,6 +489,7 @@
                         // Ignore errors during destruction.
                     });
 
+                    // Unregister the component
                     _registry.delete(pacId);
                 }
             };
@@ -507,6 +511,7 @@
                 return;
             }
 
+            // Call the Vimeo SDK; forward errors to msgProc
             entry.player.play().catch(function (err) {
                 entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_ERROR, 0, 0, {
                     message: err.message ?? 'Play failed'
@@ -525,6 +530,7 @@
                 return;
             }
 
+            // Call the Vimeo SDK
             entry.player.pause().catch(function (err) {
                 console.warn('WakaVimeo: pause failed:', err);
             });
@@ -548,6 +554,7 @@
                 return;
             }
 
+            // Call the Vimeo SDK; MSG_VIDEO_SEEK fires from the seeked event
             entry.player.setCurrentTime(Math.max(0, time)).catch(function (err) {
                 console.warn('WakaVimeo: seek failed:', err);
             });
@@ -569,6 +576,7 @@
 
             const clamped = Math.max(0, Math.min(100, volume));
 
+            // Call the Vimeo SDK; MSG_VIDEO_VOLUME_CHANGE fires from the volumechange event
             entry.player.setVolume(clamped / 100).catch(function (err) {
                 console.warn('WakaVimeo: setVolume failed:', err);
             });
@@ -587,6 +595,7 @@
                 return;
             }
 
+            // Call the Vimeo SDK; MSG_VIDEO_VOLUME_CHANGE fires from the volumechange event
             entry.player.setMuted(Boolean(muted)).catch(function (err) {
                 console.warn('WakaVimeo: setMuted failed:', err);
             });
@@ -615,6 +624,7 @@
             // will be rejected with a RangeError by the SDK.
             const clamped = Math.min(2, Math.max(0.5, rate));
 
+            // Call the Vimeo SDK; MSG_VIDEO_RATE_CHANGE fires from the playbackratechange event
             entry.player.setPlaybackRate(clamped).catch(function (err) {
                 console.warn('WakaVimeo: setPlaybackRate failed:', err);
             });

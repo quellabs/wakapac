@@ -35,15 +35,19 @@
  * ║    MSG_VIDEO_PLAY         — playback started                                         ║
  * ║    MSG_VIDEO_PAUSE        — playback paused                                          ║
  * ║    MSG_VIDEO_ENDED        — playback reached the end                                 ║
- * ║    MSG_VIDEO_SEEK         — seek dispatched; extended.currentTime                    ║
- * ║    MSG_VIDEO_LOADED       — video metadata available; extended.duration/             ║
- * ║                             volume/muted. Fired once per video load, on the          ║
- * ║                             first transition into playing or cued state.             ║
+ * ║    MSG_VIDEO_SEEK         — seek dispatched; wParam = ms (truncated),                ║
+ * ║                             extended.currentTime (fractional seconds)                ║
+ * ║    MSG_VIDEO_LOADED       — video metadata available; extended.duration.             ║
+ * ║                             Fired once per video load, on the first transition       ║
+ * ║                             into playing or cued state.                              ║
  * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; wParam = volume (0–100),       ║
  * ║                              lParam = muted (1/0); extended.volume/muted             ║
  * ║    MSG_VIDEO_WAITING      — player is buffering (IFrame API state 3)                 ║
  * ║    MSG_VIDEO_CANPLAY      — buffering resolved; fires before MSG_VIDEO_PLAY          ║
  * ║                             when the player transitions from buffering to playing    ║
+ * ║    MSG_VIDEO_TIMEUPDATE   — fired each animation frame during playback;              ║
+ * ║                             wParam = ms (truncated),                                 ║
+ * ║                             extended.currentTime (fractional seconds)                ║
  * ║    MSG_VIDEO_ERROR        — playback error; wParam = YouTube error code              ║
  * ║                             (2 invalid param, 5 HTML5 error, 100 not found,          ║
  * ║                              101/150 embedding not allowed)                          ║
@@ -56,10 +60,7 @@
  * ║    WakaYouTube.setMuted(pacId, muted)   — set muted state                            ║
  * ║                                                                                      ║
  * ║  Reactive properties injected on the abstraction:                                    ║
- * ║    currentTime  — updated via rAF during playback; also updated on seek              ║
  * ║    duration     — set when MSG_VIDEO_LOADED fires                                    ║
- * ║    volume       — 0–100; updated on MSG_VIDEO_VOLUME_CHANGE                          ║
- * ║    muted        — updated on MSG_VIDEO_VOLUME_CHANGE                                 ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -180,32 +181,37 @@
     /**
      * Advances currentTime on the abstraction once per animation frame while
      * the player is playing. Self-terminates when rafHandle is cleared.
+     * @param pacId
      * @param {Object} entry
      */
-    function rafTick(entry) {
+    function rafTick(pacId, entry) {
+        // Stop the loop if it was cancelled
         if (entry.rafHandle === null) {
             return;
         }
 
         const t = entry.player.getCurrentTime();
 
-        if (entry.abstraction.currentTime !== t) {
-            entry.abstraction.currentTime = t;
-        }
+        // Notify msgProc of the current playback position
+        entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_TIMEUPDATE, Math.trunc(t * 1000), 0, {
+            currentTime: t
+        });
 
-        entry.rafHandle = requestAnimationFrame(() => rafTick(entry));
+        // Schedule the next tick
+        entry.rafHandle = requestAnimationFrame(() => rafTick(pacId, entry));
     }
 
     /**
      * Starts the rAF loop. No-op if already running.
+     * @param pacId
      * @param {Object} entry
      */
-    function startPolling(entry) {
+    function startPolling(pacId, entry) {
         if (entry.rafHandle !== null) {
             return;
         }
 
-        entry.rafHandle = requestAnimationFrame(() => rafTick(entry));
+        entry.rafHandle = requestAnimationFrame(() => rafTick(pacId, entry));
     }
 
     /**
@@ -271,14 +277,12 @@
 
         const {pac, player, abstraction, msgConstants} = entry;
 
+        // Update the abstraction
         abstraction.duration = player.getDuration();
-        abstraction.volume = player.getVolume();
-        abstraction.muted = player.isMuted();
 
+        // Notify msgProc
         pac.sendMessage(pacId, msgConstants.MSG_VIDEO_LOADED, 0, 0, {
-            duration: abstraction.duration,
-            volume: abstraction.volume,
-            muted: abstraction.muted
+            duration: abstraction.duration
         });
     }
 
@@ -304,24 +308,34 @@
                     pac.sendMessage(pacId, msgConstants.MSG_VIDEO_CANPLAY, 0, 0);
                 }
 
-                startPolling(entry);
+                // Start the rAF loop to drive MSG_VIDEO_TIMEUPDATE
+                startPolling(pacId, entry);
+
+                // Notify msgProc
                 pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PLAY, 0, 0);
                 break;
 
             case YT_PAUSED:
+                // Stop the rAF loop
                 stopPolling(entry);
-                abstraction.currentTime = player.getCurrentTime();
+
+                // Notify msgProc
                 pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PAUSE, 0, 0);
                 break;
 
             case YT_ENDED:
+                // Stop the rAF loop
                 stopPolling(entry);
-                abstraction.currentTime = player.getCurrentTime();
+
+                // Notify msgProc
                 pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ENDED, 0, 0);
                 break;
 
             case YT_BUFFERING:
+                // Stop the rAF loop while buffering
                 stopPolling(entry);
+
+                // Notify msgProc
                 pac.sendMessage(pacId, msgConstants.MSG_VIDEO_WAITING, 0, 0);
                 break;
 
@@ -366,9 +380,10 @@
             return;
         }
 
+        // Register the component; player is assigned below once YT.Player is constructed
         const entry = {
             pac,
-            player: null,   // assigned below once YT.Player is constructed
+            player: null,
             abstraction,
             msgConstants,
             rafHandle: null,
@@ -378,6 +393,7 @@
 
         _registry.set(pacId, entry);
 
+        // Instantiate the YouTube player in the container
         entry.player = new YT.Player(container, {
             // host must be at the top level of the config object, not inside
             // playerVars — YouTube ignores it there.
@@ -389,6 +405,7 @@
                     onStateChange(pacId, entry, event.data);
                 },
                 onError(event) {
+                    // Notify msgProc
                     pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, event.data, 0, {
                         message: YT_ERROR_MESSAGES[event.data] ?? 'Unknown YouTube error'
                     });
@@ -426,6 +443,7 @@
             const MSG_VIDEO_VOLUME_CHANGE = pac.MSG_PLUGIN + 0x108;
             const MSG_VIDEO_WAITING = pac.MSG_PLUGIN + 0x10A;
             const MSG_VIDEO_CANPLAY = pac.MSG_PLUGIN + 0x10B;
+            const MSG_VIDEO_TIMEUPDATE = pac.MSG_PLUGIN + 0x10C;
 
             // Attach constants so components can reference WakaYouTube.MSG_VIDEO_PLAY etc.
             this.MSG_VIDEO_PLAY = MSG_VIDEO_PLAY;
@@ -437,8 +455,8 @@
             this.MSG_VIDEO_VOLUME_CHANGE = MSG_VIDEO_VOLUME_CHANGE;
             this.MSG_VIDEO_WAITING = MSG_VIDEO_WAITING;
             this.MSG_VIDEO_CANPLAY = MSG_VIDEO_CANPLAY;
+            this.MSG_VIDEO_TIMEUPDATE = MSG_VIDEO_TIMEUPDATE;
 
-            // Bundle constants for passing into closures without closing over `this`.
             const msgConstants = {
                 MSG_VIDEO_PLAY,
                 MSG_VIDEO_PAUSE,
@@ -448,7 +466,8 @@
                 MSG_VIDEO_ERROR,
                 MSG_VIDEO_VOLUME_CHANGE,
                 MSG_VIDEO_WAITING,
-                MSG_VIDEO_CANPLAY
+                MSG_VIDEO_CANPLAY,
+                MSG_VIDEO_TIMEUPDATE
             };
 
             return {
@@ -488,13 +507,11 @@
                         enablejsapi: 1
                     };
 
-                    // Seed the abstraction with neutral initial values before the
+                    // Seed the abstraction with a neutral initial value before the
                     // player is ready, so bindings have something to render.
-                    abstraction.currentTime = 0;
                     abstraction.duration = NaN;
-                    abstraction.volume = 100;
-                    abstraction.muted = false;
 
+                    // Inject the API script if not already done, then create the player
                     ensureApiLoaded();
 
                     if (_apiReady) {
@@ -527,8 +544,13 @@
                         return;
                     }
 
+                    // Stop the rAF loop
                     stopPolling(entry);
+
+                    // Destroy the YouTube player instance
                     entry.player.destroy();
+
+                    // Unregister the component
                     _registry.delete(pacId);
                 }
             };
@@ -543,6 +565,7 @@
          * @param {string} pacId
          */
         play(pacId) {
+            // Call the YouTube API
             _registry.get(pacId)?.player?.playVideo();
         },
 
@@ -551,6 +574,7 @@
          * @param {string} pacId
          */
         pause(pacId) {
+            // Call the YouTube API
             _registry.get(pacId)?.player?.pauseVideo();
         },
 
@@ -565,12 +589,10 @@
         seek(pacId, time) {
             const entry = _registry.get(pacId);
 
-            // If no component found, bail
             if (!entry) {
                 return;
             }
 
-            // If time is invalid, bail
             if (typeof time !== 'number' || Number.isNaN(time)) {
                 return;
             }
@@ -580,14 +602,11 @@
             const duration = entry.player.getDuration();
             const clamped = Math.max(0, duration > 0 ? Math.min(time, duration) : time);
 
-            // Call YouTube
+            // Call the YouTube API
             entry.player.seekTo(clamped, true);
 
-            // Update the abstraction immediately and dispatch MSG_VIDEO_SEEK so
-            // msgProc receives the same message shape it would from WakaVideo.
-            entry.abstraction.currentTime = clamped;
-
-            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_SEEK, 0, 0, {
+            // Notify msgProc immediately; the IFrame API has no seeked completion event
+            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_SEEK, Math.trunc(clamped * 1000), 0, {
                 currentTime: clamped
             });
         },
@@ -603,19 +622,17 @@
         setVolume(pacId, volume) {
             const entry = _registry.get(pacId);
 
-            // If no component found, bail
             if (!entry) {
                 return;
             }
 
-            const muted = entry.abstraction.muted ? 1 : 0;
             const clamped = Math.max(0, Math.min(100, volume));
+            const muted = entry.player.isMuted() ? 1 : 0;
 
-            // Call YouTube
+            // Call the YouTube API
             entry.player.setVolume(clamped);
 
-            entry.abstraction.volume = clamped;
-
+            // Notify msgProc; the IFrame API fires no volumechange event
             entry.pac.sendMessage(
                 pacId,
                 entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE,
@@ -623,7 +640,7 @@
                 muted,
                 {
                     volume: clamped,
-                    muted: entry.abstraction.muted
+                    muted: Boolean(muted)
                 }
             );
         },
@@ -637,24 +654,24 @@
         setMuted(pacId, muted) {
             const entry = _registry.get(pacId);
 
-            // If no component found, bail
             if (!entry) {
                 return;
             }
 
-            // Call YouTube
             muted = Boolean(muted);
 
+            // Call the YouTube API
             if (muted) {
                 entry.player.mute();
             } else {
                 entry.player.unMute();
             }
 
-            entry.abstraction.muted = muted;
+            const volume = entry.player.getVolume();
 
-            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE, entry.abstraction.volume, muted ? 1 : 0, {
-                volume: entry.abstraction.volume,
+            // Notify msgProc; the IFrame API fires no volumechange event
+            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE, volume, muted ? 1 : 0, {
+                volume,
                 muted
             });
         }

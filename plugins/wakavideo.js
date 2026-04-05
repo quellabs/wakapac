@@ -23,16 +23,23 @@
  * ║    MSG_VIDEO_PLAY       — playback started (play event)                              ║
  * ║    MSG_VIDEO_PAUSE      — playback paused (pause event)                              ║
  * ║    MSG_VIDEO_ENDED      — playback reached end (ended event)                         ║
- * ║    MSG_VIDEO_SEEK       — seek completed; extended.currentTime                       ║
+ * ║    MSG_VIDEO_SEEK          — seek completed; wParam = ms (truncated),                ║
+ * ║                              extended.currentTime (fractional seconds)               ║
  * ║    MSG_VIDEO_LOADED        — metadata available; extended.duration/videoWidth/       ║
- * ║                              videoHeight/volume/muted/playbackRate                   ║
+ * ║                              videoHeight                                             ║
  * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; wParam = volume (0–100),       ║
  * ║                              lParam = muted (1/0); extended.volume/muted             ║
  * ║    MSG_VIDEO_RATE_CHANGE   — playbackRate changed; extended.playbackRate             ║
  * ║    MSG_VIDEO_WAITING       — playback stalled waiting for data (waiting event)       ║
  * ║    MSG_VIDEO_CANPLAY       — enough data to resume playback (canplay event)          ║
- * ║    MSG_VIDEO_CUE_ENTER  — a cue was entered; extended: { startTime, endTime, text }  ║
- * ║    MSG_VIDEO_CUE_LEAVE  — a cue was exited;  extended: { startTime, endTime, text }  ║
+ * ║    MSG_VIDEO_TIMEUPDATE    — fired each animation frame during playback, and via     ║
+ * ║                              timeupdate (~4 Hz) when the tab is hidden;              ║
+ * ║                              wParam = ms (truncated),                                ║
+ * ║                              extended.currentTime (fractional seconds)               ║
+ * ║    MSG_VIDEO_CUE_ENTER     — a cue was entered; extended: { startTime, endTime,      ║
+ * ║                              text }                                                  ║
+ * ║    MSG_VIDEO_CUE_LEAVE     — a cue was exited;  extended: { startTime, endTime,      ║
+ * ║                              text }                                                  ║
  * ║    MSG_VIDEO_ERROR      — playback error; wParam = error code                        ║
  * ║                                                                                      ║
  * ║  API — all methods take pacId as first argument:                                     ║
@@ -47,14 +54,9 @@
  * ║    WakaVideo.addCue(pacId, startTime, endTime, text)  — add a programmatic cue       ║
  * ║                                                                                      ║
  * ║  Reactive properties injected on the abstraction:                                    ║
- * ║    currentTime   — updated via rAF during playback (timeupdate fallback in hidden    ║
- * ║                    tabs); also on seek                                               ║
  * ║    duration     — set when MSG_VIDEO_LOADED fires                                    ║
  * ║    videoWidth   — set when MSG_VIDEO_LOADED fires                                    ║
  * ║    videoHeight  — set when MSG_VIDEO_LOADED fires                                    ║
- * ║    volume        — mirrors video.volume × 100; updated on MSG_VIDEO_VOLUME_CHANGE    ║
- * ║    muted         — mirrors video.muted;  updated on MSG_VIDEO_VOLUME_CHANGE          ║
- * ║    playbackRate  — mirrors video.playbackRate; updated on MSG_VIDEO_RATE_CHANGE      ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -100,11 +102,12 @@
     /**
      * Advances currentTime on the abstraction once per animation frame while
      * the video is playing. Self-terminates when the video is paused or ended.
+     * @param {string} pacId
      * @param {HTMLVideoElement} video
-     * @param {Object} abstraction
      * @param {Object} entry
      */
-    function rafTick(video, abstraction, entry) {
+    function rafTick(pacId, video, entry) {
+        // Stop the loop if playback is no longer active
         if (video.paused || video.ended) {
             entry.rafHandle = null;
             return;
@@ -112,25 +115,27 @@
 
         const t = video.currentTime;
 
-        if (abstraction.currentTime !== t) {
-            abstraction.currentTime = t;
-        }
+        // Notify msgProc of the current playback position
+        entry.pac.sendMessage(pacId, entry.msgTimeUpdate, Math.trunc(t * 1000), 0, {
+            currentTime: t
+        });
 
-        entry.rafHandle = requestAnimationFrame(() => rafTick(video, abstraction, entry));
+        // Schedule the next tick
+        entry.rafHandle = requestAnimationFrame(() => rafTick(pacId, video, entry));
     }
 
     /**
      * Starts the rAF loop for the given entry. No-op if already running.
+     * @param {string} pacId
      * @param {HTMLVideoElement} video
-     * @param {Object} abstraction
      * @param {Object} entry
      */
-    function startRaf(video, abstraction, entry) {
+    function startRaf(pacId, video, entry) {
         if (entry.rafHandle !== null) {
             return;
         }
 
-        entry.rafHandle = requestAnimationFrame(() => rafTick(video, abstraction, entry));
+        entry.rafHandle = requestAnimationFrame(() => rafTick(pacId, video, entry));
     }
 
     /**
@@ -176,8 +181,8 @@
             if (!current.has(key)) {
                 entry.pac.sendMessage(pacId, entry.msgCueLeave, 0, 0, {
                     startTime: cue.startTime,
-                    endTime:   cue.endTime,
-                    text:      cue.text
+                    endTime: cue.endTime,
+                    text: cue.text
                 });
             }
         }
@@ -191,33 +196,35 @@
 
             // Derive message constants from the host's MSG_PLUGIN base.
             // WakaVideo never hardcodes these values.
-            const MSG_VIDEO_PLAY          = pac.MSG_PLUGIN + 0x100;
-            const MSG_VIDEO_PAUSE         = pac.MSG_PLUGIN + 0x101;
-            const MSG_VIDEO_ENDED         = pac.MSG_PLUGIN + 0x102;
-            const MSG_VIDEO_SEEK          = pac.MSG_PLUGIN + 0x103;
-            const MSG_VIDEO_LOADED        = pac.MSG_PLUGIN + 0x104;
-            const MSG_VIDEO_CUE_ENTER     = pac.MSG_PLUGIN + 0x105;
-            const MSG_VIDEO_CUE_LEAVE     = pac.MSG_PLUGIN + 0x106;
-            const MSG_VIDEO_ERROR         = pac.MSG_PLUGIN + 0x107;
+            const MSG_VIDEO_PLAY = pac.MSG_PLUGIN + 0x100;
+            const MSG_VIDEO_PAUSE = pac.MSG_PLUGIN + 0x101;
+            const MSG_VIDEO_ENDED = pac.MSG_PLUGIN + 0x102;
+            const MSG_VIDEO_SEEK = pac.MSG_PLUGIN + 0x103;
+            const MSG_VIDEO_LOADED = pac.MSG_PLUGIN + 0x104;
+            const MSG_VIDEO_CUE_ENTER = pac.MSG_PLUGIN + 0x105;
+            const MSG_VIDEO_CUE_LEAVE = pac.MSG_PLUGIN + 0x106;
+            const MSG_VIDEO_ERROR = pac.MSG_PLUGIN + 0x107;
             const MSG_VIDEO_VOLUME_CHANGE = pac.MSG_PLUGIN + 0x108;
-            const MSG_VIDEO_RATE_CHANGE   = pac.MSG_PLUGIN + 0x109;
-            const MSG_VIDEO_WAITING       = pac.MSG_PLUGIN + 0x10A;
-            const MSG_VIDEO_CANPLAY       = pac.MSG_PLUGIN + 0x10B;
+            const MSG_VIDEO_RATE_CHANGE = pac.MSG_PLUGIN + 0x109;
+            const MSG_VIDEO_WAITING = pac.MSG_PLUGIN + 0x10A;
+            const MSG_VIDEO_CANPLAY = pac.MSG_PLUGIN + 0x10B;
+            const MSG_VIDEO_TIMEUPDATE = pac.MSG_PLUGIN + 0x10C;
 
             // Attach message constants so components can reference
             // them as WakaVideo.MSG_VIDEO_PLAY etc.
-            this.MSG_VIDEO_PLAY          = MSG_VIDEO_PLAY;
-            this.MSG_VIDEO_PAUSE         = MSG_VIDEO_PAUSE;
-            this.MSG_VIDEO_ENDED         = MSG_VIDEO_ENDED;
-            this.MSG_VIDEO_SEEK          = MSG_VIDEO_SEEK;
-            this.MSG_VIDEO_LOADED        = MSG_VIDEO_LOADED;
-            this.MSG_VIDEO_CUE_ENTER     = MSG_VIDEO_CUE_ENTER;
-            this.MSG_VIDEO_CUE_LEAVE     = MSG_VIDEO_CUE_LEAVE;
-            this.MSG_VIDEO_ERROR         = MSG_VIDEO_ERROR;
+            this.MSG_VIDEO_PLAY = MSG_VIDEO_PLAY;
+            this.MSG_VIDEO_PAUSE = MSG_VIDEO_PAUSE;
+            this.MSG_VIDEO_ENDED = MSG_VIDEO_ENDED;
+            this.MSG_VIDEO_SEEK = MSG_VIDEO_SEEK;
+            this.MSG_VIDEO_LOADED = MSG_VIDEO_LOADED;
+            this.MSG_VIDEO_CUE_ENTER = MSG_VIDEO_CUE_ENTER;
+            this.MSG_VIDEO_CUE_LEAVE = MSG_VIDEO_CUE_LEAVE;
+            this.MSG_VIDEO_ERROR = MSG_VIDEO_ERROR;
             this.MSG_VIDEO_VOLUME_CHANGE = MSG_VIDEO_VOLUME_CHANGE;
-            this.MSG_VIDEO_RATE_CHANGE   = MSG_VIDEO_RATE_CHANGE;
-            this.MSG_VIDEO_WAITING       = MSG_VIDEO_WAITING;
-            this.MSG_VIDEO_CANPLAY       = MSG_VIDEO_CANPLAY;
+            this.MSG_VIDEO_RATE_CHANGE = MSG_VIDEO_RATE_CHANGE;
+            this.MSG_VIDEO_WAITING = MSG_VIDEO_WAITING;
+            this.MSG_VIDEO_CANPLAY = MSG_VIDEO_CANPLAY;
+            this.MSG_VIDEO_TIMEUPDATE = MSG_VIDEO_TIMEUPDATE;
 
             return {
 
@@ -239,63 +246,76 @@
                     }
 
                     const video = container;
-                    const entry = { video, pac, msgVideoError: MSG_VIDEO_ERROR, msgCueEnter: MSG_VIDEO_CUE_ENTER, msgCueLeave: MSG_VIDEO_CUE_LEAVE, cueTrack: null, cueChangeHandler: null, activeCues: new Map(), rafHandle: null };
+                    const entry = {
+                        video,
+                        pac,
+                        msgVideoError: MSG_VIDEO_ERROR,
+                        msgCueEnter: MSG_VIDEO_CUE_ENTER,
+                        msgCueLeave: MSG_VIDEO_CUE_LEAVE,
+                        msgTimeUpdate: MSG_VIDEO_TIMEUPDATE,
+                        cueTrack: null,
+                        cueChangeHandler: null,
+                        activeCues: new Map(),
+                        rafHandle: null
+                    };
 
+                    // Register the component
                     _registry.set(pacId, entry);
 
-                    abstraction.currentTime = 0;
+                    // Seed the abstraction with neutral initial values
                     abstraction.duration = NaN;
                     abstraction.videoWidth = null;
                     abstraction.videoHeight = null;
-                    abstraction.volume = video.volume * 100;
-                    abstraction.muted = video.muted;
-                    abstraction.playbackRate = video.playbackRate;
 
                     function onPlay() {
-                        startRaf(video, abstraction, entry);
+                        // Start the rAF loop to drive MSG_VIDEO_TIMEUPDATE
+                        startRaf(pacId, video, entry);
+
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_PLAY, 0, 0);
                     }
 
                     function onPause() {
+                        // Stop the rAF loop
                         stopRaf(entry);
-                        abstraction.currentTime = video.currentTime;
+
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_PAUSE, 0, 0);
                     }
 
                     function onEnded() {
+                        // Stop the rAF loop
                         stopRaf(entry);
-                        abstraction.currentTime = video.currentTime;
+
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_ENDED, 0, 0);
                     }
 
                     function onSeeked() {
-                        abstraction.currentTime = video.currentTime;
-                        pac.sendMessage(pacId, MSG_VIDEO_SEEK, 0, 0, {
-                            currentTime: video.currentTime
+                        const t = video.currentTime;
+
+                        // Notify msgProc of the landed position
+                        pac.sendMessage(pacId, MSG_VIDEO_SEEK, Math.trunc(t * 1000), 0, {
+                            currentTime: t
                         });
                     }
 
                     function onLoadedMetadata() {
+                        // Update the abstraction
                         abstraction.duration = video.duration;
                         abstraction.videoWidth = video.videoWidth;
                         abstraction.videoHeight = video.videoHeight;
-                        abstraction.volume = video.volume * 100;
-                        abstraction.muted = video.muted;
-                        abstraction.playbackRate = video.playbackRate;
 
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_LOADED, 0, 0, {
                             duration: video.duration,
                             videoWidth: video.videoWidth,
-                            videoHeight: video.videoHeight,
-                            volume: video.volume * 100,
-                            muted: video.muted,
-                            playbackRate: video.playbackRate
+                            videoHeight: video.videoHeight
                         });
                     }
 
                     function onVolumeChange() {
-                        abstraction.volume = video.volume * 100;
-                        abstraction.muted = video.muted;
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_VOLUME_CHANGE, video.volume * 100, video.muted ? 1 : 0, {
                             volume: video.volume * 100,
                             muted: video.muted
@@ -303,39 +323,49 @@
                     }
 
                     function onRateChange() {
-                        abstraction.playbackRate = video.playbackRate;
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_RATE_CHANGE, 0, 0, {
                             playbackRate: video.playbackRate
                         });
                     }
 
                     function onWaiting() {
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_WAITING, 0, 0);
                     }
 
                     function onCanPlay() {
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_CANPLAY, 0, 0);
                     }
 
                     /**
                      * Fallback for background tabs where rAF is suspended.
                      * timeupdate fires at ~4 Hz regardless of tab visibility.
-                     * Only writes currentTime when rAF is not already doing so,
-                     * to avoid redundant updates in the common visible-tab case.
+                     * Only sends MSG_VIDEO_TIMEUPDATE when rAF is not already doing so,
+                     * to avoid redundant messages in the common visible-tab case.
                      */
                     function onTimeUpdate() {
                         if (entry.rafHandle === null) {
-                            abstraction.currentTime = video.currentTime;
+                            const t = video.currentTime;
+
+                            // Notify msgProc of the current playback position
+                            pac.sendMessage(pacId, MSG_VIDEO_TIMEUPDATE, Math.trunc(t * 1000), 0, {
+                                currentTime: t
+                            });
                         }
                     }
 
                     function onError() {
                         const code = video.error?.code ?? 0;
+
+                        // Notify msgProc
                         pac.sendMessage(pacId, MSG_VIDEO_ERROR, code, 0, {
                             message: video.error ? `MediaError code ${video.error.code}` : ''
                         });
                     }
 
+                    // Wire up the video element events
                     video.addEventListener('play', onPlay);
                     video.addEventListener('pause', onPause);
                     video.addEventListener('ended', onEnded);
@@ -354,6 +384,7 @@
                         onLoadedMetadata();
                     }
 
+                    // Store listener references for clean removal in onComponentDestroyed
                     _listeners.set(video, {
                         play: onPlay,
                         pause: onPause,
@@ -384,12 +415,15 @@
                         return;
                     }
 
+                    // Stop the rAF loop
                     stopRaf(entry);
 
+                    // Remove the cue change listener if active
                     if (entry.cueTrack && entry.cueChangeHandler) {
                         entry.cueTrack.removeEventListener('cuechange', entry.cueChangeHandler);
                     }
 
+                    // Remove all video element event listeners
                     const listeners = _listeners.get(entry.video);
 
                     if (listeners) {
@@ -400,6 +434,7 @@
                         _listeners.delete(entry.video);
                     }
 
+                    // Unregister the component
                     _registry.delete(pacId);
                 }
             };
@@ -422,6 +457,7 @@
                 return;
             }
 
+            // Call the video API; catch autoplay policy rejections and forward to msgProc
             entry.video.play().catch(err => {
                 entry.pac.sendMessage(pacId, entry.msgVideoError, 0, 0, {
                     message: err.message ?? ''
@@ -434,6 +470,7 @@
          * @param {string} pacId
          */
         pause(pacId) {
+            // Call the video API
             getVideo(pacId)?.pause();
         },
 
@@ -447,6 +484,7 @@
             const video = getVideo(pacId);
 
             if (video) {
+                // Call the video API; MSG_VIDEO_SEEK fires from the seeked event
                 video.currentTime = time;
             }
         },
@@ -461,6 +499,7 @@
             const video = getVideo(pacId);
 
             if (video) {
+                // Call the video API; MSG_VIDEO_VOLUME_CHANGE fires from the volumechange event
                 video.volume = Math.max(0, Math.min(100, volume)) / 100;
             }
         },
@@ -475,6 +514,7 @@
             const video = getVideo(pacId);
 
             if (video) {
+                // Call the video API; MSG_VIDEO_VOLUME_CHANGE fires from the volumechange event
                 video.muted = muted;
             }
         },
@@ -490,6 +530,7 @@
             const video = getVideo(pacId);
 
             if (video) {
+                // Call the video API; MSG_VIDEO_RATE_CHANGE fires from the ratechange event
                 video.playbackRate = rate;
             }
         },
@@ -554,6 +595,7 @@
                 return;
             }
 
+            // Lazy-create the metadata track on first use
             if (!entry.cueTrack) {
                 entry.cueTrack = entry.video.addTextTrack('metadata', 'waka-cues', 'zxx');
                 entry.cueTrack.mode = 'hidden';
@@ -561,6 +603,7 @@
                 entry.cueTrack.addEventListener('cuechange', entry.cueChangeHandler);
             }
 
+            // Add the cue to the track
             entry.cueTrack.addCue(new VTTCue(startTime, endTime, text));
         }
     };
