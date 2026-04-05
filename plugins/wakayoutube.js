@@ -500,7 +500,6 @@
                  * Removes any pending init from the queue, stops the currentTime
                  * polling interval, destroys the YT.Player instance, and removes
                  * the registry entry.
-                 *
                  * @param {Object} abstraction
                  * @param {string} pacId
                  */
