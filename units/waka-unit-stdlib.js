@@ -87,20 +87,6 @@
                         oscillator.start();
                         oscillator.stop(ctx.currentTime + duration / 1000);
                     }
-                },
-
-                /**
-                 * Add unit to abstraction if instructed.
-                 * @param abstraction
-                 * @param pacId
-                 * @param config
-                 */
-                onComponentCreated(abstraction, pacId, config) {
-                    const key = config.stdlib?.property;
-
-                    if (key && key in abstraction) {
-                        abstraction[key] = this.functions;
-                    }
                 }
             };
         }

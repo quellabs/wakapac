@@ -292,20 +292,6 @@
 
                         return false;
                     }
-                },
-
-                /**
-                 * Add unit to abstraction if instructed
-                 * @param abstraction
-                 * @param pacId
-                 * @param config
-                 */
-                onComponentCreated(abstraction, pacId, config) {
-                    const key = config.phpUtils?.property;
-
-                    if (key && key in abstraction) {
-                        abstraction[key] = this.functions;
-                    }
                 }
             };
         }
