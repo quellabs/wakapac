@@ -60,25 +60,6 @@
 (function () {
     "use strict";
 
-    // =========================================================================
-    // Message type constants — placed in the plugin message range (MSG_PLUGIN+)
-    // to avoid collisions with both core WakaPAC messages and user-defined
-    // messages. WakaVideo occupies the 0x2100 sub-range.
-    // =========================================================================
-
-    const MSG_VIDEO_PLAY = wakaPAC.MSG_PLUGIN + 0x100;
-    const MSG_VIDEO_PAUSE = wakaPAC.MSG_PLUGIN + 0x101;
-    const MSG_VIDEO_ENDED = wakaPAC.MSG_PLUGIN + 0x102;
-    const MSG_VIDEO_SEEK = wakaPAC.MSG_PLUGIN + 0x103;
-    const MSG_VIDEO_LOADED = wakaPAC.MSG_PLUGIN + 0x104;
-    const MSG_VIDEO_CUE_ENTER = wakaPAC.MSG_PLUGIN + 0x105;
-    const MSG_VIDEO_CUE_LEAVE = wakaPAC.MSG_PLUGIN + 0x106;
-    const MSG_VIDEO_ERROR = wakaPAC.MSG_PLUGIN + 0x107;
-    const MSG_VIDEO_VOLUME_CHANGE = wakaPAC.MSG_PLUGIN + 0x108;
-    const MSG_VIDEO_RATE_CHANGE = wakaPAC.MSG_PLUGIN + 0x109;
-    const MSG_VIDEO_WAITING = wakaPAC.MSG_PLUGIN + 0x10A;
-    const MSG_VIDEO_CANPLAY = wakaPAC.MSG_PLUGIN + 0x10B;
-
     /**
      * Registry of active video components keyed by pacId.
      * Each entry holds the HTMLVideoElement, its cue track, the previous active
@@ -203,6 +184,36 @@
     window.WakaVideo = {
 
         createPacPlugin(pac, _options = {}) {
+
+            // Derive message constants from the host's MSG_PLUGIN base.
+            // WakaVideo never hardcodes these values.
+            const MSG_VIDEO_PLAY          = pac.MSG_PLUGIN + 0x100;
+            const MSG_VIDEO_PAUSE         = pac.MSG_PLUGIN + 0x101;
+            const MSG_VIDEO_ENDED         = pac.MSG_PLUGIN + 0x102;
+            const MSG_VIDEO_SEEK          = pac.MSG_PLUGIN + 0x103;
+            const MSG_VIDEO_LOADED        = pac.MSG_PLUGIN + 0x104;
+            const MSG_VIDEO_CUE_ENTER     = pac.MSG_PLUGIN + 0x105;
+            const MSG_VIDEO_CUE_LEAVE     = pac.MSG_PLUGIN + 0x106;
+            const MSG_VIDEO_ERROR         = pac.MSG_PLUGIN + 0x107;
+            const MSG_VIDEO_VOLUME_CHANGE = pac.MSG_PLUGIN + 0x108;
+            const MSG_VIDEO_RATE_CHANGE   = pac.MSG_PLUGIN + 0x109;
+            const MSG_VIDEO_WAITING       = pac.MSG_PLUGIN + 0x10A;
+            const MSG_VIDEO_CANPLAY       = pac.MSG_PLUGIN + 0x10B;
+
+            // Attach message constants so components can reference
+            // them as WakaVideo.MSG_VIDEO_PLAY etc.
+            this.MSG_VIDEO_PLAY          = MSG_VIDEO_PLAY;
+            this.MSG_VIDEO_PAUSE         = MSG_VIDEO_PAUSE;
+            this.MSG_VIDEO_ENDED         = MSG_VIDEO_ENDED;
+            this.MSG_VIDEO_SEEK          = MSG_VIDEO_SEEK;
+            this.MSG_VIDEO_LOADED        = MSG_VIDEO_LOADED;
+            this.MSG_VIDEO_CUE_ENTER     = MSG_VIDEO_CUE_ENTER;
+            this.MSG_VIDEO_CUE_LEAVE     = MSG_VIDEO_CUE_LEAVE;
+            this.MSG_VIDEO_ERROR         = MSG_VIDEO_ERROR;
+            this.MSG_VIDEO_VOLUME_CHANGE = MSG_VIDEO_VOLUME_CHANGE;
+            this.MSG_VIDEO_RATE_CHANGE   = MSG_VIDEO_RATE_CHANGE;
+            this.MSG_VIDEO_WAITING       = MSG_VIDEO_WAITING;
+            this.MSG_VIDEO_CANPLAY       = MSG_VIDEO_CANPLAY;
 
             return {
 
@@ -528,20 +539,7 @@
             }
 
             entry.cueTrack.addCue(new VTTCue(startTime, endTime, text));
-        },
-
-        MSG_VIDEO_PLAY,
-        MSG_VIDEO_PAUSE,
-        MSG_VIDEO_ENDED,
-        MSG_VIDEO_SEEK,
-        MSG_VIDEO_LOADED,
-        MSG_VIDEO_VOLUME_CHANGE,
-        MSG_VIDEO_RATE_CHANGE,
-        MSG_VIDEO_WAITING,
-        MSG_VIDEO_CANPLAY,
-        MSG_VIDEO_CUE_ENTER,
-        MSG_VIDEO_CUE_LEAVE,
-        MSG_VIDEO_ERROR
+        }
     };
 
 })();

@@ -81,17 +81,17 @@
             const self = this;
             let nextRequestId = 0;
 
-            // Derive message constants from the host's MSG_USER base.
+            // Derive message constants from the host's MSG_PLUGIN base.
             // WakaSync never hardcodes these values.
-            const MSG_HTTP_SUCCESS = pac.MSG_USER + 0x100;
-            const MSG_HTTP_ERROR = pac.MSG_USER + 0x101;
-            const MSG_HTTP_ABORT = pac.MSG_USER + 0x102;
+            const MSG_HTTP_SUCCESS = pac.MSG_PLUGIN + 0x200;
+            const MSG_HTTP_ERROR = pac.MSG_PLUGIN + 0x201;
+            const MSG_HTTP_ABORT = pac.MSG_PLUGIN + 0x202;
 
             // Attach message constants so components can reference
-            // them as wakaPAC.MSG_HTTP_SUCCESS etc.
-            pac.MSG_HTTP_SUCCESS = MSG_HTTP_SUCCESS;
-            pac.MSG_HTTP_ERROR   = MSG_HTTP_ERROR;
-            pac.MSG_HTTP_ABORT   = MSG_HTTP_ABORT;
+            // them as wakaSync.MSG_HTTP_SUCCESS etc.
+            this.MSG_HTTP_SUCCESS = MSG_HTTP_SUCCESS;
+            this.MSG_HTTP_ERROR   = MSG_HTTP_ERROR;
+            this.MSG_HTTP_ABORT   = MSG_HTTP_ABORT;
 
             /**
              * Initiates an HTTP request and delivers the result as a message
