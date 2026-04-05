@@ -65,7 +65,7 @@
      * Each entry holds the pac reference, the HTMLVideoElement, the MSG_VIDEO_ERROR
      * constant, the cue track, the previous active cue set for enter/leave diffing,
      * and the rAF handle.
-     * @type {Map<string, { pac: Object, video: HTMLVideoElement, msgVideoError: number, msgCueEnter: number, msgCueLeave: number, cueTrack: TextTrack|null, activeCues: Set<string>, rafHandle: number|null }>}
+     * @type {Map<string, { pac: Object, video: HTMLVideoElement, msgVideoError: number, msgCueEnter: number, msgCueLeave: number, cueTrack: TextTrack|null, cueChangeHandler: Function|null, activeCues: Set<string>, rafHandle: number|null }>}
      */
     const _registry = new Map();
 
@@ -86,12 +86,13 @@
     }
 
     /**
-     * Returns a stable string key for a VTTCue, used to diff active cue sets.
+     * Returns a stable JSON key for a VTTCue, used to diff active cue sets.
+     * JSON serialization avoids delimiter collision when cue text contains colons.
      * @param {VTTCue} cue
      * @returns {string}
      */
     function cueKey(cue) {
-        return `${cue.startTime}:${cue.endTime}:${cue.text}`;
+        return JSON.stringify({ startTime: cue.startTime, endTime: cue.endTime, text: cue.text });
     }
 
     /**
@@ -155,7 +156,9 @@
 
         // Cues in current but not in previous → entered
         for (const cue of entry.cueTrack.activeCues ?? []) {
-            if (!entry.activeCues.has(cueKey(cue))) {
+            const key = cueKey(cue);
+
+            if (!entry.activeCues.has(key)) {
                 entry.pac.sendMessage(pacId, entry.msgCueEnter, 0, 0, {
                     startTime: cue.startTime,
                     endTime: cue.endTime,
@@ -167,14 +170,12 @@
         // Cues in previous but not in current → left
         for (const key of entry.activeCues) {
             if (!currentKeys.has(key)) {
-                // Reconstruct the cue data from the key since the cue
-                // is no longer in activeCues at this point
-                const [st, et, ...textParts] = key.split(':');
+                const { startTime, endTime, text } = JSON.parse(key);
 
                 entry.pac.sendMessage(pacId, entry.msgCueLeave, 0, 0, {
-                    startTime: Number(st),
-                    endTime: Number(et),
-                    text: textParts.join(':')
+                    startTime,
+                    endTime,
+                    text
                 });
             }
         }
@@ -236,7 +237,7 @@
                     }
 
                     const video = container;
-                    const entry = { video, pac, msgVideoError: MSG_VIDEO_ERROR, msgCueEnter: MSG_VIDEO_CUE_ENTER, msgCueLeave: MSG_VIDEO_CUE_LEAVE, cueTrack: null, activeCues: new Set(), rafHandle: null };
+                    const entry = { video, pac, msgVideoError: MSG_VIDEO_ERROR, msgCueEnter: MSG_VIDEO_CUE_ENTER, msgCueLeave: MSG_VIDEO_CUE_LEAVE, cueTrack: null, cueChangeHandler: null, activeCues: new Set(), rafHandle: null };
 
                     _registry.set(pacId, entry);
 
@@ -382,6 +383,10 @@
                     }
 
                     stopRaf(entry);
+
+                    if (entry.cueTrack && entry.cueChangeHandler) {
+                        entry.cueTrack.removeEventListener('cuechange', entry.cueChangeHandler);
+                    }
 
                     const listeners = _listeners.get(entry.video);
 
@@ -534,7 +539,7 @@
          * @param {string} pacId
          * @param {number} startTime - Cue start in seconds
          * @param {number} endTime   - Cue end in seconds
-         * @param {string} text      - Cue payload (free-form string or JSON)
+         * @param {string} text      - Cue payload (plain string label or identifier)
          */
         addCue(pacId, startTime, endTime, text) {
             const entry = _registry.get(pacId);
@@ -543,10 +548,15 @@
                 return;
             }
 
+            if (typeof startTime !== 'number' || typeof endTime !== 'number' || endTime <= startTime) {
+                return;
+            }
+
             if (!entry.cueTrack) {
                 entry.cueTrack = entry.video.addTextTrack('metadata', 'waka-cues', 'zxx');
                 entry.cueTrack.mode = 'hidden';
-                entry.cueTrack.addEventListener('cuechange', () => onCueChange(pacId, entry));
+                entry.cueChangeHandler = () => onCueChange(pacId, entry);
+                entry.cueTrack.addEventListener('cuechange', entry.cueChangeHandler);
             }
 
             entry.cueTrack.addCue(new VTTCue(startTime, endTime, text));
