@@ -38,7 +38,7 @@
  * ║    WakaVideo.play(pacId)                              — start playback               ║
  * ║    WakaVideo.pause(pacId)                             — pause playback               ║
  * ║    WakaVideo.seek(pacId, time)                        — seek to time in seconds      ║
- * ║    WakaVideo.setVolume(pacId, volume)                 — set volume (0.0–1.0)         ║
+ * ║    WakaVideo.setVolume(pacId, volume)                 — set volume (0–100)           ║
  * ║    WakaVideo.setMuted(pacId, muted)                   — set muted state              ║
  * ║    WakaVideo.setPlaybackRate(pacId, rate)             — set playback rate            ║
  * ║    WakaVideo.bitBlt(dc, pacId)                        — copy full frame into DC      ║
@@ -51,7 +51,7 @@
  * ║    duration     — set when MSG_VIDEO_LOADED fires                                    ║
  * ║    videoWidth   — set when MSG_VIDEO_LOADED fires                                    ║
  * ║    videoHeight  — set when MSG_VIDEO_LOADED fires                                    ║
- * ║    volume        — mirrors video.volume; updated on MSG_VIDEO_VOLUME_CHANGE          ║
+ * ║    volume        — mirrors video.volume × 100; updated on MSG_VIDEO_VOLUME_CHANGE    ║
  * ║    muted         — mirrors video.muted;  updated on MSG_VIDEO_VOLUME_CHANGE          ║
  * ║    playbackRate  — mirrors video.playbackRate; updated on MSG_VIDEO_RATE_CHANGE      ║
  * ║                                                                                      ║
@@ -246,7 +246,7 @@
                     abstraction.duration = NaN;
                     abstraction.videoWidth = null;
                     abstraction.videoHeight = null;
-                    abstraction.volume = video.volume;
+                    abstraction.volume = video.volume * 100;
                     abstraction.muted = video.muted;
                     abstraction.playbackRate = video.playbackRate;
 
@@ -278,7 +278,7 @@
                         abstraction.duration = video.duration;
                         abstraction.videoWidth = video.videoWidth;
                         abstraction.videoHeight = video.videoHeight;
-                        abstraction.volume = video.volume;
+                        abstraction.volume = video.volume * 100;
                         abstraction.muted = video.muted;
                         abstraction.playbackRate = video.playbackRate;
 
@@ -286,17 +286,17 @@
                             duration: video.duration,
                             videoWidth: video.videoWidth,
                             videoHeight: video.videoHeight,
-                            volume: video.volume,
+                            volume: video.volume * 100,
                             muted: video.muted,
                             playbackRate: video.playbackRate
                         });
                     }
 
                     function onVolumeChange() {
-                        abstraction.volume = video.volume;
+                        abstraction.volume = video.volume * 100;
                         abstraction.muted = video.muted;
                         pac.sendMessage(pacId, MSG_VIDEO_VOLUME_CHANGE, 0, 0, {
-                            volume: video.volume,
+                            volume: video.volume * 100,
                             muted: video.muted
                         });
                     }
@@ -454,13 +454,13 @@
          * Set the volume level.
          * MSG_VIDEO_VOLUME_CHANGE fires after the change.
          * @param {string} pacId
-         * @param {number} volume - Value between 0.0 (silent) and 1.0 (full)
+         * @param {number} volume - Value between 0 (silent) and 100 (full)
          */
         setVolume(pacId, volume) {
             const video = getVideo(pacId);
 
             if (video) {
-                video.volume = Math.max(0, Math.min(1, volume));
+                video.volume = Math.max(0, Math.min(100, volume)) / 100;
             }
         },
 
