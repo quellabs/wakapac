@@ -424,7 +424,7 @@
                 // ── HTTP success ────────────────────────────────
                 // Wikipedia REST API returns:
                 //   { pages: [{ title, description, excerpt, key }] }
-                case wakaPAC.MSG_HTTP_SUCCESS: {
+                case wakaSync.MSG_HTTP_SUCCESS: {
                     const raw = event.detail.data;
                     const ms = event.detail.timing.duration;
 
@@ -449,7 +449,7 @@
                 // ── HTTP error ──────────────────────────────────
                 // The request completed but the server returned a
                 // non-2xx status code.
-                case wakaPAC.MSG_HTTP_ERROR:
+                case wakaSync.MSG_HTTP_ERROR:
                     this.loading = false;
                     this.addLog('err', 'ERR',
                         'HTTP ' + event.lParam + '  reqId=' + event.wParam
@@ -462,7 +462,7 @@
                 // the same group. This is the auto-cancel mechanism
                 // at work — no data is lost because the newer
                 // request will deliver the up-to-date results.
-                case wakaPAC.MSG_HTTP_ABORT:
+                case wakaSync.MSG_HTTP_ABORT:
                     this.addLog('abort', 'ABORT',
                         'superseded  reqId=' + event.wParam
                     );
