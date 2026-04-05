@@ -95,6 +95,94 @@
         return `${cue.startTime}:${cue.endTime}:${cue.text}`;
     }
 
+    /**
+     * Advances currentTime on the abstraction once per animation frame while
+     * the video is playing. Self-terminates when the video is paused or ended.
+     * @param {HTMLVideoElement} video
+     * @param {Object} abstraction
+     * @param {Object} entry
+     */
+    function rafTick(video, abstraction, entry) {
+        if (video.paused || video.ended) {
+            entry.rafHandle = null;
+            return;
+        }
+
+        const t = video.currentTime;
+
+        if (abstraction.currentTime !== t) {
+            abstraction.currentTime = t;
+        }
+
+        entry.rafHandle = requestAnimationFrame(() => rafTick(video, abstraction, entry));
+    }
+
+    /**
+     * Starts the rAF loop for the given entry. No-op if already running.
+     * @param {HTMLVideoElement} video
+     * @param {Object} abstraction
+     * @param {Object} entry
+     */
+    function startRaf(video, abstraction, entry) {
+        if (entry.rafHandle !== null) {
+            return;
+        }
+
+        entry.rafHandle = requestAnimationFrame(() => rafTick(video, abstraction, entry));
+    }
+
+    /**
+     * Stops the rAF loop for the given entry. No-op if not running.
+     * @param {Object} entry
+     */
+    function stopRaf(entry) {
+        if (entry.rafHandle !== null) {
+            cancelAnimationFrame(entry.rafHandle);
+            entry.rafHandle = null;
+        }
+    }
+
+    /**
+     * Handles a cuechange event on the metadata track.
+     * Diffs the current active cue set against the previous one and dispatches
+     * MSG_VIDEO_CUE_ENTER / MSG_VIDEO_CUE_LEAVE for each cue that entered or left.
+     * @param {string} pacId
+     * @param {Object} entry
+     */
+    function onCueChange(pacId, entry) {
+        const currentKeys = new Set(
+            Array.from(entry.cueTrack.activeCues ?? []).map(cueKey)
+        );
+
+        // Cues in current but not in previous → entered
+        for (const cue of entry.cueTrack.activeCues ?? []) {
+            if (!entry.activeCues.has(cueKey(cue))) {
+                window.wakaPAC.sendMessage(pacId, MSG_VIDEO_CUE_ENTER, 0, 0, {
+                    startTime: cue.startTime,
+                    endTime:   cue.endTime,
+                    text:      cue.text
+                });
+            }
+        }
+
+        // Cues in previous but not in current → left
+        for (const key of entry.activeCues) {
+            if (!currentKeys.has(key)) {
+                // Reconstruct the cue data from the key since the cue
+                // is no longer in activeCues at this point
+                const [st, et, ...textParts] = key.split(':');
+
+                window.wakaPAC.sendMessage(pacId, MSG_VIDEO_CUE_LEAVE, 0, 0, {
+                    startTime: Number(st),
+                    endTime:   Number(et),
+                    text:      textParts.join(':')
+                });
+            }
+        }
+
+        entry.activeCues = currentKeys;
+    }
+
     window.WakaVideo = {
 
         createPacPlugin(pac, options = {}) {
@@ -123,60 +211,24 @@
 
                     _registry.set(pacId, entry);
 
-                    // ── Reactive properties ───────────────────────────────────
-
                     abstraction.currentTime = 0;
                     abstraction.duration    = NaN;
                     abstraction.videoWidth  = 0;
                     abstraction.videoHeight = 0;
 
-                    // ── rAF loop — updates currentTime during playback ─────────
-
-                    function startRaf() {
-                        if (entry.rafHandle !== null) {
-                            return;
-                        }
-
-                        function tick() {
-                            if (video.paused || video.ended) {
-                                entry.rafHandle = null;
-                                return;
-                            }
-
-                            const t = video.currentTime;
-
-                            if (abstraction.currentTime !== t) {
-                                abstraction.currentTime = t;
-                            }
-
-                            entry.rafHandle = requestAnimationFrame(tick);
-                        }
-
-                        entry.rafHandle = requestAnimationFrame(tick);
-                    }
-
-                    function stopRaf() {
-                        if (entry.rafHandle !== null) {
-                            cancelAnimationFrame(entry.rafHandle);
-                            entry.rafHandle = null;
-                        }
-                    }
-
-                    // ── Native event → PAC message bridge ─────────────────────
-
                     function onPlay() {
-                        startRaf();
+                        startRaf(video, abstraction, entry);
                         pac.sendMessage(pacId, MSG_VIDEO_PLAY, 0, 0);
                     }
 
                     function onPause() {
-                        stopRaf();
+                        stopRaf(entry);
                         abstraction.currentTime = video.currentTime;
                         pac.sendMessage(pacId, MSG_VIDEO_PAUSE, 0, 0);
                     }
 
                     function onEnded() {
-                        stopRaf();
+                        stopRaf(entry);
                         abstraction.currentTime = video.currentTime;
                         pac.sendMessage(pacId, MSG_VIDEO_ENDED, 0, 0);
                     }
@@ -245,20 +297,16 @@
                         return;
                     }
 
-                    const { video } = entry;
+                    stopRaf(entry);
 
-                    if (entry.rafHandle !== null) {
-                        cancelAnimationFrame(entry.rafHandle);
-                    }
-
-                    const listeners = _listeners.get(video);
+                    const listeners = _listeners.get(entry.video);
 
                     if (listeners) {
                         for (const [event, fn] of Object.entries(listeners)) {
-                            video.removeEventListener(event, fn);
+                            entry.video.removeEventListener(event, fn);
                         }
 
-                        _listeners.delete(video);
+                        _listeners.delete(entry.video);
                     }
 
                     _registry.delete(pacId);
@@ -361,48 +409,12 @@
             if (!entry.cueTrack) {
                 entry.cueTrack = entry.video.addTextTrack('metadata', 'waka-cues', 'zxx');
                 entry.cueTrack.mode = 'hidden';
-
-                entry.cueTrack.addEventListener('cuechange', () => {
-                    const currentKeys = new Set(
-                        Array.from(entry.cueTrack.activeCues ?? []).map(cueKey)
-                    );
-
-                    // Cues in current but not in previous → entered
-                    for (const cue of entry.cueTrack.activeCues ?? []) {
-                        const key = cueKey(cue);
-
-                        if (!entry.activeCues.has(key)) {
-                            window.wakaPAC.sendMessage(pacId, MSG_VIDEO_CUE_ENTER, 0, 0, {
-                                startTime: cue.startTime,
-                                endTime:   cue.endTime,
-                                text:      cue.text
-                            });
-                        }
-                    }
-
-                    // Cues in previous but not in current → left
-                    for (const key of entry.activeCues) {
-                        if (!currentKeys.has(key)) {
-                            // Reconstruct the cue data from the key since the cue
-                            // is no longer in activeCues at this point
-                            const [st, et, ...textParts] = key.split(':');
-
-                            window.wakaPAC.sendMessage(pacId, MSG_VIDEO_CUE_LEAVE, 0, 0, {
-                                startTime: Number(st),
-                                endTime:   Number(et),
-                                text:      textParts.join(':')
-                            });
-                        }
-                    }
-
-                    entry.activeCues = currentKeys;
-                });
+                entry.cueTrack.addEventListener('cuechange', () => onCueChange(pacId, entry));
             }
 
             entry.cueTrack.addCue(new VTTCue(startTime, endTime, text));
         },
 
-        // ── Message type constants ─────────────────────────────────────────────
         MSG_VIDEO_PLAY,
         MSG_VIDEO_PAUSE,
         MSG_VIDEO_ENDED,
