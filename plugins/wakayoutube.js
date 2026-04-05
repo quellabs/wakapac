@@ -130,6 +130,23 @@
         const tag = document.createElement('script');
         tag.id = 'waka-youtube-api-script';
         tag.src = 'https://www.youtube.com/iframe_api';
+
+        tag.onerror = function () {
+            // Script failed to load (network error, CSP block, etc.).
+            // Notify each queued component via MSG_VIDEO_ERROR so msgProc can
+            // react rather than silently waiting forever.
+            for (const pending of _pendingInits) {
+                pending.pac.sendMessage(
+                    pending.pacId,
+                    pending.msgConstants.MSG_VIDEO_ERROR,
+                    0, 0,
+                    { message: 'YouTube IFrame API failed to load' }
+                );
+            }
+
+            _pendingInits.length = 0;
+        };
+
         (document.head ?? document.body).appendChild(tag);
     }
 
@@ -596,14 +613,21 @@
                 return;
             }
 
+            const muted = entry.abstraction.muted ? 1 : 0;
             const clamped = Math.max(0, Math.min(100, volume));
             entry.player.setVolume(clamped);
             entry.abstraction.volume = clamped;
 
-            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE, clamped, entry.abstraction.muted ? 1 : 0, {
-                volume: clamped,
-                muted: entry.abstraction.muted
-            });
+            entry.pac.sendMessage(
+                pacId,
+                entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE,
+                clamped,
+                muted,
+                {
+                    volume: clamped,
+                    muted: entry.abstraction.muted
+                }
+            );
         },
 
         /**

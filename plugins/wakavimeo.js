@@ -229,12 +229,12 @@
         const entry = { pac, player, abstraction, msgConstants };
         _registry.set(pacId, entry);
 
-        // -----------------------------------------------------------------
-        // loaded — fires when the video metadata is ready (also when
-        // loadVideo() loads a new video into an existing player).
-        // We read all metadata asynchronously via Promise.all since the
-        // Vimeo SDK exposes only async getters.
-        // -----------------------------------------------------------------
+        /**
+         * loaded — fires when the video metadata is ready (also when
+         * loadVideo() loads a new video into an existing player).
+         * We read all metadata asynchronously via Promise.all since the
+         * Vimeo SDK exposes only async getters.
+         */
         player.on('loaded', function () {
             Promise.all([
                 player.getDuration(),
@@ -266,36 +266,42 @@
             });
         });
 
-        // -----------------------------------------------------------------
-        // timeupdate — fires at ~250 ms intervals during playback.
-        // data: { seconds, percent, duration }
-        // -----------------------------------------------------------------
+        /**
+         * timeupdate — fires at ~250 ms intervals during playback.
+         * data: { seconds, percent, duration }
+         */
         player.on('timeupdate', function (data) {
             abstraction.currentTime = data.seconds;
         });
 
-        // -----------------------------------------------------------------
-        // play / pause / ended
-        // -----------------------------------------------------------------
+        /**
+         * Fires when playback starts
+         */
         player.on('play', function () {
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PLAY, 0, 0);
         });
 
+        /**
+         * Fires when playback is paused. data: { seconds, percent, duration }
+         */
         player.on('pause', function (data) {
             abstraction.currentTime = data.seconds;
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PAUSE, 0, 0);
         });
 
+        /**
+         * Fires when playback reaches the end of the video. data: { seconds, percent, duration }
+         */
         player.on('ended', function (data) {
             abstraction.currentTime = data.seconds;
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ENDED, 0, 0);
         });
 
-        // -----------------------------------------------------------------
-        // seeked — fires after setCurrentTime() resolves with the actual
-        // position the player landed on (may differ from requested time).
-        // data: { seconds, percent, duration }
-        // -----------------------------------------------------------------
+        /**
+         * seeked — fires after setCurrentTime() resolves with the actual
+         * position the player landed on (may differ from requested time).
+         * data: { seconds, percent, duration }
+         */
         player.on('seeked', function (data) {
             abstraction.currentTime = data.seconds;
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_SEEK, 0, 0, {
@@ -303,11 +309,11 @@
             });
         });
 
-        // -----------------------------------------------------------------
-        // volumechange — fires for both volume level and muted changes,
-        // including changes made through the player UI.
-        // data: { volume, muted }  (volume is 0–1)
-        // -----------------------------------------------------------------
+        /**
+         * volumechange — fires for both volume level and muted changes,
+         * including changes made through the player UI.
+         * data: { volume, muted }  (volume is 0–1)
+         */
         player.on('volumechange', function (data) {
             const volume = data.volume * 100;
             const muted = data.muted ? 1 : 0;
@@ -321,9 +327,9 @@
             });
         });
 
-        // -----------------------------------------------------------------
-        // playbackratechange — data: { playbackRate }
-        // -----------------------------------------------------------------
+        /**
+         * Fires when the playback rate changes. data: { playbackRate }
+         */
         player.on('playbackratechange', function (data) {
             abstraction.playbackRate = data.playbackRate;
 
@@ -332,21 +338,24 @@
             });
         });
 
-        // -----------------------------------------------------------------
-        // bufferstart / bufferend → WAITING / CANPLAY
-        // -----------------------------------------------------------------
+        /**
+         * Fires when the player starts buffering.
+         */
         player.on('bufferstart', function () {
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_WAITING, 0, 0);
         });
 
+        /**
+         * Fires when buffering ends and playback can resume.
+         */
         player.on('bufferend', function () {
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_CANPLAY, 0, 0);
         });
 
-        // -----------------------------------------------------------------
-        // error — data: { message, method, name }
-        // -----------------------------------------------------------------
-        player.on('error', function (data) {
+        /**
+         *  Fires on playback errors. data: { message, method, name }
+         */
+         player.on('error', function (data) {
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, 0, 0, {
                 message: data.message ?? 'Unknown Vimeo error'
             });
@@ -369,8 +378,6 @@
             const MSG_VIDEO_ENDED         = pac.MSG_PLUGIN + 0x102;
             const MSG_VIDEO_SEEK          = pac.MSG_PLUGIN + 0x103;
             const MSG_VIDEO_LOADED        = pac.MSG_PLUGIN + 0x104;
-            // 0x105 MSG_VIDEO_CUE_ENTER — not supported (no TextTrack access)
-            // 0x106 MSG_VIDEO_CUE_LEAVE — not supported (no TextTrack access)
             const MSG_VIDEO_ERROR         = pac.MSG_PLUGIN + 0x107;
             const MSG_VIDEO_VOLUME_CHANGE = pac.MSG_PLUGIN + 0x108;
             const MSG_VIDEO_RATE_CHANGE   = pac.MSG_PLUGIN + 0x109;
