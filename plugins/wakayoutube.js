@@ -168,15 +168,6 @@
      */
     const _registry = new Map();
 
-    /**
-     * Returns the YT.Player for a pacId, or null if not found.
-     * @param {string} pacId
-     * @returns {YT.Player|null}
-     */
-    function getPlayer(pacId) {
-        return _registry.get(pacId)?.player ?? null;
-    }
-
     // =========================================================================
     // currentTime tracking
     //
@@ -552,7 +543,7 @@
          * @param {string} pacId
          */
         play(pacId) {
-            getPlayer(pacId)?.playVideo();
+            _registry.get(pacId)?.player?.playVideo();
         },
 
         /**
@@ -560,7 +551,7 @@
          * @param {string} pacId
          */
         pause(pacId) {
-            getPlayer(pacId)?.pauseVideo();
+            _registry.get(pacId)?.player?.pauseVideo();
         },
 
         /**
@@ -574,10 +565,12 @@
         seek(pacId, time) {
             const entry = _registry.get(pacId);
 
+            // If no component found, bail
             if (!entry) {
                 return;
             }
 
+            // If time is invalid, bail
             if (typeof time !== 'number' || Number.isNaN(time)) {
                 return;
             }
@@ -587,6 +580,7 @@
             const duration = entry.player.getDuration();
             const clamped = Math.max(0, duration > 0 ? Math.min(time, duration) : time);
 
+            // Call YouTube
             entry.player.seekTo(clamped, true);
 
             // Update the abstraction immediately and dispatch MSG_VIDEO_SEEK so
@@ -609,13 +603,17 @@
         setVolume(pacId, volume) {
             const entry = _registry.get(pacId);
 
+            // If no component found, bail
             if (!entry) {
                 return;
             }
 
             const muted = entry.abstraction.muted ? 1 : 0;
             const clamped = Math.max(0, Math.min(100, volume));
+
+            // Call YouTube
             entry.player.setVolume(clamped);
+
             entry.abstraction.volume = clamped;
 
             entry.pac.sendMessage(
@@ -639,10 +637,12 @@
         setMuted(pacId, muted) {
             const entry = _registry.get(pacId);
 
+            // If no component found, bail
             if (!entry) {
                 return;
             }
 
+            // Call YouTube
             muted = Boolean(muted);
 
             if (muted) {

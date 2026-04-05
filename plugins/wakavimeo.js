@@ -164,15 +164,6 @@
      */
     const _registry = new Map();
 
-    /**
-     * Returns the Vimeo.Player for a pacId, or null if not found.
-     * @param {string} pacId
-     * @returns {Vimeo.Player|null}
-     */
-    function getPlayer(pacId) {
-        return _registry.get(pacId)?.player ?? null;
-    }
-
     // =========================================================================
     // Player construction
     // =========================================================================
@@ -527,7 +518,13 @@
          * @param {string} pacId
          */
         pause(pacId) {
-            getPlayer(pacId)?.pause().catch(function (err) {
+            const entry = _registry.get(pacId);
+
+            if (!entry) {
+                return;
+            }
+
+            entry.player.pause().catch(function (err) {
                 console.warn('WakaVimeo: pause failed:', err);
             });
         },
