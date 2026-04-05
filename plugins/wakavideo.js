@@ -65,7 +65,7 @@
      * Each entry holds the pac reference, the HTMLVideoElement, the MSG_VIDEO_ERROR
      * constant, the cue track, the previous active cue set for enter/leave diffing,
      * and the rAF handle.
-     * @type {Map<string, { pac: Object, video: HTMLVideoElement, msgVideoError: number, msgCueEnter: number, msgCueLeave: number, cueTrack: TextTrack|null, cueChangeHandler: Function|null, activeCues: Set<string>, rafHandle: number|null }>}
+     * @type {Map<string, { pac: Object, video: HTMLVideoElement, msgVideoError: number, msgCueEnter: number, msgCueLeave: number, cueTrack: TextTrack|null, cueChangeHandler: Function|null, activeCues: Map<string, VTTCue>, rafHandle: number|null }>}
      */
     const _registry = new Map();
 
@@ -78,6 +78,8 @@
 
     /**
      * Returns the registered video element for a pacId, or null if not found.
+     * Used by public API methods that only need the video element.
+     * Methods that need the full entry (play, addCue) call _registry.get() directly.
      * @param {string} pacId
      * @returns {HTMLVideoElement|null}
      */
@@ -86,13 +88,12 @@
     }
 
     /**
-     * Returns a stable JSON key for a VTTCue, used to diff active cue sets.
-     * JSON serialization avoids delimiter collision when cue text contains colons.
+     * Returns a stable string key for a VTTCue, used to diff active cue maps.
      * @param {VTTCue} cue
      * @returns {string}
      */
     function cueKey(cue) {
-        return JSON.stringify({ startTime: cue.startTime, endTime: cue.endTime, text: cue.text });
+        return `${cue.startTime}:${cue.endTime}:${cue.text}`;
     }
 
     /**
@@ -144,20 +145,22 @@
 
     /**
      * Handles a cuechange event on the metadata track.
-     * Diffs the current active cue set against the previous one and dispatches
+     * Diffs the current active cue map against the previous one and dispatches
      * MSG_VIDEO_CUE_ENTER / MSG_VIDEO_CUE_LEAVE for each cue that entered or left.
+     * activeCues is a Map<key, VTTCue> so cue data is always available without
+     * re-parsing the key.
      * @param {string} pacId
      * @param {Object} entry
      */
     function onCueChange(pacId, entry) {
-        const currentKeys = new Set(
-            Array.from(entry.cueTrack.activeCues ?? []).map(cueKey)
-        );
+        const current = new Map();
+
+        for (const cue of entry.cueTrack.activeCues ?? []) {
+            current.set(cueKey(cue), cue);
+        }
 
         // Cues in current but not in previous → entered
-        for (const cue of entry.cueTrack.activeCues ?? []) {
-            const key = cueKey(cue);
-
+        for (const [key, cue] of current) {
             if (!entry.activeCues.has(key)) {
                 entry.pac.sendMessage(pacId, entry.msgCueEnter, 0, 0, {
                     startTime: cue.startTime,
@@ -168,19 +171,17 @@
         }
 
         // Cues in previous but not in current → left
-        for (const key of entry.activeCues) {
-            if (!currentKeys.has(key)) {
-                const { startTime, endTime, text } = JSON.parse(key);
-
+        for (const [key, cue] of entry.activeCues) {
+            if (!current.has(key)) {
                 entry.pac.sendMessage(pacId, entry.msgCueLeave, 0, 0, {
-                    startTime,
-                    endTime,
-                    text
+                    startTime: cue.startTime,
+                    endTime:   cue.endTime,
+                    text:      cue.text
                 });
             }
         }
 
-        entry.activeCues = currentKeys;
+        entry.activeCues = current;
     }
 
     window.WakaVideo = {
@@ -237,7 +238,7 @@
                     }
 
                     const video = container;
-                    const entry = { video, pac, msgVideoError: MSG_VIDEO_ERROR, msgCueEnter: MSG_VIDEO_CUE_ENTER, msgCueLeave: MSG_VIDEO_CUE_LEAVE, cueTrack: null, cueChangeHandler: null, activeCues: new Set(), rafHandle: null };
+                    const entry = { video, pac, msgVideoError: MSG_VIDEO_ERROR, msgCueEnter: MSG_VIDEO_CUE_ENTER, msgCueLeave: MSG_VIDEO_CUE_LEAVE, cueTrack: null, cueChangeHandler: null, activeCues: new Map(), rafHandle: null };
 
                     _registry.set(pacId, entry);
 
@@ -330,7 +331,7 @@
                     function onError() {
                         const code = video.error?.code ?? 0;
                         pac.sendMessage(pacId, MSG_VIDEO_ERROR, code, 0, {
-                            message: video.error?.message ?? ''
+                            message: video.error ? `MediaError code ${video.error.code}` : ''
                         });
                     }
 
