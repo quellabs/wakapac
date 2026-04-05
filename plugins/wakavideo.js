@@ -65,18 +65,18 @@
     // to avoid collisions with core WakaPAC messages.
     // =========================================================================
 
-    const MSG_VIDEO_PLAY       = 0x1100;
-    const MSG_VIDEO_PAUSE      = 0x1101;
-    const MSG_VIDEO_ENDED      = 0x1102;
-    const MSG_VIDEO_SEEK       = 0x1103;
-    const MSG_VIDEO_LOADED     = 0x1104;
-    const MSG_VIDEO_CUE_ENTER  = 0x1105;
-    const MSG_VIDEO_CUE_LEAVE  = 0x1106;
-    const MSG_VIDEO_ERROR      = 0x1107;
+    const MSG_VIDEO_PLAY = 0x1100;
+    const MSG_VIDEO_PAUSE = 0x1101;
+    const MSG_VIDEO_ENDED = 0x1102;
+    const MSG_VIDEO_SEEK = 0x1103;
+    const MSG_VIDEO_LOADED = 0x1104;
+    const MSG_VIDEO_CUE_ENTER = 0x1105;
+    const MSG_VIDEO_CUE_LEAVE = 0x1106;
+    const MSG_VIDEO_ERROR = 0x1107;
     const MSG_VIDEO_VOLUME_CHANGE = 0x1108;
-    const MSG_VIDEO_RATE_CHANGE   = 0x1109;
-    const MSG_VIDEO_WAITING       = 0x110A;
-    const MSG_VIDEO_CANPLAY       = 0x110B;
+    const MSG_VIDEO_RATE_CHANGE = 0x1109;
+    const MSG_VIDEO_WAITING = 0x110A;
+    const MSG_VIDEO_CANPLAY = 0x110B;
 
     /**
      * Registry of active video components keyed by pacId.
@@ -175,8 +175,8 @@
             if (!entry.activeCues.has(cueKey(cue))) {
                 window.wakaPAC.sendMessage(pacId, MSG_VIDEO_CUE_ENTER, 0, 0, {
                     startTime: cue.startTime,
-                    endTime:   cue.endTime,
-                    text:      cue.text
+                    endTime: cue.endTime,
+                    text: cue.text
                 });
             }
         }
@@ -190,8 +190,8 @@
 
                 window.wakaPAC.sendMessage(pacId, MSG_VIDEO_CUE_LEAVE, 0, 0, {
                     startTime: Number(st),
-                    endTime:   Number(et),
-                    text:      textParts.join(':')
+                    endTime: Number(et),
+                    text: textParts.join(':')
                 });
             }
         }
@@ -201,7 +201,7 @@
 
     window.WakaVideo = {
 
-        createPacPlugin(pac, options = {}) {
+        createPacPlugin(pac, _options = {}) {
 
             return {
 
@@ -223,16 +223,16 @@
                     }
 
                     const video = container;
-                    const entry = { video, cueTrack: null, activeCues: new Set(), rafHandle: null };
+                    const entry = {video, cueTrack: null, activeCues: new Set(), rafHandle: null};
 
                     _registry.set(pacId, entry);
 
-                    abstraction.currentTime = 0;
-                    abstraction.duration    = NaN;
-                    abstraction.videoWidth  = 0;
-                    abstraction.videoHeight = 0;
-                    abstraction.volume       = video.volume;
-                    abstraction.muted        = video.muted;
+                    abstraction.currentTime = null;
+                    abstraction.duration = NaN;
+                    abstraction.videoWidth = null;
+                    abstraction.videoHeight = null;
+                    abstraction.volume = video.volume;
+                    abstraction.muted = video.muted;
                     abstraction.playbackRate = video.playbackRate;
 
                     function onPlay() {
@@ -260,29 +260,29 @@
                     }
 
                     function onLoadedMetadata() {
-                        abstraction.duration    = video.duration;
-                        abstraction.videoWidth  = video.videoWidth;
+                        abstraction.duration = video.duration;
+                        abstraction.videoWidth = video.videoWidth;
                         abstraction.videoHeight = video.videoHeight;
-                        abstraction.volume       = video.volume;
-                        abstraction.muted        = video.muted;
+                        abstraction.volume = video.volume;
+                        abstraction.muted = video.muted;
                         abstraction.playbackRate = video.playbackRate;
 
                         pac.sendMessage(pacId, MSG_VIDEO_LOADED, 0, 0, {
-                            duration:    video.duration,
-                            videoWidth:  video.videoWidth,
-                            videoHeight:  video.videoHeight,
-                            volume:       video.volume,
-                            muted:        video.muted,
+                            duration: video.duration,
+                            videoWidth: video.videoWidth,
+                            videoHeight: video.videoHeight,
+                            volume: video.volume,
+                            muted: video.muted,
                             playbackRate: video.playbackRate
                         });
                     }
 
                     function onVolumeChange() {
                         abstraction.volume = video.volume;
-                        abstraction.muted  = video.muted;
+                        abstraction.muted = video.muted;
                         pac.sendMessage(pacId, MSG_VIDEO_VOLUME_CHANGE, 0, 0, {
                             volume: video.volume,
-                            muted:  video.muted
+                            muted: video.muted
                         });
                     }
 
@@ -320,17 +320,17 @@
                         });
                     }
 
-                    video.addEventListener('play',           onPlay);
-                    video.addEventListener('pause',          onPause);
-                    video.addEventListener('ended',          onEnded);
-                    video.addEventListener('seeked',         onSeeked);
+                    video.addEventListener('play', onPlay);
+                    video.addEventListener('pause', onPause);
+                    video.addEventListener('ended', onEnded);
+                    video.addEventListener('seeked', onSeeked);
                     video.addEventListener('loadedmetadata', onLoadedMetadata);
-                    video.addEventListener('volumechange',   onVolumeChange);
-                    video.addEventListener('ratechange',     onRateChange);
-                    video.addEventListener('waiting',        onWaiting);
-                    video.addEventListener('canplay',        onCanPlay);
-                    video.addEventListener('timeupdate',     onTimeUpdate);
-                    video.addEventListener('error',          onError);
+                    video.addEventListener('volumechange', onVolumeChange);
+                    video.addEventListener('ratechange', onRateChange);
+                    video.addEventListener('waiting', onWaiting);
+                    video.addEventListener('canplay', onCanPlay);
+                    video.addEventListener('timeupdate', onTimeUpdate);
+                    video.addEventListener('error', onError);
 
                     // Metadata may have already loaded before the listener was attached,
                     // which is common with local files. Fire the message immediately if so.
@@ -339,17 +339,17 @@
                     }
 
                     _listeners.set(video, {
-                        play:           onPlay,
-                        pause:          onPause,
-                        ended:          onEnded,
-                        seeked:         onSeeked,
+                        play: onPlay,
+                        pause: onPause,
+                        ended: onEnded,
+                        seeked: onSeeked,
                         loadedmetadata: onLoadedMetadata,
-                        volumechange:   onVolumeChange,
-                        ratechange:     onRateChange,
-                        waiting:        onWaiting,
-                        canplay:        onCanPlay,
-                        timeupdate:     onTimeUpdate,
-                        error:          onError
+                        volumechange: onVolumeChange,
+                        ratechange: onRateChange,
+                        waiting: onWaiting,
+                        canplay: onCanPlay,
+                        timeupdate: onTimeUpdate,
+                        error: onError
                     });
                 },
 
