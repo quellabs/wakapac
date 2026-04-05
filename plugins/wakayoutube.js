@@ -126,7 +126,7 @@
         };
 
         const tag = document.createElement('script');
-        tag.id  = 'waka-youtube-api-script';
+        tag.id = 'waka-youtube-api-script';
         tag.src = 'https://www.youtube.com/iframe_api';
         (document.head ?? document.body).appendChild(tag);
     }
@@ -174,14 +174,14 @@
      */
     function rafTick(entry) {
         if (entry.rafHandle === null) {
-                return;
-            }
+            return;
+        }
 
-            const t = entry.player.getCurrentTime();
+        const t = entry.player.getCurrentTime();
 
-            if (entry.abstraction.currentTime !== t) {
-                entry.abstraction.currentTime = t;
-            }
+        if (entry.abstraction.currentTime !== t) {
+            entry.abstraction.currentTime = t;
+        }
 
         entry.rafHandle = requestAnimationFrame(() => rafTick(entry));
     }
@@ -217,12 +217,12 @@
      * YouTube IFrame API player state constants.
      * @enum {number}
      */
-    const YT_UNSTARTED  = -1;
-    const YT_ENDED      =  0;
-    const YT_PLAYING    =  1;
-    const YT_PAUSED     =  2;
-    const YT_BUFFERING  =  3;
-    const YT_VIDEO_CUED =  5;
+    const YT_UNSTARTED = -1;
+    const YT_ENDED = 0;
+    const YT_PLAYING = 1;
+    const YT_PAUSED = 2;
+    const YT_BUFFERING = 3;
+    const YT_VIDEO_CUED = 5;
 
     /**
      * Human-readable messages for YouTube IFrame API error codes.
@@ -230,8 +230,8 @@
      * @type {Object<number, string>}
      */
     const YT_ERROR_MESSAGES = {
-        2:   'Invalid video ID or parameter',
-        5:   'HTML5 playback error',
+        2: 'Invalid video ID or parameter',
+        5: 'HTML5 playback error',
         100: 'Video not found or has been removed',
         101: 'Embedding not allowed for this video',
         150: 'Embedding not allowed for this video'
@@ -259,16 +259,16 @@
 
         entry.loadedFired = true;
 
-        const { pac, player, abstraction, msgConstants } = entry;
+        const {pac, player, abstraction, msgConstants} = entry;
 
         abstraction.duration = player.getDuration();
-        abstraction.volume   = player.getVolume();
-        abstraction.muted    = player.isMuted();
+        abstraction.volume = player.getVolume();
+        abstraction.muted = player.isMuted();
 
         pac.sendMessage(pacId, msgConstants.MSG_VIDEO_LOADED, 0, 0, {
             duration: abstraction.duration,
-            volume:   abstraction.volume,
-            muted:    abstraction.muted
+            volume: abstraction.volume,
+            muted: abstraction.muted
         });
     }
 
@@ -281,7 +281,7 @@
      * @param {number} newState
      */
     function onStateChange(pacId, entry, newState) {
-        const { pac, player, abstraction, msgConstants } = entry;
+        const {pac, player, abstraction, msgConstants} = entry;
 
         switch (newState) {
 
@@ -357,11 +357,11 @@
 
         const entry = {
             pac,
-            player:      null,   // assigned below once YT.Player is constructed
+            player: null,   // assigned below once YT.Player is constructed
             abstraction,
             msgConstants,
-            rafHandle:   null,
-            prevState:   YT_UNSTARTED,
+            rafHandle: null,
+            prevState: YT_UNSTARTED,
             loadedFired: false
         };
 
@@ -370,7 +370,7 @@
         entry.player = new YT.Player(container, {
             // host must be at the top level of the config object, not inside
             // playerVars — YouTube ignores it there.
-            host:    'https://www.youtube-nocookie.com',
+            host: 'https://www.youtube-nocookie.com',
             videoId,
             playerVars: {
                 controls: 0, // Suppress the native YouTube control bar; the host page owns the UI.
@@ -401,26 +401,26 @@
             // Derive message constants from the host's MSG_PLUGIN base.
             // Offsets are identical to WakaVideo so msgProc handlers are
             // interchangeable between the two plugins.
-            const MSG_VIDEO_PLAY          = pac.MSG_PLUGIN + 0x100;
-            const MSG_VIDEO_PAUSE         = pac.MSG_PLUGIN + 0x101;
-            const MSG_VIDEO_ENDED         = pac.MSG_PLUGIN + 0x102;
-            const MSG_VIDEO_SEEK          = pac.MSG_PLUGIN + 0x103;
-            const MSG_VIDEO_LOADED        = pac.MSG_PLUGIN + 0x104;
-            const MSG_VIDEO_ERROR         = pac.MSG_PLUGIN + 0x107;
+            const MSG_VIDEO_PLAY = pac.MSG_PLUGIN + 0x100;
+            const MSG_VIDEO_PAUSE = pac.MSG_PLUGIN + 0x101;
+            const MSG_VIDEO_ENDED = pac.MSG_PLUGIN + 0x102;
+            const MSG_VIDEO_SEEK = pac.MSG_PLUGIN + 0x103;
+            const MSG_VIDEO_LOADED = pac.MSG_PLUGIN + 0x104;
+            const MSG_VIDEO_ERROR = pac.MSG_PLUGIN + 0x107;
             const MSG_VIDEO_VOLUME_CHANGE = pac.MSG_PLUGIN + 0x108;
-            const MSG_VIDEO_WAITING       = pac.MSG_PLUGIN + 0x10A;
-            const MSG_VIDEO_CANPLAY       = pac.MSG_PLUGIN + 0x10B;
+            const MSG_VIDEO_WAITING = pac.MSG_PLUGIN + 0x10A;
+            const MSG_VIDEO_CANPLAY = pac.MSG_PLUGIN + 0x10B;
 
             // Attach constants so components can reference WakaYouTube.MSG_VIDEO_PLAY etc.
-            this.MSG_VIDEO_PLAY          = MSG_VIDEO_PLAY;
-            this.MSG_VIDEO_PAUSE         = MSG_VIDEO_PAUSE;
-            this.MSG_VIDEO_ENDED         = MSG_VIDEO_ENDED;
-            this.MSG_VIDEO_SEEK          = MSG_VIDEO_SEEK;
-            this.MSG_VIDEO_LOADED        = MSG_VIDEO_LOADED;
-            this.MSG_VIDEO_ERROR         = MSG_VIDEO_ERROR;
+            this.MSG_VIDEO_PLAY = MSG_VIDEO_PLAY;
+            this.MSG_VIDEO_PAUSE = MSG_VIDEO_PAUSE;
+            this.MSG_VIDEO_ENDED = MSG_VIDEO_ENDED;
+            this.MSG_VIDEO_SEEK = MSG_VIDEO_SEEK;
+            this.MSG_VIDEO_LOADED = MSG_VIDEO_LOADED;
+            this.MSG_VIDEO_ERROR = MSG_VIDEO_ERROR;
             this.MSG_VIDEO_VOLUME_CHANGE = MSG_VIDEO_VOLUME_CHANGE;
-            this.MSG_VIDEO_WAITING       = MSG_VIDEO_WAITING;
-            this.MSG_VIDEO_CANPLAY       = MSG_VIDEO_CANPLAY;
+            this.MSG_VIDEO_WAITING = MSG_VIDEO_WAITING;
+            this.MSG_VIDEO_CANPLAY = MSG_VIDEO_CANPLAY;
 
             // Bundle constants for passing into closures without closing over `this`.
             const msgConstants = {
@@ -465,16 +465,16 @@
                     // Seed the abstraction with neutral initial values before the
                     // player is ready, so bindings have something to render.
                     abstraction.currentTime = 0;
-                    abstraction.duration    = NaN;
-                    abstraction.volume      = 100;
-                    abstraction.muted       = false;
+                    abstraction.duration = NaN;
+                    abstraction.volume = 100;
+                    abstraction.muted = false;
 
                     ensureApiLoaded();
 
                     if (_apiReady) {
                         createPlayer(abstraction, pacId, videoId, pac, msgConstants);
                     } else {
-                        _pendingInits.push({ abstraction, pacId, videoId, pac, msgConstants });
+                        _pendingInits.push({abstraction, pacId, videoId, pac, msgConstants});
                     }
                 },
 
@@ -551,7 +551,7 @@
             // Clamp to the valid range. Seeking past the end or before zero causes
             // unpredictable behaviour in the IFrame API.
             const duration = entry.player.getDuration();
-            const clamped  = Math.max(0, duration > 0 ? Math.min(time, duration) : time);
+            const clamped = Math.max(0, duration > 0 ? Math.min(time, duration) : time);
 
             entry.player.seekTo(clamped, true);
 
@@ -585,7 +585,7 @@
 
             entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE, 0, 0, {
                 volume: clamped,
-                muted:  entry.abstraction.muted
+                muted: entry.abstraction.muted
             });
         },
 
