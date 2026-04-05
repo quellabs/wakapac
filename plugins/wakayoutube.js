@@ -39,7 +39,8 @@
  * ║    MSG_VIDEO_LOADED       — video metadata available; extended.duration/             ║
  * ║                             volume/muted. Fired once per video load, on the          ║
  * ║                             first transition into playing or cued state.             ║
- * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; extended.volume/muted          ║
+ * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; wParam = volume (0–100),       ║
+ * ║                              lParam = muted (1/0); extended.volume/muted             ║
  * ║    MSG_VIDEO_WAITING      — player is buffering (IFrame API state 3)                 ║
  * ║    MSG_VIDEO_CANPLAY      — buffering resolved; fires before MSG_VIDEO_PLAY          ║
  * ║                             when the player transitions from buffering to playing    ║
@@ -599,7 +600,7 @@
             entry.player.setVolume(clamped);
             entry.abstraction.volume = clamped;
 
-            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE, 0, 0, {
+            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE, clamped, entry.abstraction.muted ? 1 : 0, {
                 volume: clamped,
                 muted: entry.abstraction.muted
             });
@@ -628,7 +629,7 @@
 
             entry.abstraction.muted = muted;
 
-            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE, 0, 0, {
+            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_VOLUME_CHANGE, entry.abstraction.volume, muted ? 1 : 0, {
                 volume: entry.abstraction.volume,
                 muted
             });

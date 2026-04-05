@@ -26,7 +26,8 @@
  * ║    MSG_VIDEO_SEEK       — seek completed; extended.currentTime                       ║
  * ║    MSG_VIDEO_LOADED        — metadata available; extended.duration/videoWidth/       ║
  * ║                              videoHeight/volume/muted/playbackRate                   ║
- * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; extended.volume/muted          ║
+ * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; wParam = volume (0–100),       ║
+ * ║                              lParam = muted (1/0); extended.volume/muted             ║
  * ║    MSG_VIDEO_RATE_CHANGE   — playbackRate changed; extended.playbackRate             ║
  * ║    MSG_VIDEO_WAITING       — playback stalled waiting for data (waiting event)       ║
  * ║    MSG_VIDEO_CANPLAY       — enough data to resume playback (canplay event)          ║
@@ -295,7 +296,7 @@
                     function onVolumeChange() {
                         abstraction.volume = video.volume * 100;
                         abstraction.muted = video.muted;
-                        pac.sendMessage(pacId, MSG_VIDEO_VOLUME_CHANGE, 0, 0, {
+                        pac.sendMessage(pacId, MSG_VIDEO_VOLUME_CHANGE, video.volume * 100, video.muted ? 1 : 0, {
                             volume: video.volume * 100,
                             muted: video.muted
                         });
