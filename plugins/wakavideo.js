@@ -42,7 +42,7 @@
  * ║    WakaVideo.setMuted(pacId, muted)                   — set muted state              ║
  * ║    WakaVideo.setPlaybackRate(pacId, rate)             — set playback rate            ║
  * ║    WakaVideo.bitBlt(dc, pacId)                        — copy full frame into DC      ║
- * ║    WakaVideo.stretchBlt(dc, pacId, dx,dy,dw,dh)      — copy full frame into rect     ║
+ * ║    WakaVideo.stretchBlt(dc, pacId, dx,dy,dw,dh)       — copy full frame into rect    ║
  * ║    WakaVideo.addCue(pacId, startTime, endTime, text)  — add a programmatic cue       ║
  * ║                                                                                      ║
  * ║  Reactive properties injected on the abstraction:                                    ║
@@ -61,22 +61,23 @@
     "use strict";
 
     // =========================================================================
-    // Message type constants — placed in the user message range (MSG_USER+)
-    // to avoid collisions with core WakaPAC messages.
+    // Message type constants — placed in the plugin message range (MSG_PLUGIN+)
+    // to avoid collisions with both core WakaPAC messages and user-defined
+    // messages. WakaVideo occupies the 0x2100 sub-range.
     // =========================================================================
 
-    const MSG_VIDEO_PLAY = 0x1100;
-    const MSG_VIDEO_PAUSE = 0x1101;
-    const MSG_VIDEO_ENDED = 0x1102;
-    const MSG_VIDEO_SEEK = 0x1103;
-    const MSG_VIDEO_LOADED = 0x1104;
-    const MSG_VIDEO_CUE_ENTER = 0x1105;
-    const MSG_VIDEO_CUE_LEAVE = 0x1106;
-    const MSG_VIDEO_ERROR = 0x1107;
-    const MSG_VIDEO_VOLUME_CHANGE = 0x1108;
-    const MSG_VIDEO_RATE_CHANGE = 0x1109;
-    const MSG_VIDEO_WAITING = 0x110A;
-    const MSG_VIDEO_CANPLAY = 0x110B;
+    const MSG_VIDEO_PLAY = wakaPAC.MSG_PLUGIN + 0x100;
+    const MSG_VIDEO_PAUSE = wakaPAC.MSG_PLUGIN + 0x101;
+    const MSG_VIDEO_ENDED = wakaPAC.MSG_PLUGIN + 0x102;
+    const MSG_VIDEO_SEEK = wakaPAC.MSG_PLUGIN + 0x103;
+    const MSG_VIDEO_LOADED = wakaPAC.MSG_PLUGIN + 0x104;
+    const MSG_VIDEO_CUE_ENTER = wakaPAC.MSG_PLUGIN + 0x105;
+    const MSG_VIDEO_CUE_LEAVE = wakaPAC.MSG_PLUGIN + 0x106;
+    const MSG_VIDEO_ERROR = wakaPAC.MSG_PLUGIN + 0x107;
+    const MSG_VIDEO_VOLUME_CHANGE = wakaPAC.MSG_PLUGIN + 0x108;
+    const MSG_VIDEO_RATE_CHANGE = wakaPAC.MSG_PLUGIN + 0x109;
+    const MSG_VIDEO_WAITING = wakaPAC.MSG_PLUGIN + 0x10A;
+    const MSG_VIDEO_CANPLAY = wakaPAC.MSG_PLUGIN + 0x10B;
 
     /**
      * Registry of active video components keyed by pacId.
