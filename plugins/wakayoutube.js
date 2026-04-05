@@ -83,7 +83,7 @@
     /**
      * Queue of pending component descriptors for components that were created
      * before the IFrame API finished loading.
-     * @type {Array<{ abstraction: Object, pacId: string, videoId: string, pac: Object, msgConstants: Object }>}
+     * @type {Array<{ abstraction: Object, pacId: string, videoId: string, pac: Object, msgConstants: Object, playerVars: Object }>}
      */
     const _pendingInits = [];
 
@@ -118,7 +118,8 @@
                     pending.pacId,
                     pending.videoId,
                     pending.pac,
-                    pending.msgConstants
+                    pending.msgConstants,
+                    pending.playerVars
                 );
             }
 
@@ -345,8 +346,9 @@
      * @param {string} videoId
      * @param {Object} pac
      * @param {Object} msgConstants
+     * @param {Object} playerVars - Merged plugin-level and per-instance playerVars
      */
-    function createPlayer(abstraction, pacId, videoId, pac, msgConstants) {
+    function createPlayer(abstraction, pacId, videoId, pac, msgConstants, playerVars) {
         const container = pac.getContainerByPacId(pacId);
 
         // Guard: the component may have been destroyed while waiting for the API,
@@ -372,11 +374,7 @@
             // playerVars — YouTube ignores it there.
             host: 'https://www.youtube-nocookie.com',
             videoId,
-            playerVars: {
-                controls: 0, // Suppress the native YouTube control bar; the host page owns the UI.
-                rel: 0, // Do not show related videos at the end of playback.
-                enablejsapi: 1 // Required for the IFrame API to control playback.
-            },
+            playerVars,
             events: {
                 onStateChange(event) {
                     onStateChange(pacId, entry, event.data);
@@ -397,6 +395,15 @@
     window.WakaYouTube = {
 
         createPacPlugin(pac, _options = {}) {
+
+            // Plugin-level playerVars defaults, set via wakaPAC.use(WakaYouTube, { ... }).
+            // Per-instance config passed as the third argument to wakaPAC() under the
+            // 'youtube' key overrides these on a property-by-property basis.
+            // enablejsapi is always forced to 1 — the plugin cannot function without it.
+            const _defaultPlayerVars = {
+                controls: _options.controls ?? 0,
+                rel:      _options.rel      ?? 0
+            };
 
             // Derive message constants from the host's MSG_PLUGIN base.
             // Offsets are identical to WakaVideo so msgProc handlers are
@@ -462,6 +469,16 @@
                         return;
                     }
 
+                    // Merge plugin-level defaults with per-instance overrides.
+                    // Per-instance config is passed as the third argument to wakaPAC()
+                    // under the 'youtube' key: wakaPAC('id', { msgProc }, { youtube: { controls: 1 } })
+                    // enablejsapi is always forced to 1 regardless of either config.
+                    const playerVars = {
+                        ..._defaultPlayerVars,
+                        ...(_config.youtube ?? {}),
+                        enablejsapi: 1
+                    };
+
                     // Seed the abstraction with neutral initial values before the
                     // player is ready, so bindings have something to render.
                     abstraction.currentTime = 0;
@@ -472,9 +489,9 @@
                     ensureApiLoaded();
 
                     if (_apiReady) {
-                        createPlayer(abstraction, pacId, videoId, pac, msgConstants);
+                        createPlayer(abstraction, pacId, videoId, pac, msgConstants, playerVars);
                     } else {
-                        _pendingInits.push({abstraction, pacId, videoId, pac, msgConstants});
+                        _pendingInits.push({ abstraction, pacId, videoId, pac, msgConstants, playerVars });
                     }
                 },
 
