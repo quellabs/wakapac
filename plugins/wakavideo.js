@@ -1,59 +1,59 @@
 /*
  * ╔══════════════════════════════════════════════════════════════════════════════════════╗
  * ║                                                                                      ║
- * ║  ██╗    ██╗ █████╗ ██╗  ██╗ █████╗ ██╗   ██╗██╗██████╗ ███████╗ ██████╗             ║
- * ║  ██║    ██║██╔══██╗██║ ██╔╝██╔══██╗██║   ██║██║██╔══██╗██╔════╝██╔═══██╗            ║
- * ║  ██║ █╗ ██║███████║█████╔╝ ███████║██║   ██║██║██║  ██║█████╗  ██║   ██║            ║
- * ║  ██║███╗██║██╔══██║██╔═██╗ ██╔══██║╚██╗ ██╔╝██║██║  ██║██╔══╝  ██║   ██║            ║
- * ║  ╚███╔███╔╝██║  ██║██║  ██╗██║  ██║ ╚████╔╝ ██║██████╔╝███████╗╚██████╔╝            ║
- * ║   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═════╝ ╚══════╝ ╚═════╝             ║
+ * ║  ██╗    ██╗ █████╗ ██╗  ██╗ █████╗ ██╗   ██╗██╗██████╗ ███████╗ ██████╗              ║
+ * ║  ██║    ██║██╔══██╗██║ ██╔╝██╔══██╗██║   ██║██║██╔══██╗██╔════╝██╔═══██╗             ║
+ * ║  ██║ █╗ ██║███████║█████╔╝ ███████║██║   ██║██║██║  ██║█████╗  ██║   ██║             ║
+ * ║  ██║███╗██║██╔══██║██╔═██╗ ██╔══██║╚██╗ ██╔╝██║██║  ██║██╔══╝  ██║   ██║             ║
+ * ║  ╚███╔███╔╝██║  ██║██║  ██╗██║  ██║ ╚████╔╝ ██║██████╔╝███████╗╚██████╔╝             ║
+ * ║   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═════╝ ╚══════╝ ╚═════╝              ║
  * ║                                                                                      ║
  * ║  WakaPAC Plugin — WakaVideo                                                          ║
  * ║                                                                                      ║
- * ║  Wraps <video> elements inside PAC containers, bridging the HTML video API          ║
- * ║  into the WakaPAC message and abstraction model.                                    ║
+ * ║  Wraps <video> elements inside PAC containers, bridging the HTML video API           ║
+ * ║  into the WakaPAC message and abstraction model.                                     ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
  * ║    wakaPAC.use(WakaVideo);                                                           ║
  * ║                                                                                      ║
- * ║  The plugin activates only when the PAC container's root element is a               ║
- * ║  <video> element. It sends video messages to msgProc as playback events occur.      ║
+ * ║  The plugin activates only when the PAC container's root element is a                ║
+ * ║  <video> element. It sends video messages to msgProc as playback events occur.       ║
  * ║                                                                                      ║
- * ║  Messages dispatched:                                                               ║
- * ║    MSG_VIDEO_PLAY       — playback started (play event)                             ║
- * ║    MSG_VIDEO_PAUSE      — playback paused (pause event)                             ║
- * ║    MSG_VIDEO_ENDED      — playback reached end (ended event)                        ║
- * ║    MSG_VIDEO_SEEK       — seek completed; extended.currentTime                      ║
+ * ║  Messages dispatched:                                                                ║
+ * ║    MSG_VIDEO_PLAY       — playback started (play event)                              ║
+ * ║    MSG_VIDEO_PAUSE      — playback paused (pause event)                              ║
+ * ║    MSG_VIDEO_ENDED      — playback reached end (ended event)                         ║
+ * ║    MSG_VIDEO_SEEK       — seek completed; extended.currentTime                       ║
  * ║    MSG_VIDEO_LOADED        — metadata available; extended.duration/videoWidth/       ║
- * ║                              videoHeight/volume/muted/playbackRate                  ║
- * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; extended.volume/muted         ║
- * ║    MSG_VIDEO_RATE_CHANGE   — playbackRate changed; extended.playbackRate            ║
- * ║    MSG_VIDEO_WAITING       — playback stalled waiting for data (waiting event)      ║
- * ║    MSG_VIDEO_CANPLAY       — enough data to resume playback (canplay event)         ║
- * ║    MSG_VIDEO_CUE_ENTER  — a cue was entered; extended: { startTime, endTime, text } ║
- * ║    MSG_VIDEO_CUE_LEAVE  — a cue was exited;  extended: { startTime, endTime, text } ║
- * ║    MSG_VIDEO_ERROR      — playback error; wParam = error code                       ║
+ * ║                              videoHeight/volume/muted/playbackRate                   ║
+ * ║    MSG_VIDEO_VOLUME_CHANGE — volume or muted changed; extended.volume/muted          ║
+ * ║    MSG_VIDEO_RATE_CHANGE   — playbackRate changed; extended.playbackRate             ║
+ * ║    MSG_VIDEO_WAITING       — playback stalled waiting for data (waiting event)       ║
+ * ║    MSG_VIDEO_CANPLAY       — enough data to resume playback (canplay event)          ║
+ * ║    MSG_VIDEO_CUE_ENTER  — a cue was entered; extended: { startTime, endTime, text }  ║
+ * ║    MSG_VIDEO_CUE_LEAVE  — a cue was exited;  extended: { startTime, endTime, text }  ║
+ * ║    MSG_VIDEO_ERROR      — playback error; wParam = error code                        ║
  * ║                                                                                      ║
- * ║  API — all methods take pacId as first argument:                                    ║
- * ║    WakaVideo.play(pacId)                              — start playback              ║
- * ║    WakaVideo.pause(pacId)                             — pause playback              ║
- * ║    WakaVideo.seek(pacId, time)                        — seek to time in seconds     ║
- * ║    WakaVideo.setVolume(pacId, volume)                 — set volume (0.0–1.0)        ║
- * ║    WakaVideo.setMuted(pacId, muted)                   — set muted state             ║
- * ║    WakaVideo.setPlaybackRate(pacId, rate)             — set playback rate           ║
- * ║    WakaVideo.bitBlt(dc, pacId)                        — copy full frame into DC     ║
- * ║    WakaVideo.stretchBlt(dc, pacId, dx,dy,dw,dh)      — copy full frame into rect   ║
- * ║    WakaVideo.addCue(pacId, startTime, endTime, text)  — add a programmatic cue     ║
+ * ║  API — all methods take pacId as first argument:                                     ║
+ * ║    WakaVideo.play(pacId)                              — start playback               ║
+ * ║    WakaVideo.pause(pacId)                             — pause playback               ║
+ * ║    WakaVideo.seek(pacId, time)                        — seek to time in seconds      ║
+ * ║    WakaVideo.setVolume(pacId, volume)                 — set volume (0.0–1.0)         ║
+ * ║    WakaVideo.setMuted(pacId, muted)                   — set muted state              ║
+ * ║    WakaVideo.setPlaybackRate(pacId, rate)             — set playback rate            ║
+ * ║    WakaVideo.bitBlt(dc, pacId)                        — copy full frame into DC      ║
+ * ║    WakaVideo.stretchBlt(dc, pacId, dx,dy,dw,dh)      — copy full frame into rect     ║
+ * ║    WakaVideo.addCue(pacId, startTime, endTime, text)  — add a programmatic cue       ║
  * ║                                                                                      ║
- * ║  Reactive properties injected on the abstraction:                                  ║
- * ║    currentTime   — updated via rAF during playback (timeupdate fallback in hidden   ║
- * ║                    tabs); also on seek                                              ║
- * ║    duration     — set when MSG_VIDEO_LOADED fires                                   ║
- * ║    videoWidth   — set when MSG_VIDEO_LOADED fires                                   ║
- * ║    videoHeight  — set when MSG_VIDEO_LOADED fires                                   ║
- * ║    volume        — mirrors video.volume; updated on MSG_VIDEO_VOLUME_CHANGE         ║
- * ║    muted         — mirrors video.muted;  updated on MSG_VIDEO_VOLUME_CHANGE         ║
- * ║    playbackRate  — mirrors video.playbackRate; updated on MSG_VIDEO_RATE_CHANGE     ║
+ * ║  Reactive properties injected on the abstraction:                                    ║
+ * ║    currentTime   — updated via rAF during playback (timeupdate fallback in hidden    ║
+ * ║                    tabs); also on seek                                               ║
+ * ║    duration     — set when MSG_VIDEO_LOADED fires                                    ║
+ * ║    videoWidth   — set when MSG_VIDEO_LOADED fires                                    ║
+ * ║    videoHeight  — set when MSG_VIDEO_LOADED fires                                    ║
+ * ║    volume        — mirrors video.volume; updated on MSG_VIDEO_VOLUME_CHANGE          ║
+ * ║    muted         — mirrors video.muted;  updated on MSG_VIDEO_VOLUME_CHANGE          ║
+ * ║    playbackRate  — mirrors video.playbackRate; updated on MSG_VIDEO_RATE_CHANGE      ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
