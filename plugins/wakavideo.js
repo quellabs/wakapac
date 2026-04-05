@@ -62,9 +62,10 @@
 
     /**
      * Registry of active video components keyed by pacId.
-     * Each entry holds the HTMLVideoElement, its cue track, the previous active
-     * cue set for enter/leave diffing, and the rAF handle.
-     * @type {Map<string, { video: HTMLVideoElement, cueTrack: TextTrack|null, activeCues: Set<string>, rafHandle: number|null }>}
+     * Each entry holds the pac reference, the HTMLVideoElement, the MSG_VIDEO_ERROR
+     * constant, the cue track, the previous active cue set for enter/leave diffing,
+     * and the rAF handle.
+     * @type {Map<string, { pac: Object, video: HTMLVideoElement, msgVideoError: number, msgCueEnter: number, msgCueLeave: number, cueTrack: TextTrack|null, activeCues: Set<string>, rafHandle: number|null }>}
      */
     const _registry = new Map();
 
@@ -155,7 +156,7 @@
         // Cues in current but not in previous → entered
         for (const cue of entry.cueTrack.activeCues ?? []) {
             if (!entry.activeCues.has(cueKey(cue))) {
-                window.wakaPAC.sendMessage(pacId, MSG_VIDEO_CUE_ENTER, 0, 0, {
+                entry.pac.sendMessage(pacId, entry.msgCueEnter, 0, 0, {
                     startTime: cue.startTime,
                     endTime: cue.endTime,
                     text: cue.text
@@ -170,7 +171,7 @@
                 // is no longer in activeCues at this point
                 const [st, et, ...textParts] = key.split(':');
 
-                window.wakaPAC.sendMessage(pacId, MSG_VIDEO_CUE_LEAVE, 0, 0, {
+                entry.pac.sendMessage(pacId, entry.msgCueLeave, 0, 0, {
                     startTime: Number(st),
                     endTime: Number(et),
                     text: textParts.join(':')
@@ -224,9 +225,9 @@
                  *
                  * @param {Object} abstraction - The component's reactive abstraction object
                  * @param {string} pacId       - The data-pac-id of the container
-                 * @param {Object} config      - Component config
+                 * @param {Object} _config     - Component config
                  */
-                onComponentCreated(abstraction, pacId, config) {
+                onComponentCreated(abstraction, pacId, _config) {
                     const container = pac.getContainerByPacId(pacId);
 
                     // Only activate for <video> containers
@@ -235,11 +236,11 @@
                     }
 
                     const video = container;
-                    const entry = {video, cueTrack: null, activeCues: new Set(), rafHandle: null};
+                    const entry = { video, pac, msgVideoError: MSG_VIDEO_ERROR, msgCueEnter: MSG_VIDEO_CUE_ENTER, msgCueLeave: MSG_VIDEO_CUE_LEAVE, cueTrack: null, activeCues: new Set(), rafHandle: null };
 
                     _registry.set(pacId, entry);
 
-                    abstraction.currentTime = null;
+                    abstraction.currentTime = 0;
                     abstraction.duration = NaN;
                     abstraction.videoWidth = null;
                     abstraction.videoHeight = null;
@@ -403,12 +404,22 @@
 
         /**
          * Start playback.
-         * Returns the Promise from video.play() so the caller can catch autoplay rejections.
+         * Autoplay policy rejections are caught and dispatched as MSG_VIDEO_ERROR
+         * so all error handling stays in msgProc.
          * @param {string} pacId
-         * @returns {Promise|undefined}
          */
         play(pacId) {
-            return getVideo(pacId)?.play();
+            const entry = _registry.get(pacId);
+
+            if (!entry) {
+                return;
+            }
+
+            entry.video.play().catch(err => {
+                entry.pac.sendMessage(pacId, entry.msgVideoError, 0, 0, {
+                    message: err.message ?? ''
+                });
+            });
         },
 
         /**
