@@ -449,6 +449,7 @@
                         return;
                     }
 
+                    // Fetch the video ID
                     const videoId = container.dataset.youtubeId;
 
                     if (!videoId) {
