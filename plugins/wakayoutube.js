@@ -140,7 +140,7 @@
                     pending.pacId,
                     pending.msgConstants.MSG_VIDEO_ERROR,
                     0, 0,
-                    { message: 'YouTube IFrame API failed to load' }
+                    {message: 'YouTube IFrame API failed to load'}
                 );
             }
 
@@ -411,7 +411,7 @@
             // enablejsapi is always forced to 1 — the plugin cannot function without it.
             const _defaultPlayerVars = {
                 controls: _options.controls ?? 0,
-                rel:      _options.rel      ?? 0
+                rel: _options.rel ?? 0
             };
 
             // Derive message constants from the host's MSG_PLUGIN base.
@@ -500,7 +500,7 @@
                     if (_apiReady) {
                         createPlayer(abstraction, pacId, videoId, pac, msgConstants, playerVars);
                     } else {
-                        _pendingInits.push({ abstraction, pacId, videoId, pac, msgConstants, playerVars });
+                        _pendingInits.push({abstraction, pacId, videoId, pac, msgConstants, playerVars});
                     }
                 },
 

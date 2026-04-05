@@ -110,7 +110,7 @@
         _apiLoading = true;
 
         const tag = document.createElement('script');
-        tag.id  = 'waka-vimeo-api-script';
+        tag.id = 'waka-vimeo-api-script';
         tag.src = 'https://player.vimeo.com/api/player.js';
 
         tag.onload = function () {
@@ -139,7 +139,7 @@
                     pending.pacId,
                     pending.msgConstants.MSG_VIDEO_ERROR,
                     0, 0,
-                    { message: 'Vimeo Player SDK failed to load' }
+                    {message: 'Vimeo Player SDK failed to load'}
                 );
             }
 
@@ -197,6 +197,7 @@
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, 0, 0, {
                 message: `Invalid Vimeo video ID: "${videoId}"`
             });
+
             return;
         }
 
@@ -217,7 +218,7 @@
             ...embedOptions
         });
 
-        const entry = { pac, player, abstraction, msgConstants };
+        const entry = {pac, player, abstraction, msgConstants};
         _registry.set(pacId, entry);
 
         /**
@@ -235,18 +236,18 @@
                 player.getMuted(),
                 player.getPlaybackRate()
             ]).then(function ([duration, videoWidth, videoHeight, volume, muted, playbackRate]) {
-                abstraction.duration    = duration;
-                abstraction.videoWidth  = videoWidth;
+                abstraction.duration = duration;
+                abstraction.videoWidth = videoWidth;
                 abstraction.videoHeight = videoHeight;
-                abstraction.volume      = volume * 100;
-                abstraction.muted       = muted;
+                abstraction.volume = volume * 100;
+                abstraction.muted = muted;
                 abstraction.playbackRate = playbackRate;
 
                 pac.sendMessage(pacId, msgConstants.MSG_VIDEO_LOADED, 0, 0, {
                     duration,
                     videoWidth,
                     videoHeight,
-                    volume:       volume * 100,
+                    volume: volume * 100,
                     muted,
                     playbackRate
                 });
@@ -310,11 +311,11 @@
             const muted = data.muted ? 1 : 0;
 
             abstraction.volume = volume;
-            abstraction.muted  = data.muted;
+            abstraction.muted = data.muted;
 
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_VOLUME_CHANGE, volume, muted, {
                 volume: volume,
-                muted:  data.muted
+                muted: data.muted
             });
         });
 
@@ -346,7 +347,7 @@
         /**
          *  Fires on playback errors. data: { message, method, name }
          */
-         player.on('error', function (data) {
+        player.on('error', function (data) {
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, 0, 0, {
                 message: data.message ?? 'Unknown Vimeo error'
             });
@@ -364,28 +365,28 @@
             // Derive message constants from the host's MSG_PLUGIN base.
             // Offsets are identical to WakaVideo and WakaYouTube so msgProc
             // handlers are interchangeable across all three plugins.
-            const MSG_VIDEO_PLAY          = pac.MSG_PLUGIN + 0x100;
-            const MSG_VIDEO_PAUSE         = pac.MSG_PLUGIN + 0x101;
-            const MSG_VIDEO_ENDED         = pac.MSG_PLUGIN + 0x102;
-            const MSG_VIDEO_SEEK          = pac.MSG_PLUGIN + 0x103;
-            const MSG_VIDEO_LOADED        = pac.MSG_PLUGIN + 0x104;
-            const MSG_VIDEO_ERROR         = pac.MSG_PLUGIN + 0x107;
+            const MSG_VIDEO_PLAY = pac.MSG_PLUGIN + 0x100;
+            const MSG_VIDEO_PAUSE = pac.MSG_PLUGIN + 0x101;
+            const MSG_VIDEO_ENDED = pac.MSG_PLUGIN + 0x102;
+            const MSG_VIDEO_SEEK = pac.MSG_PLUGIN + 0x103;
+            const MSG_VIDEO_LOADED = pac.MSG_PLUGIN + 0x104;
+            const MSG_VIDEO_ERROR = pac.MSG_PLUGIN + 0x107;
             const MSG_VIDEO_VOLUME_CHANGE = pac.MSG_PLUGIN + 0x108;
-            const MSG_VIDEO_RATE_CHANGE   = pac.MSG_PLUGIN + 0x109;
-            const MSG_VIDEO_WAITING       = pac.MSG_PLUGIN + 0x10A;
-            const MSG_VIDEO_CANPLAY       = pac.MSG_PLUGIN + 0x10B;
+            const MSG_VIDEO_RATE_CHANGE = pac.MSG_PLUGIN + 0x109;
+            const MSG_VIDEO_WAITING = pac.MSG_PLUGIN + 0x10A;
+            const MSG_VIDEO_CANPLAY = pac.MSG_PLUGIN + 0x10B;
 
             // Attach constants so components can reference WakaVimeo.MSG_VIDEO_PLAY etc.
-            this.MSG_VIDEO_PLAY          = MSG_VIDEO_PLAY;
-            this.MSG_VIDEO_PAUSE         = MSG_VIDEO_PAUSE;
-            this.MSG_VIDEO_ENDED         = MSG_VIDEO_ENDED;
-            this.MSG_VIDEO_SEEK          = MSG_VIDEO_SEEK;
-            this.MSG_VIDEO_LOADED        = MSG_VIDEO_LOADED;
-            this.MSG_VIDEO_ERROR         = MSG_VIDEO_ERROR;
+            this.MSG_VIDEO_PLAY = MSG_VIDEO_PLAY;
+            this.MSG_VIDEO_PAUSE = MSG_VIDEO_PAUSE;
+            this.MSG_VIDEO_ENDED = MSG_VIDEO_ENDED;
+            this.MSG_VIDEO_SEEK = MSG_VIDEO_SEEK;
+            this.MSG_VIDEO_LOADED = MSG_VIDEO_LOADED;
+            this.MSG_VIDEO_ERROR = MSG_VIDEO_ERROR;
             this.MSG_VIDEO_VOLUME_CHANGE = MSG_VIDEO_VOLUME_CHANGE;
-            this.MSG_VIDEO_RATE_CHANGE   = MSG_VIDEO_RATE_CHANGE;
-            this.MSG_VIDEO_WAITING       = MSG_VIDEO_WAITING;
-            this.MSG_VIDEO_CANPLAY       = MSG_VIDEO_CANPLAY;
+            this.MSG_VIDEO_RATE_CHANGE = MSG_VIDEO_RATE_CHANGE;
+            this.MSG_VIDEO_WAITING = MSG_VIDEO_WAITING;
+            this.MSG_VIDEO_CANPLAY = MSG_VIDEO_CANPLAY;
 
             const msgConstants = {
                 MSG_VIDEO_PLAY,
@@ -403,9 +404,9 @@
             // Plugin-level embed option defaults, set via wakaPAC.use(WakaVimeo, { ... }).
             // Per-instance config under the 'vimeo' key overrides these.
             const _defaultEmbedOptions = {
-                controls:     _options.controls     ?? true,
-                speed:        _options.speed        ?? false,
-                transparent:  _options.transparent  ?? true
+                controls: _options.controls ?? true,
+                speed: _options.speed ?? false,
+                transparent: _options.transparent ?? true
             };
 
             return {
@@ -441,12 +442,12 @@
                     };
 
                     // Seed the abstraction with neutral initial values.
-                    abstraction.currentTime  = 0;
-                    abstraction.duration     = NaN;
-                    abstraction.videoWidth   = null;
-                    abstraction.videoHeight  = null;
-                    abstraction.volume       = 100;
-                    abstraction.muted        = false;
+                    abstraction.currentTime = 0;
+                    abstraction.duration = NaN;
+                    abstraction.videoWidth = null;
+                    abstraction.videoHeight = null;
+                    abstraction.volume = 100;
+                    abstraction.muted = false;
                     abstraction.playbackRate = 1;
 
                     ensureApiLoaded();
@@ -454,7 +455,7 @@
                     if (_apiReady) {
                         createPlayer(abstraction, pacId, videoId, pac, msgConstants, embedOptions);
                     } else {
-                        _pendingInits.push({ abstraction, pacId, videoId, pac, msgConstants, embedOptions });
+                        _pendingInits.push({abstraction, pacId, videoId, pac, msgConstants, embedOptions});
                     }
                 },
 
