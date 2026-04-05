@@ -85,6 +85,14 @@
     let _apiReady = false;
 
     /**
+     * True once the SDK script tag has been injected, preventing a second
+     * injection if two components call ensureApiLoaded() synchronously before
+     * the first appendChild has committed to the DOM.
+     * @type {boolean}
+     */
+    let _apiLoading = false;
+
+    /**
      * Queue of pending component descriptors created before the SDK loaded.
      * @type {Array<{ abstraction: Object, pacId: string, videoId: string, pac: Object, msgConstants: Object, embedOptions: Object }>}
      */
@@ -95,9 +103,11 @@
      * only injects once. Drains the pending queue on load.
      */
     function ensureApiLoaded() {
-        if (document.getElementById('waka-vimeo-api-script')) {
+        if (_apiReady || _apiLoading) {
             return;
         }
+
+        _apiLoading = true;
 
         const tag = document.createElement('script');
         tag.id  = 'waka-vimeo-api-script';
@@ -122,8 +132,17 @@
 
         tag.onerror = function () {
             // Script failed to load (network error, CSP block, etc.).
-            // Components in the queue will never initialize; remove them to
-            // prevent them from sitting in memory indefinitely.
+            // Notify each queued component via MSG_VIDEO_ERROR so msgProc can
+            // react rather than silently waiting forever.
+            for (const pending of _pendingInits) {
+                pending.pac.sendMessage(
+                    pending.pacId,
+                    pending.msgConstants.MSG_VIDEO_ERROR,
+                    0, 0,
+                    { message: 'Vimeo Player SDK failed to load' }
+                );
+            }
+
             _pendingInits.length = 0;
         };
 
@@ -175,8 +194,34 @@
             return;
         }
 
+        // Guard against duplicate initialization (framework re-renders, hydration, etc.).
+        if (_registry.has(pacId)) {
+            return;
+        }
+
+        // Validate the video ID before handing it to the SDK.
+        const id = Number(videoId);
+
+        if (!Number.isFinite(id)) {
+            pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, 0, 0, {
+                message: `Invalid Vimeo video ID: "${videoId}"`
+            });
+            return;
+        }
+
+        // Confirm the SDK is actually present on the global scope. _apiReady
+        // being true is normally sufficient, but an explicit check guards against
+        // environments where the script loaded but the global was not set.
+        if (!window.Vimeo?.Player) {
+            pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, 0, 0, {
+                message: 'Vimeo Player SDK is not available'
+            });
+
+            return;
+        }
+
         const player = new Vimeo.Player(container, {
-            id:  Number(videoId),
+            id,
             dnt: true,            // privacy-enhanced embed; no tracking cookies
             ...embedOptions
         });
@@ -265,11 +310,12 @@
         // -----------------------------------------------------------------
         player.on('volumechange', function (data) {
             const volume = data.volume * 100;
+            const muted = data.muted ? 1 : 0;
 
             abstraction.volume = volume;
             abstraction.muted  = data.muted;
 
-            pac.sendMessage(pacId, msgConstants.MSG_VIDEO_VOLUME_CHANGE, volume, data.muted ? 1 : 0, {
+            pac.sendMessage(pacId, msgConstants.MSG_VIDEO_VOLUME_CHANGE, volume, muted, {
                 volume: volume,
                 muted:  data.muted
             });
@@ -385,7 +431,7 @@
 
                     const videoId = container.dataset.vimeoId;
 
-                    if (!videoId) {
+                    if (!videoId || !Number.isFinite(Number(videoId))) {
                         return;
                     }
 
@@ -474,7 +520,9 @@
          * @param {string} pacId
          */
         pause(pacId) {
-            getPlayer(pacId)?.pause().catch(function () {});
+            getPlayer(pacId)?.pause().catch(function (err) {
+                console.warn('WakaVimeo: pause failed:', err);
+            });
         },
 
         /**
@@ -495,10 +543,9 @@
                 return;
             }
 
-            // setCurrentTime rejects with RangeError if time is out of bounds;
-            // the rejection is handled by the 'error' event listener on the player,
-            // which dispatches MSG_VIDEO_ERROR. No need to duplicate error handling here.
-            entry.player.setCurrentTime(Math.max(0, time)).catch(function () {});
+            entry.player.setCurrentTime(Math.max(0, time)).catch(function (err) {
+                console.warn('WakaVimeo: seek failed:', err);
+            });
         },
 
         /**
@@ -516,7 +563,10 @@
             }
 
             const clamped = Math.max(0, Math.min(100, volume));
-            entry.player.setVolume(clamped / 100).catch(function () {});
+
+            entry.player.setVolume(clamped / 100).catch(function (err) {
+                console.warn('WakaVimeo: setVolume failed:', err);
+            });
         },
 
         /**
@@ -532,7 +582,9 @@
                 return;
             }
 
-            entry.player.setMuted(Boolean(muted)).catch(function () {});
+            entry.player.setMuted(Boolean(muted)).catch(function (err) {
+                console.warn('WakaVimeo: setMuted failed:', err);
+            });
         },
 
         /**
@@ -550,7 +602,17 @@
                 return;
             }
 
-            entry.player.setPlaybackRate(rate).catch(function () {});
+            if (typeof rate !== 'number' || Number.isNaN(rate)) {
+                return;
+            }
+
+            // Clamp to the range the Vimeo SDK accepts. Values outside 0.5–2
+            // will be rejected with a RangeError by the SDK.
+            const clamped = Math.min(2, Math.max(0.5, rate));
+
+            entry.player.setPlaybackRate(clamped).catch(function (err) {
+                console.warn('WakaVimeo: setPlaybackRate failed:', err);
+            });
         }
     };
 
