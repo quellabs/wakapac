@@ -139,21 +139,7 @@
                         return `${sign}${seconds}s`;
                     }
                 },
-
-                /**
-                 * Add unit to abstraction if instructed
-                 * @param abstraction
-                 * @param pacId
-                 * @param config
-                 */
-                onComponentCreated(abstraction, pacId, config) {
-                    const key = config.numberUtils?.property;
-
-                    if (key && key in abstraction) {
-                        abstraction[key] = this.functions;
-                    }
-                }
-            };
+            }
         }
     };
 

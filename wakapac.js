@@ -48,9 +48,17 @@
     /**
      * Unit function registries keyed by unit name.
      * Populated by plugins that return a `functions` object from createPacPlugin().
-     * @type {Object<string, Object>}
+     * @type {Map<string, Object>}
      */
-    const _units = {};
+    const _units = new Map();
+
+    /**
+     * Maps library objects to their registered unit names.
+     * Populated by wakaPAC.use() for libraries that expose a named function set.
+     * Enables wakaPAC.unit(CollectionUtils) as an alternative to wakaPAC.unit('CollectionUtils').
+     * @type {WeakMap<Object, string>}
+     */
+    const _unitNames = new WeakMap();
 
     /**
      * Registered message hooks, installed via wakaPAC.installMessageHook().
@@ -4286,7 +4294,7 @@
 
                     if (obj !== undefined) {
                         // Warn when a data variable is shadowing a registered unit
-                        if (_units[node.unit]) {
+                        if (_units.get(node.unit)) {
                             console.warn(`WakaPAC: data property "${node.unit}" is shadowing a registered unit`);
                         }
 
@@ -4304,7 +4312,7 @@
                     }
 
                     // Fall back to unit registry (namespaced call)
-                    const unit = _units[node.unit];
+                    const unit = _units.get(node.unit);
 
                     if (unit && typeof unit[node.method] === 'function') {
                         const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
@@ -5168,7 +5176,7 @@
         if (usesAttr) {
             usesAttr.split(',').forEach(name => {
                 const unitName = name.trim();
-                const unit = _units[unitName];
+                const unit = _units.get(unitName);
 
                 if (!unit) {
                     console.warn(`WakaPAC: data-pac-uses references unknown unit "${unitName}"`);
@@ -9620,12 +9628,32 @@
 
         // If the plugin exposes named functions, register it as a unit
         if (plugin.name && Utils.isPlainObject(plugin.functions)) {
-            if (_units[plugin.name]) {
+            if (_units.get(plugin.name)) {
                 console.warn(`WakaPAC: unit "${plugin.name}" is already registered`);
             } else {
-                _units[plugin.name] = plugin.functions;
+                _units.set(plugin.name, plugin.functions);
+                _unitNames.set(library, plugin.name);
             }
         }
+    };
+
+    /**
+     * Retrieves the function set exported by a registered unit.
+     * Accepts either the unit's string name or the original library object
+     * passed to wakaPAC.use() — both forms return the same result.
+     * @param {string|Object} name - Unit name (e.g. 'CollectionUtils') or library reference (e.g. CollectionUtils)
+     * @returns {Object|null} The unit's function set, or null if not found
+     */
+    wakaPAC.unit = function (name) {
+        if (typeof name === 'object') {
+            name = _unitNames.get(name) ?? null;
+
+            if (!name) {
+                return null;
+            }
+        }
+
+        return _units.get(name) ?? null;
     };
 
     // ========================================================================

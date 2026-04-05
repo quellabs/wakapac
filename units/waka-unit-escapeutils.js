@@ -129,22 +129,7 @@
                         }
                     }
                 },
-
-                /**
-                 * Attaches EscapeUtils to the component namespace
-                 * if the configured property already exists.
-                 * @param {Object} abstraction
-                 * @param {string} pacId
-                 * @param {Object} config
-                 */
-                onComponentCreated(abstraction, pacId, config) {
-                    const key = config.escapeUtils?.property;
-
-                    if (key && key in abstraction) {
-                        abstraction[key] = this.functions;
-                    }
-                }
-            };
+            }
         }
     };
 

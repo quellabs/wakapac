@@ -180,20 +180,6 @@
                         alpha = Math.min(1, Math.max(0, alpha));
                         return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
                     }
-                },
-
-                /**
-                 * Add unit to abstraction if instructed
-                 * @param abstraction
-                 * @param pacId
-                 * @param config
-                 */
-                onComponentCreated(abstraction, pacId, config) {
-                    const key = config.colorUtils?.property;
-
-                    if (key && key in abstraction) {
-                        abstraction[key] = this.functions;
-                    }
                 }
             };
         }
