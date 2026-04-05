@@ -404,7 +404,7 @@
             // Plugin-level embed option defaults, set via wakaPAC.use(WakaVimeo, { ... }).
             // Per-instance config under the 'vimeo' key overrides these.
             const _defaultEmbedOptions = {
-                controls: _options.controls ?? true,
+                controls: _options.controls ?? false,
                 speed: _options.speed ?? false,
                 transparent: _options.transparent ?? true
             };
