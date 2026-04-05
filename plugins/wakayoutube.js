@@ -55,7 +55,7 @@
  * ║    WakaYouTube.setMuted(pacId, muted)   — set muted state                            ║
  * ║                                                                                      ║
  * ║  Reactive properties injected on the abstraction:                                    ║
- * ║    currentTime  — polled at 250 ms during playback; also updated on seek             ║
+ * ║    currentTime  — updated via rAF during playback; also updated on seek              ║
  * ║    duration     — set when MSG_VIDEO_LOADED fires                                    ║
  * ║    volume       — 0–100; updated on MSG_VIDEO_VOLUME_CHANGE                          ║
  * ║    muted        — updated on MSG_VIDEO_VOLUME_CHANGE                                 ║
@@ -142,7 +142,7 @@
      *   player:       YT.Player,
      *   abstraction:  Object,
      *   msgConstants: Object,
-     *   intervalId:   number|null,
+     *   rafHandle:    number|null,
      *   prevState:    number,
      *   loadedFired:  boolean
      * }>}
@@ -159,28 +159,21 @@
     }
 
     // =========================================================================
-    // currentTime polling
+    // currentTime tracking
     //
-    // getCurrentTime() in the IFrame API is a postMessage round-trip under the
-    // hood. Polling it at 60 fps via rAF would be wasteful. A 250 ms interval
-    // gives smooth enough currentTime updates for a progress bar at low cost.
+    // getCurrentTime() returns a locally cached value inside the IFrame API —
+    // it is not a postMessage round-trip. Polling it once per animation frame
+    // is cheap and gives smooth currentTime updates for progress bars.
+    // The rAF loop self-terminates when the player is no longer playing.
     // =========================================================================
 
     /**
-     * Starts the 250 ms currentTime polling interval. No-op if already running.
+     * Advances currentTime on the abstraction once per animation frame while
+     * the player is playing. Self-terminates when rafHandle is cleared.
      * @param {Object} entry
      */
-    function startPolling(entry) {
-        if (entry.intervalId !== null) {
-            return;
-        }
-
-        entry.intervalId = setInterval(function () {
-            // Guard against the interval firing after the player has been destroyed
-            // during teardown. An explicit method check is more reliable than a
-            // try/catch because it avoids masking unrelated errors.
-            if (!entry.player || typeof entry.player.getCurrentTime !== 'function') {
-                stopPolling(entry);
+    function rafTick(entry) {
+        if (entry.rafHandle === null) {
                 return;
             }
 
@@ -189,17 +182,30 @@
             if (entry.abstraction.currentTime !== t) {
                 entry.abstraction.currentTime = t;
             }
-        }, 250);
+
+        entry.rafHandle = requestAnimationFrame(() => rafTick(entry));
     }
 
     /**
-     * Stops the currentTime polling interval. No-op if not running.
+     * Starts the rAF loop. No-op if already running.
+     * @param {Object} entry
+     */
+    function startPolling(entry) {
+        if (entry.rafHandle !== null) {
+            return;
+        }
+
+        entry.rafHandle = requestAnimationFrame(() => rafTick(entry));
+    }
+
+    /**
+     * Stops the rAF loop. No-op if not running.
      * @param {Object} entry
      */
     function stopPolling(entry) {
-        if (entry.intervalId !== null) {
-            clearInterval(entry.intervalId);
-            entry.intervalId = null;
+        if (entry.rafHandle !== null) {
+            cancelAnimationFrame(entry.rafHandle);
+            entry.rafHandle = null;
         }
     }
 
@@ -354,7 +360,7 @@
             player:      null,   // assigned below once YT.Player is constructed
             abstraction,
             msgConstants,
-            intervalId:  null,
+            rafHandle:   null,
             prevState:   YT_UNSTARTED,
             loadedFired: false
         };
