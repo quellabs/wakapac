@@ -44,7 +44,7 @@ Two-way binding, reactive updates, zero configuration.
 - Metafile API: display list recording, playback, and hit testing
 
 **Units** — optional utility libraries callable from templates and component methods:
-Stdlib, Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, EscapeUtils, ColorUtils 
+Stdlib, Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, EscapeUtils, ColorUtils
 
 ## Plugins
 
@@ -59,6 +59,12 @@ Stdlib, Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, P
 **WakaMotion** — device motion and orientation sensors as reactive properties.
 
 **WakaSync** — full-featured HTTP client with request grouping, cancellation, retries, and interceptors. Results delivered as `MSG_HTTP_SUCCESS`, `MSG_HTTP_ERROR`, or `MSG_HTTP_ABORT`.
+
+**WakaVideo** — bridges native `<video>` elements into the WakaPAC message and abstraction model. Supports playback control, volume, seek, playback rate, programmatic cues (`addCue`), and canvas frame capture via `bitBlt`/`stretchBlt`.
+
+**WakaYouTube** — bridges the YouTube IFrame API into WakaPAC. Activate on any `<div data-youtube-id="...">` container; the API script is injected and shared automatically. Supports playback control, volume, seek, and mute.
+
+**WakaVimeo** — bridges the Vimeo Player SDK into WakaPAC. Activate on any `<div data-vimeo-id="...">` container; the SDK script is injected automatically. Supports playback control, volume, seek, mute, and playback rate (requires Vimeo PRO/Business).
 
 ## Documentation
 
