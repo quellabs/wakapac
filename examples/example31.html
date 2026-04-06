@@ -81,7 +81,6 @@ void main() {
 
                 case wakaPAC.MSG_WEBGL_READY: {
                     const gl = wakaPAC.getDC(this.pacId);
-                    // releaseDC is a no-op for WebGL contexts but called for consistency
 
                     const vs = compile(gl, gl.VERTEX_SHADER, VS);
                     const fs = compile(gl, gl.FRAGMENT_SHADER, FS);
@@ -117,6 +116,7 @@ void main() {
                     gl.bindVertexArray(null);
                     gl.enable(gl.DEPTH_TEST);
                     gl.clearColor(0.1, 0.1, 0.1, 1.0);
+
                     wakaPAC.releaseDC(gl);
                     break;
                 }
@@ -143,6 +143,7 @@ void main() {
                     gl.bindVertexArray(this._vao);
                     gl.drawElements(gl.TRIANGLES, INDICES.length, gl.UNSIGNED_SHORT, 0);
                     gl.bindVertexArray(null);
+
                     wakaPAC.releaseDC(gl);
                     break;
                 }
