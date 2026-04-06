@@ -10107,33 +10107,40 @@
     };
 
     /**
-     * Blits srcDC onto destDC at (dx, dy). Optional dw/dh stretch the source;
-     * omit to copy at the source's natural dimensions.
+     * Performs a bit-block transfer from srcDC to destDC.
+     * Equivalent to Win32 BitBlt() — copies a rectangle of pixels from the source
+     * to the destination at 1:1 scale. No stretching or compression is performed.
+     *
+     * cx/cy define the size of the rectangle copied; the same dimensions apply to
+     * both the source and the destination. sx/sy define the top-left corner of the
+     * source rectangle; omit to copy from (0, 0).
      *
      * Supports mixed 2D ↔ WebGL/WebGL2 copies:
      *
      *   2D   → 2D     drawImage() — straightforward
      *   WebGL → 2D    drawImage() on the WebGL canvas — requires preserveDrawingBuffer: true
-     *                 in glAttributes, otherwise the copy produces a blank result.
+     *                 in dcAttributes, otherwise the copy produces a blank result.
      *   2D   → WebGL  texImage2D() on the currently bound TEXTURE_2D — caller must
      *                 bind the target texture before calling bitBlt().
      *   WebGL → WebGL drawImage() via the source canvas — requires preserveDrawingBuffer: true.
      *
      * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} destDC
      * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} srcDC
-     * @param {number} dx
-     * @param {number} dy
-     * @param {number} [dw]
-     * @param {number} [dh]
+     * @param {number} dx - Destination X
+     * @param {number} dy - Destination Y
+     * @param {number} [cx] - Width of the rectangle to copy. Defaults to full source width
+     * @param {number} [cy] - Height of the rectangle to copy. Defaults to full source height
+     * @param {number} [sx=0] - Source X offset
+     * @param {number} [sy=0] - Source Y offset
      */
-    wakaPAC.bitBlt = function(destDC, srcDC, dx, dy, dw, dh) {
+    wakaPAC.bitBlt = function(destDC, srcDC, dx, dy, cx, cy, sx = 0, sy = 0) {
         if (!destDC || !srcDC) {
             return;
         }
 
         const srcCanvas = srcDC.canvas;
-        const srcW = dw ?? srcCanvas.width;
-        const srcH = dh ?? srcCanvas.height;
+        const w = cx ?? srcCanvas.width;
+        const h = cy ?? srcCanvas.height;
         const destIsGL = _isWebGLContext(destDC);
 
         if (destIsGL) {
@@ -10143,7 +10150,7 @@
         } else {
             // 2D destination — drawImage handles both 2D and WebGL sources.
             // WebGL sources require preserveDrawingBuffer: true.
-            _blitToCanvas2D(destDC, srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, dx, dy, srcW, srcH);
+            _blitToCanvas2D(destDC, srcCanvas, sx, sy, w, h, dx, dy, w, h);
         }
     };
 
