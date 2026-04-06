@@ -219,6 +219,7 @@
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
     const MSG_FOREACH_REBUILT = 0x0400;
+    const MSG_WEBGL_READY = 0x0401;
     const MSG_USER = 0x1000;
     const MSG_PLUGIN = 0x2000;
 
@@ -2648,16 +2649,26 @@
                         // Dispatch size update to the owning container/component
                         self.dispatchToContainer(container, customEvent);
 
-                        // For WebGL canvas components, init() was deferred until the
-                        // first MSG_SIZE so the context is valid when it runs.
-                        if (component._pendingInit) {
-                            try {
-                                component._pendingInit();
-                            } catch (error) {
-                                console.warn('Error in deferred init() method:', error);
-                            }
+                        // For WebGL canvas components, dispatch MSG_WEBGL_READY after
+                        // the first MSG_SIZE. At this point the canvas is laid out and
+                        // getDC() returns a valid context — safe to compile shaders,
+                        // upload geometry, and set up any other GL resources.
+                        // Only fires once per component lifetime.
+                        const pacContextType = container.dataset?.pacContext;
 
-                            component._pendingInit = null;
+                        if (
+                            pacContextType === 'webgl' || pacContextType === 'webgl2'
+                        ) {
+                            if (!component._webglReadySent) {
+                                component._webglReadySent = true;
+
+                                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
+                                    MSG_WEBGL_READY,
+                                    null,
+                                    0,
+                                    0
+                                ));
+                            }
                         }
                     }
                 });
@@ -9095,23 +9106,8 @@
                 }
             });
 
-            // For WebGL canvas components, init() must be deferred until after the
-            // first MSG_SIZE — at registration time the ResizeObserver has not yet
-            // fired, so the canvas context is not yet valid. We store the pending
-            // init on the context and call it from the ResizeObserver on first fire.
-            // For all other components, init() is called immediately as usual.
-            const isCanvasElement = container instanceof HTMLCanvasElement;
-            const contextType = isCanvasElement ? (container.dataset.pacContext || '2d') : '2d';
-            const deferInit = isCanvasElement && contextType !== '2d';
-
-            if (deferInit) {
-                context._pendingInit = context.abstraction.init
-                    ? context.abstraction.init.bind(context.abstraction)
-                    : null;
-            }
-
             // Call init() method if it exists after all setup is complete
-            if (!deferInit &&
+            if (
                 context.abstraction.init &&
                 typeof context.abstraction.init === 'function'
             ) {
@@ -9121,6 +9117,9 @@
                     console.warn('Error in init() method:', error);
                 }
             }
+
+            const isCanvasElement = container instanceof HTMLCanvasElement;
+            const contextType = isCanvasElement ? (container.dataset.pacContext || '2d') : '2d';
 
             if (isCanvasElement) {
                 // Synchronously flush any paint requests queued during observation
@@ -10752,9 +10751,9 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
         MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE, MSG_PLUGIN,
         MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL, MSG_COPY, MSG_PASTE,
-        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE,
-        MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER,
-        MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
+        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT, MSG_WEBGL_READY, MSG_MOUSEENTER,
+        MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER,
+        MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,

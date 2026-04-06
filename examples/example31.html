@@ -70,43 +70,6 @@ void main() {
 
     wakaPAC('#scene', {
         init() {
-            const gl = wakaPAC.getDC(this.pacId);
-
-            const vs = compile(gl, gl.VERTEX_SHADER, VS);
-            const fs = compile(gl, gl.FRAGMENT_SHADER, FS);
-
-            this._prog = gl.createProgram();
-            gl.attachShader(this._prog, vs);
-            gl.attachShader(this._prog, fs);
-            gl.linkProgram(this._prog);
-
-            this._uMVP = gl.getUniformLocation(this._prog, 'uMVP');
-            this._aPos = gl.getAttribLocation(this._prog, 'aPos');
-            this._aCol = gl.getAttribLocation(this._prog, 'aColor');
-
-            this._vao = gl.createVertexArray();
-            gl.bindVertexArray(this._vao);
-
-            const posVBO = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, posVBO);
-            gl.bufferData(gl.ARRAY_BUFFER, POSITIONS, gl.STATIC_DRAW);
-            gl.enableVertexAttribArray(this._aPos);
-            gl.vertexAttribPointer(this._aPos, 3, gl.FLOAT, false, 0, 0);
-
-            const colVBO = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, colVBO);
-            gl.bufferData(gl.ARRAY_BUFFER, COLORS, gl.STATIC_DRAW);
-            gl.enableVertexAttribArray(this._aCol);
-            gl.vertexAttribPointer(this._aCol, 3, gl.FLOAT, false, 0, 0);
-
-            const ibo = gl.createBuffer();
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, INDICES, gl.STATIC_DRAW);
-
-            gl.bindVertexArray(null);
-            gl.enable(gl.DEPTH_TEST);
-            gl.clearColor(0.1, 0.1, 0.1, 1.0);
-
             this._rx = 0.4;
             this._ry = 0;
             this._w  = 400;
@@ -115,6 +78,48 @@ void main() {
 
         msgProc(event) {
             switch (event.message) {
+
+                case wakaPAC.MSG_WEBGL_READY: {
+                    const gl = wakaPAC.getDC(this.pacId);
+                    // releaseDC is a no-op for WebGL contexts but called for consistency
+
+                    const vs = compile(gl, gl.VERTEX_SHADER, VS);
+                    const fs = compile(gl, gl.FRAGMENT_SHADER, FS);
+
+                    this._prog = gl.createProgram();
+                    gl.attachShader(this._prog, vs);
+                    gl.attachShader(this._prog, fs);
+                    gl.linkProgram(this._prog);
+
+                    this._uMVP = gl.getUniformLocation(this._prog, 'uMVP');
+                    this._aPos = gl.getAttribLocation(this._prog, 'aPos');
+                    this._aCol = gl.getAttribLocation(this._prog, 'aColor');
+
+                    this._vao = gl.createVertexArray();
+                    gl.bindVertexArray(this._vao);
+
+                    const posVBO = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, posVBO);
+                    gl.bufferData(gl.ARRAY_BUFFER, POSITIONS, gl.STATIC_DRAW);
+                    gl.enableVertexAttribArray(this._aPos);
+                    gl.vertexAttribPointer(this._aPos, 3, gl.FLOAT, false, 0, 0);
+
+                    const colVBO = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, colVBO);
+                    gl.bufferData(gl.ARRAY_BUFFER, COLORS, gl.STATIC_DRAW);
+                    gl.enableVertexAttribArray(this._aCol);
+                    gl.vertexAttribPointer(this._aCol, 3, gl.FLOAT, false, 0, 0);
+
+                    const ibo = gl.createBuffer();
+                    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+                    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, INDICES, gl.STATIC_DRAW);
+
+                    gl.bindVertexArray(null);
+                    gl.enable(gl.DEPTH_TEST);
+                    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+                    wakaPAC.releaseDC(gl);
+                    break;
+                }
 
                 case wakaPAC.MSG_SIZE: {
                     this._w = wakaPAC.LOWORD(event.lParam);
@@ -138,6 +143,7 @@ void main() {
                     gl.bindVertexArray(this._vao);
                     gl.drawElements(gl.TRIANGLES, INDICES.length, gl.UNSIGNED_SHORT, 0);
                     gl.bindVertexArray(null);
+                    wakaPAC.releaseDC(gl);
                     break;
                 }
             }
