@@ -5296,6 +5296,12 @@
         this.commentBindingMap.clear();
         this.updateQueue.clear();
 
+        // Cancel any active render loop for this component
+        if (this.abstraction?.pacId && _renderLoops.has(this.abstraction.pacId)) {
+            cancelAnimationFrame(_renderLoops.get(this.abstraction.pacId));
+            _renderLoops.delete(this.abstraction.pacId);
+        }
+
         // Remove from registry
         if (this.abstraction.pacId) {
             window.PACRegistry.deregister(this.abstraction.pacId);
@@ -8823,6 +8829,15 @@
     const _dirtyCanvases = new Map();
 
     /**
+     * Tracks active render loops for WebGL canvas components registered with renderLoop: true.
+     * Key:   pacId (string)
+     * Value: rAF handle (number) — the return value of the most recent requestAnimationFrame call,
+     *        used to cancel the loop via cancelAnimationFrame() when the component is destroyed.
+     * @type {Map<string, number>}
+     */
+    const _renderLoops = new Map();
+
+    /**
      * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
      * the dirty set. Called once per animation frame by requestAnimationFrame.
      */
@@ -9080,17 +9095,47 @@
                 }
             }
 
-            // Synchronously flush any paint requests queued during observation
-            // to avoid a blank frame before the first animation frame fires
-            if (container instanceof HTMLCanvasElement) {
-                _invalidateRect(container._pacId);
-                _flushPaintQueue();
-            }
-
             // Signal that a new component is ready
             document.dispatchEvent(new CustomEvent('pac:component-ready', {
                 detail: { component: context, selector: selector, pacId: pacId }
             }));
+
+            // For WebGL canvases with renderLoop: true, start the per-component rAF loop
+            // that dispatches MSG_PAINT each frame. Ignored for 2D canvases (which use
+            // invalidateRect) and for WebGL canvases without renderLoop: true.
+            const isCanvasElement = container instanceof HTMLCanvasElement;
+            const contextType = isCanvasElement ? (container.dataset.pacContext || '2d') : '2d';
+
+            if (isCanvasElement) {
+                // Synchronously flush any paint requests queued during observation
+                // to avoid a blank frame before the first animation frame fires.
+                // Only applies to 2D canvases — WebGL canvases use MSG_PAINT via
+                // the render loop or manage their own redraws.
+                if (contextType === '2d') {
+                    _invalidateRect(pacId);
+                    _flushPaintQueue();
+                }
+
+                // Setup renderloop for webgl if renderLoop is set to true
+                if (contextType !== '2d' && config.renderLoop === true) {
+                    const loop = function () {
+                        if (!_renderLoops.has(pacId)) {
+                            return; // Loop was canceled — component destroyed
+                        }
+
+                        DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                            MSG_PAINT,
+                            null,
+                            0,
+                            0
+                        ));
+
+                        _renderLoops.set(pacId, requestAnimationFrame(loop));
+                    };
+
+                    _renderLoops.set(pacId, requestAnimationFrame(loop));
+                }
+            }
 
             // Collect the abstraction
             abstractions.push(context.abstraction);
