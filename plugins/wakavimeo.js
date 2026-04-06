@@ -465,11 +465,9 @@
                  * Called by WakaPAC when a component is destroyed.
                  * Removes any pending init, destroys the Vimeo.Player instance,
                  * and removes the registry entry.
-                 *
-                 * @param {Object} abstraction
                  * @param {string} pacId
                  */
-                onComponentDestroyed(abstraction, pacId) {
+                onComponentDestroyed(pacId) {
                     // Remove from the pending queue if the SDK has not loaded yet
                     const pendingIndex = _pendingInits.findIndex(p => p.pacId === pacId);
 

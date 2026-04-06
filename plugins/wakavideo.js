@@ -404,11 +404,9 @@
                  * Called by WakaPAC when a component is destroyed.
                  * Cancels the rAF loop, removes all event listeners, and cleans
                  * up the registry entry.
-                 *
-                 * @param {Object} abstraction
                  * @param {string} pacId
                  */
-                onComponentDestroyed(abstraction, pacId) {
+                onComponentDestroyed(pacId) {
                     const entry = _registry.get(pacId);
 
                     if (!entry) {
