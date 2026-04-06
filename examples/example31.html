@@ -32,12 +32,12 @@ void main() {
 }`;
 
     const POSITIONS = new Float32Array([
-        -1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1,
-        -1,-1,-1, -1, 1,-1,  1, 1,-1,  1,-1,-1,
-        -1, 1,-1, -1, 1, 1,  1, 1, 1,  1, 1,-1,
-        -1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1,
-        1,-1,-1,  1, 1,-1,  1, 1, 1,  1,-1, 1,
-        -1,-1,-1, -1,-1, 1, -1, 1, 1, -1, 1,-1,
+        -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1,
+        -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1,
+        -1, 1, -1, -1, 1, 1, 1, 1, 1, 1, 1, -1,
+        -1, -1, -1, 1, -1, -1, 1, -1, 1, -1, -1, 1,
+        1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1,
+        -1, -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1,
     ]);
 
     const FACE_COLORS = [
@@ -49,13 +49,15 @@ void main() {
     const COLORS = new Float32Array(6 * 4 * 3);
     for (let f = 0; f < 6; f++) {
         const [r, g, b] = FACE_COLORS[f];
-        for (let v = 0; v < 4; v++) COLORS.set([r, g, b], (f * 4 + v) * 3);
+        for (let v = 0; v < 4; v++) {
+            COLORS.set([r, g, b], (f * 4 + v) * 3);
+        }
     }
 
     const INDICES = new Uint16Array(6 * 6);
     for (let f = 0; f < 6; f++) {
         const b = f * 4;
-        INDICES.set([b,b+1,b+2, b,b+2,b+3], f * 6);
+        INDICES.set([b, b + 1, b + 2, b, b + 2, b + 3], f * 6);
     }
 
     const mat4 = wakaPAC.unit(Mat4);
@@ -64,7 +66,12 @@ void main() {
         const sh = gl.createShader(type);
         gl.shaderSource(sh, src);
         gl.compileShader(sh);
-        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(sh)); return null; }
+
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(sh));
+            return null;
+        }
+
         return sh;
     }
 
@@ -72,11 +79,12 @@ void main() {
         init() {
             this._rx = 0.4;
             this._ry = 0;
-            this._w  = 400;
-            this._h  = 400;
+            this._w = 400;
+            this._h = 400;
         },
 
         msgProc(event) {
+
             switch (event.message) {
 
                 case wakaPAC.MSG_WEBGL_READY: {
@@ -150,8 +158,8 @@ void main() {
             }
         }
     }, {
-        dcAttributes: { antialias: true, depth: true },
-        renderLoop:   true
+        dcAttributes: {antialias: true, depth: true},
+        renderLoop: true
     });
 
 </script>

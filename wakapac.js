@@ -10137,6 +10137,51 @@
     };
 
     /**
+     * Schedules a single MSG_PAINT for a WebGL canvas component on the next
+     * animation frame. Equivalent to invalidateRect() for 2D canvases — use
+     * this to trigger an on-demand redraw on a WebGL canvas that does not use
+     * renderLoop: true.
+     *
+     * Safe to call multiple times before the next frame — only one MSG_PAINT
+     * will fire, since requestAnimationFrame deduplicates same-frame callbacks.
+     *
+     * Has no effect if the container does not exist, is not a canvas, or is
+     * not a WebGL/WebGL2 canvas.
+     *
+     * @param {string} pacId - data-pac-id of the target canvas container
+     */
+    wakaPAC.requestRender = function(pacId) {
+        const container = this.getContainerByPacId(pacId);
+
+        // Bail if the container does not exist or is not a canvas element
+        if (!container || !(container instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        const contextType = container.dataset.pacContext || '2d';
+
+        // requestRender is for WebGL canvases only — 2D canvases use invalidateRect()
+        if (contextType === '2d') {
+            console.warn(`wakaPAC.requestRender: "${pacId}" is a 2D canvas — use invalidateRect() instead.`);
+            return;
+        }
+
+        requestAnimationFrame(() => {
+            // Guard: component may have been destroyed before the frame fired
+            if (!window.PACRegistry.get(pacId)) {
+                return;
+            }
+
+            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                MSG_PAINT,
+                null,
+                0,
+                0
+            ));
+        });
+    };
+
+    /**
      * Returns the bounding rectangle of the invalidated region for a canvas
      * PAC container, or null if no repaint is currently pending.
      * @param {string} pacId - data-pac-id of the target canvas container
