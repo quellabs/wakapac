@@ -8926,6 +8926,58 @@
     }
 
     // ========================================================================
+    // PAINT INTERNAL HELPERS
+    // ========================================================================
+
+    /**
+     * Returns true if the given rendering context is a WebGL or WebGL2 context.
+     * @param {RenderingContext} ctx
+     * @returns {boolean}
+     */
+    function _isWebGLContext(ctx) {
+        return ctx instanceof WebGLRenderingContext || ctx instanceof WebGL2RenderingContext;
+    }
+
+    /**
+     * Copies srcCanvas onto a 2D destDC using drawImage.
+     * For WebGL sources, the source canvas must have been created with
+     * preserveDrawingBuffer: true in its glAttributes, otherwise the drawing
+     * buffer will have been cleared by the browser after compositing and the
+     * copy will produce a blank result.
+     * @param {CanvasRenderingContext2D} destCtx2D
+     * @param {HTMLCanvasElement} srcCanvas
+     * @param {number} sx - Source X
+     * @param {number} sy - Source Y
+     * @param {number} sw - Source width
+     * @param {number} sh - Source height
+     * @param {number} dx - Destination X
+     * @param {number} dy - Destination Y
+     * @param {number} dw - Destination width
+     * @param {number} dh - Destination height
+     */
+    function _blitToCanvas2D(destCtx2D, srcCanvas, sx, sy, sw, sh, dx, dy, dw, dh) {
+        destCtx2D.drawImage(srcCanvas, sx, sy, sw, sh, dx, dy, dw, dh);
+    }
+
+    /**
+     * Copies a source canvas onto a WebGL destination as a texture bound to
+     * the currently active texture unit. The caller is responsible for binding
+     * the target texture before calling this function.
+     * @param {WebGLRenderingContext|WebGL2RenderingContext} destGL
+     * @param {HTMLCanvasElement} srcCanvas
+     */
+    function _blitToWebGL(destGL, srcCanvas) {
+        destGL.texImage2D(
+            destGL.TEXTURE_2D,
+            0,                  // mip level
+            destGL.RGBA,             // internal format
+            destGL.RGBA,             // format
+            destGL.UNSIGNED_BYTE,
+            srcCanvas
+        );
+    }
+
+    // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
 
@@ -9846,11 +9898,24 @@
     // ========================================================================
 
     /**
-     * Returns the CanvasRenderingContext2D for a canvas PAC container.
+     * Returns the rendering context for a canvas PAC container.
      * Equivalent to Win32 GetDC() — retrieves the drawing context for a window.
-     * Returns null if the container does not exist or is not a <canvas> element.
+     *
+     * The context type is determined by the data-pac-context attribute on the
+     * canvas element (defaults to '2d' if absent):
+     *   '2d'     — returns CanvasRenderingContext2D  (dcAttributes from config)
+     *   'webgl'  — returns WebGLRenderingContext      (glAttributes from config)
+     *   'webgl2' — returns WebGL2RenderingContext     (glAttributes from config)
+     *
+     * Calling getDC() on a WebGL/WebGL2 canvas returns the WebGL context directly.
+     * The dirty-rect clip logic only applies to 2D contexts; WebGL components drive
+     * their own render loop via requestAnimationFrame and do not use invalidateRect.
+     *
+     * Returns null if the container does not exist, is not a <canvas> element, or
+     * if the requested context type is not supported by the browser.
+     *
      * @param {string} pacId
-     * @returns {CanvasRenderingContext2D|null}
+     * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
      */
     wakaPAC.getDC = function (pacId) {
         const container = this.getContainerByPacId(pacId);
@@ -9859,25 +9924,36 @@
             return null;
         }
 
-        const context = window.PACRegistry.get(pacId);
-        const attributes = context?.config?.dcAttributes;
-        const ctx = container.getContext('2d', attributes);
+        // Resolve context attributes from component config
+        const pacContext = window.PACRegistry.get(pacId);
+        const contextType = container.dataset.pacContext || '2d';
+        const attributes = pacContext?.config?.dcAttributes;
 
-        // If we're inside a MSG_PAINT dispatch, automatically restrict drawing
-        // to the dirty region — equivalent to Win32 BeginPaint() setting up a
-        // clip region over the update region.  Callers must balance this with a
-        // matching releaseDC() call so the saved state is properly unwound.
-        const entry = _dirtyCanvases.get(pacId);
+        // Delegate context acquisition to getDCFromElement
+        const ctx = this.getDCFromElement(container, attributes);
 
-        if (entry?.painting && entry.rects?.length) {
-            ctx.save();
-            ctx.beginPath();
+        if (!ctx) {
+            return null;
+        }
 
-            for (const r of entry.rects) {
-                ctx.rect(r.x, r.y, r.width, r.height);
+        // For 2D contexts only: if we're inside a MSG_PAINT dispatch, restrict
+        // drawing to the dirty region — equivalent to Win32 BeginPaint() setting
+        // up a clip region over the update region. Callers must balance this with
+        // a matching releaseDC() call so the saved state is properly unwound.
+        // WebGL contexts drive their own render loop and do not use this mechanism.
+        if (contextType === '2d') {
+            const entry = _dirtyCanvases.get(pacId);
+
+            if (entry?.painting && entry.rects?.length) {
+                ctx.save();
+                ctx.beginPath();
+
+                for (const r of entry.rects) {
+                    ctx.rect(r.x, r.y, r.width, r.height);
+                }
+
+                ctx.clip();
             }
-
-            ctx.clip();
         }
 
         return ctx;
@@ -9886,13 +9962,20 @@
     /**
      * Releases a device context previously obtained with getDC().
      * Must be called once for every getDC() call made inside a MSG_PAINT
-     * handler; outside of paint cycles this is a no-op and safe to call
-     * unconditionally.
-     * @param {CanvasRenderingContext2D} ctx - the context returned by getDC()
+     * handler for 2D canvases; outside of paint cycles this is a no-op and
+     * safe to call unconditionally.
+     * For WebGL/WebGL2 contexts this is always a no-op — they do not use
+     * the dirty-rect clip mechanism.
+     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} ctx - the context returned by getDC()
      */
     wakaPAC.releaseDC = function (ctx) {
         // Bail if no ctx passed
         if (!ctx) {
+            return;
+        }
+
+        // WebGL contexts do not participate in the dirty-rect clip mechanism
+        if (ctx instanceof WebGLRenderingContext || ctx instanceof WebGL2RenderingContext) {
             return;
         }
 
@@ -9914,9 +9997,11 @@
 
     /**
      * Creates an off-screen context sized to match the canvas backing store.
+     * The context type matches the source canvas's data-pac-context attribute,
+     * so a WebGL2 canvas produces a WebGL2 OffscreenCanvas context.
      * The component owns the returned DC; recreate it in MSG_SIZE after resizing.
      * @param {string} pacId
-     * @returns {CanvasRenderingContext2D|null}
+     * @returns {OffscreenCanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
      */
     wakaPAC.createCompatibleDC = function(pacId) {
         const container = this.getContainerByPacId(pacId);
@@ -9925,7 +10010,11 @@
             return null;
         }
 
-        return /** @type {CanvasRenderingContext2D} */ (new OffscreenCanvas(container.width, container.height).getContext('2d'));
+        const contextType = container.dataset.pacContext || '2d';
+        const pacContext = window.PACRegistry.get(pacId);
+        const attributes = pacContext?.config?.dcAttributes;
+
+        return new OffscreenCanvas(container.width, container.height).getContext(contextType, attributes);
     };
 
     /**
@@ -9951,18 +10040,27 @@
     };
 
     /**
-     * Returns the CanvasRenderingContext2D for any canvas element — not tied to
+     * Returns the rendering context for any canvas element — not tied to
      * a PAC container. Use this to get a drawing context for canvas elements
      * inside foreach items or other non-container canvases.
+     *
+     * The context type is determined by the data-pac-context attribute on the
+     * canvas element (defaults to '2d' if absent):
+     *   '2d'     — returns CanvasRenderingContext2D
+     *   'webgl'  — returns WebGLRenderingContext
+     *   'webgl2' — returns WebGL2RenderingContext
+     *
      * @param {HTMLCanvasElement} canvasElement
-     * @returns {CanvasRenderingContext2D|null}
+     * @param {Object} [attributes] - Context attributes passed to getContext()
+     * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
      */
-    wakaPAC.getDCFromElement = function(canvasElement) {
+    wakaPAC.getDCFromElement = function(canvasElement, attributes) {
         if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
             return null;
         }
 
-        return canvasElement.getContext('2d');
+        const contextType = canvasElement.dataset.pacContext || '2d';
+        return canvasElement.getContext(contextType, attributes);
     };
 
     /**
@@ -10011,8 +10109,18 @@
     /**
      * Blits srcDC onto destDC at (dx, dy). Optional dw/dh stretch the source;
      * omit to copy at the source's natural dimensions.
-     * @param {CanvasRenderingContext2D} destDC
-     * @param {CanvasRenderingContext2D} srcDC
+     *
+     * Supports mixed 2D ↔ WebGL/WebGL2 copies:
+     *
+     *   2D   → 2D     drawImage() — straightforward
+     *   WebGL → 2D    drawImage() on the WebGL canvas — requires preserveDrawingBuffer: true
+     *                 in glAttributes, otherwise the copy produces a blank result.
+     *   2D   → WebGL  texImage2D() on the currently bound TEXTURE_2D — caller must
+     *                 bind the target texture before calling bitBlt().
+     *   WebGL → WebGL drawImage() via the source canvas — requires preserveDrawingBuffer: true.
+     *
+     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} destDC
+     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} srcDC
      * @param {number} dx
      * @param {number} dy
      * @param {number} [dw]
@@ -10023,22 +10131,32 @@
             return;
         }
 
-        const source = srcDC.canvas;
+        const srcCanvas = srcDC.canvas;
+        const srcW = dw ?? srcCanvas.width;
+        const srcH = dh ?? srcCanvas.height;
+        const destIsGL = _isWebGLContext(destDC);
 
-        destDC.drawImage(
-            source,
-            dx, dy,
-            dw ?? source.width,
-            dh ?? source.height
-        );
+        if (destIsGL) {
+            // WebGL destination — upload source canvas as a texture.
+            // The caller must have bound the target texture before calling bitBlt().
+            _blitToWebGL(destDC, srcCanvas);
+        } else {
+            // 2D destination — drawImage handles both 2D and WebGL sources.
+            // WebGL sources require preserveDrawingBuffer: true.
+            _blitToCanvas2D(destDC, srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, dx, dy, srcW, srcH);
+        }
     };
 
     /**
      * Blits srcDC onto destDC at (dx, dy) scaled to (dw, dh).
      * Unlike bitBlt, the source is always stretched to fill the destination rect.
      * Use this when the offscreen DC dimensions differ from the target canvas.
-     * @param {CanvasRenderingContext2D} destDC
-     * @param {CanvasRenderingContext2D} srcDC
+     *
+     * Supports the same mixed 2D ↔ WebGL/WebGL2 copy paths as bitBlt().
+     * See bitBlt() for preserveDrawingBuffer and texture-binding requirements.
+     *
+     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} destDC
+     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} srcDC
      * @param {number} dx - Destination X
      * @param {number} dy - Destination Y
      * @param {number} dw - Destination width
@@ -10049,11 +10167,20 @@
             return;
         }
 
-        destDC.drawImage(
-            srcDC.canvas,
-            0, 0, srcDC.canvas.width, srcDC.canvas.height,
-            dx, dy, dw, dh
-        );
+        const srcCanvas = srcDC.canvas;
+        const destIsGL = _isWebGLContext(destDC);
+
+        if (destIsGL) {
+            // WebGL destination — upload source canvas as a texture.
+            // The caller must have bound the target texture before calling stretchBlt().
+            // dx, dy, dw, dh are ignored; scaling is the caller's responsibility
+            // via their shader and geometry.
+            _blitToWebGL(destDC, srcCanvas);
+        } else {
+            // 2D destination — drawImage handles stretching natively.
+            // WebGL sources require preserveDrawingBuffer: true.
+            _blitToCanvas2D(destDC, srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, dx, dy, dw, dh);
+        }
     };
 
     /**
@@ -10062,7 +10189,7 @@
      * @param {number} width  - New backing store width in pixels
      * @param {number} height - New backing store height in pixels
      */
-    wakaPAC.resizeCanvas = function(pacId, width, height) {
+    wakaPAC.resizeCanvas = function (pacId, width, height) {
         // Fetch the container
         const container = this.getContainerByPacId(pacId);
 
@@ -10078,11 +10205,17 @@
         }
 
         // Resize the backing store; existing pixel data is cleared by the browser
-        container.width  = width;
+        container.width = width;
         container.height = height;
 
-        // Schedule a repaint — the canvas content is invalid after every resize
-        _invalidateRect(pacId, null);
+        // Schedule a repaint for 2D canvases — the canvas content is invalid after
+        // every resize. WebGL canvases drive their own render loop via
+        // requestAnimationFrame and do not use the dirty rect / MSG_PAINT mechanism.
+        const contextType = container.dataset.pacContext || '2d';
+
+        if (contextType === '2d') {
+            _invalidateRect(pacId, null);
+        }
     };
 
     /**
