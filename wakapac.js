@@ -2647,6 +2647,18 @@
 
                         // Dispatch size update to the owning container/component
                         self.dispatchToContainer(container, customEvent);
+
+                        // For WebGL canvas components, init() was deferred until the
+                        // first MSG_SIZE so the context is valid when it runs.
+                        if (component._pendingInit) {
+                            try {
+                                component._pendingInit();
+                            } catch (error) {
+                                console.warn('Error in deferred init() method:', error);
+                            }
+
+                            component._pendingInit = null;
+                        }
                     }
                 });
             });
@@ -9083,8 +9095,23 @@
                 }
             });
 
+            // For WebGL canvas components, init() must be deferred until after the
+            // first MSG_SIZE — at registration time the ResizeObserver has not yet
+            // fired, so the canvas context is not yet valid. We store the pending
+            // init on the context and call it from the ResizeObserver on first fire.
+            // For all other components, init() is called immediately as usual.
+            const isCanvasElement = container instanceof HTMLCanvasElement;
+            const contextType = isCanvasElement ? (container.dataset.pacContext || '2d') : '2d';
+            const deferInit = isCanvasElement && contextType !== '2d';
+
+            if (deferInit) {
+                context._pendingInit = context.abstraction.init
+                    ? context.abstraction.init.bind(context.abstraction)
+                    : null;
+            }
+
             // Call init() method if it exists after all setup is complete
-            if (
+            if (!deferInit &&
                 context.abstraction.init &&
                 typeof context.abstraction.init === 'function'
             ) {
@@ -9095,24 +9122,13 @@
                 }
             }
 
-            // Signal that a new component is ready
-            document.dispatchEvent(new CustomEvent('pac:component-ready', {
-                detail: { component: context, selector: selector, pacId: pacId }
-            }));
-
-            // For WebGL canvases with renderLoop: true, start the per-component rAF loop
-            // that dispatches MSG_PAINT each frame. Ignored for 2D canvases (which use
-            // invalidateRect) and for WebGL canvases without renderLoop: true.
-            const isCanvasElement = container instanceof HTMLCanvasElement;
-            const contextType = isCanvasElement ? (container.dataset.pacContext || '2d') : '2d';
-
             if (isCanvasElement) {
                 // Synchronously flush any paint requests queued during observation
                 // to avoid a blank frame before the first animation frame fires.
                 // Only applies to 2D canvases — WebGL canvases use MSG_PAINT via
                 // the render loop or manage their own redraws.
                 if (contextType === '2d') {
-                    _invalidateRect(pacId);
+                    _invalidateRect(container._pacId);
                     _flushPaintQueue();
                 }
 
@@ -9136,6 +9152,11 @@
                     _renderLoops.set(pacId, requestAnimationFrame(loop));
                 }
             }
+
+            // Signal that a new component is ready
+            document.dispatchEvent(new CustomEvent('pac:component-ready', {
+                detail: { component: context, selector: selector, pacId: pacId }
+            }));
 
             // Collect the abstraction
             abstractions.push(context.abstraction);
