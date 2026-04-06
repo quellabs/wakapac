@@ -2649,19 +2649,16 @@
                         // Dispatch size update to the owning container/component
                         self.dispatchToContainer(container, customEvent);
 
-                        // For WebGL canvas components, dispatch MSG_WEBGL_READY after
-                        // the first MSG_SIZE. At this point the canvas is laid out and
-                        // getDC() returns a valid context — safe to compile shaders,
-                        // upload geometry, and set up any other GL resources.
-                        // Only fires once per component lifetime.
-                        const pacContextType = container.dataset?.pacContext;
+                        // For WebGL canvas components, dispatch MSG_WEBGL_READY after the first MSG_SIZE.
+                        // At this point the canvas is laid out and getDC() returns a valid context — safe to
+                        // compile shaders, upload geometry, and set up any other GL resources. Only fires once
+                        // per component lifetime.
+                        if (!component._webglReadySent) {
+                            component._webglReadySent = true;
 
-                        if (
-                            pacContextType === 'webgl' || pacContextType === 'webgl2'
-                        ) {
-                            if (!component._webglReadySent) {
-                                component._webglReadySent = true;
+                            const pacContextType = container.dataset?.pacContext;
 
+                            if (pacContextType === 'webgl' || pacContextType === 'webgl2') {
                                 self.dispatchToContainer(container, self.wrapDomEventAsMessage(
                                     MSG_WEBGL_READY,
                                     null,
