@@ -6,12 +6,12 @@
 </head>
 <body>
 
-<canvas id="scene" data-pac-id="scene" data-pac-context="webgl2" width="400" height="400"></canvas>
+<canvas id="scene" data-pac-context="webgl2" width="400" height="400"></canvas>
 
 <script src="../wakapac.js"></script>
-<script src="../units/waka-unit-mat4.js"></script>
+<script src="../units/waka-unit-math3d.js"></script>
 <script>
-    wakaPAC.use(Mat4);
+    wakaPAC.use(Math3D);
 
     const VS = `#version 300 es
 in vec3 aPos;
@@ -60,7 +60,7 @@ void main() {
         INDICES.set([b, b + 1, b + 2, b, b + 2, b + 3], f * 6);
     }
 
-    const mat4 = wakaPAC.unit(Mat4);
+const m3d = wakaPAC.unit(Math3D);
 
     function compile(gl, type, src) {
         const sh = gl.createShader(type);
@@ -142,7 +142,7 @@ void main() {
                     this._rx += 0.005;
                     this._ry += 0.009;
 
-                    const mvp = mat4.mul(mat4.perspective(Math.PI / 4, this._w / this._h, 0.1, 100), mat4.mul(mat4.translation(0, 0, -4), mat4.mul(mat4.rotX(this._rx), mat4.rotY(this._ry))));
+                const mvp = m3d.mul(m3d.perspective(Math.PI / 4, this._w / this._h, 0.1, 100), m3d.mul(m3d.translation(0, 0, -4), m3d.mul(m3d.rotX(this._rx), m3d.rotY(this._ry))));
 
                     gl.viewport(0, 0, this._w, this._h);
                     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
