@@ -9163,12 +9163,18 @@
                             return; // Loop was canceled — component destroyed
                         }
 
-                        DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                            MSG_PAINT,
-                            null,
-                            0,
-                            0
-                        ));
+                        // Do not dispatch MSG_PAINT before MSG_WEBGL_READY has been sent —
+                        // shaders and GL resources are not yet initialized at that point.
+                        const _component = window.PACRegistry.getByElement(container);
+
+                        if (_component && _component._webglReadySent) {
+                            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                                MSG_PAINT,
+                                null,
+                                0,
+                                0
+                            ));
+                        }
 
                         _renderLoops.set(pacId, requestAnimationFrame(loop));
                     };
