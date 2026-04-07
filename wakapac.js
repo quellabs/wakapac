@@ -1296,7 +1296,7 @@
             const oldValue = target[prop];
             const propertyPath = currentPath.concat([prop]);
 
-            if (oldValue === newValue) {
+            if (Utils.isEqual(oldValue, newValue)) {
                 return true;
             }
 
@@ -1311,21 +1311,31 @@
 
             // Wrap objects and arrays in proxies when they're assigned
             if (newValue && typeof newValue === 'object') {
-                target[prop] = createProxy(newValue, propertyPath);
-                target[prop]._isReactive = true;
+                const proxied = createProxy(newValue, propertyPath);
+
+                Object.defineProperty(proxied, '_isReactive', {
+                    value: true,
+                    writable: true,
+                    configurable: true,
+                    enumerable: false
+                });
+
+                target[prop] = proxied;
             } else {
                 target[prop] = newValue;
             }
 
             // Dispatch array-specific event if this is an array assignment
             /*
+            const assignedValue = target[prop];
+
             container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
                 path: propertyPath,
-                oldValue: oldValue,
-                newValue: target[prop],
+                oldValue,
+                newValue: assignedValue,
                 origin: 'wakaPAC'
             }));
-             */
+            */
 
             return true;
         }
