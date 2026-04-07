@@ -121,7 +121,6 @@
     /** Custom event names dispatched on PAC containers */
     const EV_PAC_EVENT = 'pac:event';
     const EV_PAC_CHANGE = 'pac:change';
-    const EV_PAC_ARRAY_CHANGE = 'pac:array-change';
     const EV_PAC_BROWSER_STATE = 'pac:browser-state';
 
     /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
@@ -1158,39 +1157,17 @@
                 }
 
                 // Dispatch events for the array change
-                dispatchArrayChangeEvents(currentPath, oldArray, target, methodName);
+                container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                    detail: {
+                        path: currentPath,
+                        oldValue: oldArray,
+                        newValue: target
+                    }
+                }));
 
                 // Return the result
                 return result;
             };
-        }
-
-        /**
-         * Dispatches array change and general change events
-         * @param {Array} path - Property path where change occurred
-         * @param {*} oldValue - Previous value
-         * @param {*} newValue - New value
-         * @param {string} method - Method or operation that triggered the change
-         */
-        function dispatchArrayChangeEvents(path, oldValue, newValue, method) {
-            // Dispatch array-specific event
-            container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
-                detail: {
-                    path: path,
-                    oldValue: oldValue,
-                    newValue: newValue,
-                    method: method
-                }
-            }));
-
-            // Also trigger computed property updates
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: path,
-                    oldValue: oldValue,
-                    newValue: newValue
-                }
-            }));
         }
 
         /**
@@ -1215,12 +1192,13 @@
             target.length = newLength;
 
             // Dispatch events
-            dispatchArrayChangeEvents(
-                currentPath,
-                oldArray,
-                Array.prototype.slice.call(target),
-                'length'
-            );
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                detail: {
+                    path: currentPath,
+                    oldValue: oldArray,
+                    newValue: Array.prototype.slice.call(target)
+                }
+            }));
 
             return true;
         }
@@ -1342,17 +1320,6 @@
             }
 
             // Dispatch array-specific event if this is an array assignment
-            if (Array.isArray(newValue)) {
-                container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
-                    detail: {
-                        path: propertyPath,
-                        oldValue: oldValue,
-                        newValue: target[prop],
-                        method: 'assignment'
-                    }
-                }));
-            }
-
             container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
                 detail: {
                     path: propertyPath,
@@ -5272,7 +5239,6 @@
         // Add listeners using the stored references
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
-        this.container.addEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
     }
 
@@ -5318,7 +5284,6 @@
 
         // Remove event listeners
         this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
-        this.container.removeEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
 
@@ -5826,15 +5791,10 @@
                 this.handlePacEvent(event);
                 break;
 
-            // Handle array modification events (insertions, deletions, reordering)
-            case 'pac:array-change':
-                this.handleArrayChange(event);
-                break;
-
             // Handle reactive data binding changes (property updates, computed value changes)
             case 'pac:change':
                 if (Array.isArray(event.detail.newValue)) {
-                    //this.handleArrayChange(event);
+                    this.handleArrayChange(event);
                 }
 
                 this.handleReactiveChange(event);
@@ -6451,7 +6411,7 @@
         }
 
         // Only handles computed/filtered foreach dependencies (e.g., filter → filteredTodos).
-        // Direct array assignments go through handleArrayChange via pac:array-change.
+        // Direct array assignments go through handleArrayChange via pac:change.
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
 
