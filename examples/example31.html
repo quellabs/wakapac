@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaPAC — WebGL2 Demo</title>
+</head>
+<body>
+
+<canvas id="scene" data-pac-context="webgl2" width="400" height="400"></canvas>
+
+<script src="../wakapac.js"></script>
+<script src="../units/waka-unit-math3d.js"></script>
+<script>
+    wakaPAC.use(Math3D);
+
+    const VS = `#version 300 es
+in vec3 aPos;
+in vec3 aColor;
+uniform mat4 uMVP;
+out vec3 vColor;
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+    vColor = aColor;
+}`;
+
+    const FS = `#version 300 es
+precision mediump float;
+in vec3 vColor;
+out vec4 fragColor;
+void main() {
+    fragColor = vec4(vColor, 1.0);
+}`;
+
+    const POSITIONS = new Float32Array([
+        -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1,
+        -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1, -1,
+        -1, 1, -1, -1, 1, 1, 1, 1, 1, 1, 1, -1,
+        -1, -1, -1, 1, -1, -1, 1, -1, 1, -1, -1, 1,
+        1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1,
+        -1, -1, -1, -1, -1, 1, -1, 1, 1, -1, 1, -1,
+    ]);
+
+    const FACE_COLORS = [
+        [0.36, 0.49, 1.00], [0.20, 0.30, 0.80],
+        [1.00, 0.42, 0.42], [0.70, 0.20, 0.20],
+        [0.40, 0.90, 0.60], [0.20, 0.55, 0.35],
+    ];
+
+    const COLORS = new Float32Array(6 * 4 * 3);
+    for (let f = 0; f < 6; f++) {
+        const [r, g, b] = FACE_COLORS[f];
+        for (let v = 0; v < 4; v++) {
+            COLORS.set([r, g, b], (f * 4 + v) * 3);
+        }
+    }
+
+    const INDICES = new Uint16Array(6 * 6);
+    for (let f = 0; f < 6; f++) {
+        const b = f * 4;
+        INDICES.set([b, b + 1, b + 2, b, b + 2, b + 3], f * 6);
+    }
+
+const m3d = wakaPAC.unit(Math3D);
+
+    function compile(gl, type, src) {
+        const sh = gl.createShader(type);
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(sh));
+            return null;
+        }
+
+        return sh;
+    }
+
+    wakaPAC('#scene', {
+        init() {
+            this._rx = 0.4;
+            this._ry = 0;
+            this._w = 400;
+            this._h = 400;
+        },
+
+        msgProc(event) {
+
+            switch (event.message) {
+
+                case wakaPAC.MSG_WEBGL_READY: {
+                    const gl = event.detail.glContext;
+
+                    const vs = compile(gl, gl.VERTEX_SHADER, VS);
+                    const fs = compile(gl, gl.FRAGMENT_SHADER, FS);
+
+                    this._prog = gl.createProgram();
+                    gl.attachShader(this._prog, vs);
+                    gl.attachShader(this._prog, fs);
+                    gl.linkProgram(this._prog);
+
+                    this._uMVP = gl.getUniformLocation(this._prog, 'uMVP');
+                    this._aPos = gl.getAttribLocation(this._prog, 'aPos');
+                    this._aCol = gl.getAttribLocation(this._prog, 'aColor');
+
+                    this._vao = gl.createVertexArray();
+                    gl.bindVertexArray(this._vao);
+
+                    const posVBO = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, posVBO);
+                    gl.bufferData(gl.ARRAY_BUFFER, POSITIONS, gl.STATIC_DRAW);
+                    gl.enableVertexAttribArray(this._aPos);
+                    gl.vertexAttribPointer(this._aPos, 3, gl.FLOAT, false, 0, 0);
+
+                    const colVBO = gl.createBuffer();
+                    gl.bindBuffer(gl.ARRAY_BUFFER, colVBO);
+                    gl.bufferData(gl.ARRAY_BUFFER, COLORS, gl.STATIC_DRAW);
+                    gl.enableVertexAttribArray(this._aCol);
+                    gl.vertexAttribPointer(this._aCol, 3, gl.FLOAT, false, 0, 0);
+
+                    const ibo = gl.createBuffer();
+                    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+                    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, INDICES, gl.STATIC_DRAW);
+
+                    gl.bindVertexArray(null);
+                    gl.enable(gl.DEPTH_TEST);
+                    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+                    break;
+                }
+
+                case wakaPAC.MSG_SIZE: {
+                    this._w = wakaPAC.LOWORD(event.lParam);
+                    this._h = wakaPAC.HIWORD(event.lParam);
+                    wakaPAC.resizeCanvas(this.pacId, this._w, this._h);
+                    break;
+                }
+
+                case wakaPAC.MSG_PAINT: {
+                    const gl = wakaPAC.getDC(this.pacId);
+
+                    this._rx += 0.005;
+                    this._ry += 0.009;
+
+                const mvp = m3d.mul(m3d.perspective(Math.PI / 4, this._w / this._h, 0.1, 100), m3d.mul(m3d.translation(0, 0, -4), m3d.mul(m3d.rotX(this._rx), m3d.rotY(this._ry))));
+
+                    gl.viewport(0, 0, this._w, this._h);
+                    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                    gl.useProgram(this._prog);
+                    gl.uniformMatrix4fv(this._uMVP, false, mvp);
+                    gl.bindVertexArray(this._vao);
+                    gl.drawElements(gl.TRIANGLES, INDICES.length, gl.UNSIGNED_SHORT, 0);
+                    gl.bindVertexArray(null);
+
+                    wakaPAC.releaseDC(gl);
+                    break;
+                }
+            }
+        }
+    }, {
+        dcAttributes: {antialias: true, depth: true},
+        renderLoop: true
+    });
+
+</script>
+</body>
+</html>
