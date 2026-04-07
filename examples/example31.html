@@ -88,7 +88,7 @@ const m3d = wakaPAC.unit(Math3D);
             switch (event.message) {
 
                 case wakaPAC.MSG_WEBGL_READY: {
-                    const gl = wakaPAC.getDC(this.pacId);
+                    const gl = event.detail.glContext;
 
                     const vs = compile(gl, gl.VERTEX_SHADER, VS);
                     const fs = compile(gl, gl.FRAGMENT_SHADER, FS);
@@ -124,8 +124,6 @@ const m3d = wakaPAC.unit(Math3D);
                     gl.bindVertexArray(null);
                     gl.enable(gl.DEPTH_TEST);
                     gl.clearColor(0.1, 0.1, 0.1, 1.0);
-
-                    wakaPAC.releaseDC(gl);
                     break;
                 }
 

@@ -220,6 +220,8 @@
     const MSG_GESTURE = 0x0250;
     const MSG_FOREACH_REBUILT = 0x0400;
     const MSG_WEBGL_READY = 0x0401;
+    const MSG_WEBGL_CONTEXT_LOST = 0x0402;
+    const MSG_WEBGL_CONTEXT_RESTORED = 0x0403;
     const MSG_USER = 0x1000;
     const MSG_PLUGIN = 0x2000;
 
@@ -2663,7 +2665,12 @@
                                     MSG_WEBGL_READY,
                                     null,
                                     0,
-                                    0
+                                    0,
+                                    {
+                                        // Provide the GL context directly on the event so components
+                                        // can set up shaders in the handler without a separate getDC() call.
+                                        glContext: wakaPAC.getDC(container.dataset.pacId)
+                                    }
                                 ));
                             }
                         }
@@ -9147,6 +9154,72 @@
 
                     _renderLoops.set(pacId, requestAnimationFrame(loop));
                 }
+
+                // Attach WebGL context loss/restore handlers for all WebGL canvases,
+                // regardless of whether renderLoop is active.
+                if (contextType !== '2d') {
+                    container.addEventListener('webglcontextlost', function (e) {
+                        // Calling preventDefault() is required — without it the browser
+                        // will not attempt to restore the context after it is lost.
+                        e.preventDefault();
+
+                        // Pause the render loop while the context is unavailable.
+                        // Dispatching MSG_PAINT to a lost context produces GL errors and
+                        // is meaningless — suspend the loop until the context is restored.
+                        if (_renderLoops.has(pacId)) {
+                            cancelAnimationFrame(_renderLoops.get(pacId));
+                            // Use a sentinel value to indicate suspended (not destroyed).
+                            // The loop check uses _renderLoops.has(), so we must keep the
+                            // key present to allow resumption on restore.
+                            _renderLoops.set(pacId, null);
+                        }
+
+                        // Notify the component so it can null out all GL resource handles.
+                        // All WebGL objects (buffers, textures, programs, etc.) are invalid
+                        // after context loss and must not be used until MSG_WEBGL_CONTEXT_RESTORED.
+                        DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                            MSG_WEBGL_CONTEXT_LOST,
+                            e,
+                            0,
+                            0
+                        ));
+                    });
+
+                    container.addEventListener('webglcontextrestored', function (e) {
+                        // The context has been recreated by the browser — all GL resources
+                        // must be rebuilt from scratch (shaders, buffers, textures, etc.).
+                        // Provide the fresh context on event.glContext, mirroring MSG_WEBGL_READY.
+                        DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                            MSG_WEBGL_CONTEXT_RESTORED,
+                            e,
+                            0,
+                            0,
+                            {
+                                glContext: wakaPAC.getDC(pacId)
+                            }
+                        ));
+
+                        // Resume the render loop if it was running before context loss.
+                        if (_renderLoops.has(pacId) && _renderLoops.get(pacId) === null) {
+                            const loop = function () {
+                                if (!_renderLoops.has(pacId)) {
+                                    return;
+                                }
+
+                                DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                                    MSG_PAINT,
+                                    null,
+                                    0,
+                                    0
+                                ));
+
+                                _renderLoops.set(pacId, requestAnimationFrame(loop));
+                            };
+
+                            _renderLoops.set(pacId, requestAnimationFrame(loop));
+                        }
+                    });
+                }
             }
 
             // Signal that a new component is ready
@@ -10793,9 +10866,10 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
         MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE, MSG_PLUGIN,
         MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL, MSG_COPY, MSG_PASTE,
-        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT, MSG_WEBGL_READY, MSG_MOUSEENTER,
-        MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER,
-        MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
+        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT, MSG_WEBGL_READY,
+        MSG_WEBGL_CONTEXT_LOST, MSG_WEBGL_CONTEXT_RESTORED, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
+        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
+        MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
