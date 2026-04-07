@@ -119,7 +119,9 @@
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
 
     /** Custom event names dispatched on PAC containers */
-    const EV_PAC_EVENT        = 'pac:event';
+    const EV_PAC_EVENT = 'pac:event';
+    const EV_PAC_CHANGE = 'pac:change';
+    const EV_PAC_ARRAY_CHANGE = 'pac:array-change';
     const EV_PAC_BROWSER_STATE = 'pac:browser-state';
 
     /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
@@ -178,7 +180,6 @@
      * Hex values match Win32 API message identifiers
      */
     const MSG_UNKNOWN = 0x0000;
-    const MSG_VALUE_CHANGED = 0x0001;
     const MSG_SIZE = 0x0005;
     const MSG_PAINT = 0x000F;
     const MSG_DPR_CHANGE = 0x0010;
@@ -1157,16 +1158,39 @@
                 }
 
                 // Dispatch events for the array change
-                container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
-                    path: currentPath,
-                    oldValue: oldArray,
-                    newValue: target,
-                    origin: 'wakaPAC'
-                }));
+                dispatchArrayChangeEvents(currentPath, oldArray, target, methodName);
 
                 // Return the result
                 return result;
             };
+        }
+
+        /**
+         * Dispatches array change and general change events
+         * @param {Array} path - Property path where change occurred
+         * @param {*} oldValue - Previous value
+         * @param {*} newValue - New value
+         * @param {string} method - Method or operation that triggered the change
+         */
+        function dispatchArrayChangeEvents(path, oldValue, newValue, method) {
+            // Dispatch array-specific event
+            container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
+                detail: {
+                    path: path,
+                    oldValue: oldValue,
+                    newValue: newValue,
+                    method: method
+                }
+            }));
+
+            // Also trigger computed property updates
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                detail: {
+                    path: path,
+                    oldValue: oldValue,
+                    newValue: newValue
+                }
+            }));
         }
 
         /**
@@ -1191,12 +1215,12 @@
             target.length = newLength;
 
             // Dispatch events
-            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
-                path: currentPath,
-                oldValue: oldArray,
-                newValue: Array.prototype.slice.call(target),
-                origin: 'wakaPAC'
-            }));
+            dispatchArrayChangeEvents(
+                currentPath,
+                oldArray,
+                Array.prototype.slice.call(target),
+                'length'
+            );
 
             return true;
         }
@@ -1264,7 +1288,7 @@
                 proxiedVal._isReactive = true;
 
                 // Write directly to target without going through the proxy set trap.
-                // This caches the proxy without firing MSG_VALUE_CHANGED.
+                // This caches the proxy without firing pac:change.
                 Object.defineProperty(target, prop, {
                     value: proxiedVal,
                     writable: true,
@@ -1296,7 +1320,7 @@
             const oldValue = target[prop];
             const propertyPath = currentPath.concat([prop]);
 
-            if (Utils.isEqual(oldValue, newValue)) {
+            if (oldValue === newValue) {
                 return true;
             }
 
@@ -1311,38 +1335,38 @@
 
             // Wrap objects and arrays in proxies when they're assigned
             if (newValue && typeof newValue === 'object') {
-                const proxied = createProxy(newValue, propertyPath);
-
-                Object.defineProperty(proxied, '_isReactive', {
-                    value: true,
-                    writable: true,
-                    configurable: true,
-                    enumerable: false
-                });
-
-                target[prop] = proxied;
+                target[prop] = createProxy(newValue, propertyPath);
+                target[prop]._isReactive = true;
             } else {
                 target[prop] = newValue;
             }
 
             // Dispatch array-specific event if this is an array assignment
-            /*
-            const assignedValue = target[prop];
+            if (Array.isArray(newValue)) {
+                container.dispatchEvent(new CustomEvent(EV_PAC_ARRAY_CHANGE, {
+                    detail: {
+                        path: propertyPath,
+                        oldValue: oldValue,
+                        newValue: target[prop],
+                        method: 'assignment'
+                    }
+                }));
+            }
 
-            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
-                path: propertyPath,
-                oldValue,
-                newValue: assignedValue,
-                origin: 'wakaPAC'
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                detail: {
+                    path: propertyPath,
+                    oldValue: oldValue,
+                    newValue: target[prop]
+                }
             }));
-            */
 
             return true;
         }
 
         /**
          * Proxy deleteProperty trap handler.
-         * Fires a MSG_VALUE_CHANGED event when a reactive property is deleted,
+         * Fires a pac:change event when a reactive property is deleted,
          * allowing the DOM to update in response.
          * @param {Object|Array} target - The object being proxied
          * @param {string|symbol} prop - Property being deleted
@@ -1369,11 +1393,12 @@
             delete target[prop];
 
             // Notify the DOM that this property is gone
-            container.dispatchEvent(wakaPAC.createPacMessage(MSG_VALUE_CHANGED, 0, 0, {
-                path: propertyPath,
-                oldValue: oldValue,
-                newValue: undefined,
-                origin: 'wakaPAC'
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                detail: {
+                    path: propertyPath,
+                    oldValue: oldValue,
+                    newValue: undefined
+                }
             }));
 
             return true;
@@ -5246,6 +5271,8 @@
 
         // Add listeners using the stored references
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
+        this.container.addEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
     }
 
@@ -5291,6 +5318,8 @@
 
         // Remove event listeners
         this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_ARRAY_CHANGE, this.boundHandlePacEvent);
+        this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
 
         // Clear updateQueueTimer
@@ -5798,6 +5827,19 @@
                 break;
 
             // Handle array modification events (insertions, deletions, reordering)
+            case 'pac:array-change':
+                this.handleArrayChange(event);
+                break;
+
+            // Handle reactive data binding changes (property updates, computed value changes)
+            case 'pac:change':
+                if (Array.isArray(event.detail.newValue)) {
+                    //this.handleArrayChange(event);
+                }
+
+                this.handleReactiveChange(event);
+                break;
+
             // Handle browser state changes (navigation, history, URL changes)
             case 'pac:browser-state':
                 this.handleBrowserStateEvent(event);
@@ -5848,19 +5890,6 @@
 
         // Call built in event handlers
         switch(event.message) {
-            // Handle reactive data binding changes (property updates, computed value changes)
-            case MSG_VALUE_CHANGED:
-                if (Array.isArray(event.detail.newValue)) {
-                    this.handleArrayChange(event);
-                }
-
-                this.updateElementBindings();
-                this.updateTextInterpolations();
-                this.updateCommentConditionals();
-                this.handleWatchersForChange(event);
-                this.handleForeachRebuildForChange(event);
-                break;
-
             case MSG_SETFOCUS:
                 this.updateFocusProperties();
                 break;
@@ -6194,6 +6223,26 @@
         });
     };
 
+    /**
+     * Handles reactive data binding changes triggered by property updates
+     * Orchestrates updates to all binding types: element attributes, text interpolations,
+     * comment conditionals, watchers, and foreach loops
+     * @param {CustomEvent} event - The pac:change event containing change details
+     * @param {Object} event.detail - Event payload
+     * @param {string[]} event.detail.path - Array representing the property path that changed (e.g., ['todos', '0', 'completed'])
+     * @param {*} event.detail.oldValue - The previous value before the change
+     * @param {*} event.detail.newValue - The new value after the change
+     */
+    Context.prototype.handleReactiveChange = function (event) {
+        this.updateElementBindings();
+        this.updateTextInterpolations();
+        this.updateCommentConditionals();
+        this.handleWatchersForChange(event);
+        this.handleForeachRebuildForChange(event);
+
+        //wakaPAC.sendMessage(this.abstraction.pacId, MSG_VALUE_CHANGE, 0, 0, event.detail);
+    };
+
     // =============================================================================
     // DOM UPDATE METHODS (Reactive Data → DOM Sync)
     // =============================================================================
@@ -6333,7 +6382,7 @@
      * Triggers watchers for property changes
      * Handles both root-level and nested property changes, passing appropriate before/after values
      * Note: Does not trigger for array element changes - arrays are handled by foreach rebuilds
-     * @param {CustomEvent} event - The MSG_VALUE_CHANGED event with change details
+     * @param {CustomEvent} event - The pac:change event with change details
      */
     Context.prototype.handleWatchersForChange = function(event) {
         // Root-level change (e.g., this.count = 5)
@@ -6390,7 +6439,7 @@
      * either because they're bound directly to the changed array, or because
      * they're bound to a computed property that depends on the changed property
      * (e.g., changing 'filter' triggers rebuild of foreach bound to 'filteredTodos').
-     * @param {CustomEvent} event - The MSG_VALUE_CHANGED event containing change details
+     * @param {CustomEvent} event - The pac:change event containing change details
      * @param {string[]} event.detail.path - Property path that changed
      */
     Context.prototype.handleForeachRebuildForChange = function(event) {
@@ -6402,7 +6451,7 @@
         }
 
         // Only handles computed/filtered foreach dependencies (e.g., filter → filteredTodos).
-        // Direct array assignments go through handleArrayChange via MSG_VALUE_CHANGED
+        // Direct array assignments go through handleArrayChange via pac:array-change.
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
 
@@ -7379,7 +7428,7 @@
      * Syncs a <select> element's DOM value back into the model after its
      * child <option> elements were rebuilt by a foreach. The browser reconciles
      * the selection against the new option set; this method reads the resulting
-     * .value and writes it into the abstraction so the proxy fires a MSG_VALUE_CHANGED
+     * .value and writes it into the abstraction so the proxy fires a pac:change
      * event and dependent bindings stay in sync.
      * @param {Element} foreachElement - The element whose foreach just rebuilt
      */
@@ -10874,14 +10923,14 @@
     // Attach message type constants to wakaPAC
     Object.assign(wakaPAC, {
         // Message types
-        MSG_UNKNOWN, MSG_VALUE_CHANGED, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
+        MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
-        MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE, MSG_PLUGIN,
-        MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL, MSG_COPY, MSG_PASTE,
-        MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT, MSG_WEBGL_READY,
-        MSG_WEBGL_CONTEXT_LOST, MSG_WEBGL_CONTEXT_RESTORED, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
-        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
-        MSG_DPR_CHANGE,
+        MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
+        MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
+        MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT,
+        MSG_WEBGL_READY, MSG_WEBGL_CONTEXT_LOST, MSG_WEBGL_CONTEXT_RESTORED, MSG_MOUSEENTER, MSG_MOUSELEAVE,
+        MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER,
+        MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
