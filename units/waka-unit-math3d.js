@@ -437,9 +437,20 @@
                         // f = forward direction: normalised vector from eye toward target.
                         const f = this.vec3Normalize([target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]]);
 
-                        // r = right direction: perpendicular to both forward and the up hint.
-                        // cross(f, up) gives a vector pointing to the camera's right.
-                        const r = this.vec3Normalize(this.vec3Cross(f, up));
+                        // Edge case: if f is parallel (or anti-parallel) to the up hint,
+                        // cross(f, up) produces a zero vector and the basis is undefined.
+                        // This happens when the camera looks straight up or straight down
+                        // along the world up axis (e.g. up=[0,1,0] and target is directly
+                        // above or below eye). Silent fallback: substitute an alternative up
+                        // hint guaranteed not to be parallel to f — world Z if f points
+                        // mostly along world Y, world Y otherwise. Same approach as gl-matrix.
+                        const parallelThreshold = 0.9999;
+                        const safeUp = Math.abs(this.vec3Dot(f, up)) > parallelThreshold
+                            ? (Math.abs(f[1]) > parallelThreshold ? [0, 0, 1] : [0, 1, 0])
+                            : up;
+
+                        // r = right direction: perpendicular to both forward and the safe up hint.
+                        const r = this.vec3Normalize(this.vec3Cross(f, safeUp));
 
                         // u = true up direction: recomputed from r and f to guarantee orthogonality.
                         // The original `up` hint may not be perpendicular to f.
@@ -618,8 +629,34 @@
                         ];
                     },
 
+                    /**
+                     * Returns the Euclidean distance between two vec3 points.
+                     * Equivalent to vec3Length(vec3Subtract(a, b)) but avoids constructing
+                     * an intermediate array.
+                     * @param {number[]} a
+                     * @param {number[]} b
+                     * @returns {number}
+                     */
+                    vec3Distance(a, b) {
+                        return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]);
+                    },
+
                     // ================================================================
-                    // QUAT — quaternion operations
+                    // MAT4 utilities
+                    // ================================================================
+
+                    /**
+                     * Returns a deep copy of a 4×4 matrix.
+                     * Float32Arrays are reference types — without cloning, assigning a matrix
+                     * to two variables and then mutating one will corrupt the other.
+                     * Use this whenever you need to branch transforms from a shared base matrix.
+                     * @param {Float32Array} m
+                     * @returns {Float32Array}
+                     */
+                    mat4Clone(m) {
+                        // Float32Array.slice() returns a new Float32Array with the same 16 values.
+                        return m.slice();
+                    },
                     //
                     // Quaternions are plain number arrays [x, y, z, w], where (x, y, z)
                     // is the imaginary vector part and w is the real scalar part.
@@ -671,16 +708,18 @@
                      * @returns {number[]}
                      */
                     quatFromAxisAngle(axis, angle) {
+                        // Calculate the square root of the sum of all axis.
+                        const l = Math.hypot(axis[0], axis[1], axis[2]);
+
                         // Normalise the axis while computing the sine scale factor in one step.
                         // Guard against zero-length axis by falling back to divisor 1 (result will be ~0 anyway).
-                        const l = Math.hypot(axis[0], axis[1], axis[2]);
                         const s = Math.sin(angle / 2) / (l < 1e-10 ? 1 : l);
 
                         return [
                             axis[0] * s,            // x = nx * sin(θ/2)
                             axis[1] * s,            // y = ny * sin(θ/2)
                             axis[2] * s,            // z = nz * sin(θ/2)
-                            Math.cos(angle / 2), // w = cos(θ/2)
+                            Math.cos(angle / 2),    // w = cos(θ/2)
                         ];
                     },
 
@@ -720,6 +759,45 @@
                         }
 
                         return [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
+                    },
+
+                    /**
+                     * Returns the conjugate of a quaternion: negates the vector part (x, y, z),
+                     * leaving the scalar part (w) unchanged.
+                     *
+                     * For unit quaternions (length = 1), the conjugate equals the inverse and
+                     * represents the opposite rotation. Prefer this over quatInvert() whenever
+                     * you know the quaternion is unit length — it is a simple negation with no
+                     * division or length computation.
+                     *
+                     * Use quatInvert() only when working with non-unit quaternions.
+                     * @param {number[]} q
+                     * @returns {number[]}
+                     */
+                    quatConjugate(q) {
+                        return [-q[0], -q[1], -q[2], q[3]]; // negate xyz, keep w
+                    },
+
+                    /**
+                     * Returns the inverse of a quaternion: conjugate divided by squared length.
+                     * For unit quaternions this equals the conjugate — use quatConjugate() instead,
+                     * as it is cheaper (no division). Use this only when the quaternion may not
+                     * be unit length, e.g. after constructing one manually or combining scaled
+                     * quaternions outside the normal rotation workflow.
+                     * Returns the identity quaternion for near-zero input.
+                     * @param {number[]} q
+                     * @returns {number[]}
+                     */
+                    quatInvert(q) {
+                        const l2 = q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]; // squared length
+
+                        if (l2 < 1e-10) {
+                            return [0, 0, 0, 1]; // degenerate quaternion — return identity
+                        }
+
+                        // inverse = conjugate / |q|² — divides each conjugate component by squared length.
+                        const inv = 1 / l2;
+                        return [-q[0]*inv, -q[1]*inv, -q[2]*inv, q[3]*inv];
                     },
 
                     /**

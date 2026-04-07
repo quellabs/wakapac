@@ -145,7 +145,21 @@
                      * @param {number} hi - Upper bound (inclusive)
                      * @returns {boolean}
                      */
-                    inRange: (n, lo, hi) => n >= lo && n <= hi
+                    inRange: (n, lo, hi) => n >= lo && n <= hi,
+
+                    /**
+                     * Converts degrees to radians.
+                     * @param {number} deg - Angle in degrees
+                     * @returns {number} Angle in radians
+                     */
+                    toRad: (deg) => deg * (Math.PI / 180),
+
+                    /**
+                     * Converts radians to degrees.
+                     * @param {number} rad - Angle in radians
+                     * @returns {number} Angle in degrees
+                     */
+                    toDeg: (rad) => rad * (180 / Math.PI)
                 },
             }
         }
