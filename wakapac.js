@@ -5426,12 +5426,36 @@
             scrollContentWidth > this.abstraction.containerWidth ||
             scrollContentHeight > this.abstraction.containerHeight;
 
-        // Update individual properties
-        this.abstraction.containerScrollX = scrollX;
-        this.abstraction.containerScrollY = scrollY;
-        this.abstraction.containerContentWidth = scrollContentWidth;
-        this.abstraction.containerContentHeight = scrollContentHeight;
-        this.abstraction.containerIsScrollable = isScrollable;
+        // Write through the proxy so that MSG_VALUE_CHANGED fires and the DOM updates,
+        // but guard every assignment with an equality check first. Without the guard,
+        // a visible: binding changing layout height triggers updateContainerScrollState,
+        // which re-dispatches MSG_VALUE_CHANGED for containerContentHeight, which
+        // re-evaluates the visible: bindings — infinite loop.
+        //
+        // The proxy already has an oldValue === newValue guard in proxySetHandler, but
+        // it compares against the previously written proxy value, not the live DOM value —
+        // so the guard here uses the raw object for a reliable before-write comparison.
+        const raw = this.originalAbstraction;
+
+        if (raw.containerScrollX !== scrollX) {
+            this.abstraction.containerScrollX = scrollX;
+        }
+
+        if (raw.containerScrollY !== scrollY) {
+            this.abstraction.containerScrollY = scrollY;
+        }
+
+        if (raw.containerContentWidth !== scrollContentWidth) {
+            this.abstraction.containerContentWidth = scrollContentWidth;
+        }
+
+        if (raw.containerContentHeight !== scrollContentHeight) {
+            this.abstraction.containerContentHeight = scrollContentHeight;
+        }
+
+        if (raw.containerIsScrollable !== isScrollable) {
+            this.abstraction.containerIsScrollable = isScrollable;
+        }
 
         // Update scroll window object
         Object.assign(this.abstraction.containerScrollWindow, {
