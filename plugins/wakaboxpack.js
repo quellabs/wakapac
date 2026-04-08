@@ -94,28 +94,6 @@
     }
 
     /**
-     * Draw one cuboid: top face, then left (front-Y) face, then right (front-X) face.
-     * Caller guarantees items are sorted back-to-front before calling.
-     */
-    function drawCuboid(dl, item, s, ox, oy, colors, stroke, lw) {
-        const { x, y, z, width: w, length: l, depth: d } = item;
-        const p = (px, py, pz) => project(px, py, pz, s, ox, oy);
-
-        const p000 = p(x,   y,   z  );
-        const p100 = p(x+w, y,   z  );
-        const p010 = p(x,   y+l, z  );
-        const p110 = p(x+w, y+l, z  );
-        const p001 = p(x,   y,   z+d);
-        const p101 = p(x+w, y,   z+d);
-        const p011 = p(x,   y+l, z+d);
-        const p111 = p(x+w, y+l, z+d);
-
-        quad(dl, [p101, p111, p110, p100], colors.right, stroke, lw); // right (x=x+w, high-X)
-        quad(dl, [p011, p111, p110, p010], colors.left,  stroke, lw); // back  (y=y+l, high-Y)
-        quad(dl, [p001, p101, p111, p011], colors.top,   stroke, lw); // top   (z=z+d)
-    }
-
-    /**
      * Draw floor + front wall (y=0) + left wall (x=0). Viewer is at high-X high-Y so these are the visible interior faces.
      * Must be called before items.
      */
@@ -149,17 +127,6 @@
         e(p(0,L,D), p(W,L,D)); // back-top horizontal  (meets back wall)
     }
 
-    // ─── Sort ─────────────────────────────────────────────────────────────────
-
-    // Viewer is at high-X, high-Y. Items with low x+y are furthest from the
-    // viewer and must draw first. Z ascending as tiebreaker ensures floor
-    // items draw before items stacked on top of them at the same XY position.
-    function sortItems(items) {
-        return [...items].sort((a, b) =>
-            (a.x + a.y) - (b.x + b.y) || a.z - b.z
-        );
-    }
-
     // ─── Legend ───────────────────────────────────────────────────────────────
 
     function drawLegend(dl, entries, x, y, font, textColor, swatchSize, rowH) {
@@ -170,6 +137,63 @@
             dl.setStrokeStyle('rgba(0,0,0,0.25)').setLineWidth(1).strokeRect(x, ey, swatchSize, swatchSize);
             dl.setFillStyle(textColor).fillText(label, x + swatchSize + 6, ey + swatchSize / 2);
         });
+    }
+
+    function renderPackedBox(dl, items, s, ox, oy, o) {
+
+        const p = (x, y, z) => project(x, y, z, s, ox, oy);
+
+        function quad(pts, fill) {
+            dl.setFillStyle(fill)
+                .setStrokeStyle(o.outlineColor)
+                .setLineWidth(o.outlineWidth)
+                .setLineJoin('round')
+                .beginPath()
+                .moveTo(pts[0].x, pts[0].y)
+                .lineTo(pts[1].x, pts[1].y)
+                .lineTo(pts[2].x, pts[2].y)
+                .lineTo(pts[3].x, pts[3].y)
+                .closePath()
+                .fill()
+                .stroke();
+        }
+
+        function drawCuboid(item) {
+
+            const { x, y, z, width: w, length: l, depth: d } = item;
+
+            const colors = faceColors(
+                o.colorMap.get(item.description) ?? o.colors[0]
+            );
+
+            const p000 = p(x,   y,   z);
+            const p100 = p(x+w, y,   z);
+            const p010 = p(x,   y+l, z);
+            const p110 = p(x+w, y+l, z);
+
+            const p001 = p(x,   y,   z+d);
+            const p101 = p(x+w, y,   z+d);
+            const p011 = p(x,   y+l, z+d);
+            const p111 = p(x+w, y+l, z+d);
+
+            /* +X face */
+            quad([p101, p111, p110, p100], colors.right);
+
+            /* +Y face */
+            quad([p011, p111, p110, p010], colors.left);
+
+            /* top */
+            quad([p001, p101, p111, p011], colors.top);
+        }
+
+        /* sweep ordering */
+        const sorted = [...items].sort((a, b) =>
+            (a.z + a.depth)  - (b.z + b.depth)  ||
+            (a.y + a.length) - (b.y + b.length) ||
+            (a.x + a.width)  - (b.x + b.width)
+        );
+
+        sorted.forEach(drawCuboid);
     }
 
     // ─── Plugin ───────────────────────────────────────────────────────────────
@@ -211,94 +235,106 @@
                 packedBox(ctx, packingResult, opts = {}) {
                     const o = Object.assign({}, defaults, opts);
 
-                    if (!packingResult?.boxes?.length) return [];
+                    const {box,items}=packingResult.boxes[o.boxIndex ?? 0];
 
-                    const boxIndex = o.boxIndex ?? 0;
-                    if (boxIndex < 0 || boxIndex >= packingResult.boxes.length) return [];
+                    const W=box.inner_width;
+                    const L=box.inner_length;
+                    const D=box.inner_depth;
 
-                    const { box, items: rawItems } = packingResult.boxes[boxIndex];
-                    const items  = Array.isArray(rawItems) ? rawItems : [];
-                    const innerW = box.inner_width;
-                    const innerL = box.inner_length;
-                    const innerD = box.inner_depth;
-                    if (!innerW || !innerL || !innerD) return [];
+                    const dl=new wakaPAC.MetaFile();
 
-                    // Assign one stable color per unique description.
-                    const descriptions = [...new Set(items.map(i => i.description))].sort();
-                    const colorMap     = new Map(
-                        descriptions.map((d, i) => [d, o.colors[i % o.colors.length]])
+                    /* layout */
+
+                    const pad=o.padding;
+
+                    const availW=ctx.canvas.width-pad*2;
+                    const availH=ctx.canvas.height-pad*2;
+
+                    const s=Math.min(
+                        availW/((W+L)*COS30),
+                        availH/((W+L)*SIN30+D)
                     );
 
-                    // Canvas layout.
-                    const pad     = o.padding;
-                    const legendH = o.showLegend && descriptions.length
-                        ? descriptions.length * o.legendRowH + pad : 0;
-                    const availW  = ctx.canvas.width  - pad * 2;
-                    const availH  = ctx.canvas.height - pad * 2 - legendH;
+                    const corners=[[0,0,0],[W,0,0],[0,L,0],[W,L,0],[0,0,D],[W,0,D],[0,L,D],[W,L,D]];
 
-                    const s = Math.min(
-                        availW / ((innerW + innerL) * COS30),
-                        availH / ((innerW + innerL) * SIN30 + innerD)
+                    const px=corners.map(([x,y,z])=>(x-y)*COS30*s);
+                    const py=corners.map(([x,y,z])=>(x+y)*SIN30*s-z*s);
+
+                    const ox=pad+(availW-(Math.max(...px)-Math.min(...px)))/2-Math.min(...px);
+                    const oy=pad+(availH-(Math.max(...py)-Math.min(...py)))/2-Math.min(...py);
+
+                    /* color mapping */
+
+                    const desc=[...new Set(items.map(i=>i.description))].sort();
+
+                    const colorMap=new Map(
+                        desc.map((d,i)=>[d,o.colors[i%o.colors.length]])
                     );
-                    if (s <= 0) return [];
 
-                    // Center: compute bounding box of projected box corners.
-                    const corners = [[0,0,0],[innerW,0,0],[0,innerL,0],[innerW,innerL,0],
-                        [0,0,innerD],[innerW,0,innerD],[0,innerL,innerD],[innerW,innerL,innerD]];
-                    const px = corners.map(([x,y,z]) => (x - y) * COS30 * s);
-                    const py = corners.map(([x,y,z]) => (x + y) * SIN30 * s - z * s);
-                    const ox = pad + (availW - (Math.max(...px) - Math.min(...px))) / 2 - Math.min(...px);
-                    const oy = pad + (availH - (Math.max(...py) - Math.min(...py))) / 2 - Math.min(...py);
+                    o.colorMap=colorMap;
 
-                    const dl = new wakaPAC.MetaFile();
+                    /* box walls */
 
-                    // 1. Walls: floor + front (y=0) + left (x=0) — viewer is at high-X, high-Y.
-                    drawBoxWalls(dl, innerW, innerL, innerD, s, ox, oy,
-                        o.boxWallColor, o.boxEdgeColor, o.boxEdgeWidth);
+                    drawBoxWalls(dl,W,L,D,s,ox,oy,
+                        o.boxWallColor,
+                        o.boxEdgeColor,
+                        o.boxEdgeWidth
+                    );
 
-                    // 2. Items sorted back-to-front by far corner.
-                    for (const item of sortItems(items)) {
-                        drawCuboid(dl, item, s, ox, oy,
-                            faceColors(colorMap.get(item.description) ?? o.colors[0]),
-                            o.outlineColor, o.outlineWidth);
-                    }
+                    /* items */
+                    renderPackedBox(dl, items, s, ox, oy, o);
 
-                    // 3. Front rim edges on top of everything.
-                    drawBoxRim(dl, innerW, innerL, innerD, s, ox, oy,
-                        o.boxEdgeColor, o.boxEdgeWidth);
+                    /* front rim */
 
-                    // 4. Hit areas — top-face bounding rect per item.
-                    for (const item of items) {
-                        const { x, y, z, width: w, length: l, depth: d } = item;
-                        const topPts = [
-                            project(x,   y,   z+d, s, ox, oy),
-                            project(x+w, y,   z+d, s, ox, oy),
-                            project(x+w, y+l, z+d, s, ox, oy),
-                            project(x,   y+l, z+d, s, ox, oy),
+                    drawBoxRim(dl,W,L,D,s,ox,oy,
+                        o.boxEdgeColor,
+                        o.boxEdgeWidth
+                    );
+
+                    /* hit areas */
+
+                    items.forEach(item=>{
+                        const {x,y,z,width:w,length:l,depth:d}=item;
+
+                        const pts=[
+                            project(x,y,z+d,s,ox,oy),
+                            project(x+w,y,z+d,s,ox,oy),
+                            project(x+w,y+l,z+d,s,ox,oy),
+                            project(x,y+l,z+d,s,ox,oy)
                         ];
-                        const xs = topPts.map(p => p.x), ys = topPts.map(p => p.y);
-                        const minX = Math.min(...xs), minY = Math.min(...ys);
-                        dl.hitArea('rect', {
-                            x: minX, y: minY,
-                            w: Math.max(...xs) - minX,
-                            h: Math.max(...ys) - minY,
-                            data: { description: item.description, weight: item.weight,
-                                x: item.x, y: item.y, z: item.z,
-                                width: w, length: l, depth: d },
-                        });
-                    }
 
-                    // 5. Legend.
-                    if (o.showLegend && descriptions.length) {
-                        drawLegend(dl,
-                            descriptions.map(d => ({ color: colorMap.get(d), label: d })),
+                        const xs=pts.map(p=>p.x);
+                        const ys=pts.map(p=>p.y);
+
+                        const minX=Math.min(...xs);
+                        const minY=Math.min(...ys);
+
+                        dl.hitArea('rect',{
+                            x:minX,
+                            y:minY,
+                            w:Math.max(...xs)-minX,
+                            h:Math.max(...ys)-minY,
+                            data:item
+                        });
+                    });
+
+                    /* legend */
+
+                    if(o.showLegend && desc.length){
+                        drawLegend(
+                            dl,
+                            desc.map(d=>({color:colorMap.get(d),label:d})),
                             pad,
-                            ctx.canvas.height - pad - descriptions.length * o.legendRowH,
-                            o.font, o.legendColor, o.swatchSize, o.legendRowH);
+                            ctx.canvas.height-pad-desc.length*o.legendRowH,
+                            o.font,
+                            o.legendColor,
+                            o.swatchSize,
+                            o.legendRowH
+                        );
                     }
 
                     return dl.build();
-                },
+                }
             };
 
             return {
