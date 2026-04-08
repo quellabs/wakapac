@@ -62,7 +62,7 @@
         _cx.fillStyle = color;
         _cx.fillRect(0, 0, 1, 1);
         const [r, g, b] = _cx.getImageData(0, 0, 1, 1).data;
-        return { r, g, b };
+        return {r, g, b};
     }
 
     function tint(rgb, f) {
@@ -72,7 +72,7 @@
     // Returns { top, left, right } shaded variants of a base CSS color.
     function faceColors(base) {
         const rgb = parseColor(base);
-        return { top: tint(rgb, 1.25), left: tint(rgb, 1.0), right: tint(rgb, 0.7) };
+        return {top: tint(rgb, 1.25), left: tint(rgb, 1.0), right: tint(rgb, 0.7)};
     }
 
     // ─── Default palette ──────────────────────────────────────────────────────
@@ -100,9 +100,9 @@
     function drawBoxWalls(dl, W, L, D, s, ox, oy, fill, stroke, lw) {
         const p = (x, y, z) => project(x, y, z, s, ox, oy);
 
-        quad(dl, [p(0,0,0), p(W,0,0), p(W,L,0), p(0,L,0)], fill, stroke, lw); // floor
-        quad(dl, [p(0,0,0), p(W,0,0), p(W,0,D), p(0,0,D)], fill, stroke, lw); // front wall (y=0, low-Y)
-        quad(dl, [p(0,0,0), p(0,L,0), p(0,L,D), p(0,0,D)], fill, stroke, lw); // left wall  (x=0, low-X)
+        quad(dl, [p(0, 0, 0), p(W, 0, 0), p(W, L, 0), p(0, L, 0)], fill, stroke, lw); // floor
+        quad(dl, [p(0, 0, 0), p(W, 0, 0), p(W, 0, D), p(0, 0, D)], fill, stroke, lw); // front wall (y=0, low-Y)
+        quad(dl, [p(0, 0, 0), p(0, L, 0), p(0, L, D), p(0, 0, D)], fill, stroke, lw); // left wall  (x=0, low-X)
     }
 
     /**
@@ -116,22 +116,22 @@
 
         // Front and top rim edges
         const e = (a, b) => dl.beginPath().moveTo(a.x, a.y).lineTo(b.x, b.y).stroke();
-        e(p(0,0,0), p(0,0,D)); // front-left vertical
-        e(p(W,0,0), p(W,0,D)); // front-right vertical
-        e(p(0,L,0), p(0,L,D)); // back-left vertical
-        e(p(0,0,0), p(W,0,0)); // front-bottom horizontal
-        e(p(0,0,0), p(0,L,0)); // left-bottom horizontal
-        e(p(0,0,D), p(W,0,D)); // front-top horizontal
-        e(p(0,0,D), p(0,L,D)); // left-top horizontal
-        e(p(W,0,D), p(W,L,D)); // right-top horizontal (meets back wall)
-        e(p(0,L,D), p(W,L,D)); // back-top horizontal  (meets back wall)
+        e(p(0, 0, 0), p(0, 0, D)); // front-left vertical
+        e(p(W, 0, 0), p(W, 0, D)); // front-right vertical
+        e(p(0, L, 0), p(0, L, D)); // back-left vertical
+        e(p(0, 0, 0), p(W, 0, 0)); // front-bottom horizontal
+        e(p(0, 0, 0), p(0, L, 0)); // left-bottom horizontal
+        e(p(0, 0, D), p(W, 0, D)); // front-top horizontal
+        e(p(0, 0, D), p(0, L, D)); // left-top horizontal
+        e(p(W, 0, D), p(W, L, D)); // right-top horizontal (meets back wall)
+        e(p(0, L, D), p(W, L, D)); // back-top horizontal  (meets back wall)
     }
 
     // ─── Legend ───────────────────────────────────────────────────────────────
 
     function drawLegend(dl, entries, x, y, font, textColor, swatchSize, rowH) {
         dl.setFont(font).setTextAlign('left').setTextBaseline('middle');
-        entries.forEach(({ color, label }, i) => {
+        entries.forEach(({color, label}, i) => {
             const ey = y + i * rowH;
             dl.setFillStyle(color).fillRect(x, ey, swatchSize, swatchSize);
             dl.setStrokeStyle('rgba(0,0,0,0.25)').setLineWidth(1).strokeRect(x, ey, swatchSize, swatchSize);
@@ -139,61 +139,34 @@
         });
     }
 
-    function renderPackedBox(dl, items, s, ox, oy, o) {
+    function renderIsometricBoxes(items, project, emitQuad) {
 
-        const p = (x, y, z) => project(x, y, z, s, ox, oy);
-
-        function quad(pts, fill) {
-            dl.setFillStyle(fill)
-                .setStrokeStyle(o.outlineColor)
-                .setLineWidth(o.outlineWidth)
-                .setLineJoin('round')
-                .beginPath()
-                .moveTo(pts[0].x, pts[0].y)
-                .lineTo(pts[1].x, pts[1].y)
-                .lineTo(pts[2].x, pts[2].y)
-                .lineTo(pts[3].x, pts[3].y)
-                .closePath()
-                .fill()
-                .stroke();
-        }
-
-        function drawCuboid(item) {
-
-            const { x, y, z, width: w, length: l, depth: d } = item;
-
-            const colors = faceColors(
-                o.colorMap.get(item.description) ?? o.colors[0]
-            );
-
-            const p000 = p(x,   y,   z);
-            const p100 = p(x+w, y,   z);
-            const p010 = p(x,   y+l, z);
-            const p110 = p(x+w, y+l, z);
-
-            const p001 = p(x,   y,   z+d);
-            const p101 = p(x+w, y,   z+d);
-            const p011 = p(x,   y+l, z+d);
-            const p111 = p(x+w, y+l, z+d);
-
-            /* +X face */
-            quad([p101, p111, p110, p100], colors.right);
-
-            /* +Y face */
-            quad([p011, p111, p110, p010], colors.left);
-
-            /* top */
-            quad([p001, p101, p111, p011], colors.top);
-        }
-
-        /* sweep ordering */
         const sorted = [...items].sort((a, b) =>
-            (a.z + a.depth)  - (b.z + b.depth)  ||
+            (a.z + a.depth) - (b.z + b.depth) ||
             (a.y + a.length) - (b.y + b.length) ||
-            (a.x + a.width)  - (b.x + b.width)
+            (a.x + a.width) - (b.x + b.width)
         );
 
-        sorted.forEach(drawCuboid);
+        sorted.forEach(item => {
+
+            const {x, y, z, width: w, length: l, depth: d, color} = item;
+
+            const p000 = project(x, y, z);
+            const p100 = project(x + w, y, z);
+            const p010 = project(x, y + l, z);
+            const p110 = project(x + w, y + l, z);
+
+            const p001 = project(x, y, z + d);
+            const p101 = project(x + w, y, z + d);
+            const p011 = project(x, y + l, z + d);
+            const p111 = project(x + w, y + l, z + d);
+
+            emitQuad([p101, p111, p110, p100], color.right);
+            emitQuad([p011, p111, p110, p010], color.left);
+            emitQuad([p001, p101, p111, p011], color.top);
+
+        });
+
     }
 
     // ─── Plugin ───────────────────────────────────────────────────────────────
@@ -203,18 +176,18 @@
         createPacPlugin(pac, options = {}) {
 
             const defaults = {
-                colors:       options.colors       ?? DEFAULT_COLORS,
+                colors: options.colors ?? DEFAULT_COLORS,
                 outlineColor: options.outlineColor ?? '#1a1a2e',
                 outlineWidth: options.outlineWidth ?? 1.5,
                 boxWallColor: options.boxWallColor ?? 'rgba(200,205,220,0.5)',
                 boxEdgeColor: options.boxEdgeColor ?? '#4a4a6a',
                 boxEdgeWidth: options.boxEdgeWidth ?? 2,
-                padding:      options.padding      ?? 20,
-                font:         options.font         ?? '11px sans-serif',
-                legendColor:  options.legendColor  ?? '#333333',
-                showLegend:   options.showLegend   ?? true,
-                legendRowH:   options.legendRowH   ?? 18,
-                swatchSize:   options.swatchSize   ?? 12,
+                padding: options.padding ?? 20,
+                font: options.font ?? '11px sans-serif',
+                legendColor: options.legendColor ?? '#333333',
+                showLegend: options.showLegend ?? true,
+                legendRowH: options.legendRowH ?? 18,
+                swatchSize: options.swatchSize ?? 12,
             };
 
             const boxPack = {
@@ -235,97 +208,119 @@
                 packedBox(ctx, packingResult, opts = {}) {
                     const o = Object.assign({}, defaults, opts);
 
-                    const {box,items}=packingResult.boxes[o.boxIndex ?? 0];
+                    const {box, items} = packingResult.boxes[o.boxIndex ?? 0];
 
-                    const W=box.inner_width;
-                    const L=box.inner_length;
-                    const D=box.inner_depth;
+                    const W = box.inner_width;
+                    const L = box.inner_length;
+                    const D = box.inner_depth;
 
-                    const dl=new wakaPAC.MetaFile();
+                    const dl = new wakaPAC.MetaFile();
 
                     /* layout */
 
-                    const pad=o.padding;
+                    const pad = o.padding;
 
-                    const availW=ctx.canvas.width-pad*2;
-                    const availH=ctx.canvas.height-pad*2;
+                    const availW = ctx.canvas.width - pad * 2;
+                    const availH = ctx.canvas.height - pad * 2;
 
-                    const s=Math.min(
-                        availW/((W+L)*COS30),
-                        availH/((W+L)*SIN30+D)
+                    const s = Math.min(
+                        availW / ((W + L) * COS30),
+                        availH / ((W + L) * SIN30 + D)
                     );
 
-                    const corners=[[0,0,0],[W,0,0],[0,L,0],[W,L,0],[0,0,D],[W,0,D],[0,L,D],[W,L,D]];
+                    const corners = [[0, 0, 0], [W, 0, 0], [0, L, 0], [W, L, 0], [0, 0, D], [W, 0, D], [0, L, D], [W, L, D]];
 
-                    const px=corners.map(([x,y,z])=>(x-y)*COS30*s);
-                    const py=corners.map(([x,y,z])=>(x+y)*SIN30*s-z*s);
+                    const px = corners.map(([x, y, z]) => (x - y) * COS30 * s);
+                    const py = corners.map(([x, y, z]) => (x + y) * SIN30 * s - z * s);
 
-                    const ox=pad+(availW-(Math.max(...px)-Math.min(...px)))/2-Math.min(...px);
-                    const oy=pad+(availH-(Math.max(...py)-Math.min(...py)))/2-Math.min(...py);
+                    const ox = pad + (availW - (Math.max(...px) - Math.min(...px))) / 2 - Math.min(...px);
+                    const oy = pad + (availH - (Math.max(...py) - Math.min(...py))) / 2 - Math.min(...py);
 
                     /* color mapping */
 
-                    const desc=[...new Set(items.map(i=>i.description))].sort();
+                    const desc = [...new Set(items.map(i => i.description))].sort();
 
-                    const colorMap=new Map(
-                        desc.map((d,i)=>[d,o.colors[i%o.colors.length]])
+                    const colorMap = new Map(
+                        desc.map((d, i) => [d, o.colors[i % o.colors.length]])
                     );
 
-                    o.colorMap=colorMap;
+                    o.colorMap = colorMap;
 
                     /* box walls */
 
-                    drawBoxWalls(dl,W,L,D,s,ox,oy,
+                    drawBoxWalls(dl, W, L, D, s, ox, oy,
                         o.boxWallColor,
                         o.boxEdgeColor,
                         o.boxEdgeWidth
                     );
 
                     /* items */
-                    renderPackedBox(dl, items, s, ox, oy, o);
+                    renderIsometricBoxes(
+                        items.map(i => ({
+                            ...i,
+                            color: faceColors(o.colorMap.get(i.description))
+                        })),
+
+                        (x, y, z) => project(x, y, z, s, ox, oy),
+
+                        (pts, fill) => {
+                            dl.setFillStyle(fill)
+                                .setStrokeStyle(o.outlineColor)
+                                .setLineWidth(o.outlineWidth)
+                                .setLineJoin('round')
+                                .beginPath()
+                                .moveTo(pts[0].x, pts[0].y)
+                                .lineTo(pts[1].x, pts[1].y)
+                                .lineTo(pts[2].x, pts[2].y)
+                                .lineTo(pts[3].x, pts[3].y)
+                                .closePath()
+                                .fill()
+                                .stroke();
+                        }
+                    );
 
                     /* front rim */
 
-                    drawBoxRim(dl,W,L,D,s,ox,oy,
+                    drawBoxRim(dl, W, L, D, s, ox, oy,
                         o.boxEdgeColor,
                         o.boxEdgeWidth
                     );
 
                     /* hit areas */
 
-                    items.forEach(item=>{
-                        const {x,y,z,width:w,length:l,depth:d}=item;
+                    items.forEach(item => {
+                        const {x, y, z, width: w, length: l, depth: d} = item;
 
-                        const pts=[
-                            project(x,y,z+d,s,ox,oy),
-                            project(x+w,y,z+d,s,ox,oy),
-                            project(x+w,y+l,z+d,s,ox,oy),
-                            project(x,y+l,z+d,s,ox,oy)
+                        const pts = [
+                            project(x, y, z + d, s, ox, oy),
+                            project(x + w, y, z + d, s, ox, oy),
+                            project(x + w, y + l, z + d, s, ox, oy),
+                            project(x, y + l, z + d, s, ox, oy)
                         ];
 
-                        const xs=pts.map(p=>p.x);
-                        const ys=pts.map(p=>p.y);
+                        const xs = pts.map(p => p.x);
+                        const ys = pts.map(p => p.y);
 
-                        const minX=Math.min(...xs);
-                        const minY=Math.min(...ys);
+                        const minX = Math.min(...xs);
+                        const minY = Math.min(...ys);
 
-                        dl.hitArea('rect',{
-                            x:minX,
-                            y:minY,
-                            w:Math.max(...xs)-minX,
-                            h:Math.max(...ys)-minY,
-                            data:item
+                        dl.hitArea('rect', {
+                            x: minX,
+                            y: minY,
+                            w: Math.max(...xs) - minX,
+                            h: Math.max(...ys) - minY,
+                            data: item
                         });
                     });
 
                     /* legend */
 
-                    if(o.showLegend && desc.length){
+                    if (o.showLegend && desc.length) {
                         drawLegend(
                             dl,
-                            desc.map(d=>({color:colorMap.get(d),label:d})),
+                            desc.map(d => ({color: colorMap.get(d), label: d})),
                             pad,
-                            ctx.canvas.height-pad-desc.length*o.legendRowH,
+                            ctx.canvas.height - pad - desc.length * o.legendRowH,
                             o.font,
                             o.legendColor,
                             o.swatchSize,
@@ -339,7 +334,7 @@
 
             return {
                 onComponentCreated(abstraction, pacId, config) {
-                    const key  = config.wakaBoxPack?.property ?? '_pack';
+                    const key = config.wakaBoxPack?.property ?? '_pack';
                     const opts = Object.assign({}, config.wakaBoxPack ?? {});
                     delete opts.property;
 
@@ -349,10 +344,12 @@
                     }
 
                     const wrapped = Object.create(null);
+
                     for (const name of Object.keys(boxPack)) {
                         wrapped[name] = (ctx, data, o2) =>
                             boxPack[name](ctx, data, Object.assign({}, opts, o2));
                     }
+
                     abstraction[key] = wrapped;
                 }
             };
