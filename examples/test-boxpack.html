@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakaBoxPack Demo</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: system-ui, sans-serif;
+            background: #f0f2f5;
+            color: #222;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 32px 16px;
+            gap: 24px;
+        }
+
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            color: #1a1a2e;
+        }
+
+        .layout {
+            display: flex;
+            gap: 24px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .panel {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+
+        /* Canvas component */
+        .canvas-panel {
+            flex: 1 1 480px;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 460px;
+            cursor: crosshair;
+        }
+
+        /* Controls sidebar */
+        .controls-panel {
+            flex: 0 0 240px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .controls-panel h2 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #888;
+        }
+
+        .box-nav {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .box-nav button {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #fafafa;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.15s;
+        }
+
+        .box-nav button:hover { background: #f0f0f0; }
+        .box-nav button:disabled { opacity: 0.35; cursor: default; }
+
+        .box-label {
+            flex: 1;
+            text-align: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #444;
+        }
+
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            padding: 4px 0;
+            border-bottom: 1px solid #f0f0f0;
+            color: #555;
+        }
+
+        .stat span:last-child { font-weight: 600; color: #222; }
+
+        .tooltip {
+            background: #1a1a2e;
+            color: #fff;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            min-height: 60px;
+        }
+
+        .tooltip em {
+            color: #aaa;
+            font-style: normal;
+        }
+
+        /* Unpacked warning */
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 0.82rem;
+            color: #856404;
+            display: none;
+        }
+
+        .warning.visible { display: block; }
+    </style>
+</head>
+<body>
+
+<h1>WakaBoxPack — isometric packing visualiser</h1>
+
+<div class="layout">
+
+    <div class="panel canvas-panel">
+        <canvas id="boxCanvas" data-pac-id="boxCanvas" width="480" height="460"></canvas>
+    </div>
+
+    <div class="panel controls-panel">
+        <h2>Box navigation</h2>
+
+        <div class="box-nav">
+            <button id="btnPrev">◀</button>
+            <span class="box-label" id="boxLabel">Box 1 of 1</span>
+            <button id="btnNext">▶</button>
+        </div>
+
+        <h2>Stats</h2>
+        <div class="stat"><span>Boxes needed</span><span id="statBoxes">—</span></div>
+        <div class="stat"><span>Total weight</span><span id="statWeight">—</span></div>
+        <div class="stat"><span>Items in box</span><span id="statItems">—</span></div>
+        <div class="stat"><span>Gross weight</span><span id="statGross">—</span></div>
+
+        <h2>Hover / click item</h2>
+        <div class="tooltip" id="tooltip"><em>Hover or click an item in the diagram</em></div>
+
+        <div class="warning" id="warning">
+            ⚠ Some items could not be packed and require manual handling.
+        </div>
+    </div>
+
+</div>
+
+<script src="../wakapac.js"></script>
+<script src="../plugins/wakaboxpack.js"></script>
+<script>
+    // ─── Sample packing result ────────────────────────────────────────────────
+    //
+    // This mimics the JSON output of ShipmentRouter::pack() — i.e. what you get
+    // from json_encode($router->pack($items)) on the PHP side.
+    //
+    // Dimensions in mm, weights in grams.
+    // x/y/z and width/length/depth on each item are the placed coordinates and
+    // post-rotation dimensions as returned by dvdoug/boxpacker.
+    //
+    const packingResult = {
+        box_count: 2,
+        total_weight: 4800,
+        has_unpacked: false,
+        unpacked_items: [],
+
+        boxes: [
+            {
+                gross_weight: 2800,
+                item_weight: 2400,
+
+                box: {
+                    reference: 'medium-box',
+                    inner_width: 400,
+                    inner_length: 300,
+                    inner_depth: 250,
+                    empty_weight: 400,
+                    max_weight: 15000,
+                },
+
+                items: [
+                    // floor
+                    { description:'Book', x:0,   y:0,   z:0,  width:200, length:300, depth:30, weight:600 },
+
+                    { description:'Thermos', x:200, y:0,   z:0, width:80,  length:140, depth:200, weight:400 },
+
+                    { description:'Tea Bags', x:200, y:140, z:0, width:120, length:120, depth:80, weight:400 },
+
+                    // on book
+                    { description:'Coffee Mug', x:0,   y:0,   z:30, width:100, length:140, depth:120, weight:350 },
+
+                    { description:'Coffee Mug', x:100, y:0,   z:30, width:100, length:140, depth:120, weight:350 },
+
+                    { description:'Phone Cable', x:0, y:160, z:30, width:200, length:60, depth:40, weight:100 },
+
+                    { description:'Phone Cable', x:0, y:220, z:30, width:200, length:60, depth:40, weight:100 },
+
+                    // on mugs
+                    { description:'Notebook', x:0, y:0, z:150, width:200, length:140, depth:20, weight:250 },
+                ],
+            },
+
+            {
+                gross_weight: 2000,
+                item_weight: 1600,
+
+                box: {
+                    reference: 'small-box',
+                    inner_width: 250,
+                    inner_length: 200,
+                    inner_depth: 180,
+                    empty_weight: 400,
+                    max_weight: 10000,
+                },
+
+                items: [
+                    // floor
+                    { description:'Book', x:0,   y:0, z:0, width:150, length:200, depth:30, weight:600 },
+
+                    { description:'Tea Bags', x:150, y:0, z:0, width:100, length:100, depth:80, weight:400 },
+
+                    // layer 1
+                    { description:'Coffee Mug', x:0, y:0, z:30, width:120, length:120, depth:120, weight:350 },
+
+                    // shifted slightly to avoid mug footprint
+                    { description:'Notebook', x:0, y:120, z:30, width:140, length:80, depth:20, weight:250 },
+
+                    { description:'Phone Cable', x:0, y:120, z:50, width:140, length:80, depth:30, weight:100 },
+
+                    // upper tea bags moved forward so it doesn't touch mug
+                    { description:'Tea Bags', x:150, y:110, z:80, width:100, length:70, depth:60, weight:400 },
+                ],
+            },
+        ],
+    };
+
+    // ─── UI helpers ───────────────────────────────────────────────────────────
+
+    function updateStats(boxIndex) {
+        const box = packingResult.boxes[boxIndex];
+
+        document.getElementById('statBoxes').textContent = packingResult.box_count;
+        document.getElementById('statWeight').textContent = (packingResult.total_weight / 1000).toFixed(2) + ' kg';
+        document.getElementById('statItems').textContent  = box.items.length;
+        document.getElementById('statGross').textContent  = (box.gross_weight / 1000).toFixed(2) + ' kg';
+        document.getElementById('boxLabel').textContent   = `Box ${boxIndex + 1} of ${packingResult.box_count}`;
+        document.getElementById('btnPrev').disabled = boxIndex === 0;
+        document.getElementById('btnNext').disabled = boxIndex === packingResult.box_count - 1;
+
+        if (packingResult.has_unpacked) {
+            document.getElementById('warning').classList.add('visible');
+        }
+    }
+
+    function showHit(hit) {
+        const el = document.getElementById('tooltip');
+        if (!hit) {
+            el.innerHTML = '<em>Hover or click an item in the diagram</em>';
+            return;
+        }
+        el.innerHTML =
+            `<strong>${hit.description}</strong><br>` +
+            `Weight: ${hit.weight} g<br>` +
+            `Position: (${hit.x}, ${hit.y}, ${hit.z}) mm<br>` +
+            `Size: ${hit.width} × ${hit.length} × ${hit.depth} mm`;
+    }
+
+    // ─── WakaPAC component ────────────────────────────────────────────────────
+
+    wakaPAC.use(WakaBoxPack);
+
+    wakaPAC('#boxCanvas', {
+
+        boxIndex: 0,
+        lastDL:   null,
+
+        msgProc(event) {
+            switch (event.message) {
+
+                case 0x000F: { // MSG_PAINT
+                    const ctx = wakaPAC.getDC(this.pacId);
+                    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                    this.lastDL = this._pack.packedBox(ctx, packingResult, { boxIndex: this.boxIndex });
+                    wakaPAC.playMetaFile(ctx, this.lastDL);
+                    wakaPAC.releaseDC(ctx);
+                    break;
+                }
+
+                case 0x0210: { // MSG_LCLICK
+                    if (!this.lastDL) break;
+                    const pos = wakaPAC.MAKEPOINTS(event.lParam);
+                    const hit = wakaPAC.metaFileHitTest(this.lastDL, pos.x, pos.y);
+                    showHit(hit);
+                    break;
+                }
+
+                case 0x0200: { // MSG_MOUSEMOVE
+                    if (!this.lastDL) break;
+                    const pos = wakaPAC.MAKEPOINTS(event.lParam);
+                    const hit = wakaPAC.metaFileHitTest(this.lastDL, pos.x, pos.y);
+                    showHit(hit);
+                    break;
+                }
+            }
+        },
+
+        init() {
+            updateStats(this.boxIndex);
+            wakaPAC.invalidateRect(this.pacId);
+
+            document.getElementById('btnPrev').addEventListener('click', () => {
+                if (this.boxIndex > 0) {
+                    this.boxIndex--;
+                    updateStats(this.boxIndex);
+                    wakaPAC.invalidateRect(this.pacId);
+                }
+            });
+
+            document.getElementById('btnNext').addEventListener('click', () => {
+                if (this.boxIndex < packingResult.box_count - 1) {
+                    this.boxIndex++;
+                    updateStats(this.boxIndex);
+                    wakaPAC.invalidateRect(this.pacId);
+                }
+            });
+        },
+
+    }, { wakaBoxPack: { property: '_pack' } });
+
+</script>
+</body>
+</html>
