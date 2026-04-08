@@ -10807,6 +10807,39 @@
                     }
                     break;
 
+                case 'polygon': {
+                    const pts = op.points;
+
+                    if (!pts || pts.length < 6) {
+                        break;
+                    }
+
+                    let inside = false;
+
+                    for (let i = 0, j = pts.length - 2; i < pts.length; i += 2) {
+                        const xi = pts[i];
+                        const yi = pts[i + 1];
+                        const xj = pts[j];
+                        const yj = pts[j + 1];
+
+                        const intersect =
+                            ((yi > ly) !== (yj > ly)) &&
+                            (lx < (xj - xi) * (ly - yi) / (yj - yi) + xi);
+
+                        if (intersect) {
+                            inside = !inside;
+                        }
+
+                        j = i;
+                    }
+
+                    if (inside) {
+                        return op.data ?? null;
+                    }
+
+                    break;
+                }
+
                 case 'sector': {
                     // Distance from centre
                     const dx = lx - op.cx;
