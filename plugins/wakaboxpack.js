@@ -150,51 +150,50 @@
     }
 
     /**
-     * Draw a single isometric cuboid into the MetaFile.
+     * Collect the three visible faces of a cuboid into the face list.
+     * Faces are stored in world space so they can be depth-sorted before
+     * projection. Each face carries its fill color and a depth key computed
+     * from the sum of its four world-space vertices.
      *
-     * The three visible faces are drawn left → right → top so that the top
-     * face wins on shared edges, giving a clean lit-from-above appearance.
+     * Viewer is at low-X, low-Y, so the three visible faces are:
+     *   front  (y = pos.y plane, faces toward viewer)
+     *   right  (x = pos.x+dim.w plane, faces right)
+     *   top    (z = pos.z+dim.d plane, faces up)
      *
-     * Coordinate conventions match PackedItem:
-     *   pos.x / dim.w = width  axis
-     *   pos.y / dim.l = length axis
-     *   pos.z / dim.d = height axis (upward)
-     *
-     * @param {Object} dl   wakaPAC.MetaFile instance
-     * @param {Object} pos  World origin: { x, y, z }
-     * @param {Object} dim  World dimensions: { w, l, d }
-     * @param {number} s    Scale factor (world units → pixels)
-     * @param {number} ox   Canvas X offset of the iso scene origin
-     * @param {number} oy   Canvas Y offset of the iso scene origin
-     * @param {{ top: string, left: string, right: string }} colors  Face fill colors
-     * @param {string} outline    Stroke color
-     * @param {number} lineWidth  Stroke width in pixels
+     * @param {Array}  faces  Accumulator array
+     * @param {Object} pos    World origin: { x, y, z }
+     * @param {Object} dim    World dimensions: { w, l, d }
+     * @param {{ top: string, left: string, right: string }} colors
      */
-    function emitCuboid(dl, pos, dim, s, ox, oy, colors, outline, lineWidth) {
+    function collectFaces(faces, pos, dim, colors) {
         const {x, y, z} = pos;
         const {w, l, d} = dim;
+        const x2 = x + w, y2 = y + l, z2 = z + d;
 
-        // Project all 8 corners. Naming: p[xHi][yHi][zHi]
-        const p000 = project(x, y, z, s);
-        const p100 = project(x + w, y, z, s);
-        const p010 = project(x, y + l, z, s);
-        const p110 = project(x + w, y + l, z, s);
-        const p001 = project(x, y, z + d, s);
-        const p101 = project(x + w, y, z + d, s);
-        const p011 = project(x, y + l, z + d, s);
-        const p111 = project(x + w, y + l, z + d, s);
+        // Eight corners in world space
+        const p000 = {x, y, z};
+        const p100 = {x: x2, y, z};
+        const p010 = {x, y: y2, z};
+        const p110 = {x: x2, y: y2, z};
+        const p001 = {x, y, z: z2};
+        const p101 = {x: x2, y, z: z2};
+        const p011 = {x, y: y2, z: z2};
+        const p111 = {x: x2, y: y2, z: z2};
 
-        // Shift projected points to canvas space
-        const o = pt => ({x: pt.x + ox, y: pt.y + oy});
+        // depth key = sum of vertex world coords (higher = further from viewer = draw first)
+        const key = (...pts) => pts.reduce((s, p) => s + p.x + p.y + p.z, 0);
 
-        // Front face (toward viewer)
-        emitFace(dl, [o(p001), o(p101), o(p100), o(p000)], colors.left, outline, lineWidth);
+        //  Back face (y = y2)
+        const back = [p011, p111, p110, p010];
+        faces.push({pts: back, fill: colors.left, depth: key(...back)});
 
-        // Right face
-        emitFace(dl, [o(p101), o(p111), o(p110), o(p100)], colors.right, outline, lineWidth);
+        // Right face (x = x2, faces toward viewer at low-X)
+        const right = [p101, p111, p110, p100];
+        faces.push({pts: right, fill: colors.right, depth: key(...right)});
 
-        // Top face
-        emitFace(dl, [o(p001), o(p101), o(p111), o(p011)], colors.top, outline, lineWidth);
+        // Top face (z = z2)
+        const top = [p001, p101, p111, p011];
+        faces.push({pts: top, fill: colors.top, depth: key(...top)});
     }
 
     /**
@@ -247,16 +246,15 @@
         const p100 = off(project(innerW, 0, 0, s));
         const p010 = off(project(0, innerL, 0, s));
         const p110 = off(project(innerW, innerL, 0, s));
-        const p001 = off(project(0, 0, innerD, s));
-        const p101 = off(project(innerW, 0, innerD, s));
         const p011 = off(project(0, innerL, innerD, s));
         const p111 = off(project(innerW, innerL, innerD, s));
+        const p101 = off(project(innerW, 0, innerD, s));
 
-        // Floor
+        // Floor (z=0)
         emitFace(dl, [p000, p100, p110, p010], wallColor, edgeColor, edgeWidth);
-        // Back-left wall  (high Y)
+        // Back wall (high Y — furthest from viewer)
         emitFace(dl, [p010, p110, p111, p011], wallColor, edgeColor, edgeWidth);
-        // Back-right wall (high X)
+        // Back-right wall (high X — furthest right)
         emitFace(dl, [p100, p110, p111, p101], wallColor, edgeColor, edgeWidth);
     }
 
@@ -510,29 +508,36 @@
                     dl.save();
                     emitBoxClip(dl, innerW, innerL, innerD, s, ox, oy);
 
-                    // Sort back-to-front for the painter's algorithm.
-                    // In this projection the viewer is at low-X, low-Y.
-                    // Primary key: high Y+length first (deepest into scene draws first).
-                    // Secondary:   high X+width (further right = further back on right wall).
-                    // Tertiary:    low Z (floor items before stacked items at same XY).
-                    // Depth-sort back-to-front using the far corner of each cuboid:
-                    // (x+width) + (y+length) + (z+depth).
-                    // Using the origin alone misorders large items that extend toward
-                    // the viewer — the far corner is what determines true scene depth.
-                    const sortedItems = [...items].sort((a, b) =>
-                        ((b.x + b.width) + (b.y + b.length) + (b.z + b.depth)) -
-                        ((a.x + a.width) + (a.y + a.length) + (a.z + a.depth))
-                    );
+                    // Collect all faces from all items in world space, then sort
+                    // by depth before projecting. Face-level sorting is required —
+                    // item-level sorting breaks when large items span multiple depth
+                    // zones and their faces interleave with faces from other items.
+                    const allFaces = [];
 
-                    for (const item of sortedItems) {
+                    for (const item of items) {
                         const pos = {x: item.x, y: item.y, z: item.z};
                         const dim = {w: item.width, l: item.length, d: item.depth};
+                        collectFaces(allFaces, pos, dim,
+                            faceColors(colorMap.get(item.description) ?? o.colors[0]));
+                    }
 
-                        emitCuboid(dl, pos, dim, s, ox, oy,
-                            faceColors(colorMap.get(item.description) ?? o.colors[0]),
-                            o.outlineColor, o.outlineWidth
-                        );
+                    // Sort descending: higher depth key = further from viewer = draw first
+                    allFaces.sort((a, b) => b.depth - a.depth);
 
+                    // Project and emit each face
+                    for (const f of allFaces) {
+                        const pts = f.pts.map(p => {
+                            const sc = project(p.x, p.y, p.z, s);
+                            return {x: sc.x + ox, y: sc.y + oy};
+                        });
+                        emitFace(dl, pts, f.fill, o.outlineColor, o.outlineWidth);
+                    }
+
+                    // Hit areas — one per item, on the top face bounding rect.
+                    // Emitted after faces so they sit on top of all drawing ops.
+                    for (const item of items) {
+                        const pos = {x: item.x, y: item.y, z: item.z};
+                        const dim = {w: item.width, l: item.length, d: item.depth};
                         emitItemHitArea(dl, pos, dim, s, ox, oy, {
                             description: item.description,
                             weight: item.weight,
