@@ -181,7 +181,19 @@
         const p111 = {x: x2, y: y2, z: z2};
 
         // depth key = sum of vertex world coords (higher = further from viewer = draw first)
-        const key = (...pts) => pts.reduce((s, p) => s + p.x + p.y + p.z, 0);
+        const key = (...pts) => {
+            let m = -Infinity;
+
+            for (const p of pts) {
+                const d = p.x + p.y;
+
+                if (d > m) {
+                    m = d;
+                }
+            }
+
+            return m;
+        };
 
         //  Back face (y = y2)
         const back = [p011, p111, p110, p010];
