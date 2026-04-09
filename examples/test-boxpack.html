@@ -282,19 +282,6 @@
         }
     }
 
-    function showHit(hit) {
-        const el = document.getElementById('tooltip');
-        if (!hit) {
-            el.innerHTML = '<em>Hover or click an item in the diagram</em>';
-            return;
-        }
-        el.innerHTML =
-            `<strong>${hit.description}</strong><br>` +
-            `Weight: ${hit.weight} g<br>` +
-            `Position: (${hit.x}, ${hit.y}, ${hit.z}) mm<br>` +
-            `Size: ${hit.width} × ${hit.length} × ${hit.depth} mm`;
-    }
-
     // ─── WakaPAC component ────────────────────────────────────────────────────
 
     wakaPAC.use(WakaBoxPack);
@@ -313,22 +300,6 @@
                     this.lastDL = this._pack.packedBox(ctx, packingResult, { boxIndex: this.boxIndex });
                     wakaPAC.playMetaFile(ctx, this.lastDL);
                     wakaPAC.releaseDC(ctx);
-                    break;
-                }
-
-                case 0x0210: { // MSG_LCLICK
-                    if (!this.lastDL) break;
-                    const pos = wakaPAC.MAKEPOINTS(event.lParam);
-                    const hit = wakaPAC.metaFileHitTest(this.lastDL, pos.x, pos.y);
-                    showHit(hit);
-                    break;
-                }
-
-                case 0x0200: { // MSG_MOUSEMOVE
-                    if (!this.lastDL) break;
-                    const pos = wakaPAC.MAKEPOINTS(event.lParam);
-                    const hit = wakaPAC.metaFileHitTest(this.lastDL, pos.x, pos.y);
-                    showHit(hit);
                     break;
                 }
             }
