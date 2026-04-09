@@ -212,38 +212,6 @@
         quad([proj(0,0,0), proj(0,L,0), proj(0,L,D), proj(0,0,D)]); // left wall  (x=0)
     }
 
-    /**
-     * Draw the nine structural edges of the open box as a wireframe overlay.
-     * Must be called after renderCuboids() so the outline sits on top of items.
-     * Edges: three vertical corners, two bottom rim edges, four top rim edges.
-     *
-     * @param {Object}   dl     wakaPAC.MetaFile instance
-     * @param {number}   W      Box inner width  (mm)
-     * @param {number}   L      Box inner length (mm)
-     * @param {number}   D      Box inner depth  (mm)
-     * @param {Function} proj   proj(x,y,z) → {x,y}
-     * @param {string}   stroke CSS stroke color
-     * @param {number}   lw     Stroke width in pixels
-     */
-    function drawBoxRim(dl, W, L, D, proj, stroke, lw) {
-
-        dl.setStrokeStyle(stroke).setLineWidth(lw).setLineCap('round');
-
-        function edge(a, b) {
-            dl.beginPath().moveTo(a.x, a.y).lineTo(b.x, b.y).stroke();
-        }
-
-        edge(proj(0,0,0), proj(0,0,D)); // vertical: front-left
-        edge(proj(W,0,0), proj(W,0,D)); // vertical: front-right
-        edge(proj(0,L,0), proj(0,L,D)); // vertical: back-left
-        edge(proj(0,0,0), proj(W,0,0)); // bottom: front
-        edge(proj(0,0,0), proj(0,L,0)); // bottom: left
-        edge(proj(0,0,D), proj(W,0,D)); // top: front
-        edge(proj(0,0,D), proj(0,L,D)); // top: left
-        edge(proj(W,0,D), proj(W,L,D)); // top: right
-        edge(proj(0,L,D), proj(W,L,D)); // top: back
-    }
-
     // ─── Legend ───────────────────────────────────────────────────────────────
 
     /**
@@ -396,10 +364,7 @@
                         }
                     );
 
-                    // 3. Box rim — drawn after items so the frame sits on top
-                    drawBoxRim(dl, W, L, D, proj, o.boxEdgeColor, o.boxEdgeWidth);
-
-                    // 4. Legend
+                    // 3. Legend
                     if (o.showLegend && descriptions.length) {
                         drawLegend(
                             dl,
