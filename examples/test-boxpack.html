@@ -144,13 +144,13 @@
 
 <h1>WakaBoxPack — isometric packing visualiser</h1>
 
-<div class="layout">
+<div class="layout" data-pac-id="boxPacker">
 
     <div class="panel canvas-panel">
         <canvas id="boxCanvas" data-pac-id="boxCanvas" width="480" height="460"></canvas>
     </div>
 
-    <div class="panel controls-panel">
+    <div class="panel controls-panel" data-pac-id="boxControls">
         <h2>Box navigation</h2>
 
         <div class="box-nav">
@@ -286,6 +286,33 @@
 
     wakaPAC.use(WakaBoxPack);
 
+    const MSG_PREV_BOX = wakaPAC.MSG_USER + 1;
+    const MSG_NEXT_BOX = wakaPAC.MSG_USER + 2;
+
+    // ─── Controls component ───────────────────────────────────────────────────
+
+    wakaPAC('boxControls', {
+
+        msgProc(event) {
+            if (event.message !== wakaPAC.MSG_LCLICK) {
+                return;
+            }
+
+            switch (event.target?.id) {
+                case 'btnPrev':
+                    wakaPAC.sendMessageToParent(this.pacId, MSG_PREV_BOX, 0, 0);
+                    return false;
+
+                case 'btnNext':
+                    wakaPAC.sendMessageToParent(this.pacId, MSG_NEXT_BOX, 0, 0);
+                    return false;
+            }
+        },
+
+    });
+
+    // ─── Canvas component ─────────────────────────────────────────────────────
+
     wakaPAC('#boxCanvas', {
 
         boxIndex: 0,
@@ -294,7 +321,7 @@
         msgProc(event) {
             switch (event.message) {
 
-                case 0x000F: { // MSG_PAINT
+                case wakaPAC.MSG_PAINT: {
                     const ctx = wakaPAC.getDC(this.pacId);
                     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
                     this.lastDL = this._pack.packedBox(ctx, packingResult, { boxIndex: this.boxIndex });
@@ -302,31 +329,47 @@
                     wakaPAC.releaseDC(ctx);
                     break;
                 }
+
+                case MSG_PREV_BOX: {
+                    if (this.boxIndex > 0) {
+                        this.boxIndex--;
+                        updateStats(this.boxIndex);
+                        wakaPAC.invalidateRect(this.pacId);
+                    }
+                    break;
+                }
+
+                case MSG_NEXT_BOX: {
+                    if (this.boxIndex < packingResult.box_count - 1) {
+                        this.boxIndex++;
+                        updateStats(this.boxIndex);
+                        wakaPAC.invalidateRect(this.pacId);
+                    }
+                    break;
+                }
             }
         },
 
         init() {
             updateStats(this.boxIndex);
-            wakaPAC.invalidateRect(this.pacId);
-
-            document.getElementById('btnPrev').addEventListener('click', () => {
-                if (this.boxIndex > 0) {
-                    this.boxIndex--;
-                    updateStats(this.boxIndex);
-                    wakaPAC.invalidateRect(this.pacId);
-                }
-            });
-
-            document.getElementById('btnNext').addEventListener('click', () => {
-                if (this.boxIndex < packingResult.box_count - 1) {
-                    this.boxIndex++;
-                    updateStats(this.boxIndex);
-                    wakaPAC.invalidateRect(this.pacId);
-                }
-            });
         },
 
     }, { wakaBoxPack: { property: '_pack' } });
+
+    // ─── Parent component (routes navigation messages to canvas) ─────────────
+
+    wakaPAC('boxPacker', {
+
+        msgProc(event) {
+            switch (event.message) {
+                case MSG_PREV_BOX:
+                case MSG_NEXT_BOX:
+                    wakaPAC.sendMessage('boxCanvas', event.message, 0, 0);
+                    return false;
+            }
+        },
+
+    });
 
 </script>
 </body>
