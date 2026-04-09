@@ -244,7 +244,7 @@
                         }
                     );
 
-                    drawBoxRim(dl, W, L, D, proj, o.boxEdgeColor, o.boxEdgeWidth);
+                    //drawBoxRim(dl, W, L, D, proj, o.boxEdgeColor, o.boxEdgeWidth);
 
                     [...items].reverse().forEach(item => {
 
