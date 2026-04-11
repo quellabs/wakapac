@@ -9124,13 +9124,33 @@
             // Hydrate fields into abstraction before context is created
             if (config?.hydrate === true) {
                 container.querySelectorAll('[data-pac-field]').forEach(el => {
-                    if (Utils.belongsToPacContainer(container, el)) {
-                        const name = el.getAttribute('name');
-                        const value = el.value ?? el.getAttribute('value');
+                    // Element belongs to another container. Skip.
+                    if (!Utils.belongsToPacContainer(container, el)) {
+                        return;
+                    }
 
-                        if (name) {
-                            containerAbstraction[name] = value;
+                    // Fetch name attribute
+                    const name = el.getAttribute('name');
+
+                    // No name attribute exists. Skip.
+                    if (!name) {
+                        return;
+                    }
+
+                    // Special case for radio buttons
+                    if (el.type === 'radio') {
+                        // Initialize the group property with an empty string on first encounter
+                        if (!(name in abstraction)) {
+                            abstraction[name] = '';
                         }
+
+                        // Only overwrite if this radio button is the selected one
+                        if (el.checked) {
+                            abstraction[name] = el.value;
+                        }
+                    } else {
+                        // For all other field types, read the current value or fall back to the HTML attribute
+                        abstraction[name] = el.value ?? el.getAttribute('value');
                     }
                 });
             }
