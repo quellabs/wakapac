@@ -9118,8 +9118,25 @@
                 delay: 300
             }, options);
 
+            // Create a per-container copy so hydration does not bleed across containers
+            const containerAbstraction = isMultiSelector ? Object.assign({}, abstraction) : abstraction;
+
+            // Hydrate fields into abstraction before context is created
+            if (config?.hydrate === true) {
+                container.querySelectorAll('[data-pac-field]').forEach(el => {
+                    if (Utils.belongsToPacContainer(container, el)) {
+                        const name = el.getAttribute('name');
+                        const value = el.value ?? el.getAttribute('value');
+
+                        if (name) {
+                            containerAbstraction[name] = value;
+                        }
+                    }
+                });
+            }
+
             // Create context for this container
-            const context = new Context(container, abstraction, config);
+            const context = new Context(container, containerAbstraction, config);
 
             // Register using pac-id as key (not selector)
             window.PACRegistry.register(pacId, context);
