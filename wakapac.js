@@ -612,6 +612,27 @@
         },
 
         /**
+         * Gets a nested property value from an object using dot and bracket notation
+         * @param {object} obj - The object to read from
+         * @param {string} path - The property path (e.g., "configuration[theme]" or "todos[0].completed")
+         * @returns {*} The value at the given path, or undefined if any part of the path does not exist
+         */
+        getNestedValue(obj, path) {
+            const parts = path.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
+            let current = obj;
+
+            for (const part of parts) {
+                if (!(part in current)) {
+                    return undefined;
+                }
+
+                current = current[part];
+            }
+
+            return current;
+        },
+
+        /**
          * Sets a nested property value on the reactive abstraction
          * @param {string} path - The property path (e.g., "todos[0].completed")
          * @param {*} value - The value to set
@@ -9137,20 +9158,39 @@
                         return;
                     }
 
-                    // Special case for radio buttons
-                    if (el.type === 'radio') {
-                        // Initialize the group property with an empty string on first encounter
-                        if (!(name in abstraction)) {
-                            abstraction[name] = '';
-                        }
+                    switch (el.type) {
+                        case 'checkbox':
+                            // Read checked state as boolean
+                            Utils.setNestedProperty(name, el.checked, abstraction);
+                            break;
 
-                        // Only overwrite if this radio button is the selected one
-                        if (el.checked) {
-                            abstraction[name] = el.value;
-                        }
-                    } else {
-                        // For all other field types, read the current value or fall back to the HTML attribute
-                        abstraction[name] = el.value ?? el.getAttribute('value');
+                        case 'number':
+                        case 'range':
+                            // Convert numeric input values to actual numbers
+                            Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', abstraction);
+                            break;
+
+                        case 'radio':
+                            // Initialize the group property with an empty string on first encounter
+                            if (Utils.getNestedValue(abstraction, name) === undefined) {
+                                Utils.setNestedProperty(name, '', abstraction);
+                            }
+
+                            // Only overwrite if this radio button is the selected one
+                            if (el.checked) {
+                                Utils.setNestedProperty(name, el.value, abstraction);
+                            }
+
+                            break;
+
+                        case 'file':
+                            // File inputs cannot be hydrated — skip
+                            break;
+
+                        default:
+                            // For all other field types, read the current value or fall back to the HTML attribute
+                            Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), abstraction);
+                            break;
                     }
                 });
             }
