@@ -4471,11 +4471,21 @@
             let current = obj;
 
             for (let i = 0; i < parts.length; i++) {
+                // Null check
                 if (current == null) {
                     return undefined;
                 }
 
-                const part = parts[i];
+                // Extract the part
+                let part = parts[i];
+
+                // If the path segment is not a numeric index and not a direct key on the
+                // current object, try to resolve it as a variable from the root context.
+                // This allows dynamic bracket notation like regions[country] where 'country'
+                // is a reactive property rather than a literal key.
+                if (isNaN(part) && !(part in current) && part in obj) {
+                    part = obj[part];
+                }
 
                 current = current[part];
             }
