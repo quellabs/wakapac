@@ -9154,6 +9154,18 @@
 
             // Hydrate fields into abstraction before context is created
             if (config?.hydrate === true) {
+                // Read initial state from data-pac-state attribute if present
+                const pacState = container.dataset.pacState;
+
+                if (pacState) {
+                    try {
+                        Object.assign(abstraction, JSON.parse(pacState));
+                    } catch (e) {
+                        console.warn('WakaPAC: Failed to parse data-pac-state:', e);
+                    }
+                }
+
+                // Scan data-pac-field elements and add to abstraction
                 container.querySelectorAll('[data-pac-field]').forEach(el => {
                     // Element belongs to another container. Skip.
                     if (!Utils.belongsToPacContainer(container, el)) {
