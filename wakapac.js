@@ -612,6 +612,27 @@
         },
 
         /**
+         * Gets a nested property value from an object using dot and bracket notation
+         * @param {object} obj - The object to read from
+         * @param {string} path - The property path (e.g., "configuration[theme]" or "todos[0].completed")
+         * @returns {*} The value at the given path, or undefined if any part of the path does not exist
+         */
+        getNestedValue(obj, path) {
+            const parts = path.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
+            let current = obj;
+
+            for (const part of parts) {
+                if (!(part in current)) {
+                    return undefined;
+                }
+
+                current = current[part];
+            }
+
+            return current;
+        },
+
+        /**
          * Sets a nested property value on the reactive abstraction
          * @param {string} path - The property path (e.g., "todos[0].completed")
          * @param {*} value - The value to set
@@ -1098,6 +1119,42 @@
             return debounced;
         }
     }
+
+    // ========================================================================
+    // UNIT HANDLING
+    // ========================================================================
+
+    function _registerUnit(library, options = {}) {
+        // Prevent duplicate registration
+        if (_registeredLibs.indexOf(library) !== -1) {
+            return;
+        }
+
+        // The library must expose a factory method that returns
+        // a plugin descriptor. wakaPAC passes itself as the argument,
+        // so the library never needs a hard reference to wakaPAC.
+        if (typeof library.createPacPlugin !== 'function') {
+            throw new Error('wakaPAC.use(): library must implement createPacPlugin()');
+        }
+
+        // Add to registered libs array to prevent duplicates
+        _registeredLibs.push(library);
+
+        // Create the plugin and store
+        const plugin = library.createPacPlugin(wakaPAC, options);
+        _plugins.push(plugin);
+
+        // If the plugin exposes named functions, register it as a unit
+        if (plugin.name && Utils.isPlainObject(plugin.functions)) {
+            if (_units.get(plugin.name)) {
+                console.warn(`WakaPAC: unit "${plugin.name}" is already registered`);
+            } else {
+                _units.set(plugin.name, plugin.functions);
+                _unitNames.set(library, plugin.name);
+            }
+        }
+    }
+
 
     // ========================================================================
     // REACTIVE PROXY
@@ -4450,11 +4507,26 @@
             let current = obj;
 
             for (let i = 0; i < parts.length; i++) {
+                // Null check
                 if (current == null) {
                     return undefined;
                 }
 
-                const part = parts[i];
+                // Extract the part
+                let part = parts[i];
+
+                // If current is a string, access native string properties directly
+                if (typeof current === 'string') {
+                    return current[part];
+                }
+
+                // If the path segment is not a numeric index and not a direct key on the
+                // current object, try to resolve it as a variable from the root context.
+                // This allows dynamic bracket notation like regions[country] where 'country'
+                // is a reactive property rather than a literal key.
+                if (isNaN(part) && !(part in current) && part in obj) {
+                    part = obj[part];
+                }
 
                 current = current[part];
             }
@@ -9041,6 +9113,109 @@
     }
 
     // ========================================================================
+    // STDLIB — built-in unit
+    // ========================================================================
+
+    _registerUnit({
+        createPacPlugin() {
+            return {
+                /** Unit namespace — accessible in binds as Stdlib.fn() */
+                name: 'Stdlib',
+
+                functions: {
+                    /**
+                     * Logs one or more values to the browser console.
+                     * Useful for inspecting abstraction state from within bind expressions.
+                     * @param {...*} args - Values to log
+                     * @returns {void}
+                     */
+                    log: (...args) => console.log(...args),
+
+                    beep: (() => {
+                        /** Shared AudioContext — created once on first beep(), reused thereafter. */
+                        let _audioCtx = null;
+
+                        /**
+                         * Plays an audible beep using the Web Audio API.
+                         * Requires a prior user gesture (click, keypress, etc.) — browsers block
+                         * audio on pages the user hasn't interacted with yet.
+                         * Not meaningful as a {{ }} interpolation; use in event bindings.
+                         * @param {number} [frequency=440]  - Tone frequency in Hz
+                         * @param {number} [duration=200]   - Duration in milliseconds
+                         * @param {number} [volume=0.5]     - Gain level (0.0 – 1.0)
+                         * @param {string} [type='square']  - Oscillator type: sine|square|sawtooth|triangle
+                         * @returns {void}
+                         */
+                        return (frequency = 440, duration = 200, volume = 0.5, type = 'square') => {
+                            // Create or reuse the shared AudioContext
+                            if (!_audioCtx || _audioCtx.state === 'closed') {
+                                _audioCtx = new AudioContext();
+                            }
+
+                            const oscillator = _audioCtx.createOscillator();
+                            const gain       = _audioCtx.createGain();
+
+                            oscillator.connect(gain);
+                            gain.connect(_audioCtx.destination);
+
+                            oscillator.type            = type;
+                            oscillator.frequency.value = frequency;
+                            gain.gain.value            = volume;
+
+                            oscillator.start();
+                            oscillator.stop(_audioCtx.currentTime + duration / 1000);
+                        };
+                    })(),
+
+                    /**
+                     * Sends a message to a specific WakaPAC component by id.
+                     * Equivalent to calling wakaPAC.sendMessage() directly, but usable
+                     * in binding expressions via data-pac-bind.
+                     * @param {string} pacId            - The data-pac-id of the target component
+                     * @param {number} message          - Message identifier (e.g. wakaPAC.MSG_USER + 1)
+                     * @param {number} [wParam=0]       - First message parameter (integer)
+                     * @param {number} [lParam=0]       - Second message parameter (integer)
+                     * @param {Object} [extended={}]    - Additional data passed via event.detail
+                     * @returns {void}
+                     */
+                    sendMessage: (pacId, message, wParam = 0, lParam = 0, extended = {}) => {
+                        wakaPAC.sendMessage(pacId, message, wParam, lParam, extended);
+                    },
+
+                    /**
+                     * Sends a message to the parent component of the given container.
+                     * Equivalent to calling wakaPAC.sendMessageToParent() directly, but usable
+                     * in binding expressions via data-pac-bind.
+                     * @param {string} pacId            - The data-pac-id of the child component
+                     * @param {number} message          - Message identifier (e.g. wakaPAC.MSG_USER + 1)
+                     * @param {number} [wParam=0]       - First message parameter (integer)
+                     * @param {number} [lParam=0]       - Second message parameter (integer)
+                     * @param {Object} [extended={}]    - Additional data passed via event.detail
+                     * @returns {void}
+                     */
+                    sendMessageToParent: (pacId, message, wParam = 0, lParam = 0, extended = {}) => {
+                        wakaPAC.sendMessageToParent(pacId, message, wParam, lParam, extended);
+                    },
+
+                    /**
+                     * Broadcasts a message to all active WakaPAC components.
+                     * Equivalent to calling wakaPAC.broadcastMessage() directly, but usable
+                     * in binding expressions via data-pac-bind.
+                     * @param {number} message          - Message identifier (e.g. wakaPAC.MSG_USER + 1)
+                     * @param {number} [wParam=0]       - First message parameter (integer)
+                     * @param {number} [lParam=0]       - Second message parameter (integer)
+                     * @param {Object} [extended={}]    - Additional data passed via event.detail
+                     * @returns {void}
+                     */
+                    broadcastMessage: (message, wParam = 0, lParam = 0, extended = {}) => {
+                        wakaPAC.broadcastMessage(message, wParam, lParam, extended);
+                    }
+                }
+            };
+        }
+    });
+
+    // ========================================================================
     // MAIN FRAMEWORK
     // ========================================================================
 
@@ -9118,8 +9293,76 @@
                 delay: 300
             }, options);
 
+            // Create a per-container copy so hydration does not bleed across containers
+            const containerAbstraction = isMultiSelector ? Object.assign({}, abstraction) : abstraction;
+
+            // Hydrate fields into abstraction before context is created
+            if (config?.hydrate === true) {
+                // Read initial state from data-pac-state attribute if present
+                const pacState = container.dataset.pacState;
+
+                if (pacState) {
+                    try {
+                        Object.assign(abstraction, JSON.parse(pacState));
+                    } catch (e) {
+                        console.warn('WakaPAC: Failed to parse data-pac-state:', e);
+                    }
+                }
+
+                // Scan data-pac-field elements and add to abstraction
+                container.querySelectorAll('[data-pac-field]').forEach(el => {
+                    // Element belongs to another container. Skip.
+                    if (!Utils.belongsToPacContainer(container, el)) {
+                        return;
+                    }
+
+                    // Fetch name attribute
+                    const name = el.getAttribute('name');
+
+                    // No name attribute exists. Skip.
+                    if (!name) {
+                        return;
+                    }
+
+                    switch (el.type) {
+                        case 'checkbox':
+                            // Read checked state as boolean
+                            Utils.setNestedProperty(name, el.checked, abstraction);
+                            break;
+
+                        case 'number':
+                        case 'range':
+                            // Convert numeric input values to actual numbers
+                            Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', abstraction);
+                            break;
+
+                        case 'radio':
+                            // Initialize the group property with an empty string on first encounter
+                            if (Utils.getNestedValue(abstraction, name) === undefined) {
+                                Utils.setNestedProperty(name, '', abstraction);
+                            }
+
+                            // Only overwrite if this radio button is the selected one
+                            if (el.checked) {
+                                Utils.setNestedProperty(name, el.value, abstraction);
+                            }
+
+                            break;
+
+                        case 'file':
+                            // File inputs cannot be hydrated — skip
+                            break;
+
+                        default:
+                            // For all other field types, read the current value or fall back to the HTML attribute
+                            Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), abstraction);
+                            break;
+                    }
+                });
+            }
+
             // Create context for this container
-            const context = new Context(container, abstraction, config);
+            const context = new Context(container, containerAbstraction, config);
 
             // Register using pac-id as key (not selector)
             window.PACRegistry.register(pacId, context);
@@ -9822,34 +10065,7 @@
      * @throws {Error} If lib does not implement createPacPlugin()
      */
     wakaPAC.use = function(library, options = {}) {
-        // Prevent duplicate registration
-        if (_registeredLibs.indexOf(library) !== -1) {
-            return;
-        }
-
-        // The library must expose a factory method that returns
-        // a plugin descriptor. wakaPAC passes itself as the argument,
-        // so the library never needs a hard reference to wakaPAC.
-        if (typeof library.createPacPlugin !== 'function') {
-            throw new Error('wakaPAC.use(): library must implement createPacPlugin()');
-        }
-
-        // Add to registered libs array to prevent duplicates
-        _registeredLibs.push(library);
-
-        // Create the plugin and store
-        const plugin = library.createPacPlugin(wakaPAC, options);
-        _plugins.push(plugin);
-
-        // If the plugin exposes named functions, register it as a unit
-        if (plugin.name && Utils.isPlainObject(plugin.functions)) {
-            if (_units.get(plugin.name)) {
-                console.warn(`WakaPAC: unit "${plugin.name}" is already registered`);
-            } else {
-                _units.set(plugin.name, plugin.functions);
-                _unitNames.set(library, plugin.name);
-            }
-        }
+        _registerUnit(library, options);
     };
 
     /**
