@@ -283,10 +283,12 @@
             pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, { value });
         });
 
+        // Message sent when editor gets focus
         editor.on('focus', function () {
             pac.sendMessage(pacId, pac.MSG_SETFOCUS, 0, 0);
         });
 
+        // Message sent when editor loses focus
         editor.on('blur', function () {
             // Sync value on blur — this is the point at which CKEditor 4 also
             // updates the source textarea, so the two are always consistent.
