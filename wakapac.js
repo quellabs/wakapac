@@ -4479,6 +4479,11 @@
                 // Extract the part
                 let part = parts[i];
 
+                // If current is a string, access native string properties directly
+                if (typeof current === 'string') {
+                    return current[part];
+                }
+
                 // If the path segment is not a numeric index and not a direct key on the
                 // current object, try to resolve it as a variable from the root context.
                 // This allows dynamic bracket notation like regions[country] where 'country'
