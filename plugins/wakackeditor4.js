@@ -24,8 +24,10 @@
  * ║  so native form posts work without any extra handling in this plugin.                ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
- * ║    wakaPAC.use(WakaCKEditor);                                                        ║
- * ║    wakaPAC.use(WakaCKEditor, { src: '/path/to/ckeditor/ckeditor.js' });              ║
+ * ║    wakaPAC.use(WakaCKEditor);                              // free build (default)   ║
+ * ║    wakaPAC.use(WakaCKEditor, { license: 'lts',                                       ║
+ * ║                                licenseKey: 'your-key' }); // LTS commercial build    ║
+ * ║    wakaPAC.use(WakaCKEditor, { src: '/path/to/ckeditor/ckeditor.js' }); // self-host ║
  * ║                                                                                      ║
  * ║  HTML:                                                                               ║
  * ║    <textarea data-pac-id="editor1" data-ckeditor name="body"></textarea>             ║
@@ -69,10 +71,16 @@
     // =========================================================================
 
     /**
-     * CDN fallback used when no src is provided via plugin options.
-     * @type {string}
+     * CDN URLs for each supported CKEditor 4 variant.
+     * 'free' is the last version available under the open-source license.
+     * 'lts'  is the commercial Long-Term Support track (4.23.0+) and requires
+     *         a valid licenseKey passed via plugin options.
+     * @type {Object<string, string>}
      */
-    const CKEDITOR_CDN = 'https://cdn.ckeditor.com/4.22.1/standard/ckeditor.js';
+    const CKEDITOR_CDN = {
+        free: 'https://cdn.ckeditor.com/4.22.1/standard/ckeditor.js',
+        lts:  'https://cdn.ckeditor.com/4.25.1-lts/standard/ckeditor.js'
+    };
 
     /**
      * True once window.CKEDITOR is available and ready to use.
@@ -93,7 +101,7 @@
      * Set once during createPacPlugin.
      * @type {string}
      */
-    let _scriptSrc = CKEDITOR_CDN;
+    let _scriptSrc = CKEDITOR_CDN.free;
 
     /**
      * Injects the CKEditor 4 script tag and drains the pending queue once it
@@ -311,23 +319,29 @@
     window.WakaCKEditor = {
 
         /**
-         * Called on plugin initialisation through wakaPAC.use()
+         * Called on plugin initialization through wakaPAC.use()
          * @param pac
          * @param options
          * @returns {{onComponentCreated(Object, string, Object): void, onComponentDestroyed(string): void}}
          */
         createPacPlugin(pac, options = {}) {
 
-            // Capture the src option for use by ensureApiLoaded.
+            // Resolve the script URL.
+            // 'src' takes precedence; otherwise 'lts' selects the commercial LTS
+            // build (requires licenseKey), and the default is the free 4.22.1 build.
             if (options.src) {
                 _scriptSrc = options.src;
+            } else if (options.license === 'lts') {
+                _scriptSrc = CKEDITOR_CDN.lts;
             }
 
             // Plugin-level CKEditor config defaults, overridable per-instance
             // via the 'ckeditor' key in the component config object.
+            // licenseKey is required when using the LTS build.
             const _defaultEditorConfig = {
                 toolbar: options.toolbar ?? 'Full',
-                language: options.language ?? undefined
+                language: options.language ?? undefined,
+                licenseKey: options.licenseKey ?? undefined
             };
 
             // Strip keys with undefined values so CKEditor doesn't see them.
