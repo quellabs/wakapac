@@ -25,6 +25,7 @@
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
  * ║    wakaPAC.use(WakaCKEditor);                              // free build (default)   ║
+ * ║    wakaPAC.use(WakaCKEditor, { suppressVersionCheck: true });  // silence warning    ║
  * ║    wakaPAC.use(WakaCKEditor, { license: 'lts',                                       ║
  * ║                                licenseKey: 'your-key' }); // LTS commercial build    ║
  * ║    wakaPAC.use(WakaCKEditor, { src: '/path/to/ckeditor/ckeditor.js' }); // self-host ║
@@ -104,6 +105,15 @@
     let _scriptSrc = CKEDITOR_CDN.free;
 
     /**
+     * Whether to suppress CKEditor's version security warning by setting
+     * CKEDITOR.config.versionCheck = false after the script loads.
+     * Only meaningful for the free build — the LTS build does not show this
+     * warning. Disabled by default; opt in via { suppressVersionCheck: true }.
+     * @type {boolean}
+     */
+    let _suppressVersionCheck = false;
+
+    /**
      * Injects the CKEditor 4 script tag and drains the pending queue once it
      * loads. Safe to call multiple times — only injects the tag once.
      * If window.CKEDITOR already exists, drains the queue immediately.
@@ -128,6 +138,13 @@
         // CKEditor 4 is synchronous — CKEDITOR is available immediately after
         // the script executes, so no further readiness polling is needed.
         tag.onload = function () {
+            // Suppress the "this version is not secure" console warning when
+            // explicitly opted in. Only applied for the free build — the LTS
+            // build does not emit this warning.
+            if (_suppressVersionCheck) {
+                CKEDITOR.config.versionCheck = false;
+            }
+
             _apiReady = true;
             drainPendingInits();
         };
@@ -333,6 +350,13 @@
                 _scriptSrc = options.src;
             } else if (options.license === 'lts') {
                 _scriptSrc = CKEDITOR_CDN.lts;
+            }
+
+            // suppressVersionCheck is only meaningful for the free build.
+            // The LTS build does not emit this warning, so the option is ignored
+            // when license === 'lts' or a custom src is provided.
+            if (options.suppressVersionCheck === true && !options.src && options.license !== 'lts') {
+                _suppressVersionCheck = true;
             }
 
             // Plugin-level CKEditor config defaults, overridable per-instance
