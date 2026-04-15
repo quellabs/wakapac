@@ -202,7 +202,9 @@
                     pending.pacId,
                     pending.msgConstants.MSG_EDITOR_ERROR,
                     0, 0,
-                    {message: 'CKEditor 5 script failed to load'}
+                    {
+                        message: 'CKEditor 5 script failed to load'
+                    }
                 );
             }
 

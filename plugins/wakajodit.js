@@ -70,10 +70,6 @@
     // with a companion stylesheet at:
     //   https://cdn.jsdelivr.net/npm/jodit@latest/build/jodit.min.css
     //
-    // The bundle exposes window.Jodit (a constructor). Unlike CKEditor 5, there
-    // is no intermediate namespace object — instances are created directly with
-    // new Jodit(element, config). The constructor is synchronous.
-    //
     // Jodit retains the original <textarea> in the DOM and keeps it in sync
     // automatically on every change. No proxy element is needed.
     // =========================================================================
@@ -155,7 +151,9 @@
                         pending.pacId,
                         pending.msgConstants.MSG_EDITOR_ERROR,
                         0, 0,
-                        {message: msg}
+                        {
+                            message: msg
+                        }
                     );
                 }
 
@@ -173,7 +171,9 @@
                     pending.pacId,
                     pending.msgConstants.MSG_EDITOR_ERROR,
                     0, 0,
-                    {message: 'Jodit script failed to load'}
+                    {
+                        message: 'Jodit script failed to load'
+                    }
                 );
             }
 
@@ -313,6 +313,7 @@
             pac.sendMessage(pacId, msgConstants.MSG_EDITOR_ERROR, 0, 0, {
                 message: error?.message ?? 'Jodit failed to initialize'
             });
+
             return;
         }
 
@@ -506,7 +507,6 @@
                  * Called by WakaPAC when a component is destroyed.
                  * Removes any pending init from the queue, destroys the Jodit
                  * instance, and removes the registry entry.
-                 *
                  * @param {string} pacId
                  */
                 onComponentDestroyed(pacId) {
