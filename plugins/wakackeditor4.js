@@ -10,8 +10,7 @@
  * ║                                                                                      ║
  * ║  WakaPAC Plugin — WakaCKEditor                                                       ║
  * ║                                                                                      ║
- * ║  Wraps CKEditor 4 instances inside PAC containers, keeping abstraction.value         ║
- * ║  current on every change and allowing native form submission to work as expected.    ║
+ * ║  Wraps CKEditor 4 instances inside PAC containers.                                   ║
  * ║                                                                                      ║
  * ║  The plugin activates when the PAC container is a <textarea> element carrying a      ║
  * ║  data-ckeditor attribute. The CKEditor 4 script is injected automatically            ║
@@ -243,16 +242,12 @@
         editor.on('instanceReady', function () {
             const value = editor.getData();
 
-            abstraction.value = value;
-
             pac.sendMessage(pacId, msgConstants.MSG_EDITOR_READY, 0, 0, { value });
         });
 
         // Fires for toolbar actions, programmatic changes, and committed edits.
         editor.on('change', function () {
             const value = editor.getData();
-
-            abstraction.value = value;
 
             pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
         });
@@ -268,7 +263,6 @@
                 }
 
                 const value = editor.getData();
-                abstraction.value = value;
 
                 pac.sendMessage(pacId, pac.MSG_INPUT, 0, 0, { value });
             }, 0);
@@ -303,8 +297,6 @@
 
             const value = editor.getData();
 
-            abstraction.value = value;
-
             pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, { value });
         });
 
@@ -318,9 +310,6 @@
             // Sync value on blur — this is the point at which CKEditor 4 also
             // updates the source textarea, so the two are always consistent.
             const value = editor.getData();
-
-            // Update the abstraction
-            abstraction.value = value;
 
             // MSG_INPUT_COMPLETE signals that editing is done for this interaction,
             // then MSG_KILLFOCUS signals the loss of focus itself.
@@ -410,10 +399,6 @@
                         return;
                     }
 
-                    // Seed the abstraction before the editor is ready so bindings
-                    // have something to render.
-                    abstraction.value = container.value ?? '';
-
                     // Merge plugin-level defaults with per-instance overrides.
                     const editorConfig = {
                         ..._defaultEditorConfig,
@@ -477,8 +462,7 @@
         },
 
         /**
-         * Sets the editor content. Triggers a change event, which updates
-         * abstraction.value and dispatches MSG_CHANGE.
+         * Sets the editor content. Triggers a change event, which dispatches MSG_CHANGE.
          * @param {string} pacId
          * @param {string} html
          */
@@ -490,7 +474,7 @@
             }
 
             // setData accepts an optional callback but change events fire normally,
-            // so abstraction.value and MSG_CHANGE are handled by the listener.
+            // so MSG_CHANGE us handled by the listener.
             entry.editor.setData(html);
         },
 

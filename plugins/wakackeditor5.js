@@ -10,8 +10,7 @@
  * ║                                                                                      ║
  * ║  WakaPAC Plugin — WakaCKEditor (CKEditor 5)                                          ║
  * ║                                                                                      ║
- * ║  Wraps CKEditor 5 instances inside PAC containers, keeping abstraction.value         ║
- * ║  current on every change and allowing native form submission to work as expected.    ║
+ * ║  Wraps CKEditor 5 instances inside PAC containers.                                   ║
  * ║                                                                                      ║
  * ║  The plugin activates when the PAC container is a <textarea> element carrying a      ║
  * ║  data-ckeditor attribute. CKEditor 5 replaces the textarea in the DOM — a hidden     ║
@@ -95,9 +94,9 @@
      * CDN base URL and version for the CKEditor 5 UMD bundle.
      * @type {string}
      */
-    const CKEDITOR5_VERSION     = '48.0.0';
-    const CKEDITOR5_CDN_SCRIPT  = `https://cdn.ckeditor.com/ckeditor5/${CKEDITOR5_VERSION}/ckeditor5.umd.js`;
-    const CKEDITOR5_CDN_CSS     = `https://cdn.ckeditor.com/ckeditor5/${CKEDITOR5_VERSION}/ckeditor5.css`;
+    const CKEDITOR5_VERSION = '48.0.0';
+    const CKEDITOR5_CDN_SCRIPT = `https://cdn.ckeditor.com/ckeditor5/${CKEDITOR5_VERSION}/ckeditor5.umd.js`;
+    const CKEDITOR5_CDN_CSS = `https://cdn.ckeditor.com/ckeditor5/${CKEDITOR5_VERSION}/ckeditor5.css`;
 
     /**
      * Unique lock ID used for enableReadOnlyMode / disableReadOnlyMode calls.
@@ -159,16 +158,16 @@
         // The UMD bundle does not include styles. Inject the companion stylesheet
         // unless the caller set css: null or it is already on the page.
         if (_cssSrc && !document.getElementById('waka-ckeditor5-css')) {
-            const link  = document.createElement('link');
-            link.id     = 'waka-ckeditor5-css';
-            link.rel    = 'stylesheet';
-            link.href   = _cssSrc;
+            const link = document.createElement('link');
+            link.id = 'waka-ckeditor5-css';
+            link.rel = 'stylesheet';
+            link.href = _cssSrc;
             (document.head ?? document.body).appendChild(link);
         }
 
         // ── Script ────────────────────────────────────────────────────────────
         const tag = document.createElement('script');
-        tag.id  = 'waka-ckeditor5-script';
+        tag.id = 'waka-ckeditor5-script';
         tag.src = _scriptSrc;
 
         tag.onload = function () {
@@ -184,7 +183,7 @@
                         pending.pacId,
                         pending.msgConstants.MSG_EDITOR_ERROR,
                         0, 0,
-                        { message: msg }
+                        {message: msg}
                     );
                 }
 
@@ -202,7 +201,7 @@
                     pending.pacId,
                     pending.msgConstants.MSG_EDITOR_ERROR,
                     0, 0,
-                    { message: 'CKEditor 5 script failed to load' }
+                    {message: 'CKEditor 5 script failed to load'}
                 );
             }
 
@@ -304,7 +303,7 @@
         // element so it ends up in the same form position (CKEditor 5 inserts
         // its own UI container right before where the textarea was).
         const proxy = document.createElement('textarea');
-        proxy.name  = container.name ?? '';
+        proxy.name = container.name ?? '';
         proxy.value = container.value ?? '';
         proxy.style.display = 'none';
         container.parentNode.insertBefore(proxy, container);
@@ -325,7 +324,7 @@
         // In the modern UMD CDN build, ClassicEditor lives on window.CKEDITOR,
         // not directly on window. Destructure it here so the rest of the
         // function reads the same as before.
-        const { ClassicEditor } = window.CKEDITOR;
+        const {ClassicEditor} = window.CKEDITOR;
 
         ClassicEditor
             .create(container, editorConfig)
@@ -341,8 +340,7 @@
 
                 // ── instanceReady equivalent ──────────────────────────────────
                 const initialValue = editor.getData();
-                abstraction.value  = initialValue;
-                proxy.value        = initialValue;
+                proxy.value = initialValue;
 
                 pac.sendMessage(pacId, msgConstants.MSG_EDITOR_READY, 0, 0, {
                     value: initialValue
@@ -360,12 +358,11 @@
                         return;
                     }
 
-                    const value        = editor.getData();
-                    abstraction.value  = value;
-                    proxy.value        = value;
+                    const value = editor.getData();
+                    proxy.value = value;
 
-                    pac.sendMessage(pacId, pac.MSG_INPUT,  0, 0, { value });
-                    pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
+                    pac.sendMessage(pacId, pac.MSG_INPUT, 0, 0, {value});
+                    pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, {value});
                 });
 
                 // ── Paste interception ────────────────────────────────────────
@@ -398,7 +395,7 @@
                         if (result === false) {
                             evt.stop();
                         }
-                    }, { priority: 'high' });
+                    }, {priority: 'high'});
 
                     // afterPaste equivalent: fire MSG_INPUT_COMPLETE once the
                     // paste pipeline finishes and change:data has run.
@@ -418,7 +415,7 @@
                             }
 
                             const value = editor.getData();
-                            pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, { value });
+                            pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, {value});
                         }, 0);
                     });
                 }
@@ -433,12 +430,11 @@
                 });
 
                 viewDoc.on('blur', function () {
-                    const value       = editor.getData();
-                    abstraction.value = value;
-                    proxy.value       = value;
+                    const value = editor.getData();
+                    proxy.value = value;
 
-                    pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, { value });
-                    pac.sendMessage(pacId, pac.MSG_KILLFOCUS,       0, 0);
+                    pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, {value});
+                    pac.sendMessage(pacId, pac.MSG_KILLFOCUS, 0, 0);
                 });
             })
             .catch(function (error) {
@@ -535,10 +531,6 @@
                         return;
                     }
 
-                    // Seed the abstraction with the textarea's current content
-                    // before the async editor initializes.
-                    abstraction.value = container.value ?? '';
-
                     // Merge plugin-level defaults with per-instance overrides.
                     const editorConfig = {
                         ..._defaultEditorConfig,
@@ -550,7 +542,7 @@
                     if (_apiReady) {
                         createEditor(abstraction, pacId, pac, msgConstants, editorConfig);
                     } else {
-                        _pendingInits.push({ abstraction, pacId, pac, msgConstants, editorConfig });
+                        _pendingInits.push({abstraction, pacId, pac, msgConstants, editorConfig});
                     }
                 },
 
@@ -609,8 +601,7 @@
 
         /**
          * Sets the editor content.
-         * Triggers change:data, which updates abstraction.value and dispatches
-         * MSG_INPUT and MSG_CHANGE.
+         * Triggers change:data, which dispatches MSG_INPUT and MSG_CHANGE.
          * @param {string} pacId
          * @param {string} html
          */
