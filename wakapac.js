@@ -1965,29 +1965,29 @@
                 // Resolve container responsible for the focused element
                 const container = self.getContainerForEvent(MSG_PASTE, event);
                 const clipboardData = event.clipboardData;
-                const text = clipboardData.getData('text/plain');
-                const availableTypes = Array.from(clipboardData.types);
-                const uriList = clipboardData.getData('text/uri-list');
-                const uris = uriList ? uriList.split(/\r?\n/).filter(line => line && !line.startsWith('#')) : [];
+                const uriRaw = clipboardData.getData('text/uri-list');
+                const uris = uriRaw ? uriRaw.split(/\r?\n/).filter(line => line && !line.startsWith('#')) : [];
                 const wParam = self.getModifierState(event);
-                const lParam = text.length;
+                const lParam = clipboardData.getData('text/plain').length;
 
                 // Extract file metadata for image/file paste operations (e.g., screenshot paste)
-                // Only captures metadata — file blobs are accessible via originalEvent.clipboardData.files
+                // Only captures metadata — file blobs are accessible via event.clipboardData.files
                 const files = Array.from(clipboardData.files).map(function(f) {
                     return { name: f.name, size: f.size, type: f.type };
                 });
 
-                // Build clipboard message with all available paste data
+                // Build clipboard message with all available paste data.
+                // Detail keys mirror DataTransfer property names and MIME types.
                 // msgProc can return false to cancel the paste, which prevents
-                // subsequent MSG_INPUT/MSG_INPUT_COMPLETE from firing
+                // subsequent MSG_INPUT/MSG_INPUT_COMPLETE from firing.
                 const customEvent = self.wrapDomEventAsMessage(MSG_PASTE, event, wParam, lParam, {
-                    text: text,
-                    html: clipboardData.getData('text/html'),
-                    rtf: clipboardData.getData('text/rtf'),
-                    uris: uris,
-                    files: files,
-                    availableTypes: availableTypes
+                    'text/plain':    clipboardData.getData('text/plain'),
+                    'text/html':     clipboardData.getData('text/html'),
+                    'text/rtf':      clipboardData.getData('text/rtf'),
+                    'text/uri-list': uriRaw,
+                    uris:            uris,
+                    files:           files,
+                    types:           Array.from(clipboardData.types)
                 });
 
                 // Dispatch to container — no post-dispatch readback needed

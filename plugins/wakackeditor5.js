@@ -45,8 +45,9 @@
  * ║                          mutation, making a separate keystroke event redundant)      ║
  * ║    MSG_INPUT_COMPLETE  — editing session ended (on blur or after paste);             ║
  * ║                          extended.value                                              ║
- * ║    MSG_PASTE           — fired before paste is inserted; extended.value = incoming   ║
- * ║                          paste text. Return false from msgProc to cancel the paste.  ║
+ * ║    MSG_PASTE           — fired before paste is inserted; detail keys match           ║
+ * ║                          DataTransfer (text/plain, text/html, text/rtf,              ║
+ * ║                          text/uri-list, uris, files, types). Return false to cancel. ║
  * ║    MSG_SETFOCUS        — editor gained focus                                         ║
  * ║    MSG_KILLFOCUS       — editor lost focus                                           ║
  * ║                                                                                      ║
@@ -64,7 +65,7 @@
  * ║    • CKEditor 5 does not sync the textarea automatically. This plugin handles that   ║
  * ║      via a hidden proxy element that is kept in sync on every change:data event.     ║
  * ║    • setReadOnly maps to enableReadOnlyMode / disableReadOnlyMode (CKEditor 5 API).  ║
- * ║    • Paste cancellation uses the ClipboardPipeline inputTransformation event.        ║
+ * ║    • Paste cancellation uses the view document's native 'paste' event.               ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -245,6 +246,44 @@
     const _registry = new Map();
 
     // =========================================================================
+    // Paste detail helper
+    // =========================================================================
+
+    /**
+     * Builds the MSG_PASTE detail object from a native ClipboardData instance.
+     * @param {DataTransfer|null} clipboardData
+     * @returns {{'text/plain': string, 'text/html': string, 'text/rtf': string, 'text/uri-list': string, uris: string[], files: object[], types: string[]}}
+     */
+    function buildPasteDetail(clipboardData) {
+        if (!clipboardData) {
+            return {'text/plain': '', 'text/html': '', 'text/rtf': '', 'text/uri-list': '', uris: [], files: [], types: []};
+        }
+
+        const types = Array.from(clipboardData.types ?? []);
+        const uriRaw = clipboardData.getData('text/uri-list') ?? '';
+
+        const uris = uriRaw
+            .split(/\r?\n/)
+            .filter(function (line) {
+                return line.length > 0 && !line.startsWith('#');
+            });
+
+        const files = Array.from(clipboardData.files ?? []).map(function (f) {
+            return {name: f.name, size: f.size, type: f.type};
+        });
+
+        return {
+            'text/plain':    clipboardData.getData('text/plain') ?? '',
+            'text/html':     clipboardData.getData('text/html')  ?? '',
+            'text/rtf':      clipboardData.getData('text/rtf')   ?? '',
+            'text/uri-list': uriRaw,
+            uris,
+            files,
+            types
+        };
+    }
+
+    // =========================================================================
     // Editor construction
     // =========================================================================
 
@@ -270,10 +309,10 @@
      *      change:data — MSG_INPUT for in-progress edits, MSG_CHANGE for the
      *      same mutation (consistent with WakaPAC convention).
      *
-     *   4. Paste interception uses the ClipboardPipeline's inputTransformation
-     *      event. Returning false from msgProc stops the pipeline by calling
-     *      evt.stop() on the CKEditor event, which prevents the paste content
-     *      from being inserted.
+     *   4. Paste interception uses the view document's native 'paste' event so
+     *      the full ClipboardEvent is available (text, html, rtf, files, uris).
+     *      Returning false from msgProc calls evt.stop() + preventDefault(),
+     *      cancelling the insertion before CKEditor processes it.
      *
      *   5. focus / blur events live on editor.editing.view.document, not on
      *      the editor root itself.
@@ -366,65 +405,57 @@
                 });
 
                 // ── Paste interception ────────────────────────────────────────
-                // ClipboardPipeline#inputTransformation fires after the raw paste
-                // data has been normalized but before it is inserted into the
-                // model. Calling evt.stop() on the CKEditor event object cancels
-                // the insertion entirely, matching the CKEditor 4 beforePaste
-                // cancel semantics.
-                //
-                // extended.value carries the plain-text representation of the
-                // incoming paste (dataTransfer.getData('text/plain')), consistent
-                // with CKEditor 4's evt.data.dataValue.
+                // We intercept on the view document's native 'paste' event so the
+                // full ClipboardEvent is still available, giving access to all MIME
+                // types, file metadata, and the complete clipboard payload.
+                // evt.stop() + preventDefault() cancels the paste before CKEditor
+                // processes it.
+                const viewDoc = editor.editing.view.document;
+
+                viewDoc.on('paste', function (evt, data) {
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    const clipboardData = data.domEvent.clipboardData;
+                    const detail = buildPasteDetail(clipboardData);
+                    const domEvent = data.domEvent;
+
+                    const result = pac.sendMessage(
+                        pacId, pac.MSG_PASTE,
+                        (domEvent.ctrlKey  ? pac.MK_CONTROL : 0) |
+                        (domEvent.shiftKey ? pac.MK_SHIFT   : 0) |
+                        (domEvent.altKey   ? pac.MK_ALT     : 0),
+                        detail['text/plain'].length,
+                        detail
+                    );
+
+                    if (result === false) {
+                        evt.stop();
+                        data.preventDefault();
+                    }
+                }, {priority: 'high'});
+
+                // ── Paste complete: MSG_INPUT_COMPLETE ────────────────────────
+                // contentInsertion fires after the paste pipeline has committed
+                // the content to the model. getData() is current at this point.
                 const clipboardPlugin = editor.plugins.get('ClipboardPipeline');
 
                 if (clipboardPlugin) {
-                    clipboardPlugin.on('inputTransformation', function (evt, data) {
-                        if (!_registry.has(pacId)) {
-                            return;
-                        }
-
-                        // Extract the paste payload as plain text for the message.
-                        const pasteText = data.dataTransfer
-                            ? (data.dataTransfer.getData('text/plain') ?? '')
-                            : '';
-
-                        const result = pac.sendMessage(pacId, pac.MSG_PASTE, 0, 0, {
-                            value: pasteText
-                        });
-
-                        if (result === false) {
-                            evt.stop();
-                        }
-                    }, {priority: 'high'});
-
-                    // afterPaste equivalent: fire MSG_INPUT_COMPLETE once the
-                    // paste pipeline finishes and change:data has run.
-                    // We listen on the model's change batch end instead of a
-                    // dedicated afterPaste event, using a one-shot post-paste
-                    // flag to avoid double-firing with change:data on normal edits.
                     clipboardPlugin.on('contentInsertion', function () {
                         if (!_registry.has(pacId)) {
                             return;
                         }
 
-                        // Defer slightly so change:data (which also fires here)
-                        // has already updated abstraction.value.
-                        setTimeout(function () {
-                            if (!_registry.has(pacId)) {
-                                return;
-                            }
+                        const value = editor.getData();
 
-                            const value = editor.getData();
-                            pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, {value});
-                        }, 0);
+                        pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, {value});
                     });
                 }
 
                 // ── focus / blur ──────────────────────────────────────────────
                 // In CKEditor 5, focus and blur live on the view document, not on
                 // the editor instance directly.
-                const viewDoc = editor.editing.view.document;
-
                 viewDoc.on('focus', function () {
                     pac.sendMessage(pacId, pac.MSG_SETFOCUS, 0, 0);
                 });
