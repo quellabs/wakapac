@@ -42,8 +42,9 @@
  * ║    MSG_CHANGE          — toolbar action or committed edit; extended.value            ║
  * ║    MSG_INPUT           — per-keystroke update; extended.value                        ║
  * ║    MSG_INPUT_COMPLETE  — editing session ended (on blur); extended.value             ║
- * ║    MSG_PASTE           — fired before paste is inserted; extended.value = incoming   ║
- * ║                          paste data. Return false from msgProc to cancel the paste.  ║
+ * ║    MSG_PASTE           — fired before paste is inserted; extended.html = paste       ║
+ * ║                          content (text/plain, rtf, uris, files unavailable in CK4).  ║
+ * ║                          Return false from msgProc to cancel the paste.              ║
  * ║    MSG_SETFOCUS        — editor gained focus (standard WakaPAC message)              ║
  * ║    MSG_KILLFOCUS       — editor lost focus   (standard WakaPAC message)              ║
  * ║                                                                                      ║
@@ -241,45 +242,69 @@
         // Message when CKEditor is ready to go
         editor.on('instanceReady', function () {
             const value = editor.getData();
-
             pac.sendMessage(pacId, msgConstants.MSG_EDITOR_READY, 0, 0, { value });
         });
 
         // Fires for toolbar actions, programmatic changes, and committed edits.
         editor.on('change', function () {
             const value = editor.getData();
-
             pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
         });
 
-        // CKEditor 4's 'key' event fires before the editable DOM is updated, so
-        // we defer with setTimeout(0) to read the post-keystroke content.
+        // CKEditor 4's 'key' event fires before the editable DOM is updated.
+        // pac.postMessage defers delivery asynchronously so getData() reads the
+        // committed post-keystroke content.
         // MSG_INPUT signals an in-progress edit, consistent with how WakaPAC uses
         // it on native inputs. MSG_CHANGE will follow once CKEditor commits.
         editor.on('key', function () {
-            setTimeout(function () {
-                if (!_registry.has(pacId)) {
-                    return;
-                }
-
-                const value = editor.getData();
-
-                pac.sendMessage(pacId, pac.MSG_INPUT, 0, 0, { value });
-            }, 0);
+            pac.postMessage(pacId, pac.MSG_INPUT, 0, 0, { value: editor.getData() });
         });
 
         // beforePaste fires before CKEditor inserts the pasted content, allowing
-        // msgProc to cancel the paste by returning false. The event carries the
-        // incoming paste data — extended.value is the paste payload at this point,
-        // not the full editor content, since nothing has been inserted yet.
+        // msgProc to cancel the paste by returning false.
+        //
+        // CKEditor 4's beforePaste event does not expose the native ClipboardEvent,
+        // so the full clipboard payload (text/plain, rtf, files, uris) is not
+        // accessible. We populate what CKEditor does provide: evt.data.dataValue
+        // is the processed HTML paste content. All other detail fields are empty.
+        // The domEvent is present only when the paste was triggered by the user
+        // (not programmatic), so modifier keys are extracted defensively.
         editor.on('beforePaste', function (evt) {
             if (!_registry.has(pacId)) {
                 return;
             }
 
-            const result = pac.sendMessage(pacId, pac.MSG_PASTE, 0, 0, {
-                value: evt.data.dataValue ?? ''
-            });
+            const domEvent = evt.data.domEvent?.$ ?? null;
+            const html    = evt.data.dataValue ?? '';
+
+            // Strip tags to derive a plain-text equivalent from the HTML payload.
+            // CKEditor 4 does not expose the native ClipboardEvent, so this is
+            // the closest approximation available.
+            const tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            const plain = tmp.textContent ?? tmp.innerText ?? '';
+
+            const detail = {
+                'text/plain':    plain,
+                'text/html':     html,
+                'text/rtf':      '',
+                'text/uri-list': '',
+                uris:            [],
+                files:           [],
+                types:           html ? ['text/html'] : []
+            };
+
+            const result = pac.sendMessage(
+                pacId,
+                pac.MSG_PASTE,
+                domEvent
+                    ? ((domEvent.ctrlKey  ? pac.MK_CONTROL : 0) |
+                       (domEvent.shiftKey ? pac.MK_SHIFT   : 0) |
+                       (domEvent.altKey   ? pac.MK_ALT     : 0))
+                    : 0,
+                plain.length,
+                detail
+            );
 
             if (result === false) {
                 evt.cancel();
@@ -296,7 +321,6 @@
             }
 
             const value = editor.getData();
-
             pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, { value });
         });
 
