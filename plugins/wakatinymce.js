@@ -1,12 +1,12 @@
 /*
  * ╔══════════════════════════════════════════════════════════════════════════════════════╗
  * ║                                                                                      ║
- * ║  ██╗    ██╗ █████╗ ██╗  ██╗ █████╗  ██████╗██╗  ██╗███████╗██████╗ ██╗████████╗      ║
- * ║  ██║    ██║██╔══██╗██║ ██╔╝██╔══██╗██╔════╝██║ ██╔╝██╔════╝██╔══██╗██║╚══██╔══╝      ║
- * ║  ██║ █╗ ██║███████║█████╔╝ ███████║██║     █████╔╝ █████╗  ██║  ██║██║   ██║         ║
- * ║  ██║███╗██║██╔══██║██╔═██╗ ██╔══██║██║     ██╔═██╗ ██╔══╝  ██║  ██║██║   ██║         ║
- * ║  ╚███╔███╔╝██║  ██║██║  ██╗██║  ██║╚██████╗██║  ██╗███████╗██████╔╝██║   ██║         ║
- * ║   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝   ╚═╝         ║
+ * ║  ████████╗██╗███╗   ██╗██╗   ██╗███╗   ███╗ ██████╗███████╗                          ║
+ * ║  ╚══██╔══╝██║████╗  ██║╚██╗ ██╔╝████╗ ████║██╔════╝██╔════╝                          ║
+ * ║     ██║   ██║██╔██╗ ██║ ╚████╔╝ ██╔████╔██║██║     █████╗                            ║
+ * ║     ██║   ██║██║╚██╗██║  ╚██╔╝  ██║╚██╔╝██║██║     ██╔══╝                            ║
+ * ║     ██║   ██║██║ ╚████║   ██║   ██║ ╚═╝ ██║╚██████╗███████╗                          ║
+ * ║     ╚═╝   ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚═╝     ╚═╝ ╚═════╝╚══════╝                          ║
  * ║                                                                                      ║
  * ║  WakaPAC Plugin — WakaTinyMCE (TinyMCE 7)                                            ║
  * ║                                                                                      ║
@@ -23,7 +23,7 @@
  * ║  Usage:                                                                              ║
  * ║    wakaPAC.use(WakaTinyMCE, { licenseKey: 'your-key' });  // CDN (required)          ║
  * ║    wakaPAC.use(WakaTinyMCE, { src: '/path/to/tinymce.min.js',                        ║
- * ║                               licenseKey: 'no-license-key' });  // self-host          ║
+ * ║                               licenseKey: 'no-license-key' });  // self-host         ║
  * ║                                                                                      ║
  * ║  HTML:                                                                               ║
  * ║    <textarea data-pac-id="editor1" data-tinymce name="body"></textarea>              ║
@@ -197,7 +197,7 @@
     // Paste detail helper
     // =========================================================================
 
-        /**
+    /**
      * Builds the MSG_PASTE detail object from a native ClipboardData instance.
      * @param {DataTransfer|null} clipboardData
      * @returns {{ 'text/plain': string, 'text/html': string, 'text/rtf': string, 'text/uri-list': string, uris: string[], files: object[], types: string[] }}
@@ -212,9 +212,7 @@
 
         const uris = uriRaw
             .split(/\r?\n/)
-            .filter(function (line) {
-                return line.length > 0 && !line.startsWith('#');
-            });
+            .filter(function (line) { return line.length > 0 && !line.startsWith('#'); });
 
         const files = Array.from(clipboardData.files ?? []).map(function (f) {
             return {name: f.name, size: f.size, type: f.type};
@@ -250,7 +248,7 @@
      *   3. The 'input' callback fires on every keystroke and content mutation.
      *      The 'change' callback fires on blur (when content has changed since
      *      focus). We dispatch MSG_INPUT/MSG_CHANGE from 'input' to mirror the
-     *      CKEditor 5 wrapper's per-mutation behaviour.
+     *      CKEditor 5 wrapper's per-mutation behavior.
      *
      *   4. Paste interception uses the native 'paste' event on the editor so the
      *      full ClipboardEvent is available (text, html, rtf, files, uris).
@@ -292,7 +290,7 @@
         // The callbacks below are additive — if the caller also passes e.g. an
         // 'init' callback in their editorConfig, it will be overwritten. For most
         // use cases this is acceptable; deep-merge is out of scope here.
-        tinymce.init({
+        window.tinymce.init({
             ...editorConfig,
             target: container,
 
@@ -310,7 +308,6 @@
                     }
 
                     const value = editor.getContent();
-
                     pac.sendMessage(pacId, pac.MSG_INPUT,  0, 0, { value });
                     pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
                 });
@@ -324,7 +321,6 @@
                     }
 
                     const value = editor.getContent();
-
                     pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
                 });
 
@@ -348,7 +344,7 @@
                         (domEvent.ctrlKey  ? pac.MK_CONTROL : 0) |
                         (domEvent.shiftKey ? pac.MK_SHIFT   : 0) |
                         (domEvent.altKey   ? pac.MK_ALT     : 0),
-                        detail.text.length,
+                        detail['text/plain'].length,
                         detail
                     );
 
@@ -505,7 +501,6 @@
                  * Called by WakaPAC when a component is destroyed.
                  * Removes any pending init from the queue, removes the TinyMCE
                  * instance, and removes the registry entry.
-                 *
                  * @param {string} pacId
                  */
                 onComponentDestroyed(pacId) {
