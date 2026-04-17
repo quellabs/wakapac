@@ -39,7 +39,7 @@
  * ║                                                                              ║
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
-(function () {
+(function() {
     "use strict";
 
     /** @type {Map<string, function>} Maps pacId to its pac:change unlisten function. */
@@ -177,140 +177,6 @@
 
     // ─── Color utilities ──────────────────────────────────────────────────────
 
-    /**
-     * Normalizes a hex color string to a 6-character lowercase string without '#'.
-     * Accepts 3-character shorthand (#fff → ffffff) and optional leading '#'.
-     * Returns null for any input that is not a valid hex color.
-     *
-     * @param {*} hex - Input value to normalize.
-     * @returns {string|null} 6-char lowercase hex, or null if invalid.
-     */
-    function normalizeHex(hex) {
-        // If hex is not a string, abort
-        if (typeof hex !== 'string') {
-            return null;
-        }
-
-        // Remove starting #
-        hex = hex.replace(/^#/, '').toLowerCase();
-
-        // Expand 3-char shorthand: abc → aabbcc
-        if (/^[0-9a-f]{3}$/.test(hex)) {
-            hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-        }
-
-        return /^[0-9a-f]{6}$/.test(hex) ? hex : null;
-    }
-
-    /**
-     * Converts a normalized 6-character hex string (without '#') to an RGB object.
-     * Assumes input is already validated — does not re-normalize.
-     *
-     * @param {string} hex - 6-char lowercase hex string without '#'.
-     * @returns {{ r: number, g: number, b: number }}
-     */
-    function hexToRgb(hex) {
-        return {
-            r: parseInt(hex.slice(0, 2), 16),
-            g: parseInt(hex.slice(2, 4), 16),
-            b: parseInt(hex.slice(4, 6), 16),
-        };
-    }
-
-    /**
-     * Converts integer RGB channel values (0–255) to a 6-character lowercase hex string.
-     * @param {number} r - Red channel (0–255).
-     * @param {number} g - Green channel (0–255).
-     * @param {number} b - Blue channel (0–255).
-     * @returns {string} 6-char lowercase hex string without '#'.
-     */
-    function rgbToHex(r, g, b) {
-        return `${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-    }
-
-    /**
-     * Converts RGB (0–255) to HSL.
-     * H is in degrees (0–360), S and L are percentages (0–100).
-     *
-     * @param {number} r - Red channel (0–255).
-     * @param {number} g - Green channel (0–255).
-     * @param {number} b - Blue channel (0–255).
-     * @returns {{ H: number, S: number, L: number }}
-     */
-    function rgbToHsl(r, g, b) {
-        r /= 255;
-        g /= 255;
-        b /= 255;
-        const cMin = Math.min(r, g, b), cMax = Math.max(r, g, b), delta = cMax - cMin;
-
-        // Hue calculation — 0 when achromatic
-        let h = 0;
-
-        if (delta !== 0) {
-            if (cMax === r) {
-                h = ((g - b) / delta) % 6;
-            } else if (cMax === g) {
-                h = (b - r) / delta + 2;
-            } else {
-                h = (r - g) / delta + 4;
-            }
-        }
-
-        h = Math.round(h * 60);
-
-        // wrap negative hues
-        if (h < 0) {
-            h += 360;
-        }
-
-        const l = (cMax + cMin) / 2;
-        const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
-        return { H: h, S: s * 100, L: l * 100 };
-    }
-
-    /**
-     * Converts HSL to RGB (0–255).
-     * H is in degrees (0–360), S and L are percentages (0–100).
-     *
-     * @param {number} h - Hue (0–360).
-     * @param {number} s - Saturation (0–100).
-     * @param {number} l - Lightness (0–100).
-     * @returns {{ r: number, g: number, b: number }}
-     */
-    function hslToRgb(h, s, l) {
-        s /= 100;
-        l /= 100;
-        const c = s * (1 - Math.abs(2 * l - 1)); // chroma
-        const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-        const m = l - c / 2; // lightness offset
-
-        // Sector lookup: maps hue sector (0–5) to pre-offset RGB fractions
-        const i = Math.floor(h / 60) % 6;
-        const map = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]];
-        const [r1, g1, b1] = map[i];
-        return { r: Math.round((r1 + m) * 255), g: Math.round((g1 + m) * 255), b: Math.round((b1 + m) * 255) };
-    }
-
-    /**
-     * Packs a normalized hex color string into a 24-bit integer in RGB order,
-     * equivalent to a Win32 COLORREF (0x00RRGGBB).
-     * @param {string} hex - 6-char lowercase hex string without '#'.
-     * @returns {number} 24-bit integer: (R << 16) | (G << 8) | B.
-     */
-    function hexToColorRef(hex) {
-        const { r, g, b } = hexToRgb(hex);
-        return (r << 16) | (g << 8) | b;
-    }
-
-    /**
-     * Unpacks a 24-bit COLORREF integer (0x00RRGGBB) into a '#rrggbb' hex string.
-     *
-     * @param {number} colorRef - 24-bit integer: (R << 16) | (G << 8) | B.
-     * @returns {string} '#rrggbb' hex color string.
-     */
-    function colorRefToHex(colorRef) {
-        return '#' + rgbToHex((colorRef >> 16) & 0xFF, (colorRef >> 8) & 0xFF, colorRef & 0xFF);
-    }
 
     // ─── Tailwind palette generator ───────────────────────────────────────────
     // Ported 1:1 from ImageProcessing::generateGradient / createSwatches.
@@ -371,8 +237,8 @@
         }
 
         // Compute synthetic gradient via HSL lightness distribution
-        const rgb = hexToRgb(hex);
-        const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+        const rgb = window.WakaColorPicker.hexToRgb(hex);
+        const hsl = window.WakaColorPicker.rgbToHsl(rgb.r, rgb.g, rgb.b);
         const dist = createDistributionValues(hsl.L);
 
         // Map stops 50–900 (STOPS without first and last synthetic entries).
@@ -383,8 +249,8 @@
                 return hex;
             }
 
-            const { r, g, b } = hslToRgb(hsl.H, Math.min(hsl.S, 100), dist[i + 1]);
-            return rgbToHex(r, g, b);
+            const { r, g, b } = window.WakaColorPicker.hslToRgb(hsl.H, Math.min(hsl.S, 100), dist[i + 1]);
+            return window.WakaColorPicker.rgbToHex(r, g, b);
         });
     }
 
@@ -425,7 +291,6 @@
      * @returns {{ destroy: function, setColor: function, getColor: function }}
      */
     function bindPicker(input, options = {}) {
-        // store options
         const { onChange } = options;
 
         // Hide the original input — it keeps its name and value for form submission
@@ -466,6 +331,7 @@
          * native picker, trigger background, hidden input value) to the given hex.
          * Also dispatches an 'input' event on the hidden input so any external
          * listeners stay in sync.
+         *
          * @param {string} hex - 6-char hex string without '#'.
          */
         function syncInputs(hex) {
@@ -484,6 +350,7 @@
          * Rebuilds the swatch row for the given hex color.
          * Clears the existing cells, generates a fresh 10-stop gradient,
          * and re-applies the selected highlight if the current color is present.
+         *
          * @param {string} hex - 6-char hex string without '#'.
          */
         function buildSwatches(hex) {
@@ -495,7 +362,6 @@
                 cell.style.backgroundColor = '#' + h;
                 cell.dataset.hex = h;
                 cell.title = '#' + h;
-
                 swatchesEl.appendChild(cell);
 
                 // Re-apply selection highlight if this stop matches the current color
@@ -509,6 +375,7 @@
         /**
          * Moves the selection highlight from the previous cell to the given cell.
          * Passing null deselects without selecting anything.
+         *
          * @param {HTMLElement|null} cell - The cell to highlight, or null to deselect.
          */
         function selectCell(cell) {
@@ -521,6 +388,7 @@
          * Applies a new color as the active selection.
          * Rebuilds the swatch row and syncs all inputs. Fires onChange.
          * No-ops if the color is identical to the current one.
+         *
          * @param {string} hex - 6-char hex string without '#'.
          */
         function applyColor(hex) {
@@ -541,6 +409,7 @@
          * Used when the user clicks a swatch — the palette stays the same,
          * only the active color and highlight change.
          * No-ops if the color is identical to the current one.
+         *
          * @param {string}      hex  - 6-char hex string without '#'.
          * @param {HTMLElement} cell - The swatch cell that was clicked.
          */
@@ -560,7 +429,7 @@
         // ── Init ──────────────────────────────────────────────────────────────
 
         // Seed from the input's existing value, defaulting to white
-        applyColor(normalizeHex(input.value) || 'ffffff');
+        applyColor(window.WakaColorPicker.normalizeHex(input.value) || 'ffffff');
 
         // ── Events ────────────────────────────────────────────────────────────
 
@@ -569,7 +438,7 @@
          * Fires continuously while the user drags the picker UI.
          */
         function onNativeInput() {
-            const hex = normalizeHex(nativePicker.value);
+            const hex = window.WakaColorPicker.normalizeHex(nativePicker.value);
 
             if (hex) {
                 applyColor(hex);
@@ -581,7 +450,7 @@
          * Rebuilds swatches on each valid keystroke; marks the field invalid otherwise.
          */
         function onTextInput() {
-            const hex = normalizeHex(textInput.value);
+            const hex = window.WakaColorPicker.normalizeHex(textInput.value);
 
             if (hex) {
                 textInput.classList.remove('wcp-invalid');
@@ -595,6 +464,7 @@
         /**
          * Handles keyboard shortcuts in the hex text field.
          * Escape dismisses the field by removing focus.
+         *
          * @param {KeyboardEvent} e
          */
         function onTextKeydown(e) {
@@ -606,6 +476,7 @@
         /**
          * Handles click events on the swatch row via event delegation.
          * Selects the clicked cell without rebuilding the gradient.
+         *
          * @param {MouseEvent} e
          */
         function onSwatchClick(e) {
@@ -633,19 +504,18 @@
                 textInput.removeEventListener('input', onTextInput);
                 textInput.removeEventListener('keydown', onTextKeydown);
                 swatchesEl.removeEventListener('click', onSwatchClick);
-
                 input.type = originalType;
-
                 widget.parentNode?.removeChild(widget);
             },
 
             /**
              * Programmatically sets the active color.
              * Rebuilds the swatch row and syncs all inputs.
+             *
              * @param {string} hex - Any valid hex color string (with or without '#').
              */
             setColor(hex) {
-                const n = normalizeHex(hex);
+                const n = window.WakaColorPicker.normalizeHex(hex);
 
                 if (n) {
                     applyColor(n);
@@ -654,6 +524,7 @@
 
             /**
              * Returns the current active color as a '#rrggbb' string.
+             *
              * @returns {string}
              */
             getColor() {
@@ -673,11 +544,9 @@
         if (document.getElementById('waka-color-picker-styles')) {
             return;
         }
-
         const style = document.createElement('style');
         style.id = 'waka-color-picker-styles';
         style.textContent = CSS;
-
         document.head.appendChild(style);
     }
 
@@ -695,25 +564,15 @@
 
     window.WakaColorPicker = {
 
-        // Export list
-        MSG_COLOR_CHANGED,
-        normalizeHex,
-        hexToRgb,
-        rgbToHex,
-        rgbToHsl,
-        hslToRgb,
-        hexToColorRef,
-        colorRefToHex,
-
         /**
          * WakaPAC plugin entry point. Called once by wakaPAC.use().
+         *
          * @param {object} pac               - The wakaPAC instance.
          * @param {object} [options]
          * @param {boolean} [options.injectCSS=true] - Set to false to skip stylesheet injection.
          * @returns {{ onComponentCreated: function, onComponentDestroyed: function }}
          */
         createPacPlugin(pac, options = {}) {
-            // If injectCSS is something else than false (e.g. undefined or true) inject default CSS
             if (options.injectCSS !== false) {
                 injectCSS();
             }
@@ -734,10 +593,10 @@
                  * @param {object} config      - The component configuration object.
                  */
                 onComponentCreated(abstraction, pacId, config) {
-                    const input = document.querySelector(`[data-pac-id="${pacId}"]`);
+                    const input = pac.getContainerByPacId(pacId);
 
                     if (!input) {
-                        console.warn(`[WakaColorPicker] element with data-pac-id="${pacId}" not found`);
+                        console.warn(`[WakaColorPicker] container for pacId "${pacId}" not found`);
                         return;
                     }
 
@@ -760,7 +619,7 @@
 
                             // Notify the component via the WakaPAC message system
                             if (typeof pac?.sendMessage === 'function') {
-                                pac.sendMessage(pacId, MSG_COLOR_CHANGED, hexToColorRef(hex.slice(1)), 0, { hex });
+                                pac.sendMessage(pacId, MSG_COLOR_CHANGED, window.WakaColorPicker.hexToColorRef(hex.slice(1)), 0, { hex });
                             }
                         }
                     }));
@@ -773,11 +632,12 @@
                      * WakaPAC fires 'pac:change' on the container element whenever a
                      * reactive property is set. We filter for path[0] === 'value' and
                      * forward valid hex values into the widget.
+                     *
                      * @param {CustomEvent} e - pac:change event with detail.path and detail.newValue.
                      */
                     function onPacChange(e) {
                         if (e.detail?.path?.[0] === 'value') {
-                            const hex = normalizeHex(e.detail.newValue);
+                            const hex = window.WakaColorPicker.normalizeHex(e.detail.newValue);
 
                             if (hex) {
                                 _pickers.get(pacId)?.setColor(hex);
@@ -785,7 +645,6 @@
                         }
                     }
 
-                    // Listen to pac:change
                     input.addEventListener('pac:change', onPacChange);
 
                     // Store the unlisten function in the module-level map, keyed by pacId
@@ -795,6 +654,7 @@
                 /**
                  * Called by WakaPAC just before a component is destroyed.
                  * Removes the pac:change listener and tears down the widget.
+                 *
                  * @param {string} pacId - The component's unique PAC identifier.
                  */
                 onComponentDestroyed(pacId) {
@@ -805,6 +665,172 @@
                 }
             };
         }
+    };
+
+    // ─── Exports ──────────────────────────────────────────────────────────────
+
+    /** Message constant fired when the user picks a color (MSG_PLUGIN + 1). */
+    window.WakaColorPicker.MSG_COLOR_CHANGED = MSG_COLOR_CHANGED;
+
+    /**
+     * Programmatically sets the color of a registered color picker component.
+     * Sets abstraction.value, which triggers pac:change, which updates the widget.
+     * @param {string} pacId - The pacId of the target component.
+     * @param {string} hex   - Any valid hex color string (with or without '#').
+     */
+    window.WakaColorPicker.setColor = function(pacId, hex) {
+        const n = window.WakaColorPicker.normalizeHex(hex);
+        const context = window.PACRegistry?.get(pacId);
+
+        if (n && context) {
+            context.abstraction.value = '#' + n;
+        }
+    };
+
+    /**
+     * Normalizes a hex color string to a 6-character lowercase string without '#'.
+     * Accepts 3-character shorthand (#fff → ffffff) and optional leading '#'.
+     * Returns null for any input that is not a valid hex color.
+     * @param {*} hex - Input value to normalize.
+     * @returns {string|null} 6-char lowercase hex, or null if invalid.
+     */
+    window.WakaColorPicker.normalizeHex = function(hex) {
+        if (typeof hex !== 'string') {
+            return null;
+        }
+
+        hex = hex.replace(/^#/, '').toLowerCase();
+
+        // Expand 3-char shorthand: abc → aabbcc
+        if (/^[0-9a-f]{3}$/.test(hex)) {
+            hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+
+        return /^[0-9a-f]{6}$/.test(hex) ? hex : null;
+    };
+
+    /**
+     * Converts a normalized 6-character hex string (without '#') to an RGB object.
+     * Assumes input is already validated — does not re-normalize.
+     * @param {string} hex - 6-char lowercase hex string without '#'.
+     * @returns {{ r: number, g: number, b: number }}
+     */
+    window.WakaColorPicker.hexToRgb = function(hex) {
+        return {
+            r: parseInt(hex.slice(0, 2), 16),
+            g: parseInt(hex.slice(2, 4), 16),
+            b: parseInt(hex.slice(4, 6), 16),
+        };
+    };
+
+    /**
+     * Converts integer RGB channel values (0–255) to a 6-character lowercase hex string.
+     * @param {number} r - Red channel (0–255).
+     * @param {number} g - Green channel (0–255).
+     * @param {number} b - Blue channel (0–255).
+     * @returns {string} 6-char lowercase hex string without '#'.
+     */
+    window.WakaColorPicker.rgbToHex = function(r, g, b) {
+        return `${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    };
+
+    /**
+     * Converts RGB (0–255) to HSL.
+     * H is in degrees (0–360), S and L are percentages (0–100).
+     *
+     * @param {number} r - Red channel (0–255).
+     * @param {number} g - Green channel (0–255).
+     * @param {number} b - Blue channel (0–255).
+     * @returns {{ H: number, S: number, L: number }}
+     */
+    window.WakaColorPicker.rgbToHsl = function(r, g, b) {
+        // Normalise channels to 0–1
+        r /= 255;
+        g /= 255;
+        b /= 255;
+
+        // Darkest and brightest channel, and their difference (chroma — 0 means achromatic)
+        const cMin = Math.min(r, g, b);
+        const cMax = Math.max(r, g, b);
+        const delta = cMax - cMin;
+
+        // Hue — angle on the color wheel expressed in 60° sectors, then converted to degrees
+        let h = 0;
+
+        if (delta !== 0) {
+            // Which channel is dominant determines which third of the wheel we are in
+            if (cMax === r) {
+                h = ((g - b) / delta) % 6; // red dominant: between yellow (60°) and magenta (300°)
+            } else if (cMax === g) {
+                h = (b - r) / delta + 2;   // green dominant: between cyan (180°) and yellow (60°)
+            } else {
+                h = (r - g) / delta + 4;   // blue dominant: between magenta (300°) and cyan (180°)
+            }
+        }
+
+        // Convert from sectors to degrees and wrap any negative result into 0–360
+        h = Math.round(h * 60);
+
+        if (h < 0) {
+            h += 360;
+        }
+
+        // Lightness — midpoint between the brightest and darkest channel
+        const l = (cMax + cMin) / 2;
+
+        // Saturation — chroma relative to lightness; 0 when achromatic (delta === 0)
+        const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+
+        // Return H in degrees, S and L as percentages
+        return { H: h, S: s * 100, L: l * 100 };
+    };
+
+    /**
+     * Converts HSL to RGB (0–255).
+     * H is in degrees (0–360), S and L are percentages (0–100).
+     * @param {number} h - Hue (0–360).
+     * @param {number} s - Saturation (0–100).
+     * @param {number} l - Lightness (0–100).
+     * @returns {{ r: number, g: number, b: number }}
+     */
+    window.WakaColorPicker.hslToRgb = function(h, s, l) {
+        s /= 100;
+        l /= 100;
+
+        // chroma
+        const c = s * (1 - Math.abs(2 * l - 1));
+        const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+
+        // lightness offset
+        const m = l - c / 2;
+
+        // Sector lookup: maps hue sector (0–5) to pre-offset RGB fractions
+        const i = Math.floor(h / 60) % 6;
+        const map = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]];
+        const [r1, g1, b1] = map[i];
+
+        // Return RGB value
+        return { r: Math.round((r1 + m) * 255), g: Math.round((g1 + m) * 255), b: Math.round((b1 + m) * 255) };
+    };
+
+    /**
+     * Packs a normalized hex color string into a 24-bit integer in RGB order,
+     * equivalent to a Win32 COLORREF (0x00RRGGBB).
+     * @param {string} hex - 6-char lowercase hex string without '#'.
+     * @returns {number} 24-bit integer: (R << 16) | (G << 8) | B.
+     */
+    window.WakaColorPicker.hexToColorRef = function(hex) {
+        const { r, g, b } = window.WakaColorPicker.hexToRgb(hex);
+        return (r << 16) | (g << 8) | b;
+    };
+
+    /**
+     * Unpacks a 24-bit COLORREF integer (0x00RRGGBB) into a '#rrggbb' hex string.
+     * @param {number} colorRef - 24-bit integer: (R << 16) | (G << 8) | B.
+     * @returns {string} '#rrggbb' hex color string.
+     */
+    window.WakaColorPicker.colorRefToHex = function(colorRef) {
+        return '#' + window.WakaColorPicker.rgbToHex((colorRef >> 16) & 0xFF, (colorRef >> 8) & 0xFF, colorRef & 0xFF);
     };
 
 })();
