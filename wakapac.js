@@ -9183,6 +9183,17 @@
                     },
 
                     /**
+                     * Returns the pac-id of the parent component of the given container, or null if none.
+                     * Equivalent to calling wakaPAC.getParentPacId() directly, but usable
+                     * in binding expressions via data-pac-bind.
+                     * @param {string} pacId            - The data-pac-id of the child component
+                     * @returns {string|null}
+                     */
+                    getParentPacId: (pacId) => {
+                        return wakaPAC.getParentPacId(pacId);
+                    },
+
+                    /**
                      * Sends a message to the parent component of the given container.
                      * Equivalent to calling wakaPAC.sendMessageToParent() directly, but usable
                      * in binding expressions via data-pac-bind.
@@ -9659,6 +9670,22 @@
     };
 
     /**
+     * Returns the pac-id of the parent component of the given container, or null if none.
+     * Equivalent to Win32 GetParent() returning a parent HWND.
+     * @param {string} pacId - The data-pac-id of the child container
+     * @returns {string|null} The parent's pac-id, or null if the container has no parent
+     */
+    wakaPAC.getParentPacId = function(pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context || !context.parent) {
+            return null;
+        }
+
+        return context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
+    };
+
+    /**
      * Send a message to the parent component of the given container (synchronous).
      * Similar to Win32 SendMessage directed at the parent HWND.
      * If the container has no parent, the message is dropped.
@@ -9669,13 +9696,12 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessageToParent = function(pacId, messageId, wParam, lParam, extended = {}) {
-        const context = window.PACRegistry.get(pacId);
+        const parentId = this.getParentPacId(pacId);
 
-        if (!context || !context.parent) {
+        if (!parentId) {
             return;
         }
 
-        const parentId = context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
         this.sendMessage(parentId, messageId, wParam, lParam, extended);
     };
 
@@ -9690,13 +9716,12 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.postMessageToParent = function(pacId, messageId, wParam, lParam, extended = {}) {
-        const context = window.PACRegistry.get(pacId);
+        const parentId = this.getParentPacId(pacId);
 
-        if (!context || !context.parent) {
+        if (!parentId) {
             return;
         }
 
-        const parentId = context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
         this.postMessage(parentId, messageId, wParam, lParam, extended);
     };
 
