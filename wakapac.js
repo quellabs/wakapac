@@ -9611,6 +9611,23 @@
         container.setAttribute('hidden', '');
     };
 
+
+    /**
+     * Returns the pac-id of the parent component of the given container, or null if none.
+     * Equivalent to Win32 GetParent() returning a parent HWND.
+     * @param {string} pacId - The data-pac-id of the child container
+     * @returns {string|null} The parent's pac-id, or null if the container has no parent
+     */
+    wakaPAC.getParentPacId = function(pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context || !context.parent) {
+            return null;
+        }
+
+        return context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
+    };
+
     /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 PostMessage with a specific HWND
@@ -9667,22 +9684,6 @@
         // Invoke the message procedure directly.
         // This call is synchronous and executes immediately in the current call stack.
         DomUpdateTracker.dispatchToContainer(container, event);
-    };
-
-    /**
-     * Returns the pac-id of the parent component of the given container, or null if none.
-     * Equivalent to Win32 GetParent() returning a parent HWND.
-     * @param {string} pacId - The data-pac-id of the child container
-     * @returns {string|null} The parent's pac-id, or null if the container has no parent
-     */
-    wakaPAC.getParentPacId = function(pacId) {
-        const context = window.PACRegistry.get(pacId);
-
-        if (!context || !context.parent) {
-            return null;
-        }
-
-        return context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
     };
 
     /**
