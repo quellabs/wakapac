@@ -179,6 +179,7 @@
      * Hex values match Win32 API message identifiers
      */
     const MSG_UNKNOWN = 0x0000;
+    const MSG_DESTROYED = 0x0002;
     const MSG_SIZE = 0x0005;
     const MSG_PAINT = 0x000F;
     const MSG_DPR_CHANGE = 0x0010;
@@ -5407,9 +5408,13 @@
             _renderLoops.delete(this.abstraction.pacId);
         }
 
+        // Capture identifiers needed for MSG_DESTROYED before nullification
+        const destroyedPacId = this.abstraction.pacId || null;
+        const parentPacId = this.parent ? (this.parent.abstraction?.pacId || null) : null;
+
         // Remove from registry
-        if (this.abstraction.pacId) {
-            window.PACRegistry.deregister(this.abstraction.pacId);
+        if (destroyedPacId) {
+            window.PACRegistry.deregister(destroyedPacId);
         }
 
         // Nullify all references to allow garbage collection
@@ -5418,6 +5423,11 @@
         this.parent = null;
         this.children = null;
         this.config = null;
+
+        // Notify parent that a direct child was destroyed.
+        if (parentPacId && destroyedPacId) {
+            wakaPAC.postMessage(parentPacId, MSG_DESTROYED, 0, 0, { childPacId: destroyedPacId });
+        }
     }
 
     // =============================================================================
@@ -9611,7 +9621,6 @@
         container.setAttribute('hidden', '');
     };
 
-
     /**
      * Returns the pac-id of the parent component of the given container, or null if none.
      * Equivalent to Win32 GetParent() returning a parent HWND.
@@ -11131,7 +11140,7 @@
     // Attach message type constants to wakaPAC
     Object.assign(wakaPAC, {
         // Message types
-        MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
+        MSG_UNKNOWN, MSG_DESTROYED, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
         MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
