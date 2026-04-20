@@ -4849,7 +4849,7 @@
         // Handle <select multiple> — value must be an array of selected option values.
         // Iterates all options and sets each one's selected state individually so that
         // non-array values (null, undefined, a plain string) deselect everything gracefully.
-        if (element.tagName === 'SELECT' && element.multiple) {
+        if (element.multiple) {
             const selected = Array.isArray(value) ? value.map(String) : [];
 
             for (let i = 0; i < element.options.length; i++) {
