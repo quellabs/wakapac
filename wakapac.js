@@ -113,6 +113,7 @@
      */
     const WP_IF_COMMENT_REGEX = /^\s*wp-if:\s*(.+?)\s*$/;
     const WP_IF_CLOSE_COMMENT_REGEX = /^\s*\/wp-if\s*$/;
+    const WP_ELSE_IF_COMMENT_REGEX = /^\s*wp-else-if:\s*(.+?)\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
@@ -6971,7 +6972,7 @@
      * Scans the container for comment nodes with wp-if conditionals
      * Builds mapping similar to element bindings but for comment-based conditionals
      * @param {Element} parentElement - The parent element to scan
-     * @returns {Map<Comment, {expression: string, closingComment: Comment, content: Node[], elseContent: Node[]}>}
+     * @returns {Map<Comment, {expression: string, closingComment: Comment, branches: Array<{expression: string|null, nodes: Node[], scanned: boolean}>, scopeResolver: Object, isVisible: number|null}>}
      */
     Context.prototype.scanCommentBindings = function(parentElement) {
         const commentBindingMap = new Map();
@@ -7012,23 +7013,31 @@
             // pop comment off array
             const { comment: openComment, expression } = openComments.pop();
 
-            // Collect all nodes between opening and closing comments,
-            // splitting at an optional <!-- wp-else --> into two buckets.
-            const content = [];
-            const elseContent = [];
-            let elseComment = null;
+            // Build a unified branches array so updateCommentConditional can
+            // iterate a single list regardless of how many wp-else-if clauses exist.
+            const branches = [{ expression, nodes: [], scanned: false }];
+            let activeBucket = branches[0].nodes;
 
             for (let node = openComment.nextSibling; node && node !== commentNode; node = node.nextSibling) {
-                if (node.nodeType === Node.COMMENT_NODE && node.nodeValue.match(WP_ELSE_COMMENT_REGEX)) {
-                    elseComment = node;
-                    continue;
+                if (node.nodeType === Node.COMMENT_NODE) {
+                    const elseIfMatch = node.nodeValue.match(WP_ELSE_IF_COMMENT_REGEX);
+
+                    if (elseIfMatch) {
+                        const branch = { expression: elseIfMatch[1].trim(), nodes: [], scanned: false };
+                        branches.push(branch);
+                        activeBucket = branch.nodes;
+                        continue;
+                    }
+
+                    if (node.nodeValue.match(WP_ELSE_COMMENT_REGEX)) {
+                        const branch = { expression: null, nodes: [], scanned: false };
+                        branches.push(branch);
+                        activeBucket = branch.nodes;
+                        continue;
+                    }
                 }
 
-                if (elseComment) {
-                    elseContent.push(node);
-                } else {
-                    content.push(node);
-                }
+                activeBucket.push(node);
             }
 
             // Build the scopeResolver once at scan time. The comment's parent
@@ -7050,15 +7059,9 @@
             commentBindingMap.set(openComment, {
                 expression,
                 closingComment: commentNode,
-                content,
-                elseContent,
+                branches,
                 scopeResolver,
-                isVisible: null,           // null sentinel forces first evaluation to always run
-                // NOTE: these flags assume content/elseContent nodes are never
-                // replaced after initial scan. If the framework ever supports
-                // keyed re-renders that swap these nodes, the flags must be reset.
-                contentScanned: false,     // Guards against re-scanning on repeated toggles
-                elseContentScanned: false  // Same guard for the else branch
+                isVisible: null  // null sentinel forces first evaluation to always run
             });
         }
 
@@ -7073,43 +7076,52 @@
 
     /**
      * Updates the visibility of content controlled by a wp-if comment.
-     * If the binding includes an elseContent branch (from <!-- wp-else -->),
-     * it is toggled in the opposite direction.
+     * Evaluates each branch in order and shows the first one that matches,
+     * hiding all others. The plain wp-else branch (expression === null) always
+     * matches when reached. Exactly one branch is visible at a time.
      * @param {Comment} commentNode - The wp-if comment node
      * @param {Object} mappingData - The binding data for this comment
      */
     Context.prototype.updateCommentConditional = function(commentNode, mappingData) {
         try {
-            const parsed = ExpressionCache.parseExpression(mappingData.expression);
-            const value = ExpressionParser.evaluate(parsed, this.abstraction, mappingData.scopeResolver);
-            const shouldShow = !!value;
+            const abstraction = this.abstraction;
+            const scopeResolver = mappingData.scopeResolver;
+            const branches = mappingData.branches;
 
-            // Do not toggle nodes if visibility status did not change
-            if (shouldShow === mappingData.isVisible) {
+            // Find the first branch whose expression is truthy.
+            // expression === null means plain wp-else, which always wins.
+            let winningBranch = -1;
+
+            for (let i = 0; i < branches.length; i++) {
+                const branch = branches[i];
+
+                if (branch.expression === null || ExpressionParser.evaluate(
+                    ExpressionCache.parseExpression(branch.expression),
+                    abstraction,
+                    scopeResolver
+                )) {
+                    winningBranch = i;
+                    break;
+                }
+            }
+
+            // Bail early if the same branch is already visible
+            if (winningBranch === mappingData.isVisible) {
                 return;
             }
 
-            // Update DOM before the flag. If toggleNodeVisibility throws,
-            // isVisible remains consistent with the actual DOM state.
-            this.domUpdater.toggleNodeVisibility(mappingData.content, shouldShow);
-
-            // Toggle else branch in the opposite direction (if present)
-            if (mappingData.elseContent.length > 0) {
-                this.domUpdater.toggleNodeVisibility(mappingData.elseContent, !shouldShow);
+            // Show the winning branch, hide all others
+            for (let i = 0; i < branches.length; i++) {
+                this.domUpdater.toggleNodeVisibility(branches[i].nodes, i === winningBranch);
             }
 
-            // Flag update after DOM operations succeed
-            mappingData.isVisible = shouldShow;
+            mappingData.isVisible = winningBranch;
 
-            // Scan each branch once — on first show only — to register any
-            // reactive bindings inside. Without this, a branch that starts
-            // hidden would have no registered bindings when first revealed.
-            if (shouldShow && !mappingData.contentScanned) {
-                scanElementNodes(this, mappingData.content);
-                mappingData.contentScanned = true;
-            } else if (!shouldShow && mappingData.elseContent.length > 0 && !mappingData.elseContentScanned) {
-                scanElementNodes(this, mappingData.elseContent);
-                mappingData.elseContentScanned = true;
+            // Scan the newly shown branch once to register any reactive bindings
+            // inside content that started hidden
+            if (winningBranch !== -1 && !branches[winningBranch].scanned) {
+                scanElementNodes(this, branches[winningBranch].nodes);
+                branches[winningBranch].scanned = true;
             }
         } catch (error) {
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
