@@ -28,6 +28,7 @@
  * ║                                                                                      ║
  * ║  HTML:                                                                               ║
  * ║    <textarea data-pac-id="editor1" data-jodit name="body"></textarea>                ║
+ * ║    <waka-jodit data-pac-id="editor1" name="body"></waka-jodit>  (custom element)     ║
  * ║                                                                                      ║
  * ║  Per-instance Jodit config can be passed as the third argument to wakaPAC()          ║
  * ║  under the 'jodit' key:                                                              ║
@@ -305,10 +306,15 @@
             return;
         }
 
+        // For the <waka-jodit> custom element, Jodit needs an actual <textarea>
+        // to attach to. resolveTextarea() creates one inside the custom element
+        // the first time and re-uses it on subsequent calls.
+        const textarea = resolveTextarea(container);
+
         let editor;
 
         try {
-            editor = new window.Jodit(container, editorConfig);
+            editor = new window.Jodit(textarea, editorConfig);
         } catch (error) {
             pac.sendMessage(pacId, msgConstants.MSG_EDITOR_ERROR, 0, 0, {
                 message: error?.message ?? 'Jodit failed to initialize'
@@ -409,6 +415,49 @@
     }
 
     // =========================================================================
+    // Custom element helper
+    // =========================================================================
+
+    /**
+     * Resolves the <textarea> that Jodit should be initialized on.
+     *
+     * For the classic usage pattern the container IS the textarea, so it is
+     * returned directly. For the <waka-jodit> custom-element pattern the
+     * container is a generic element; a hidden <textarea> is created inside it
+     * (or the existing one is re-used on subsequent calls) so that Jodit has a
+     * proper target and form-submission semantics are preserved.
+     *
+     * @param {Element} container - The element returned by pac.getContainerByPacId()
+     * @returns {HTMLTextAreaElement}
+     */
+    function resolveTextarea(container) {
+        if (container instanceof HTMLTextAreaElement) {
+            return container;
+        }
+
+        // Re-use an existing injected textarea if the component is re-created.
+        let ta = container.querySelector('textarea[data-waka-jodit-proxy]');
+
+        if (!ta) {
+            ta = document.createElement('textarea');
+            ta.setAttribute('data-waka-jodit-proxy', '');
+
+            // Carry over the name attribute so the field participates in form
+            // submission under the same key as the custom element declares.
+            if (container.hasAttribute('name')) {
+                ta.name = container.getAttribute('name');
+            }
+
+            // Copy initial content from the custom element's text nodes, if any.
+            ta.value = container.textContent.trim();
+
+            container.appendChild(ta);
+        }
+
+        return ta;
+    }
+
+    // =========================================================================
     // Plugin definition
     // =========================================================================
 
@@ -480,11 +529,21 @@
                 onComponentCreated(abstraction, pacId, _config) {
                     const container = pac.getContainerByPacId(pacId);
 
-                    if (!container || !(container instanceof HTMLTextAreaElement)) {
+                    if (!container) {
                         return;
                     }
 
-                    if (!container.hasAttribute('data-jodit')) {
+                    // Accept either:
+                    //   <textarea data-jodit …>      — classic attribute-based usage
+                    //   <waka-jodit …>               — custom element usage
+                    const isCustomElement = container.tagName.toLowerCase() === 'waka-jodit';
+                    const isTextarea      = container instanceof HTMLTextAreaElement;
+
+                    if (!isTextarea && !isCustomElement) {
+                        return;
+                    }
+
+                    if (isTextarea && !container.hasAttribute('data-jodit')) {
                         return;
                     }
 

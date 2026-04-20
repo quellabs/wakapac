@@ -23,6 +23,7 @@
  * ║                                                                                     ║
  * ║  HTML:                                                                              ║
  * ║    <div data-pac-id="player1" data-vimeo-id="76979871"></div>                       ║
+ * ║    <waka-vimeo data-pac-id="player1" data-vimeo-id="76979871"></waka-vimeo>         ║
  * ║                                                                                     ║
  * ║  Compared to WakaVideo, the following are additionally supported:                   ║
  * ║    - setPlaybackRate / MSG_VIDEO_RATE_CHANGE  (Vimeo SDK exposes playback rate)     ║
@@ -429,7 +430,16 @@
                 onComponentCreated(abstraction, pacId, _config) {
                     const container = pac.getContainerByPacId(pacId);
 
-                    if (!container || !(container instanceof HTMLDivElement)) {
+                    if (!container) {
+                        return;
+                    }
+
+                    // Accept either:
+                    //   <div data-vimeo-id="…">   — classic attribute-based usage
+                    //   <waka-vimeo data-vimeo-id="…">  — custom element usage
+                    const tag = container.tagName.toLowerCase();
+
+                    if (!(container instanceof HTMLDivElement) && tag !== 'waka-vimeo') {
                         return;
                     }
 

@@ -31,6 +31,7 @@
  * ║                                                                                      ║
  * ║  HTML:                                                                               ║
  * ║    <textarea data-pac-id="editor1" data-ckeditor name="body"></textarea>             ║
+ * ║    <waka-ckeditor data-pac-id="editor1" name="body"></waka-ckeditor>  (custom elem)  ║
  * ║                                                                                      ║
  * ║  Per-instance CKEditor config can be passed as the third argument to wakaPAC()       ║
  * ║  under the 'ckeditor' key:                                                           ║
@@ -223,6 +224,11 @@
             return;
         }
 
+        // For the <waka-ckeditor> custom element, CKEditor 4 needs an actual
+        // <textarea> to attach to. resolveTextarea() creates one inside the
+        // custom element the first time and re-uses it on subsequent calls.
+        const textarea = resolveTextarea(container);
+
         // Add container to registry
         const entry = {
             pac,
@@ -236,7 +242,7 @@
         // CKEDITOR.replace() hides the textarea and inserts the editor UI
         // adjacent to it. The textarea keeps its name and is synced by
         // CKEditor's built-in form submission hook.
-        const editor = CKEDITOR.replace(container, editorConfig);
+        const editor = CKEDITOR.replace(textarea, editorConfig);
         entry.editor = editor;
 
         // Message when CKEditor is ready to go
@@ -343,6 +349,52 @@
     }
 
     // =========================================================================
+    // Custom element helper
+    // =========================================================================
+
+    /**
+     * Resolves the <textarea> that CKEditor 4 should be initialized on.
+     *
+     * For the classic usage pattern the container IS the textarea, so it is
+     * returned directly. For the <waka-ckeditor> custom-element pattern the
+     * container is a generic element; a hidden <textarea> is created inside it
+     * (or the existing one is re-used on subsequent calls) so that CKEditor 4
+     * has a proper target and form-submission semantics are preserved.
+     *
+     * @param {Element} container - The element returned by pac.getContainerByPacId()
+     * @returns {HTMLTextAreaElement}
+     */
+    function resolveTextarea(container) {
+        // If the container is a textarea, return it
+        if (container instanceof HTMLTextAreaElement) {
+            return container;
+        }
+
+        // Re-use an existing injected textarea if the component is re-created.
+        let ta = container.querySelector('textarea[data-waka-ckeditor-proxy]');
+
+        if (!ta) {
+            // Create a new textarea
+            ta = document.createElement('textarea');
+            ta.setAttribute('data-waka-ckeditor-proxy', '');
+
+            // Carry over the name attribute so the field participates in form
+            // submission under the same key as the custom element declares.
+            if (container.hasAttribute('name')) {
+                ta.name = container.getAttribute('name');
+            }
+
+            // Copy initial content from the custom element's text nodes, if any.
+            ta.value = container.textContent.trim();
+
+            // Add textarea as a child of the custom element
+            container.appendChild(ta);
+        }
+
+        return ta;
+    }
+
+    // =========================================================================
     // Plugin definition
     // =========================================================================
 
@@ -414,12 +466,21 @@
                 onComponentCreated(abstraction, pacId, _config) {
                     const container = pac.getContainerByPacId(pacId);
 
-                    // Only activate for <textarea> elements carrying data-ckeditor.
-                    if (!container || !(container instanceof HTMLTextAreaElement)) {
+                    if (!container) {
                         return;
                     }
 
-                    if (!container.hasAttribute('data-ckeditor')) {
+                    // Accept either:
+                    //   <textarea data-ckeditor …>   — classic attribute-based usage
+                    //   <waka-ckeditor …>            — custom element usage
+                    const isCustomElement = container.tagName.toLowerCase() === 'waka-ckeditor';
+                    const isTextarea      = container instanceof HTMLTextAreaElement;
+
+                    if (!isTextarea && !isCustomElement) {
+                        return;
+                    }
+
+                    if (isTextarea && !container.hasAttribute('data-ckeditor')) {
                         return;
                     }
 
@@ -429,6 +490,7 @@
                         ...(_config.ckeditor ?? {})
                     };
 
+                    // Load the CKEditor API if not already done so
                     ensureApiLoaded();
 
                     if (_apiReady) {

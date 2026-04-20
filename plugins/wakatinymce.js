@@ -27,6 +27,7 @@
  * ║                                                                                      ║
  * ║  HTML:                                                                               ║
  * ║    <textarea data-pac-id="editor1" data-tinymce name="body"></textarea>              ║
+ * ║    <waka-tinymce data-pac-id="editor1" name="body"></waka-tinymce>  (custom elem)    ║
  * ║                                                                                      ║
  * ║  Per-instance TinyMCE config can be passed as the third argument to wakaPAC()        ║
  * ║  under the 'tinymce' key:                                                            ║
@@ -273,6 +274,13 @@
             return;
         }
 
+        // For the <waka-tinymce> custom element, TinyMCE needs an actual
+        // <textarea> to attach to. resolveTextarea() creates one inside the
+        // custom element the first time and re-uses it on subsequent calls.
+        // For the classic <textarea data-tinymce> pattern this returns the
+        // container itself unchanged.
+        const textarea = resolveTextarea(container);
+
         // Pre-seed the registry entry so onComponentDestroyed can clean up even
         // if the init promise is still pending.
         const entry = {
@@ -292,7 +300,7 @@
         // use cases this is acceptable; deep-merge is out of scope here.
         window.tinymce.init({
             ...editorConfig,
-            target: container,
+            target: textarea,
 
             setup(editor) {
                 // Allow the caller's own setup hook to run first.
@@ -405,6 +413,51 @@
     }
 
     // =========================================================================
+    // Custom element helper
+    // =========================================================================
+
+    /**
+     * Resolves the <textarea> that TinyMCE should be initialized on.
+     *
+     * For the classic usage pattern the container IS the textarea, so it is
+     * returned directly. For the <waka-tinymce> custom-element pattern the
+     * container is a generic element; a hidden <textarea> is created inside it
+     * (or the existing one is re-used on subsequent calls) so that TinyMCE has
+     * a proper target and form-submission semantics are preserved.
+     *
+     * @param {Element} container - The element returned by pac.getContainerByPacId()
+     * @returns {HTMLTextAreaElement}
+     */
+    function resolveTextarea(container) {
+        // If the container is a textarea, return it
+        if (container instanceof HTMLTextAreaElement) {
+            return container;
+        }
+
+        // Re-use an existing injected textarea if the component is re-created.
+        let ta = container.querySelector('textarea[data-waka-tinymce-proxy]');
+
+        if (!ta) {
+            ta = document.createElement('textarea');
+            ta.setAttribute('data-waka-tinymce-proxy', '');
+
+            // Carry over the name attribute so the field participates in form
+            // submission under the same key as the custom element declares.
+            if (container.hasAttribute('name')) {
+                ta.name = container.getAttribute('name');
+            }
+
+            // Copy initial content from the custom element's text nodes, if any.
+            ta.value = container.textContent.trim();
+
+            // Add textarea as a child of the custom element
+            container.appendChild(ta);
+        }
+
+        return ta;
+    }
+
+    // =========================================================================
     // Plugin definition
     // =========================================================================
 
@@ -474,11 +527,21 @@
                 onComponentCreated(abstraction, pacId, _config) {
                     const container = pac.getContainerByPacId(pacId);
 
-                    if (!container || !(container instanceof HTMLTextAreaElement)) {
+                    if (!container) {
                         return;
                     }
 
-                    if (!container.hasAttribute('data-tinymce')) {
+                    // Accept either:
+                    //   <textarea data-tinymce …>    — classic attribute-based usage
+                    //   <waka-tinymce …>              — custom element usage
+                    const isCustomElement = container.tagName.toLowerCase() === 'waka-tinymce';
+                    const isTextarea      = container instanceof HTMLTextAreaElement;
+
+                    if (!isTextarea && !isCustomElement) {
+                        return;
+                    }
+
+                    if (isTextarea && !container.hasAttribute('data-tinymce')) {
                         return;
                     }
 

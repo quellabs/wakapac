@@ -23,6 +23,11 @@
  * ║    wakaPAC.use(WakaColorPicker);                                             ║
  * ║    wakaPAC.use(WakaColorPicker, { injectCSS: false });                       ║
  * ║                                                                              ║
+ * ║    <!-- custom element form -->                                              ║
+ * ║    <waka-colorpicker name="color" value="#3b82f6"></waka-colorpicker>        ║
+ * ║    wakaPAC('#myPicker', {});                                                 ║
+ * ║                                                                              ║
+ * ║    <!-- legacy input form -->                                                ║
  * ║    <input data-wcp name="color" value="#3b82f6">                             ║
  * ║    wakaPAC('#myInput', {});                                                  ║
  * ║                                                                              ║
@@ -581,8 +586,10 @@
                 /**
                  * Called by WakaPAC after a component is created.
                  *
-                 * Activates the color picker on the component element if it carries
-                 * the data-wcp attribute and is an <input>. Sets up:
+                 * Activates the color picker if the component element is either:
+                 *   - A <waka-colorpicker> element (custom element form), or
+                 *   - An <input> element carrying the data-wcp attribute (legacy form).
+                 * Sets up:
                  *   - abstraction.value    — reactive hex color property
                  *
                  * External changes to abstraction.value are picked up via the
@@ -593,20 +600,28 @@
                  * @param {object} config      - The component configuration object.
                  */
                 onComponentCreated(abstraction, pacId, config) {
-                    const input = pac.getContainerByPacId(pacId);
+                    const container = pac.getContainerByPacId(pacId);
 
-                    if (!input) {
+                    if (!container) {
                         console.warn(`[WakaColorPicker] container for pacId "${pacId}" not found`);
                         return;
                     }
 
-                    // Only activate on elements explicitly opted in with data-wcp
-                    if (!input.hasAttribute('data-wcp')) {
-                        return;
-                    }
+                    let input;
 
-                    // Reject non-input elements — only <input> has name/value for form submission
-                    if (input.tagName !== 'INPUT') {
+                    if (container.tagName === 'WAKA-COLORPICKER') {
+                        // Custom element path — create a hidden input inside the container
+                        // to carry name/value for form submission, seeded from the value attribute
+                        input = Object.assign(el('input'), {
+                            type: 'hidden',
+                            name: container.getAttribute('name') || '',
+                            value: container.getAttribute('value') || '',
+                        });
+                        container.appendChild(input);
+                    } else if (container.tagName === 'INPUT' && container.hasAttribute('data-wcp')) {
+                        // Legacy path — use the input element directly
+                        input = container;
+                    } else {
                         return;
                     }
 
@@ -645,10 +660,11 @@
                         }
                     }
 
-                    input.addEventListener('pac:change', onPacChange);
+                    // Listen to change events
+                    container.addEventListener('pac:change', onPacChange);
 
                     // Store the unlisten function in the module-level map, keyed by pacId
-                    _unlisteners.set(pacId, () => input.removeEventListener('pac:change', onPacChange));
+                    _unlisteners.set(pacId, () => container.removeEventListener('pac:change', onPacChange));
                 },
 
                 /**
