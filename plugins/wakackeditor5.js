@@ -30,6 +30,7 @@
  * ║                                                                                      ║
  * ║  HTML:                                                                               ║
  * ║    <textarea data-pac-id="editor1" data-ckeditor name="body"></textarea>             ║
+ * ║    <waka-ckeditor data-pac-id="editor1" name="body"></waka-ckeditor>  (custom elem)  ║
  * ║                                                                                      ║
  * ║  Per-instance CKEditor config can be passed as the third argument to wakaPAC()       ║
  * ║  under the 'ckeditor' key:                                                           ║
@@ -337,17 +338,24 @@
             return;
         }
 
+        // For the <waka-ckeditor> custom element, CKEditor 5 needs an actual
+        // <textarea> to attach to. resolveTextarea() creates one inside the
+        // custom element the first time and re-uses it on subsequent calls.
+        // For the classic <textarea data-ckeditor> pattern this returns the
+        // container itself unchanged.
+        const textarea = resolveTextarea(container);
+
         // ── Proxy textarea ────────────────────────────────────────────────────
-        // CKEditor 5 removes the original <textarea> from the DOM, breaking
+        // CKEditor 5 removes the source <textarea> from the DOM, breaking
         // native form submission. We insert a hidden proxy with the same name
-        // so the form field survives. The proxy is inserted before the original
-        // element so it ends up in the same form position (CKEditor 5 inserts
-        // its own UI container right before where the textarea was).
+        // so the form field survives. The proxy is inserted before the textarea
+        // so it ends up in the same form position (CKEditor 5 inserts its own
+        // UI container right before where the textarea was).
         const proxy = document.createElement('textarea');
-        proxy.name = container.name ?? '';
-        proxy.value = container.value ?? '';
+        proxy.name  = textarea.name ?? '';
+        proxy.value = textarea.value ?? '';
         proxy.style.display = 'none';
-        container.parentNode.insertBefore(proxy, container);
+        textarea.parentNode.insertBefore(proxy, textarea);
 
         // Pre-seed the registry entry so onComponentDestroyed can clean up even
         // if the promise is still pending.
@@ -368,7 +376,7 @@
         const {ClassicEditor} = window.CKEDITOR;
 
         ClassicEditor
-            .create(container, editorConfig)
+            .create(textarea, editorConfig)
             .then(function (editor) {
                 // Component may have been destroyed while the Promise was in flight.
                 if (!_registry.has(pacId)) {
@@ -483,6 +491,53 @@
     }
 
     // =========================================================================
+    // Custom element helper
+    // =========================================================================
+
+    /**
+     * Resolves the <textarea> that CKEditor 5 should be initialized on.
+     *
+     * For the classic usage pattern the container IS the textarea, so it is
+     * returned directly. For the <waka-ckeditor> custom-element pattern the
+     * container is a generic element; a hidden <textarea> is created inside it
+     * (or the existing one is re-used on subsequent calls) so that CKEditor 5
+     * has a proper target and form-submission semantics are preserved via the
+     * plugin's existing proxy mechanism.
+     *
+     * @param {Element} container - The element returned by pac.getContainerByPacId()
+     * @returns {HTMLTextAreaElement}
+     */
+    function resolveTextarea(container) {
+        // If the container is a textarea, return it
+        if (container instanceof HTMLTextAreaElement) {
+            return container;
+        }
+
+        // Re-use an existing injected textarea if the component is re-created.
+        let ta = container.querySelector('textarea[data-waka-ckeditor5-proxy]');
+
+        if (!ta) {
+            // Create a new textarea
+            ta = document.createElement('textarea');
+            ta.setAttribute('data-waka-ckeditor5-proxy', '');
+
+            // Carry over the name attribute so the field participates in form
+            // submission under the same key as the custom element declares.
+            if (container.hasAttribute('name')) {
+                ta.name = container.getAttribute('name');
+            }
+
+            // Copy initial content from the custom element's text nodes, if any.
+            ta.value = container.textContent.trim();
+
+            // Add textarea as a child of the custom element
+            container.appendChild(ta);
+        }
+
+        return ta;
+    }
+
+    // =========================================================================
     // Plugin definition
     // =========================================================================
 
@@ -556,11 +611,21 @@
                 onComponentCreated(abstraction, pacId, _config) {
                     const container = pac.getContainerByPacId(pacId);
 
-                    if (!container || !(container instanceof HTMLTextAreaElement)) {
+                    if (!container) {
                         return;
                     }
 
-                    if (!container.hasAttribute('data-ckeditor')) {
+                    // Accept either:
+                    //   <textarea data-ckeditor …>   — classic attribute-based usage
+                    //   <waka-ckeditor …>             — custom element usage
+                    const isCustomElement = container.tagName.toLowerCase() === 'waka-ckeditor';
+                    const isTextarea      = container instanceof HTMLTextAreaElement;
+
+                    if (!isTextarea && !isCustomElement) {
+                        return;
+                    }
+
+                    if (isTextarea && !container.hasAttribute('data-ckeditor')) {
                         return;
                     }
 
