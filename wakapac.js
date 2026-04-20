@@ -4846,6 +4846,19 @@
             return;
         }
 
+        // Handle <select multiple> — value must be an array of selected option values.
+        // Iterates all options and sets each one's selected state individually so that
+        // non-array values (null, undefined, a plain string) deselect everything gracefully.
+        if (element.tagName === 'SELECT' && element.multiple) {
+            const selected = Array.isArray(value) ? value.map(String) : [];
+
+            for (let i = 0; i < element.options.length; i++) {
+                element.options[i].selected = selected.includes(element.options[i].value);
+            }
+
+            return;
+        }
+
         // Handle all other elements with value property (input, select, textarea, etc.)
         if ('value' in element) {
             const stringValue = String(value || '');
@@ -6117,9 +6130,17 @@
             // Resolve the target path considering any scoped context (e.g., loops, nested objects)
             const resolvedPath = self.normalizePath(valueBinding.target, targetElement);
 
-            // Update the data model using nested property setter to handle complex object paths
-            // e.g., "user.profile.name" gets properly set in the nested object structure
-            Utils.setNestedProperty(resolvedPath, targetElement.value, this.abstraction);
+            // Update the options
+            let selectOption;
+
+            if (targetElement.tagName === 'SELECT' && targetElement.multiple) {
+                selectOption = Array.from(targetElement.selectedOptions).map(opt => opt.value);
+            } else {
+                selectOption = targetElement.value;
+            }
+
+            // Set new option(s)
+            Utils.setNestedProperty(resolvedPath, selectOption, this.abstraction);
         }
 
         // Handle checked binding (for checkboxes and radio buttons)
