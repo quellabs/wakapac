@@ -6563,14 +6563,13 @@
             return;
         }
 
-        // Only handles computed/filtered foreach dependencies (e.g., filter → filteredTodos).
-        // Direct array assignments go through handleArrayChange via pac:change.
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
 
-        if (!dependents) {
-            return;
-        }
+        // Build a pattern that matches the changed property used as a dynamic bracket
+        // key inside a foreach expression, e.g. cities[country][region] contains [region].
+        // This covers dependent dropdowns where options depend on a parent scalar value.
+        const bracketPattern = new RegExp('\\[' + changedProp + '\\]');
 
         // Single-pass scan of interpolationMap instead of calling
         // findForeachElementsByArrayPath once per candidate property
@@ -6583,9 +6582,14 @@
             const expr = mappingData.foreachExpr;
             const source = mappingData.sourceArray;
 
-            // Indirect match: this foreach is bound to a computed property
-            // that depends on the changed property (e.g., filter → filteredTodos)
-            if (dependents.has(expr) || dependents.has(source)) {
+            // Match 1: computed property dependency (e.g., filter → filteredTodos)
+            const computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+
+            // Match 2: expression uses changedProp as a dynamic bracket key
+            // e.g. changing 'region' should rebuild foreach: cities[country][region]
+            const bracketMatch = bracketPattern.test(expr);
+
+            if (computedMatch || bracketMatch) {
                 if (this.shouldRebuildForeach(element)) {
                     this.renderForeach(element);
                 }
