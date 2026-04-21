@@ -124,8 +124,20 @@
     const EV_PAC_CHANGE = 'pac:change';
     const EV_PAC_BROWSER_STATE = 'pac:browser-state';
 
-    /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
-    const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
+    /**
+     * Matches {{> name}} and {{> name root}} injection syntax in raw strings.
+     * Capture group 1: partial name
+     * Capture group 2: optional root alias (the argument passed to the partial)
+     * @type {RegExp}
+     */
+    const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s+([a-zA-Z_$][a-zA-Z0-9_$.]*))?\s*}}/g;
+
+    /**
+     * Matches the parameter placeholder "$." inside a partial body.
+     * Replaced with "rootAlias." during expansion when a root argument is passed.
+     * @type {RegExp}
+     */
+    const PARTIAL_PARAM_REGEX = /\$\./g;
 
     /**
      * This regexp finds runs of dots and square brackets.
@@ -217,6 +229,7 @@
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
     const MSG_ACCEL = 0x0112;
+    const MSG_COMMAND = 0x0111;
     const MSG_TIMER = 0x0113;
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
@@ -3567,11 +3580,28 @@
 
     const ExpressionParser = {
         /**
-         * Cache for parsed expressions to avoid re-parsing
-         * @type {Map<string, Object>}
+         * Active token stream for the current parse frame.
+         * Saved and restored by parseExpression() so nested calls
+         * (re-entrant unit functions, future recursive evaluation)
+         * cannot corrupt an in-progress parse.
+         * @type {Array}
          */
         tokens: [],
+
+        /**
+         * Cursor into the active token stream.
+         * @type {number}
+         */
         currentToken: 0,
+
+        /**
+         * Stack of suspended parse frames.
+         * Each entry is { tokens, currentToken } saved by parseExpression()
+         * before overwriting the active state, and popped on return.
+         * Under normal (non-reentrant) usage this stack stays empty.
+         * @type {Array<{tokens: Array, currentToken: number}>}
+         */
+        _parseStack: [],
 
         OPERATOR_PRECEDENCE: {
             '||': 1, '&&': 2,
@@ -3610,7 +3640,16 @@
         },
 
         /**
-         * Main entry point for parsing JavaScript-like expressions into an AST
+         * Main entry point for parsing JavaScript-like expressions into an AST.
+         *
+         * Re-entrancy: this method may be called while a parse is already in
+         * progress (e.g. a unit function triggers expression evaluation during
+         * argument resolution).  To handle this safely, the current token stream
+         * and cursor are pushed onto _parseStack before the new parse begins and
+         * restored unconditionally in a finally block when it completes.  Under
+         * the common non-reentrant path the stack remains empty and there is no
+         * measurable overhead.
+         *
          * @param {string|Object} expression - The expression string to parse
          * @returns {Object|null} Parsed AST node or null if unparseable
          */
@@ -3618,16 +3657,26 @@
             // Remove whitespace around expression
             expression = String(expression).trim();
 
-            // Tokenize and parse
-            this.tokens = this.tokenize(expression);
-            this.currentToken = 0;
+            // Save the current parse frame so a re-entrant call cannot clobber it
+            this._parseStack.push({ tokens: this.tokens, currentToken: this.currentToken });
 
-            if (this.tokens.length === 0) {
-                return null;
+            try {
+                // Tokenize and parse
+                this.tokens = this.tokenize(expression);
+                this.currentToken = 0;
+
+                if (this.tokens.length === 0) {
+                    return null;
+                }
+
+                // Add dependencies to the result
+                return this.parseTernary();
+            } finally {
+                // Always restore the previous frame, even if an exception was thrown
+                const frame = this._parseStack.pop();
+                this.tokens = frame.tokens;
+                this.currentToken = frame.currentToken;
             }
-
-            // Add dependencies to the result
-            return this.parseTernary();
         },
 
         /**
@@ -6892,13 +6941,23 @@
 
         PARTIAL_INJECT_REGEX.lastIndex = 0;
 
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name) {
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name, root) {
             if (!_partials.has(name)) {
                 console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
                 return match;
             }
 
-            return _partials.get(name);
+            // Extract the body
+            let body = _partials.get(name);
+
+            // If a root argument was supplied, substitute "$." with "root." throughout
+            // the partial body so property paths resolve against the passed object.
+            if (root) {
+                PARTIAL_PARAM_REGEX.lastIndex = 0;
+                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
+            }
+
+            return body;
         });
 
         // Recurse only if something was replaced and depth allows
@@ -9038,8 +9097,8 @@
      * Multiple calls with different rects before the next frame are accumulated
      * into a dirty region: rcPaint tracks the bounding union (used by getDC()
      * for clipping), while rects collects each distinct incoming rectangle for
-     * getUpdateRgn(). Incoming rects that are fully contained within an already-
-     * queued rect are dropped to keep the list compact.
+     * getUpdateRgn(). Incoming rects that are fully contained within an
+     * already-queued rect are dropped to keep the list compact.
      *
      * @param {string} pacId  - data-pac-id of the target canvas container
      * @param {{x:number, y:number, width:number, height:number}|null} [rect]
@@ -9769,20 +9828,17 @@
     };
 
     /**
-     * Broadcast a message to all WakaPAC containers
+     * Broadcast a message to all WakaPAC containers.
+     * A fresh event object is created for each container so that a hook or
+     * msgProc calling preventDefault() on one dispatch cannot affect the rest.
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extended = {}) {
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not deliver the message by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
-        // Broadcast the message to each registered container
-        // Uses the registry instead of DOM queries for better performance
         window.PACRegistry.components.forEach((context) => {
+            const event = this.createPacMessage(messageId, wParam, lParam, extended);
             DomUpdateTracker.dispatchToContainer(context.container, event);
         });
     };
@@ -9805,14 +9861,14 @@
             return;
         }
 
-        // Construct the message once — shared across all dispatches in the subtree.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
         // Iterative breadth-first traversal using a queue.
+        // A fresh event object is created for each container so that a hook or
+        // msgProc calling preventDefault() on one dispatch cannot affect the rest.
         const queue = [...container.children];
 
         while (queue.length) {
             const node = queue.shift();
+            const event = this.createPacMessage(messageId, wParam, lParam, extended);
             DomUpdateTracker.dispatchToContainer(node.container, event);
             queue.push(...node.children);
         }
@@ -11177,7 +11233,7 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
         MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
-        MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT,
+        MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT,
         MSG_WEBGL_READY, MSG_WEBGL_CONTEXT_LOST, MSG_WEBGL_CONTEXT_RESTORED, MSG_MOUSEENTER, MSG_MOUSELEAVE,
         MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER,
         MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
