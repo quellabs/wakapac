@@ -3567,11 +3567,28 @@
 
     const ExpressionParser = {
         /**
-         * Cache for parsed expressions to avoid re-parsing
-         * @type {Map<string, Object>}
+         * Active token stream for the current parse frame.
+         * Saved and restored by parseExpression() so nested calls
+         * (re-entrant unit functions, future recursive evaluation)
+         * cannot corrupt an in-progress parse.
+         * @type {Array}
          */
         tokens: [],
+
+        /**
+         * Cursor into the active token stream.
+         * @type {number}
+         */
         currentToken: 0,
+
+        /**
+         * Stack of suspended parse frames.
+         * Each entry is { tokens, currentToken } saved by parseExpression()
+         * before overwriting the active state, and popped on return.
+         * Under normal (non-reentrant) usage this stack stays empty.
+         * @type {Array<{tokens: Array, currentToken: number}>}
+         */
+        _parseStack: [],
 
         OPERATOR_PRECEDENCE: {
             '||': 1, '&&': 2,
@@ -3610,7 +3627,16 @@
         },
 
         /**
-         * Main entry point for parsing JavaScript-like expressions into an AST
+         * Main entry point for parsing JavaScript-like expressions into an AST.
+         *
+         * Re-entrancy: this method may be called while a parse is already in
+         * progress (e.g. a unit function triggers expression evaluation during
+         * argument resolution).  To handle this safely, the current token stream
+         * and cursor are pushed onto _parseStack before the new parse begins and
+         * restored unconditionally in a finally block when it completes.  Under
+         * the common non-reentrant path the stack remains empty and there is no
+         * measurable overhead.
+         *
          * @param {string|Object} expression - The expression string to parse
          * @returns {Object|null} Parsed AST node or null if unparseable
          */
@@ -3618,16 +3644,26 @@
             // Remove whitespace around expression
             expression = String(expression).trim();
 
-            // Tokenize and parse
-            this.tokens = this.tokenize(expression);
-            this.currentToken = 0;
+            // Save the current parse frame so a re-entrant call cannot clobber it
+            this._parseStack.push({ tokens: this.tokens, currentToken: this.currentToken });
 
-            if (this.tokens.length === 0) {
-                return null;
+            try {
+                // Tokenize and parse
+                this.tokens = this.tokenize(expression);
+                this.currentToken = 0;
+
+                if (this.tokens.length === 0) {
+                    return null;
+                }
+
+                // Add dependencies to the result
+                return this.parseTernary();
+            } finally {
+                // Always restore the previous frame, even if an exception was thrown
+                const frame = this._parseStack.pop();
+                this.tokens = frame.tokens;
+                this.currentToken = frame.currentToken;
             }
-
-            // Add dependencies to the result
-            return this.parseTernary();
         },
 
         /**
@@ -9038,8 +9074,8 @@
      * Multiple calls with different rects before the next frame are accumulated
      * into a dirty region: rcPaint tracks the bounding union (used by getDC()
      * for clipping), while rects collects each distinct incoming rectangle for
-     * getUpdateRgn(). Incoming rects that are fully contained within an already-
-     * queued rect are dropped to keep the list compact.
+     * getUpdateRgn(). Incoming rects that are fully contained within an
+     * already-queued rect are dropped to keep the list compact.
      *
      * @param {string} pacId  - data-pac-id of the target canvas container
      * @param {{x:number, y:number, width:number, height:number}|null} [rect]
