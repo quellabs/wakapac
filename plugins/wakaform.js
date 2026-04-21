@@ -269,6 +269,44 @@
         return this.regex.test(String(value));
     };
 
+    /**
+     * Fails if the value is not a valid URL.
+     * Empty values pass — combine with NotBlank() if the field is required.
+     */
+    function Url() {}
+
+    Url.prototype.validate = function (value) {
+        if (value === null || value === undefined || value === '') {
+            return true;
+        }
+
+        try {
+            new URL(String(value));
+            return true;
+        } catch (_) {
+            return false;
+        }
+    };
+
+    /**
+     * Fails if the value is not in the given array of allowed values.
+     * Empty values pass — combine with NotBlank() if the field is required.
+     * @param {Array} allowed
+     */
+    function In(allowed) {
+        this.allowed = allowed;
+    }
+
+    In.prototype.validate = function (value) {
+        if (value === null || value === undefined || value === '') {
+            return true;
+        }
+
+        // Use loose equality (==) to match PHP's in_array non-strict behaviour,
+        // so numeric strings match numeric values and vice versa.
+        return this.allowed.some(function(item) { return item == value; });
+    };
+
     // ─── WakaForm ─────────────────────────────────────────────────────────────────
 
     /**
@@ -837,6 +875,8 @@
     wakaForm.MinLength = MinLength;
     wakaForm.MaxLength = MaxLength;
     wakaForm.Pattern   = Pattern;
+    wakaForm.Url       = Url;
+    wakaForm.In        = In;
 
     window.WakaForm = WakaForm;
     window.wakaForm = wakaForm;
@@ -849,5 +889,7 @@
     window.MinLength = MinLength;
     window.MaxLength = MaxLength;
     window.Pattern   = Pattern;
+    window.Url       = Url;
+    window.In        = In;
 
 })();
