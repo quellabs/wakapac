@@ -9828,20 +9828,17 @@
     };
 
     /**
-     * Broadcast a message to all WakaPAC containers
+     * Broadcast a message to all WakaPAC containers.
+     * A fresh event object is created for each container so that a hook or
+     * msgProc calling preventDefault() on one dispatch cannot affect the rest.
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extended = {}) {
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not deliver the message by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
-        // Broadcast the message to each registered container
-        // Uses the registry instead of DOM queries for better performance
         window.PACRegistry.components.forEach((context) => {
+            const event = this.createPacMessage(messageId, wParam, lParam, extended);
             DomUpdateTracker.dispatchToContainer(context.container, event);
         });
     };
@@ -9864,14 +9861,14 @@
             return;
         }
 
-        // Construct the message once — shared across all dispatches in the subtree.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
         // Iterative breadth-first traversal using a queue.
+        // A fresh event object is created for each container so that a hook or
+        // msgProc calling preventDefault() on one dispatch cannot affect the rest.
         const queue = [...container.children];
 
         while (queue.length) {
             const node = queue.shift();
+            const event = this.createPacMessage(messageId, wParam, lParam, extended);
             DomUpdateTracker.dispatchToContainer(node.container, event);
             queue.push(...node.children);
         }
