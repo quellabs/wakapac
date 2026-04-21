@@ -124,8 +124,20 @@
     const EV_PAC_CHANGE = 'pac:change';
     const EV_PAC_BROWSER_STATE = 'pac:browser-state';
 
-    /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
-    const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
+    /**
+     * Matches {{> name}} and {{> name root}} injection syntax in raw strings.
+     * Capture group 1: partial name
+     * Capture group 2: optional root alias (the argument passed to the partial)
+     * @type {RegExp}
+     */
+    const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s+([a-zA-Z_$][a-zA-Z0-9_$.]*))?\s*}}/g;
+
+    /**
+     * Matches the parameter placeholder "$." inside a partial body.
+     * Replaced with "rootAlias." during expansion when a root argument is passed.
+     * @type {RegExp}
+     */
+    const PARTIAL_PARAM_REGEX = /\$\./g;
 
     /**
      * This regexp finds runs of dots and square brackets.
@@ -6929,13 +6941,23 @@
 
         PARTIAL_INJECT_REGEX.lastIndex = 0;
 
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name) {
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name, root) {
             if (!_partials.has(name)) {
                 console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
                 return match;
             }
 
-            return _partials.get(name);
+            // Extract the body
+            let body = _partials.get(name);
+
+            // If a root argument was supplied, substitute "$." with "root." throughout
+            // the partial body so property paths resolve against the passed object.
+            if (root) {
+                PARTIAL_PARAM_REGEX.lastIndex = 0;
+                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
+            }
+
+            return body;
         });
 
         // Recurse only if something was replaced and depth allows
