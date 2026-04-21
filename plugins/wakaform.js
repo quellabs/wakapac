@@ -346,11 +346,6 @@
             function onFormChanged(event) {
                 const { formId, path, oldValue, newValue } = event.detail;
 
-                // Do nothing if the value did not change
-                if (oldValue === newValue) {
-                    return;
-                }
-
                 // No subscribers for this form — nothing to do.
                 const subscribers = registry.get(formId);
 
@@ -772,9 +767,7 @@
                     // Force-notify all fields so WakaPAC re-evaluates visible: bindings
                     // even when valid hasn't changed since createForm() init.
                     for (const fieldName of Object.keys(fieldRules)) {
-                        const current = state[fieldName].valid;
-                        proxy[fieldName].valid = !current;
-                        proxy[fieldName].valid = current;
+                        notify([fieldName, 'valid'], state[fieldName].valid, state[fieldName].valid);
                     }
 
                     return state.valid;
