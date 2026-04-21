@@ -768,6 +768,15 @@
                 value: function () {
                     // Full recompute — runs rules for every field and refreshes all state.
                     recomputeFormState();
+
+                    // Force-notify all fields so WakaPAC re-evaluates visible: bindings
+                    // even when valid hasn't changed since createForm() init.
+                    for (const fieldName of Object.keys(fieldRules)) {
+                        const current = state[fieldName].valid;
+                        proxy[fieldName].valid = !current;
+                        proxy[fieldName].valid = current;
+                    }
+
                     return state.valid;
                 }
             });
