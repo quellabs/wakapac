@@ -7196,6 +7196,42 @@
     // =============================================================================
 
     /**
+     * Resolves wakaPAC.sameAs() alias markers on the abstraction into
+     * getter/setter pairs that redirect reads and writes to the target path.
+     * Must run before makeDeepReactiveProxy so the proxy wraps the final object.
+     * @param {Object} abstraction
+     */
+    Context.prototype.resolveAliases = function(abstraction) {
+        Object.keys(abstraction).forEach(function(key) {
+            const value = abstraction[key];
+
+            if (!value || value.__waka_alias !== true) {
+                return;
+            }
+
+            const targetPath = value.target;
+
+            if (targetPath === key) {
+                console.warn('wakaPAC.sameAs: alias "' + key + '" cannot reference itself');
+                return;
+            }
+
+            delete abstraction[key];
+
+            Object.defineProperty(abstraction, key, {
+                get() {
+                    return Utils.getNestedValue(this, targetPath);
+                },
+                set(v) {
+                    Utils.setNestedProperty(targetPath, v, this);
+                },
+                enumerable:   true,
+                configurable: true
+            });
+        });
+    };
+
+    /**
      * Setup reactive properties for this container
      * @returns {*|object}
      */
@@ -7205,6 +7241,10 @@
         // Inject system properties
         this.injectHierarchyProperties(this.originalAbstraction);
         this.injectSystemProperties(this.originalAbstraction);
+
+        // Resolve sameAs aliases before the proxy is created so getter/setter
+        // definitions are in place before makeDeepReactiveProxy wraps the object.
+        this.resolveAliases(this.originalAbstraction);
 
         // Create reactive proxy directly from original abstraction
         const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
@@ -9441,6 +9481,16 @@
                         return;
                     }
 
+                    // If the element has data-pac-same-as, register an alias instead
+                    // of importing the field value directly. The alias redirects reads
+                    // and writes to the target path via getter/setter after resolveAliases().
+                    const sameAs = el.getAttribute('data-pac-same-as');
+
+                    if (sameAs) {
+                        abstraction[name] = wakaPAC.sameAs(sameAs);
+                        return;
+                    }
+
                     switch (el.type) {
                         case 'checkbox':
                             // Read checked state as boolean
@@ -9621,6 +9671,17 @@
         // Return array for multi-selectors, single abstraction for ID selectors
         return isMultiSelector ? abstractions : abstractions[0];
     }
+
+    /**
+     * Creates a sameAs alias marker. When used as an abstraction property value,
+     * the property becomes a getter/setter that redirects to the target path.
+     * Supports dot notation for nested paths: wakaPAC.sameAs('form.email.value').
+     * @param {string} targetPath
+     * @returns {{ __waka_alias: true, target: string }}
+     */
+    wakaPAC.sameAs = function(targetPath) {
+        return { __waka_alias: true, target: targetPath };
+    };
 
     /**
      * Create a wakapac CustomEvent carrying Win32-style message data.
