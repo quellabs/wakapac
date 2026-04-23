@@ -3291,7 +3291,7 @@
                 default:
                     // Treat anything ≥1 pixel as a real notch; ignore sub-pixel noise
                     if (Math.abs(delta) < 1) {
-                        return null; // caller should skip dispatch
+                        return 0; // caller should skip dispatch
                     }
 
                     normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
