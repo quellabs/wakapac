@@ -1916,7 +1916,7 @@
                 // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
                 const modifiers = self.getModifierState(event);
-                const wParam = self.buildWheelWParam(event.deltaY, modifiers);
+                const wParam = self.buildWheelWParam(event.deltaY, modifiers, event.deltaMode);
                 const lParam = self.buildMouseLParam(event, container);
 
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
@@ -3272,13 +3272,32 @@
          * LOWORD = modifier key flags (MK_SHIFT, MK_CONTROL, etc.)
          * @param {number} delta - Raw wheel delta from event
          * @param {number} modifiers - Bitmask of MK_* flags
+         * @param {number} deltaMode - An unsigned long representing the unit of the delta values scroll amount
          * @returns {number} Packed wParam value
          */
-        buildWheelWParam(delta, modifiers) {
-            // Normalize delta to ±120 per notch (Win32 standard)
-            const normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
+        buildWheelWParam(delta, modifiers, deltaMode) {
+            let normalizedDelta;
 
-            // Pack: HIWORD=delta (signed), LOWORD=modifiers
+            switch (deltaMode) {
+                case 1: // DOM_DELTA_LINE — Firefox default, delta is in lines
+                    normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
+                    break;
+
+                case 2: // DOM_DELTA_PAGE
+                    normalizedDelta = Math.sign(delta) * WHEEL_DELTA * 10;
+                    break;
+
+                case 0: // DOM_DELTA_PIXEL
+                default:
+                    // Treat anything ≥1 pixel as a real notch; ignore sub-pixel noise
+                    if (Math.abs(delta) < 1) {
+                        return 0; // caller should skip dispatch
+                    }
+
+                    normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
+                    break;
+            }
+
             return ((normalizedDelta & 0xFFFF) << 16) | (modifiers & 0xFFFF);
         },
 
