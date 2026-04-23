@@ -162,7 +162,10 @@
      * @param {string} url    - The URL that failed
      */
     function _broadcastFontFailed(alias, url) {
-        if (!_pac) return;
+        if (!_pac) {
+            return;
+        }
+
         _pac.broadcastMessage(MSG_FONT_FAILED, alias, { alias, url });
     }
 
@@ -258,11 +261,13 @@
             const latinBlock = candidates.find((block) => /\/\*\s*latin\s*\*\//.test(block));
             const winner = latinBlock ?? candidates[0];
 
+            // Extract data from the Google result
             const rawFamily = this.extractProp(winner, 'font-family');
             const family = rawFamily ? rawFamily.replace(/['"]/g, '').trim() : null;
             const src = this.extractProp(winner, 'src');
             const url = src ? this.extractUrl(src) : null;
 
+            // If failed to extract family or url, return null
             if (!family || !url) {
                 return null;
             }
@@ -347,9 +352,7 @@
 
         if (brush._type === 'pattern') {
             // Accept HTMLImageElement, HTMLCanvasElement, or wakaPAC bitmap handle
-            const src = brush.source instanceof CanvasRenderingContext2D
-                ? brush.source.canvas
-                : brush.source;
+            const src = brush.source instanceof CanvasRenderingContext2D ? brush.source.canvas : brush.source;
             return dc.createPattern(src, brush.repetition) ?? brush._fallback;
         }
 
@@ -392,10 +395,20 @@
     // GEOMETRY HELPERS
     // =========================================================================
 
+    /**
+     * Returns true if the point is inside the rectangle
+     * @returns {boolean}
+     * @private
+     */
     function _ptInRect(px, py, x, y, w, h) {
         return px >= x && px <= x + w && py >= y && py <= y + h;
     }
 
+    /**
+     * Returns true if the point is inside the circle
+     * @returns {boolean}
+     * @private
+     */
     function _ptInCircle(px, py, cx, cy, r) {
         const dx = px - cx;
         const dy = py - cy;
@@ -405,6 +418,8 @@
     /**
      * Point-in-polygon using ray casting (even-odd rule).
      * Works for convex and concave polygons.
+     * @returns {boolean}
+     * @private
      */
     function _ptInPolygon(px, py, points) {
         let inside = false;
@@ -496,7 +511,9 @@
 
             // Already registered (loading or loaded) — do not start another load
             const existing = _fonts.get(name);
-            if (existing) return existing.ready;
+            if (existing) {
+                return existing.ready;
+            }
 
             const weight = descriptors.weight ?? 'normal';
             const style = descriptors.style ?? 'normal';
@@ -717,8 +734,12 @@
          * @returns {LinearGradientBrush}
          */
         linearGradient(x1, y1, x2, y2, fallback = '#000') {
-            return { _type: 'linear', x1, y1, x2, y2, _stops: [], _fallback: fallback,
-                addColorStop(offset, color) { this._stops.push({ offset, color }); return this; }
+            return {
+                _type: 'linear', x1, y1, x2, y2, _stops: [], _fallback: fallback,
+                addColorStop(offset, color) {
+                    this._stops.push({ offset, color });
+                    return this;
+                }
             };
         },
 
@@ -737,8 +758,12 @@
          * @returns {RadialGradientBrush}
          */
         radialGradient(x1, y1, r1, x2, y2, r2, fallback = '#000') {
-            return { _type: 'radial', x1, y1, r1, x2, y2, r2, _stops: [], _fallback: fallback,
-                addColorStop(offset, color) { this._stops.push({ offset, color }); return this; }
+            return {
+                _type: 'radial', x1, y1, r1, x2, y2, r2, _stops: [], _fallback: fallback,
+                addColorStop(offset, color) {
+                    this._stops.push({ offset, color });
+                    return this;
+                }
             };
         },
 
@@ -1245,10 +1270,10 @@
             const m = dc.measureText(text);
 
             return {
-                width:   m.width,
-                ascent:  m.actualBoundingBoxAscent,
+                width: m.width,
+                ascent: m.actualBoundingBoxAscent,
                 descent: m.actualBoundingBoxDescent,
-                height:  m.actualBoundingBoxAscent + m.actualBoundingBoxDescent
+                height: m.actualBoundingBoxAscent + m.actualBoundingBoxDescent
             };
         }
     };
