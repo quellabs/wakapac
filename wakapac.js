@@ -113,6 +113,7 @@
      */
     const WP_IF_COMMENT_REGEX = /^\s*wp-if:\s*(.+?)\s*$/;
     const WP_IF_CLOSE_COMMENT_REGEX = /^\s*\/wp-if\s*$/;
+    const WP_ELSE_IF_COMMENT_REGEX = /^\s*wp-else-if:\s*(.+?)\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
@@ -123,8 +124,20 @@
     const EV_PAC_CHANGE = 'pac:change';
     const EV_PAC_BROWSER_STATE = 'pac:browser-state';
 
-    /** Matches {{> name}} injection syntax in raw (non-browser-parsed) strings. @type {RegExp} */
-    const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*}}/g;
+    /**
+     * Matches {{> name}} and {{> name root}} injection syntax in raw strings.
+     * Capture group 1: partial name
+     * Capture group 2: optional root alias (the argument passed to the partial)
+     * @type {RegExp}
+     */
+    const PARTIAL_INJECT_REGEX = /\{\{>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s+([a-zA-Z_$][a-zA-Z0-9_$.]*))?\s*}}/g;
+
+    /**
+     * Matches the parameter placeholder "$." inside a partial body.
+     * Replaced with "rootAlias." during expansion when a root argument is passed.
+     * @type {RegExp}
+     */
+    const PARTIAL_PARAM_REGEX = /\$\./g;
 
     /**
      * This regexp finds runs of dots and square brackets.
@@ -179,6 +192,7 @@
      * Hex values match Win32 API message identifiers
      */
     const MSG_UNKNOWN = 0x0000;
+    const MSG_DESTROYED = 0x0002;
     const MSG_SIZE = 0x0005;
     const MSG_PAINT = 0x000F;
     const MSG_DPR_CHANGE = 0x0010;
@@ -215,6 +229,7 @@
     const MSG_KEYDOWN = 0x0100;
     const MSG_KEYUP = 0x0101;
     const MSG_ACCEL = 0x0112;
+    const MSG_COMMAND = 0x0111;
     const MSG_TIMER = 0x0113;
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
@@ -1901,7 +1916,7 @@
                 // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
                 const modifiers = self.getModifierState(event);
-                const wParam = self.buildWheelWParam(event.deltaY, modifiers);
+                const wParam = self.buildWheelWParam(event.deltaY, modifiers, event.deltaMode);
                 const lParam = self.buildMouseLParam(event, container);
 
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
@@ -1965,29 +1980,29 @@
                 // Resolve container responsible for the focused element
                 const container = self.getContainerForEvent(MSG_PASTE, event);
                 const clipboardData = event.clipboardData;
-                const text = clipboardData.getData('text/plain');
-                const availableTypes = Array.from(clipboardData.types);
-                const uriList = clipboardData.getData('text/uri-list');
-                const uris = uriList ? uriList.split(/\r?\n/).filter(line => line && !line.startsWith('#')) : [];
+                const uriRaw = clipboardData.getData('text/uri-list');
+                const uris = uriRaw ? uriRaw.split(/\r?\n/).filter(line => line && !line.startsWith('#')) : [];
                 const wParam = self.getModifierState(event);
-                const lParam = text.length;
+                const lParam = clipboardData.getData('text/plain').length;
 
                 // Extract file metadata for image/file paste operations (e.g., screenshot paste)
-                // Only captures metadata — file blobs are accessible via originalEvent.clipboardData.files
+                // Only captures metadata — file blobs are accessible via event.clipboardData.files
                 const files = Array.from(clipboardData.files).map(function(f) {
                     return { name: f.name, size: f.size, type: f.type };
                 });
 
-                // Build clipboard message with all available paste data
+                // Build clipboard message with all available paste data.
+                // Detail keys mirror DataTransfer property names and MIME types.
                 // msgProc can return false to cancel the paste, which prevents
-                // subsequent MSG_INPUT/MSG_INPUT_COMPLETE from firing
+                // subsequent MSG_INPUT/MSG_INPUT_COMPLETE from firing.
                 const customEvent = self.wrapDomEventAsMessage(MSG_PASTE, event, wParam, lParam, {
-                    text: text,
-                    html: clipboardData.getData('text/html'),
-                    rtf: clipboardData.getData('text/rtf'),
-                    uris: uris,
-                    files: files,
-                    availableTypes: availableTypes
+                    'text/plain':    clipboardData.getData('text/plain'),
+                    'text/html':     clipboardData.getData('text/html'),
+                    'text/rtf':      clipboardData.getData('text/rtf'),
+                    'text/uri-list': uriRaw,
+                    uris:            uris,
+                    files:           files,
+                    types:           Array.from(clipboardData.types)
                 });
 
                 // Dispatch to container — no post-dispatch readback needed
@@ -3257,13 +3272,32 @@
          * LOWORD = modifier key flags (MK_SHIFT, MK_CONTROL, etc.)
          * @param {number} delta - Raw wheel delta from event
          * @param {number} modifiers - Bitmask of MK_* flags
+         * @param {number} deltaMode - An unsigned long representing the unit of the delta values scroll amount
          * @returns {number} Packed wParam value
          */
-        buildWheelWParam(delta, modifiers) {
-            // Normalize delta to ±120 per notch (Win32 standard)
-            const normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
+        buildWheelWParam(delta, modifiers, deltaMode) {
+            let normalizedDelta;
 
-            // Pack: HIWORD=delta (signed), LOWORD=modifiers
+            switch (deltaMode) {
+                case 1: // DOM_DELTA_LINE — Firefox default, delta is in lines
+                    normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
+                    break;
+
+                case 2: // DOM_DELTA_PAGE
+                    normalizedDelta = Math.sign(delta) * WHEEL_DELTA * 10;
+                    break;
+
+                case 0: // DOM_DELTA_PIXEL
+                default:
+                    // Treat anything ≥1 pixel as a real notch; ignore sub-pixel noise
+                    if (Math.abs(delta) < 1) {
+                        return 0; // caller should skip dispatch
+                    }
+
+                    normalizedDelta = Math.sign(delta) * WHEEL_DELTA;
+                    break;
+            }
+
             return ((normalizedDelta & 0xFFFF) << 16) | (modifiers & 0xFFFF);
         },
 
@@ -3565,11 +3599,28 @@
 
     const ExpressionParser = {
         /**
-         * Cache for parsed expressions to avoid re-parsing
-         * @type {Map<string, Object>}
+         * Active token stream for the current parse frame.
+         * Saved and restored by parseExpression() so nested calls
+         * (re-entrant unit functions, future recursive evaluation)
+         * cannot corrupt an in-progress parse.
+         * @type {Array}
          */
         tokens: [],
+
+        /**
+         * Cursor into the active token stream.
+         * @type {number}
+         */
         currentToken: 0,
+
+        /**
+         * Stack of suspended parse frames.
+         * Each entry is { tokens, currentToken } saved by parseExpression()
+         * before overwriting the active state, and popped on return.
+         * Under normal (non-reentrant) usage this stack stays empty.
+         * @type {Array<{tokens: Array, currentToken: number}>}
+         */
+        _parseStack: [],
 
         OPERATOR_PRECEDENCE: {
             '||': 1, '&&': 2,
@@ -3608,7 +3659,16 @@
         },
 
         /**
-         * Main entry point for parsing JavaScript-like expressions into an AST
+         * Main entry point for parsing JavaScript-like expressions into an AST.
+         *
+         * Re-entrancy: this method may be called while a parse is already in
+         * progress (e.g. a unit function triggers expression evaluation during
+         * argument resolution).  To handle this safely, the current token stream
+         * and cursor are pushed onto _parseStack before the new parse begins and
+         * restored unconditionally in a finally block when it completes.  Under
+         * the common non-reentrant path the stack remains empty and there is no
+         * measurable overhead.
+         *
          * @param {string|Object} expression - The expression string to parse
          * @returns {Object|null} Parsed AST node or null if unparseable
          */
@@ -3616,16 +3676,26 @@
             // Remove whitespace around expression
             expression = String(expression).trim();
 
-            // Tokenize and parse
-            this.tokens = this.tokenize(expression);
-            this.currentToken = 0;
+            // Save the current parse frame so a re-entrant call cannot clobber it
+            this._parseStack.push({ tokens: this.tokens, currentToken: this.currentToken });
 
-            if (this.tokens.length === 0) {
-                return null;
+            try {
+                // Tokenize and parse
+                this.tokens = this.tokenize(expression);
+                this.currentToken = 0;
+
+                if (this.tokens.length === 0) {
+                    return null;
+                }
+
+                // Add dependencies to the result
+                return this.parseTernary();
+            } finally {
+                // Always restore the previous frame, even if an exception was thrown
+                const frame = this._parseStack.pop();
+                this.tokens = frame.tokens;
+                this.currentToken = frame.currentToken;
             }
-
-            // Add dependencies to the result
-            return this.parseTernary();
         },
 
         /**
@@ -4845,6 +4915,19 @@
             return;
         }
 
+        // Handle <select multiple> — value must be an array of selected option values.
+        // Iterates all options and sets each one's selected state individually so that
+        // non-array values (null, undefined, a plain string) deselect everything gracefully.
+        if (element.multiple) {
+            const selected = Array.isArray(value) ? value.map(String) : [];
+
+            for (let i = 0; i < element.options.length; i++) {
+                element.options[i].selected = selected.includes(element.options[i].value);
+            }
+
+            return;
+        }
+
         // Handle all other elements with value property (input, select, textarea, etc.)
         if ('value' in element) {
             const stringValue = String(value || '');
@@ -5407,9 +5490,13 @@
             _renderLoops.delete(this.abstraction.pacId);
         }
 
+        // Capture identifiers needed for MSG_DESTROYED before nullification
+        const destroyedPacId = this.abstraction.pacId || null;
+        const parentPacId = this.parent ? (this.parent.abstraction?.pacId || null) : null;
+
         // Remove from registry
-        if (this.abstraction.pacId) {
-            window.PACRegistry.deregister(this.abstraction.pacId);
+        if (destroyedPacId) {
+            window.PACRegistry.deregister(destroyedPacId);
         }
 
         // Nullify all references to allow garbage collection
@@ -5418,6 +5505,11 @@
         this.parent = null;
         this.children = null;
         this.config = null;
+
+        // Notify parent that a direct child was destroyed.
+        if (parentPacId && destroyedPacId) {
+            wakaPAC.postMessage(parentPacId, MSG_DESTROYED, 0, 0, { childPacId: destroyedPacId });
+        }
     }
 
     // =============================================================================
@@ -6107,9 +6199,17 @@
             // Resolve the target path considering any scoped context (e.g., loops, nested objects)
             const resolvedPath = self.normalizePath(valueBinding.target, targetElement);
 
-            // Update the data model using nested property setter to handle complex object paths
-            // e.g., "user.profile.name" gets properly set in the nested object structure
-            Utils.setNestedProperty(resolvedPath, targetElement.value, this.abstraction);
+            // Update the options
+            let selectOption;
+
+            if (targetElement.tagName === 'SELECT' && targetElement.multiple) {
+                selectOption = Array.from(targetElement.selectedOptions).map(opt => opt.value);
+            } else {
+                selectOption = targetElement.value;
+            }
+
+            // Set new option(s)
+            Utils.setNestedProperty(resolvedPath, selectOption, this.abstraction);
         }
 
         // Handle checked binding (for checkboxes and radio buttons)
@@ -6482,14 +6582,13 @@
             return;
         }
 
-        // Only handles computed/filtered foreach dependencies (e.g., filter → filteredTodos).
-        // Direct array assignments go through handleArrayChange via pac:change.
         const changedProp = path[0];
         const dependents = this.dependencies.get(changedProp);
 
-        if (!dependents) {
-            return;
-        }
+        // Build a pattern that matches the changed property used as a dynamic bracket
+        // key inside a foreach expression, e.g. cities[country][region] contains [region].
+        // This covers dependent dropdowns where options depend on a parent scalar value.
+        const bracketPattern = new RegExp('\\[' + changedProp + '\\]');
 
         // Single-pass scan of interpolationMap instead of calling
         // findForeachElementsByArrayPath once per candidate property
@@ -6502,9 +6601,14 @@
             const expr = mappingData.foreachExpr;
             const source = mappingData.sourceArray;
 
-            // Indirect match: this foreach is bound to a computed property
-            // that depends on the changed property (e.g., filter → filteredTodos)
-            if (dependents.has(expr) || dependents.has(source)) {
+            // Match 1: computed property dependency (e.g., filter → filteredTodos)
+            const computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+
+            // Match 2: expression uses changedProp as a dynamic bracket key
+            // e.g. changing 'region' should rebuild foreach: cities[country][region]
+            const bracketMatch = bracketPattern.test(expr);
+
+            if (computedMatch || bracketMatch) {
                 if (this.shouldRebuildForeach(element)) {
                     this.renderForeach(element);
                 }
@@ -6860,13 +6964,23 @@
 
         PARTIAL_INJECT_REGEX.lastIndex = 0;
 
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name) {
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name, root) {
             if (!_partials.has(name)) {
                 console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
                 return match;
             }
 
-            return _partials.get(name);
+            // Extract the body
+            let body = _partials.get(name);
+
+            // If a root argument was supplied, substitute "$." with "root." throughout
+            // the partial body so property paths resolve against the passed object.
+            if (root) {
+                PARTIAL_PARAM_REGEX.lastIndex = 0;
+                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
+            }
+
+            return body;
         });
 
         // Recurse only if something was replaced and depth allows
@@ -6940,7 +7054,7 @@
      * Scans the container for comment nodes with wp-if conditionals
      * Builds mapping similar to element bindings but for comment-based conditionals
      * @param {Element} parentElement - The parent element to scan
-     * @returns {Map<Comment, {expression: string, closingComment: Comment, content: Node[], elseContent: Node[]}>}
+     * @returns {Map<Comment, {expression: string, closingComment: Comment, branches: Array<{expression: string|null, nodes: Node[], scanned: boolean}>, scopeResolver: Object, isVisible: number|null}>}
      */
     Context.prototype.scanCommentBindings = function(parentElement) {
         const commentBindingMap = new Map();
@@ -6981,23 +7095,31 @@
             // pop comment off array
             const { comment: openComment, expression } = openComments.pop();
 
-            // Collect all nodes between opening and closing comments,
-            // splitting at an optional <!-- wp-else --> into two buckets.
-            const content = [];
-            const elseContent = [];
-            let elseComment = null;
+            // Build a unified branches array so updateCommentConditional can
+            // iterate a single list regardless of how many wp-else-if clauses exist.
+            const branches = [{ expression, nodes: [], scanned: false }];
+            let activeBucket = branches[0].nodes;
 
             for (let node = openComment.nextSibling; node && node !== commentNode; node = node.nextSibling) {
-                if (node.nodeType === Node.COMMENT_NODE && node.nodeValue.match(WP_ELSE_COMMENT_REGEX)) {
-                    elseComment = node;
-                    continue;
+                if (node.nodeType === Node.COMMENT_NODE) {
+                    const elseIfMatch = node.nodeValue.match(WP_ELSE_IF_COMMENT_REGEX);
+
+                    if (elseIfMatch) {
+                        const branch = { expression: elseIfMatch[1].trim(), nodes: [], scanned: false };
+                        branches.push(branch);
+                        activeBucket = branch.nodes;
+                        continue;
+                    }
+
+                    if (node.nodeValue.match(WP_ELSE_COMMENT_REGEX)) {
+                        const branch = { expression: null, nodes: [], scanned: false };
+                        branches.push(branch);
+                        activeBucket = branch.nodes;
+                        continue;
+                    }
                 }
 
-                if (elseComment) {
-                    elseContent.push(node);
-                } else {
-                    content.push(node);
-                }
+                activeBucket.push(node);
             }
 
             // Build the scopeResolver once at scan time. The comment's parent
@@ -7019,15 +7141,9 @@
             commentBindingMap.set(openComment, {
                 expression,
                 closingComment: commentNode,
-                content,
-                elseContent,
+                branches,
                 scopeResolver,
-                isVisible: null,           // null sentinel forces first evaluation to always run
-                // NOTE: these flags assume content/elseContent nodes are never
-                // replaced after initial scan. If the framework ever supports
-                // keyed re-renders that swap these nodes, the flags must be reset.
-                contentScanned: false,     // Guards against re-scanning on repeated toggles
-                elseContentScanned: false  // Same guard for the else branch
+                isVisible: null  // null sentinel forces first evaluation to always run
             });
         }
 
@@ -7042,43 +7158,52 @@
 
     /**
      * Updates the visibility of content controlled by a wp-if comment.
-     * If the binding includes an elseContent branch (from <!-- wp-else -->),
-     * it is toggled in the opposite direction.
+     * Evaluates each branch in order and shows the first one that matches,
+     * hiding all others. The plain wp-else branch (expression === null) always
+     * matches when reached. Exactly one branch is visible at a time.
      * @param {Comment} commentNode - The wp-if comment node
      * @param {Object} mappingData - The binding data for this comment
      */
     Context.prototype.updateCommentConditional = function(commentNode, mappingData) {
         try {
-            const parsed = ExpressionCache.parseExpression(mappingData.expression);
-            const value = ExpressionParser.evaluate(parsed, this.abstraction, mappingData.scopeResolver);
-            const shouldShow = !!value;
+            const abstraction = this.abstraction;
+            const scopeResolver = mappingData.scopeResolver;
+            const branches = mappingData.branches;
 
-            // Do not toggle nodes if visibility status did not change
-            if (shouldShow === mappingData.isVisible) {
+            // Find the first branch whose expression is truthy.
+            // expression === null means plain wp-else, which always wins.
+            let winningBranch = -1;
+
+            for (let i = 0; i < branches.length; i++) {
+                const branch = branches[i];
+
+                if (branch.expression === null || ExpressionParser.evaluate(
+                    ExpressionCache.parseExpression(branch.expression),
+                    abstraction,
+                    scopeResolver
+                )) {
+                    winningBranch = i;
+                    break;
+                }
+            }
+
+            // Bail early if the same branch is already visible
+            if (winningBranch === mappingData.isVisible) {
                 return;
             }
 
-            // Update DOM before the flag. If toggleNodeVisibility throws,
-            // isVisible remains consistent with the actual DOM state.
-            this.domUpdater.toggleNodeVisibility(mappingData.content, shouldShow);
-
-            // Toggle else branch in the opposite direction (if present)
-            if (mappingData.elseContent.length > 0) {
-                this.domUpdater.toggleNodeVisibility(mappingData.elseContent, !shouldShow);
+            // Show the winning branch, hide all others
+            for (let i = 0; i < branches.length; i++) {
+                this.domUpdater.toggleNodeVisibility(branches[i].nodes, i === winningBranch);
             }
 
-            // Flag update after DOM operations succeed
-            mappingData.isVisible = shouldShow;
+            mappingData.isVisible = winningBranch;
 
-            // Scan each branch once — on first show only — to register any
-            // reactive bindings inside. Without this, a branch that starts
-            // hidden would have no registered bindings when first revealed.
-            if (shouldShow && !mappingData.contentScanned) {
-                scanElementNodes(this, mappingData.content);
-                mappingData.contentScanned = true;
-            } else if (!shouldShow && mappingData.elseContent.length > 0 && !mappingData.elseContentScanned) {
-                scanElementNodes(this, mappingData.elseContent);
-                mappingData.elseContentScanned = true;
+            // Scan the newly shown branch once to register any reactive bindings
+            // inside content that started hidden
+            if (winningBranch !== -1 && !branches[winningBranch].scanned) {
+                scanElementNodes(this, branches[winningBranch].nodes);
+                branches[winningBranch].scanned = true;
             }
         } catch (error) {
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
@@ -7090,6 +7215,42 @@
     // =============================================================================
 
     /**
+     * Resolves wakaPAC.sameAs() alias markers on the abstraction into
+     * getter/setter pairs that redirect reads and writes to the target path.
+     * Must run before makeDeepReactiveProxy so the proxy wraps the final object.
+     * @param {Object} abstraction
+     */
+    Context.prototype.resolveAliases = function(abstraction) {
+        Object.keys(abstraction).forEach(function(key) {
+            const value = abstraction[key];
+
+            if (!value || value.__waka_alias !== true) {
+                return;
+            }
+
+            const targetPath = value.target;
+
+            if (targetPath === key) {
+                console.warn('wakaPAC.sameAs: alias "' + key + '" cannot reference itself');
+                return;
+            }
+
+            delete abstraction[key];
+
+            Object.defineProperty(abstraction, key, {
+                get() {
+                    return Utils.getNestedValue(this, targetPath);
+                },
+                set(v) {
+                    Utils.setNestedProperty(targetPath, v, this);
+                },
+                enumerable:   true,
+                configurable: true
+            });
+        });
+    };
+
+    /**
      * Setup reactive properties for this container
      * @returns {*|object}
      */
@@ -7099,6 +7260,10 @@
         // Inject system properties
         this.injectHierarchyProperties(this.originalAbstraction);
         this.injectSystemProperties(this.originalAbstraction);
+
+        // Resolve sameAs aliases before the proxy is created so getter/setter
+        // definitions are in place before makeDeepReactiveProxy wraps the object.
+        this.resolveAliases(this.originalAbstraction);
 
         // Create reactive proxy directly from original abstraction
         const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
@@ -8995,8 +9160,8 @@
      * Multiple calls with different rects before the next frame are accumulated
      * into a dirty region: rcPaint tracks the bounding union (used by getDC()
      * for clipping), while rects collects each distinct incoming rectangle for
-     * getUpdateRgn(). Incoming rects that are fully contained within an already-
-     * queued rect are dropped to keep the list compact.
+     * getUpdateRgn(). Incoming rects that are fully contained within an
+     * already-queued rect are dropped to keep the list compact.
      *
      * @param {string} pacId  - data-pac-id of the target canvas container
      * @param {{x:number, y:number, width:number, height:number}|null} [rect]
@@ -9183,6 +9348,17 @@
                     },
 
                     /**
+                     * Returns the pac-id of the parent component of the given container, or null if none.
+                     * Equivalent to calling wakaPAC.getParentPacId() directly, but usable
+                     * in binding expressions via data-pac-bind.
+                     * @param {string} pacId            - The data-pac-id of the child component
+                     * @returns {string|null}
+                     */
+                    getParentPacId: (pacId) => {
+                        return wakaPAC.getParentPacId(pacId);
+                    },
+
+                    /**
                      * Sends a message to the parent component of the given container.
                      * Equivalent to calling wakaPAC.sendMessageToParent() directly, but usable
                      * in binding expressions via data-pac-bind.
@@ -9321,6 +9497,16 @@
 
                     // No name attribute exists. Skip.
                     if (!name) {
+                        return;
+                    }
+
+                    // If the element has data-pac-same-as, register an alias instead
+                    // of importing the field value directly. The alias redirects reads
+                    // and writes to the target path via getter/setter after resolveAliases().
+                    const sameAs = el.getAttribute('data-pac-same-as');
+
+                    if (sameAs) {
+                        abstraction[name] = wakaPAC.sameAs(sameAs);
                         return;
                     }
 
@@ -9506,6 +9692,17 @@
     }
 
     /**
+     * Creates a sameAs alias marker. When used as an abstraction property value,
+     * the property becomes a getter/setter that redirects to the target path.
+     * Supports dot notation for nested paths: wakaPAC.sameAs('form.email.value').
+     * @param {string} targetPath
+     * @returns {{ __waka_alias: true, target: string }}
+     */
+    wakaPAC.sameAs = function(targetPath) {
+        return { __waka_alias: true, target: targetPath };
+    };
+
+    /**
      * Create a wakapac CustomEvent carrying Win32-style message data.
      * @param {number} messageId
      * @param {number} wParam
@@ -9601,6 +9798,22 @@
     };
 
     /**
+     * Returns the pac-id of the parent component of the given container, or null if none.
+     * Equivalent to Win32 GetParent() returning a parent HWND.
+     * @param {string} pacId - The data-pac-id of the child container
+     * @returns {string|null} The parent's pac-id, or null if the container has no parent
+     */
+    wakaPAC.getParentPacId = function(pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context || !context.parent) {
+            return null;
+        }
+
+        return context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
+    };
+
+    /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 PostMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
@@ -9669,13 +9882,12 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessageToParent = function(pacId, messageId, wParam, lParam, extended = {}) {
-        const context = window.PACRegistry.get(pacId);
+        const parentId = this.getParentPacId(pacId);
 
-        if (!context || !context.parent) {
+        if (!parentId) {
             return;
         }
 
-        const parentId = context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
         this.sendMessage(parentId, messageId, wParam, lParam, extended);
     };
 
@@ -9690,31 +9902,27 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.postMessageToParent = function(pacId, messageId, wParam, lParam, extended = {}) {
-        const context = window.PACRegistry.get(pacId);
+        const parentId = this.getParentPacId(pacId);
 
-        if (!context || !context.parent) {
+        if (!parentId) {
             return;
         }
 
-        const parentId = context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
         this.postMessage(parentId, messageId, wParam, lParam, extended);
     };
 
     /**
-     * Broadcast a message to all WakaPAC containers
+     * Broadcast a message to all WakaPAC containers.
+     * A fresh event object is created for each container so that a hook or
+     * msgProc calling preventDefault() on one dispatch cannot affect the rest.
      * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
      * @param {number} wParam - First message parameter (integer)
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.broadcastMessage = function(messageId, wParam, lParam, extended = {}) {
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not deliver the message by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
-        // Broadcast the message to each registered container
-        // Uses the registry instead of DOM queries for better performance
         window.PACRegistry.components.forEach((context) => {
+            const event = this.createPacMessage(messageId, wParam, lParam, extended);
             DomUpdateTracker.dispatchToContainer(context.container, event);
         });
     };
@@ -9737,14 +9945,14 @@
             return;
         }
 
-        // Construct the message once — shared across all dispatches in the subtree.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
         // Iterative breadth-first traversal using a queue.
+        // A fresh event object is created for each container so that a hook or
+        // msgProc calling preventDefault() on one dispatch cannot affect the rest.
         const queue = [...container.children];
 
         while (queue.length) {
             const node = queue.shift();
+            const event = this.createPacMessage(messageId, wParam, lParam, extended);
             DomUpdateTracker.dispatchToContainer(node.container, event);
             queue.push(...node.children);
         }
@@ -11138,11 +11346,11 @@
     // Attach message type constants to wakaPAC
     Object.assign(wakaPAC, {
         // Message types
-        MSG_UNKNOWN, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
+        MSG_UNKNOWN, MSG_DESTROYED, MSG_MOUSEMOVE, MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
         MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
-        MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT,
+        MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT,
         MSG_WEBGL_READY, MSG_WEBGL_CONTEXT_LOST, MSG_WEBGL_CONTEXT_RESTORED, MSG_MOUSEENTER, MSG_MOUSELEAVE,
         MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER,
         MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,

@@ -44,7 +44,7 @@ Two-way binding, reactive updates, zero configuration.
 - Metafile API: display list recording, playback, and hit testing
 
 **Units** — optional utility libraries callable from templates and component methods:
-Stdlib, Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, EscapeUtils, ColorUtils
+Stdlib (built-in), Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, EscapeUtils, ColorUtils
 
 ## Plugins
 
@@ -59,6 +59,8 @@ Stdlib, Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, P
 **WakaMotion** — device motion and orientation sensors as reactive properties.
 
 **WakaSync** — full-featured HTTP client with request grouping, cancellation, retries, and interceptors. Results delivered as `MSG_HTTP_SUCCESS`, `MSG_HTTP_ERROR`, or `MSG_HTTP_ABORT`.
+
+**WakaCKEditor** — bridges CKEditor 4 into WakaPAC. Activate on any `<textarea data-ckeditor>` container; the CKEditor script is injected and shared automatically. Editor content is kept on `abstraction.value` on every change and synced back to the textarea on form submit, so native form posts work without extra handling.
 
 **WakaVideo** — bridges native `<video>` elements into the WakaPAC message and abstraction model. Supports playback control, volume, seek, playback rate, programmatic cues (`addCue`), and canvas frame capture via `bitBlt`/`stretchBlt`.
 

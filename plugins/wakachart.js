@@ -183,7 +183,7 @@
                     const cy = pad + chartH / 2;
                     const r = Math.max(0, Math.min(chartW, chartH) / 2);
 
-                    const dl = new wakaPAC.MetaFile();
+                    const dl = new pac.MetaFile();
 
                     // ── Slices ────────────────────────────────────────────────────
                     let startAngle = -Math.PI / 2; // start at 12 o'clock

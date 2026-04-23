@@ -24,6 +24,7 @@
  * ║                                                                                      ║
  * ║  HTML:                                                                               ║
  * ║    <div data-pac-id="player1" data-youtube-id="dQw4w9WgXcQ"></div>                   ║
+ * ║    <waka-youtube data-pac-id="player1" data-youtube-id="dQw4w9WgXcQ"></waka-youtube> ║
  * ║                                                                                      ║
  * ║  The following features from WakaVideo are omitted — the YouTube IFrame API          ║
  * ║  cannot provide them due to cross-origin restrictions:                               ║
@@ -485,8 +486,16 @@
                 onComponentCreated(abstraction, pacId, _config) {
                     const container = pac.getContainerByPacId(pacId);
 
-                    // Only activate for <div> containers carrying a YouTube video ID.
-                    if (!container || !(container instanceof HTMLDivElement)) {
+                    if (!container) {
+                        return;
+                    }
+
+                    // Accept either:
+                    //   <div data-youtube-id="…">          — classic attribute-based usage
+                    //   <waka-youtube data-youtube-id="…"> — custom element usage
+                    const tag = container.tagName.toLowerCase();
+
+                    if (!(container instanceof HTMLDivElement) && tag !== 'waka-youtube') {
                         return;
                     }
 
