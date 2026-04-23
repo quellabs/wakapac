@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaDDraw Diagnostic</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: #111;
+            color: #ccc;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px;
+            gap: 12px;
+        }
+
+        canvas[data-pac-id="game"] {
+            display: block;
+            border: 1px solid #444;
+            image-rendering: pixelated;
+        }
+
+        #debug {
+            font-size: 0.72rem;
+            color: #aaa;
+            width: 320px;
+            line-height: 2;
+        }
+
+        #debug b {
+            color: #7eb8f7;
+            font-weight: normal;
+        }
+
+        #controls {
+            font-size: 0.72rem;
+            color: #666;
+            line-height: 2;
+        }
+
+        label {
+            cursor: pointer;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+<canvas data-pac-id="game"
+        width="320"
+        height="240"
+        tabindex="0"
+        data-pac-context="2d"></canvas>
+
+<div id="debug">
+    hero pos: <b id="d-pos">—</b> &nbsp; frame: <b id="d-frame">—</b><br>
+    dirty rects this frame: <b id="d-rects">—</b><br>
+    rect coords: <b id="d-coords">—</b>
+</div>
+
+<div id="controls">
+    Arrow keys / WASD — move hero &nbsp;|&nbsp;
+    <label><input type="checkbox" id="chk-flash"> show dirty rects</label><br>
+    Target bounces autonomously. Move hero into it to trigger rect splitting.
+</div>
+
+<script src="../wakapac.js"></script>
+<script src="../plugins/wakaddraw.js"></script>
+<script>
+
+    // =============================================================================
+    // SURFACE DRAWING
+    // Draw into surface._ctx, then call applyColorKey() to make magenta transparent.
+    // =============================================================================
+
+    function _drawHero(surface) {
+        const ctx = surface._ctx;
+        const FW = 32;
+        const colors = ['#4a9eff', '#5aaeff', '#4a9eff', '#3a8eef'];
+
+        ctx.fillStyle = '#ff00ff';
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+        for (let f = 0; f < 4; f++) {
+            const ox = f * FW;
+            ctx.fillStyle = colors[f];
+            ctx.fillRect(ox + 8, 8, 16, 18);
+            ctx.fillStyle = '#c8e6ff';
+            ctx.fillRect(ox + 10, 2, 12, 10);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(ox + 12, 5, 2, 2);
+            ctx.fillRect(ox + 18, 5, 2, 2);
+            const lo = (f === 1 || f === 3) ? [-3, 3] : [0, 0];
+            ctx.fillStyle = '#2a6ebf';
+            ctx.fillRect(ox + 10, 26 + lo[0], 5, 4);
+            ctx.fillRect(ox + 17, 26 + lo[1], 5, 4);
+        }
+
+        wakaDDraw.applyColorKey(surface);
+    }
+
+    function _drawTarget(surface) {
+        const ctx = surface._ctx;
+
+        ctx.fillStyle = '#ff00ff';
+        ctx.fillRect(0, 0, 32, 32);
+        ctx.fillStyle = '#e05030';
+        ctx.fillRect(6, 6, 20, 20);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(14, 6, 4, 20);
+        ctx.fillRect(6, 14, 20, 4);
+
+        wakaDDraw.applyColorKey(surface);
+    }
+
+    // =============================================================================
+    // COMPONENT
+    // =============================================================================
+
+    wakaPAC.use(wakaDDraw);
+
+    const Demo = {
+
+        // The primary surface is also the compositor — it owns the background,
+        // the sprite list, and the dirty rect list.
+        surface: null,
+
+        // Sprite source surfaces
+        heroSurface: null,
+        targetSurface: null,
+
+        hero: null,
+        target: null,
+
+        _heroElapsed: 0,
+        HERO_MS_FRAME: 150,
+        _targetVx: 2,
+
+        keys: { left: false, right: false, up: false, down: false },
+        _timer: 0,
+        _lastTime: 0,
+
+        async init() {
+            // Primary surface: the compositor. Owns background, sprites, dirty rects.
+            // No pixel data of its own — background is a solid color.
+            this.surface = wakaDDraw.createSurface(320, 240, 320, 240, {
+                background: '#1a2a3a',
+                colorKey: null      // no color key on the compositor surface
+            });
+
+            // Sprite source surfaces: pixel data only, no background needed.
+            this.heroSurface = wakaDDraw.createSurface(128, 32, 32, 32);
+            this.targetSurface = wakaDDraw.createSurface(32, 32, 32, 32);
+
+            if (!this.surface || !this.heroSurface || !this.targetSurface) {
+                console.error('createSurface failed');
+                return;
+            }
+
+            _drawHero(this.heroSurface);
+            _drawTarget(this.targetSurface);
+
+            this.hero = wakaDDraw.createSprite(this.heroSurface, { x: 40, y: 104, z: 1 });
+            this.target = wakaDDraw.createSprite(this.targetSurface, { x: 144, y: 104, z: 0 });
+
+            wakaDDraw.addSprite(this.surface, this.target);
+            wakaDDraw.addSprite(this.surface, this.hero);
+
+            wakaDDraw.dirtyAll(this.surface);
+
+            this._lastTime = performance.now();
+            this._timer = wakaPAC.setTimer(this.pacId, 16);
+        },
+
+        msgProc(event) {
+            switch (event.message) {
+
+                case wakaPAC.MSG_TIMER: {
+                    if (event.wParam !== this._timer) {
+                        break;
+                    }
+
+                    const now = performance.now();
+                    const delta = now - this._lastTime;
+                    this._lastTime = now;
+
+                    this._tick(delta);
+
+                    if (this.surface._dirty.length > 0) {
+                        wakaPAC.invalidateRect(this.pacId, null);
+                    }
+
+                    break;
+                }
+
+                case wakaPAC.MSG_PAINT: {
+                    if (!this.surface) {
+                        break;
+                    }
+
+                    const dc = wakaPAC.getDC(this.pacId);
+                    const flash = document.getElementById('chk-flash').checked;
+
+                    const snapRects = this.surface._dirty.map(r => ({ ...r }));
+                    this._debugRects(snapRects);
+
+                    if (flash) {
+                        wakaDDraw.dirtyAll(this.surface);
+                    }
+
+                    wakaDDraw.paint(this.surface, dc);
+
+                    if (flash && snapRects.length > 0) {
+                        dc.strokeStyle = 'rgba(255, 80, 80, 0.9)';
+                        dc.lineWidth = 1;
+                        for (const r of snapRects) {
+                            dc.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+                        }
+                    }
+
+                    wakaPAC.releaseDC(dc);
+                    break;
+                }
+
+                case wakaPAC.MSG_KEYDOWN: {
+                    if (this._handleKey(event.wParam, true)) {
+                        return false;
+                    }
+                    break;
+                }
+
+                case wakaPAC.MSG_KEYUP: {
+                    if (this._handleKey(event.wParam, false)) {
+                        return false;
+                    }
+                    break;
+                }
+
+                case wakaPAC.MSG_DESTROYED: {
+                    this.surface = null;
+                    this.heroSurface = null;
+                    this.targetSurface = null;
+                    this.hero = null;
+                    this.target = null;
+                    break;
+                }
+            }
+        },
+
+        _tick(delta) {
+            const W = 320, H = 240;
+            const k = this.keys;
+
+            // Target: autonomous horizontal bounce
+            const tx = this.target.x + this._targetVx * delta * 0.1;
+            if (tx <= 0 || tx >= W - 32) {
+                this._targetVx *= -1;
+            }
+            this.target.moveTo(Math.max(0, Math.min(W - 32, tx)), this.target.y);
+
+            // Hero: keyboard or auto-chase
+            let dx = 0, dy = 0;
+            if (k.left) {
+                dx -= 1;
+            }
+            if (k.right) {
+                dx += 1;
+            }
+            if (k.up) {
+                dy -= 1;
+            }
+            if (k.down) {
+                dy += 1;
+            }
+
+            if (dx === 0 && dy === 0) {
+                if (this.hero.x < this.target.x) {
+                    dx = 1;
+                }
+                if (this.hero.x > this.target.x) {
+                    dx = -1;
+                }
+                if (this.hero.y < this.target.y) {
+                    dy = 1;
+                }
+                if (this.hero.y > this.target.y) {
+                    dy = -1;
+                }
+            }
+
+            if (dx !== 0 && dy !== 0) {
+                dx *= 0.707;
+                dy *= 0.707;
+            }
+
+            const moving = dx !== 0 || dy !== 0;
+
+            if (moving) {
+                const nx = Math.max(0, Math.min(W - 32, this.hero.x + dx * delta * 0.12));
+                const ny = Math.max(0, Math.min(H - 32, this.hero.y + dy * delta * 0.12));
+                this.hero.moveTo(nx, ny);
+            }
+
+            // Hero animation
+            if (moving) {
+                this._heroElapsed += delta;
+
+                if (this._heroElapsed >= this.HERO_MS_FRAME) {
+                    this._heroElapsed %= this.HERO_MS_FRAME;
+                    this.hero.setFrame((this.hero.frame + 1) % this.heroSurface.frames);
+                }
+            } else {
+                this._heroElapsed = 0;
+                this.hero.setFrame(0);
+            }
+
+            document.getElementById('d-pos').textContent = `${this.hero.x}, ${this.hero.y}`;
+            document.getElementById('d-frame').textContent = this.hero.frame;
+        },
+
+        _debugRects(rects) {
+            document.getElementById('d-rects').textContent = rects.length;
+            document.getElementById('d-coords').textContent = rects.length === 0
+                ? '—'
+                : rects.map(r => `(${r.x},${r.y} ${r.w}x${r.h})`).join('  ');
+        },
+
+        _handleKey(vk, down) {
+            switch (vk) {
+                case wakaPAC.VK_LEFT:
+                case wakaPAC.VK_A:
+                    this.keys.left = down;
+                    return true;
+                case wakaPAC.VK_RIGHT:
+                case wakaPAC.VK_D:
+                    this.keys.right = down;
+                    return true;
+                case wakaPAC.VK_UP:
+                case wakaPAC.VK_W:
+                    this.keys.up = down;
+                    return true;
+                case wakaPAC.VK_DOWN:
+                case wakaPAC.VK_S:
+                    this.keys.down = down;
+                    return true;
+            }
+            return false;
+        }
+    };
+
+    wakaPAC('[data-pac-id="game"]', Demo);
+
+</script>
+</body>
+</html>
