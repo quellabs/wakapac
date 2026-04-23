@@ -1222,6 +1222,11 @@
          * Components should listen for MSG_FONT_LOADED and repaint to pick up
          * the correct typeface once it arrives.
          *
+         * If a pen is selected (i.e. not NULL_PEN), the text outline is stroked
+         * using the pen's color and lineWidth — equivalent to selecting a pen
+         * before calling ExtTextOut() in GDI. Select NULL_PEN to suppress the
+         * outline.
+         *
          * @param {CanvasRenderingContext2D|Object} dc
          * @param {string} text
          * @param {number} x
