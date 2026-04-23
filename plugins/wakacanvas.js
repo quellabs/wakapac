@@ -1070,6 +1070,7 @@
          * @param {number|number[]} radius  Corner radius or [tl, tr, br, bl]
          */
         drawRoundRect(dc, x, y, w, h, radius) {
+            dc.beginPath();
             dc.roundRect(x, y, w, h, radius);
 
             if (!_nullBrush.has(dc)) {
@@ -1089,6 +1090,7 @@
          * @param {number} r
          */
         drawCircle(dc, cx, cy, r) {
+            dc.beginPath();
             dc.arc(cx, cy, r, 0, Math.PI * 2);
 
             if (!_nullBrush.has(dc)) {
@@ -1110,6 +1112,7 @@
          * @param {number} [rotation=0]  Radians
          */
         drawEllipse(dc, cx, cy, rx, ry, rotation = 0) {
+            dc.beginPath();
             dc.ellipse(cx, cy, rx, ry, rotation, 0, Math.PI * 2);
 
             if (!_nullBrush.has(dc)) {
@@ -1203,6 +1206,7 @@
                 return;
             }
 
+            dc.beginPath();
             dc.arc(cx, cy, r, startAngle, endAngle, ccw);
             dc.stroke();
         },
@@ -1212,9 +1216,11 @@
          * The brush is the text color — equivalent to Win32 SetTextColor().
          * No-op if NULL_BRUSH is selected.
          *
-         * If the selected font alias is registered but not yet loaded, this call
-         * is silently skipped. MSG_FONT_LOADED will be broadcast when the font
-         * is ready, giving components the opportunity to repaint.
+         * If the selected font alias is registered but not yet loaded, text is
+         * rendered immediately using the sans-serif fallback font. This matches
+         * GDI behaviour — output is never suppressed due to font load state.
+         * Components should listen for MSG_FONT_LOADED and repaint to pick up
+         * the correct typeface once it arrives.
          *
          * @param {CanvasRenderingContext2D|Object} dc
          * @param {string} text
