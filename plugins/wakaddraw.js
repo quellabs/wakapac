@@ -8,61 +8,66 @@
  * ║  ╚███╔███╔╝██║  ██║██║  ██╗██║  ██║██████╔╝██████╔╝██║  ██║██║  ██║╚███╔███╔╝       ║
  * ║   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝        ║
  * ║                                                                                      ║
- * ║  WakaDDraw - Sprite and Dirty Rectangle Plugin for wakaPAC                           ║
+ * ║  WakaDDraw — DirectDraw-inspired blitter plugin for wakaPAC                          ║
  * ║                                                                                      ║
- * ║  Inspired by DirectDraw's surface model. A Surface is a canvas — either the          ║
- * ║  visible onscreen canvas or an offscreen one. Sprites blit from offscreen            ║
- * ║  surfaces into the onscreen surface. The dirty rect compositor repaints only         ║
- * ║  damaged regions, back to front, directly on the destination surface.                ║
+ * ║  A pure blitter. A Surface is a canvas — either the visible onscreen canvas          ║
+ * ║  or an offscreen one. bltFast copies pixels from one surface to another             ║
+ * ║  immediately. No sprite tracking, no dirty rects, no deferred execution.             ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
  * ║    wakaPAC.use(wakaDDraw);                                                           ║
  * ║                                                                                      ║
  * ║  Surface management:                                                                 ║
- * ║    // Get a surface for an existing canvas (onscreen primary surface):              ║
- * ║    const primary = wakaDDraw.getSurface(this.pacId, { background: '#1a2a3a' });      ║
+ * ║    // Onscreen primary surface:                                                      ║
+ * ║    const primary = wakaDDraw.getSurface(this.pacId);                                 ║
  * ║                                                                                      ║
- * ║    // Create a new offscreen surface:                                               ║
+ * ║    // Offscreen surface (blank):                                                     ║
  * ║    const surface = wakaDDraw.createSurface(128, 32, 32, 32);                        ║
+ * ║    // draw into surface._ctx, then:                                                  ║
+ * ║    wakaDDraw.applyColorKey(surface);                                                 ║
  * ║                                                                                      ║
- * ║    // Load pixel data into a surface from a bitmap:                                 ║
+ * ║    // Blt a wakaPAC bitmap onto a surface:                                           ║
  * ║    const bitmap = await wakaPAC.loadBitmap('/img/hero.png');                        ║
  * ║    wakaDDraw.bltBitmap(surface, bitmap);                                            ║
  * ║    wakaPAC.deleteBitmap(bitmap);                                                    ║
  * ║                                                                                      ║
- * ║    // Or draw directly into surface._ctx and apply color key:                       ║
- * ║    wakaDDraw.applyColorKey(surface);                                                 ║
- * ║                                                                                      ║
- * ║    surface.frames     // total frame count derived from surface dimensions           ║
+ * ║    surface.frames     // total frame count derived from dimensions                   ║
  * ║    surface.offscreen  // true if offscreen                                           ║
  * ║                                                                                      ║
- * ║  Sprite management:                                                                  ║
- * ║    const hero = wakaDDraw.createSprite(heroSurface, { x: 100, y: 80, z: 1 });       ║
- * ║    wakaDDraw.addSprite(primary, hero);    // add to destination surface              ║
- * ║    wakaDDraw.removeSprite(primary, hero);                                            ║
+ * ║  Blitting:                                                                           ║
+ * ║    // Blt entire source surface:                                                     ║
+ * ║    wakaDDraw.bltFast(dst, dx, dy, src);                                             ║
  * ║                                                                                      ║
- * ║  Per-frame loop (user-driven — WakaDDraw never schedules):                          ║
- * ║    hero.setFrame(n);    // set frame index; marks dirty if changed                   ║
- * ║    hero.moveTo(x, y);  // move sprite; marks old + new rect dirty                   ║
- * ║    hero.show();        // make visible; marks dirty                                  ║
- * ║    hero.hide();        // hide; marks dirty                                          ║
- * ║    hero.setZ(n);       // change z-order; re-sorts sprite list                       ║
+ * ║    // Blt a specific region (DOMRect conventions — x/left and y/top both work):     ║
+ * ║    wakaDDraw.bltFast(dst, dx, dy, src, { x, y, width, height });                   ║
  * ║                                                                                      ║
- * ║  Dirty rect management:                                                              ║
- * ║    wakaDDraw.addDirtyRect(surface, x, y, w, h);                                     ║
- * ║    wakaDDraw.dirtyAll(surface);                                                      ║
+ * ║    // Blt with explicit flags:                                                       ║
+ * ║    wakaDDraw.bltFast(dst, dx, dy, src, rect, wakaDDraw.DDBLTFAST_NOCOLORKEY);       ║
  * ║                                                                                      ║
- * ║  Paint — composites dirty rects directly onto the surface canvas:                   ║
- * ║    case wakaPAC.MSG_PAINT: {                                                         ║
- * ║        wakaDDraw.paint(primary);                                                     ║
- * ║        break;                                                                        ║
- * ║    }                                                                                 ║
+ * ║  Flags:                                                                              ║
+ * ║    wakaDDraw.DDBLTFAST_NOCOLORKEY   // ignore color key, copy all pixels             ║
+ * ║    wakaDDraw.DDBLTFAST_SRCCOLORKEY  // respect source color key (default if set)     ║
  * ║                                                                                      ║
- * ║  Pixel access:                                                                       ║
+ * ║  Scene system (higher-level, built on bltFast):                                     ║
+ * ║    const scene  = wakaDDraw.sceneCreate({ background: '#1a2a3a' });                 ║
+ * ║    const sprite = wakaDDraw.createSprite(surface, rect, z);                         ║
+ * ║    wakaDDraw.sceneAddSprite(scene, sprite);                                         ║
+ * ║    wakaDDraw.sceneRemoveSprite(scene, sprite);                                      ║
+ * ║    wakaDDraw.sceneDestroy(scene);                                                   ║
+ * ║                                                                                      ║
+ * ║    sprite.moveTo(x, y);   // marks dirty automatically                              ║
+ * ║    sprite.setRect(rect);  // change source rect                                     ║
+ * ║    sprite.setZ(z);        // change z-order                                         ║
+ * ║    sprite.show();         // marks dirty                                             ║
+ * ║    sprite.hide();         // marks dirty                                             ║
+ * ║                                                                                      ║
+ * ║    // Call once per frame from user's timer:                                         ║
+ * ║    wakaDDraw.sceneRender(scene, primary);                                           ║
+ * ║                                                                                      ║
  * ║    const pixels = wakaDDraw.lock(surface);                                           ║
  * ║    // ... mutate pixels.data ...                                                     ║
  * ║    wakaDDraw.unlock(surface, pixels);                                                ║
- * ║    wakaDDraw.applyColorKey(surface);   // re-apply color key after drawing           ║
+ * ║    wakaDDraw.applyColorKey(surface);                                                 ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -70,8 +75,44 @@
 (function() {
     'use strict';
 
-    /** @type {string} */
     const VERSION = '1.0.0';
+
+    // =========================================================================
+    // FLAGS
+    // =========================================================================
+
+    const DDBLTFAST_NOCOLORKEY = 0x00;
+    const DDBLTFAST_SRCCOLORKEY = 0x01;
+
+    // =========================================================================
+    // CANVAS HELPERS
+    // =========================================================================
+
+    /**
+     * Maximum number of dirty rects before falling back to a full redraw.
+     * Prevents O(n²) fragmentation in scenes with many moving sprites.
+     * @type {number}
+     */
+    const MAX_DIRTY_RECTS = 64;
+
+    /**
+     * Creates a 2D canvas context of the given dimensions.
+     * Falls back to a regular HTMLCanvasElement if OffscreenCanvas is unavailable.
+     *
+     * @param {number} width
+     * @param {number} height
+     * @returns {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D}
+     */
+    function _create2DContext(width, height) {
+        if (typeof OffscreenCanvas !== 'undefined') {
+            return new OffscreenCanvas(width, height).getContext('2d');
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        return canvas.getContext('2d');
+    }
 
     // =========================================================================
     // COLOR KEY
@@ -82,7 +123,6 @@
     /**
      * Parses a CSS color string into { r, g, b }.
      * Supports #rgb, #rrggbb, and rgb()/rgba() notation.
-     * Returns null if unparseable.
      *
      * @param {string} color
      * @returns {{ r: number, g: number, b: number } | null}
@@ -121,6 +161,10 @@
      * Applies a color key to a canvas context in-place.
      * Pixels whose RGB matches the key are set to alpha=0.
      *
+     * This is O(pixels) — call once after loading or bulk pixel operations,
+     * never per frame. Repeated calls on an already-keyed surface are harmless
+     * but wasteful.
+     *
      * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
      * @param {string} colorKey
      */
@@ -146,7 +190,53 @@
     }
 
     // =========================================================================
-    // RECT HELPERS
+    // SURFACE
+    // =========================================================================
+
+    /**
+     * A Surface is a canvas — either the visible onscreen canvas or an offscreen one.
+     *
+     * @typedef {{
+     *   _ctx:      CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D,
+     *   _frameW:   number,
+     *   _frameH:   number,
+     *   _cols:     number,
+     *   width:     number,
+     *   height:    number,
+     *   frames:    number,
+     *   offscreen: boolean,
+     *   colorKey:  string|null
+     * }} Surface
+     */
+
+    /**
+     * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
+     * @param {number}      frameW
+     * @param {number}      frameH
+     * @param {string|null} colorKey
+     * @param {boolean}     offscreen
+     * @returns {Surface}
+     */
+    function _buildSurface(ctx, frameW, frameH, colorKey, offscreen) {
+        const w = ctx.canvas.width;
+        const h = ctx.canvas.height;
+        const cols = Math.floor(w / frameW);
+
+        return {
+            _ctx: ctx,
+            _frameW: frameW,
+            _frameH: frameH,
+            _cols: cols,
+            width: w,
+            height: h,
+            frames: cols * Math.floor(h / frameH),
+            offscreen,
+            colorKey
+        };
+    }
+
+    // =========================================================================
+    // RECT HELPERS (scene system)
     // =========================================================================
 
     function _rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
@@ -154,219 +244,16 @@
     }
 
     function _clampRect(x, y, w, h, bw, bh) {
-        const x2 = Math.min(x + w, bw);
-        const y2 = Math.min(y + h, bh);
         const cx = Math.max(x, 0);
         const cy = Math.max(y, 0);
-        const cw = x2 - cx;
-        const ch = y2 - cy;
+        const cw = Math.min(x + w, bw) - cx;
+        const ch = Math.min(y + h, bh) - cy;
         if (cw <= 0 || ch <= 0) {
             return null;
         }
         return { x: cx, y: cy, w: cw, h: ch };
     }
 
-    // =========================================================================
-    // SURFACE
-    // =========================================================================
-
-    /**
-     * A Surface is a canvas — either the visible onscreen canvas or an offscreen one.
-     *
-     * All surfaces:
-     *   _ctx, _frameW, _frameH, _cols, width, height, frames, offscreen, colorKey, frameRect
-     *
-     * Onscreen surfaces only (_background, _sprites, _dirty):
-     *   These hold the orchestration state for the compositor. Offscreen surfaces
-     *   are pixel data only — they cannot be used as paint() targets.
-     *
-     * @typedef {{
-     *   _ctx:        CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D,
-     *   _frameW:     number,
-     *   _frameH:     number,
-     *   _cols:       number,
-     *   _background: string|null,
-     *   _sprites:    Sprite[]|undefined,
-     *   _dirty:      Array<{x:number, y:number, w:number, h:number}>|undefined,
-     *   width:       number,
-     *   height:      number,
-     *   frames:      number,
-     *   offscreen:   boolean,
-     *   colorKey:    string|null,
-     *   frameRect:   function(number): {sx:number, sy:number, sw:number, sh:number}
-     * }} Surface
-     */
-
-    /**
-     * Builds a Surface from an existing canvas rendering context.
-     *
-     * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
-     * @param {number}      frameW
-     * @param {number}      frameH
-     * @param {string|null} colorKey
-     * @param {string|null} background
-     * @param {boolean}     offscreen
-     * @returns {Surface}
-     */
-    function _buildSurface(ctx, frameW, frameH, colorKey, background, offscreen) {
-        const w = ctx.canvas.width;
-        const h = ctx.canvas.height;
-        const cols = Math.floor(w / frameW);
-        const frames = cols * Math.floor(h / frameH);
-
-        const surface = {
-            _ctx: ctx,
-            _frameW: frameW,
-            _frameH: frameH,
-            _cols: cols,
-            width: w,
-            height: h,
-            frames,
-            offscreen,
-            colorKey,
-
-            frameRect(frameIndex) {
-                const col = frameIndex % this._cols;
-                const row = Math.floor(frameIndex / this._cols);
-                return {
-                    sx: col * this._frameW,
-                    sy: row * this._frameH,
-                    sw: this._frameW,
-                    sh: this._frameH
-                };
-            }
-        };
-
-        // Orchestration state only on onscreen surfaces
-        if (!offscreen) {
-            surface._background = background ?? '#000';
-            surface._sprites = [];
-            surface._dirty = [];
-        }
-
-        return surface;
-    }
-
-    // =========================================================================
-    // SPRITE
-    // =========================================================================
-
-    /**
-     * A Sprite blits from an offscreen source surface into a destination surface.
-     * Tracks position, frame index, visibility, and z-order.
-     * The caller drives animation timing and frame advancement.
-     *
-     * @typedef {{
-     *   _surface:  Surface,
-     *   _parent:   Surface|null,
-     *   frame:     number,
-     *   x:         number,
-     *   y:         number,
-     *   z:         number,
-     *   visible:   boolean,
-     *   rect:      { x: number, y: number, w: number, h: number },
-     *   prevRect:  { x: number, y: number, w: number, h: number },
-     *   setFrame:  function(number): void,
-     *   moveTo:    function(number, number): void,
-     *   show:      function(): void,
-     *   hide:      function(): void,
-     *   setZ:      function(number): void
-     * }} Sprite
-     */
-
-    /**
-     * @param {Surface} surface  Source surface
-     * @param {number}  x
-     * @param {number}  y
-     * @param {number}  z
-     * @returns {Sprite}
-     */
-    function _createSprite(surface, x, y, z) {
-        const w = surface._frameW;
-        const h = surface._frameH;
-        x = Math.round(x);
-        y = Math.round(y);
-
-        const sprite = {
-            _surface: surface,
-            _parent: null,
-            frame: 0,
-            x, y, z,
-            visible: true,
-            rect: { x, y, w, h },
-            prevRect: { x, y, w, h },
-
-            setFrame(n) {
-                const clamped = Math.max(0, Math.min(surface.frames - 1, Math.round(n)));
-                if (this.frame === clamped) {
-                    return;
-                }
-                this.frame = clamped;
-                _markSpriteDirty(this);
-            },
-
-            moveTo(nx, ny) {
-                nx = Math.round(nx);
-                ny = Math.round(ny);
-                if (this.x === nx && this.y === ny) {
-                    return;
-                }
-                _markSpriteDirty(this);
-                this.prevRect = { ...this.rect };
-                this.x = nx;
-                this.y = ny;
-                this.rect = { x: nx, y: ny, w, h };
-                _markSpriteDirty(this);
-            },
-
-            show() {
-                if (this.visible) {
-                    return;
-                }
-                this.visible = true;
-                _markSpriteDirty(this);
-            },
-
-            hide() {
-                if (!this.visible) {
-                    return;
-                }
-                _markSpriteDirty(this);
-                this.visible = false;
-            },
-
-            setZ(newZ) {
-                if (this.z === newZ) {
-                    return;
-                }
-                this.z = newZ;
-                if (!this._parent) {
-                    return;
-                }
-                this._parent._sprites.sort((a, b) => a.z - b.z);
-                _markSpriteDirty(this);
-            }
-        };
-
-        return sprite;
-    }
-
-    function _markSpriteDirty(sprite) {
-        if (!sprite._parent || !sprite.visible) {
-            return;
-        }
-        const r = sprite.rect;
-        _addDirtyRect(sprite._parent, r.x, r.y, r.w, r.h);
-    }
-
-    // =========================================================================
-    // DIRTY RECT SPLITTING
-    // =========================================================================
-
-    /**
-     * Subtracts rectangle B from rectangle A, returning the non-overlapping
-     * fragments of A. Returns 0–4 rects.
-     */
     function _subtractRect(ax, ay, aw, ah, bx, by, bw, bh) {
         const ix = Math.max(ax, bx);
         const iy = Math.max(ay, by);
@@ -378,7 +265,6 @@
         }
 
         const frags = [];
-
         if (ix > ax) {
             frags.push({ x: ax, y: ay, w: ix - ax, h: ah });
         }
@@ -395,27 +281,28 @@
         return frags;
     }
 
-    /**
-     * Adds a dirty rect to a surface's list, splitting against existing rects
-     * so the list is always non-overlapping. Every pixel appears exactly once.
-     */
-    function _addDirtyRect(surface, x, y, w, h) {
-        const clamped = _clampRect(x, y, w, h, surface.width, surface.height);
-        if (!clamped) {
+    function _sceneDirtyRect(scene, x, y, w, h) {
+        // If already collapsed to full-redraw, nothing to do
+        if (scene._dirty.length === 1 && scene._dirty[0].full) {
             return;
         }
 
-        let candidates = [clamped];
+        // If the dirty list is at capacity, collapse to a full redraw.
+        // Prevents O(n²) fragmentation in scenes with many moving sprites.
+        if (scene._dirty.length >= MAX_DIRTY_RECTS) {
+            scene._dirty = [{ full: true }];
+            return;
+        }
 
-        for (const existing of surface._dirty) {
+        let candidates = [{ x, y, w, h }];
+
+        for (const existing of scene._dirty) {
             if (candidates.length === 0) {
                 break;
             }
             const next = [];
             for (const c of candidates) {
-                const frags = _subtractRect(c.x, c.y, c.w, c.h,
-                    existing.x, existing.y, existing.w, existing.h);
-                for (const f of frags) {
+                for (const f of _subtractRect(c.x, c.y, c.w, c.h, existing.x, existing.y, existing.w, existing.h)) {
                     next.push(f);
                 }
             }
@@ -423,46 +310,115 @@
         }
 
         for (const c of candidates) {
-            surface._dirty.push(c);
+            scene._dirty.push(c);
         }
     }
 
     // =========================================================================
-    // COMPOSITOR
+    // SPRITE (scene system)
     // =========================================================================
 
-    function _drawBackground(ctx, surface, x, y, w, h) {
-        const bg = surface._background;
+    /**
+     * @typedef {{
+     *   _scene:    Object|null,
+     *   _surface:  Surface,
+     *   _rect:     {x?:number, left?:number, y?:number, top?:number, width:number, height:number}|null,
+     *   _z:        number,
+     *   _zSeq:     number,
+     *   x:         number,
+     *   y:         number,
+     *   visible:   boolean,
+     *   moveTo:    function(number, number): void,
+     *   setRect:   function(Object|null): void,
+     *   setZ:      function(number): void,
+     *   show:      function(): void,
+     *   hide:      function(): void
+     * }} Sprite
+     */
 
-        if (typeof bg === 'string') {
-            ctx.fillStyle = bg;
-            ctx.fillRect(x, y, w, h);
+    let _spriteSeq = 0;
+
+    function _createSpriteObject(surface, rect, z) {
+        const sprite = {
+            _scene: null,
+            _surface: surface,
+            _rect: rect ? { ...rect } : null,
+            _z: z,
+            _zSeq: _spriteSeq++,
+            x: 0,
+            y: 0,
+            visible: true,
+
+            moveTo(nx, ny) {
+                nx = Math.round(nx);
+                ny = Math.round(ny);
+                if (this.x === nx && this.y === ny) {
+                    return;
+                }
+                _spriteDirty(this);          // dirty old position
+                this.x = nx;
+                this.y = ny;
+                _spriteDirty(this);          // dirty new position
+            },
+
+            setRect(rect) {
+                this._rect = rect ? { ...rect } : null;
+                _spriteDirty(this);
+            },
+
+            setZ(z) {
+                this._z = z;
+                this._zSeq = _spriteSeq++;
+                if (this._scene) {
+                    _sceneSortSprites(this._scene);
+                }
+                _spriteDirty(this);
+            },
+
+            show() {
+                if (this.visible) {
+                    return;
+                }
+                this.visible = true;
+                _spriteDirty(this);
+            },
+
+            hide() {
+                if (!this.visible) {
+                    return;
+                }
+                _spriteDirty(this);
+                this.visible = false;
+            }
+        };
+
+        return sprite;
+    }
+
+    function _spriteBounds(sprite) {
+        const r = sprite._rect;
+        const w = r ? r.width : sprite._surface.width;
+        const h = r ? r.height : sprite._surface.height;
+        return { x: sprite.x, y: sprite.y, w, h };
+    }
+
+    function _spriteDirty(sprite) {
+        if (!sprite._scene || !sprite.visible) {
             return;
         }
-
-        // Bitmap background surface
-        if (bg && bg._ctx) {
-            ctx.drawImage(bg._ctx.canvas, x, y, w, h, x, y, w, h);
-            return;
-        }
-
-        ctx.fillStyle = '#000';
-        ctx.fillRect(x, y, w, h);
+        const b = _spriteBounds(sprite);
+        _sceneDirtyRect(sprite._scene, b.x, b.y, b.w, b.h);
     }
 
-    function _drawSprite(ctx, sprite, rx, ry, rw, rh) {
-        const { sx, sy, sw, sh } = sprite._surface.frameRect(sprite.frame);
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(rx, ry, rw, rh);
-        ctx.clip();
-        ctx.drawImage(sprite._surface._ctx.canvas, sx, sy, sw, sh, sprite.x, sprite.y, sw, sh);
-        ctx.restore();
+    function _sceneSortSprites(scene) {
+        scene._sprites.sort((a, b) => a._z !== b._z ? a._z - b._z : a._zSeq - b._zSeq);
     }
 
     // =========================================================================
-    // WAKADDRAW
+    // WAKADDRAW — continued
     // =========================================================================
+
+    let _pac = null;
 
     function WakaDDraw() {
     }
@@ -471,38 +427,41 @@
         constructor: WakaDDraw,
 
         createPacPlugin(pac) {
-            return { name: 'WakaDDraw' };
+            _pac = pac;
+            return {};
         },
+
+        // Error handling convention:
+        //   Low-level API (getSurface, createSurface, bltFast, bltBitmap, lock, unlock):
+        //     throws on misuse — these are programming errors.
+        //   High-level API (scene*, createSprite):
+        //     returns/no-ops on bad input with a console.warn — these are more
+        //     forgiving because scene state can be complex and partial failures
+        //     should not crash the render loop.
 
         // ─── Surface management ───────────────────────────────────────────────
 
         /**
-         * Returns a surface that represents the canvas of a wakaPAC component.
-         * Analogous to DirectDraw's GetGDISurface — retrieves a surface handle
-         * for a canvas that already exists rather than creating a new one.
+         * Returns a surface representing the canvas of a wakaPAC component.
+         * This is the onscreen primary surface — the render destination.
          *
-         * This is the entry point for the onscreen primary surface.
-         *
-         * @param {string}         pacId   The data-pac-id of the component
-         * @param {Object}         [opts]
-         * @param {string|Surface} [opts.background='#000']
-         * @returns {Surface|null}
+         * @param {string} pacId
+         * @returns {Surface}
          */
-        getSurface(pacId, opts = {}) {
-            const canvas = wakaPAC.getContainerByPacId(pacId);
+        getSurface(pacId) {
+            const canvas = _pac.getContainerByPacId(pacId);
 
-            if (!canvas || !(canvas instanceof HTMLCanvasElement)) {
+            if (!(canvas instanceof HTMLCanvasElement)) {
                 throw new Error(`WakaDDraw.getSurface: container for pacId "${pacId}" is not a canvas element`);
             }
 
             const ctx = canvas.getContext('2d');
 
             if (!ctx) {
-                console.warn(`WakaDDraw.getSurface: could not get 2d context for pacId "${pacId}"`);
-                return null;
+                throw new Error(`WakaDDraw.getSurface: could not get 2d context for pacId "${pacId}"`);
             }
 
-            return _buildSurface(ctx, canvas.width, canvas.height, null, opts.background ?? '#000', false);
+            return _buildSurface(ctx, canvas.width, canvas.height, null, false);
         },
 
         /**
@@ -515,30 +474,28 @@
          * @param {number}      frameH
          * @param {Object}      [opts]
          * @param {string|null} [opts.colorKey='#ff00ff']
-         * @returns {Surface|null}
+         * @returns {Surface}
          */
         createSurface(width, height, frameW, frameH, opts = {}) {
             if (!width || !height || !frameW || !frameH) {
-                console.warn('WakaDDraw.createSurface: width, height, frameW and frameH are required');
-                return null;
+                throw new Error('WakaDDraw.createSurface: width, height, frameW and frameH are required');
             }
 
             const colorKey = Object.prototype.hasOwnProperty.call(opts, 'colorKey') ? opts.colorKey : DEFAULT_COLOR_KEY;
-            const ctx = new OffscreenCanvas(width, height).getContext('2d');
+            const ctx = _create2DContext(width, height);
 
-            return _buildSurface(ctx, frameW, frameH, colorKey, null, true);
+            return _buildSurface(ctx, frameW, frameH, colorKey, true);
         },
 
+        // ─── Blitting ─────────────────────────────────────────────────────────
+
         /**
-         * Blits a wakaPAC bitmap into a surface's pixel data.
-         * If the surface has a color key, it is applied after blitting.
+         * Blits a wakaPAC bitmap onto a surface.
+         * Applies the surface's color key after blitting if set.
+         * The caller is responsible for deleting the bitmap afterward.
          *
-         * The bitmap is blitted at (0, 0) and must fit within the surface
-         * dimensions. The caller is responsible for the bitmap's lifetime —
-         * call wakaPAC.deleteBitmap() when done.
-         *
-         * @param {Surface} surface
-         * @param {CanvasRenderingContext2D} bitmap  Handle from wakaPAC.loadBitmap()
+         * @param {Surface}                 surface
+         * @param {CanvasRenderingContext2D} bitmap   Handle from wakaPAC.loadBitmap()
          */
         bltBitmap(surface, bitmap) {
             if (!surface || !surface._ctx) {
@@ -551,165 +508,56 @@
 
             surface._ctx.drawImage(bitmap.canvas, 0, 0);
 
-            if (surface.colorKey) {
+            if (surface.colorKey !== null) {
                 _applyColorKey(surface._ctx, surface.colorKey);
             }
         },
 
-        // ─── Sprite management ────────────────────────────────────────────────
-
         /**
-         * Creates a Sprite that blits from the given offscreen source surface.
+         * Blits a source surface into a destination surface immediately.
          *
-         * @param {Surface} surface  Source surface (must be offscreen)
-         * @param {Object}  [opts]
-         * @param {number}  [opts.x=0]
-         * @param {number}  [opts.y=0]
-         * @param {number}  [opts.z=0]
-         * @returns {Sprite|null}
-         */
-        createSprite(surface, opts = {}) {
-            if (!surface) {
-                console.warn('WakaDDraw.createSprite: surface is required');
-                return null;
-            }
-
-            if (!surface.offscreen) {
-                console.warn('WakaDDraw.createSprite: source surface must be offscreen');
-                return null;
-            }
-
-            return _createSprite(surface, opts.x ?? 0, opts.y ?? 0, opts.z ?? 0);
-        },
-
-        /**
-         * Adds a sprite to a destination surface's compositor.
-         * The sprite list is z-sorted on insertion.
-         * Marks the sprite's initial position dirty.
+         * If rect is omitted the entire source surface is blitted.
+         * rect follows DOMRect conventions — x/left and y/top are both accepted.
          *
-         * @param {Surface} surface  Destination surface (onscreen or offscreen)
-         * @param {Sprite}  sprite
-         */
-        addSprite(surface, sprite) {
-            if (!surface || !sprite) {
-                return;
-            }
-
-            if (surface.offscreen) {
-                console.warn('WakaDDraw.addSprite: surface must be onscreen');
-                return;
-            }
-
-            if (sprite._parent === surface) {
-                return;
-            }
-
-            if (sprite._parent !== null) {
-                console.warn('WakaDDraw.addSprite: sprite is already attached to a surface — remove it first');
-                return;
-            }
-
-            sprite._parent = surface;
-
-            let i = surface._sprites.length;
-            while (i > 0 && surface._sprites[i - 1].z > sprite.z) {
-                i--;
-            }
-            surface._sprites.splice(i, 0, sprite);
-
-            _markSpriteDirty(sprite);
-        },
-
-        /**
-         * Removes a sprite from its destination surface.
-         * Marks the vacated region dirty.
+         * flags defaults to DDBLTFAST_SRCCOLORKEY if the source has a color key,
+         * DDBLTFAST_NOCOLORKEY otherwise.
          *
-         * @param {Surface} surface
-         * @param {Sprite}  sprite
+         * @param {Surface} dst    Destination surface
+         * @param {number}  dx     Destination x
+         * @param {number}  dy     Destination y
+         * @param {Surface} src    Source surface
+         * @param {DOMRect|{x?:number, left?:number, y?:number, top?:number, width:number, height:number}} [rect]
+         * @param {number}  [flags]
          */
-        removeSprite(surface, sprite) {
-            if (!surface || !sprite || sprite._parent !== surface) {
-                return;
+        bltFast(dst, dx, dy, src, rect, flags) {
+            if (!dst || !dst._ctx) {
+                throw new Error('WakaDDraw.bltFast: dst is required');
             }
-            if (surface.offscreen) {
-                return;
-            }
-
-            _markSpriteDirty(sprite);
-
-            const idx = surface._sprites.indexOf(sprite);
-            if (idx !== -1) {
-                surface._sprites.splice(idx, 1);
+            if (!src || !src._ctx) {
+                throw new Error('WakaDDraw.bltFast: src is required');
             }
 
-            sprite._parent = null;
-        },
+            const sx = rect ? (rect.x ?? rect.left ?? 0) : 0;
+            const sy = rect ? (rect.y ?? rect.top ?? 0) : 0;
+            const sw = rect ? rect.width : src.width;
+            const sh = rect ? rect.height : src.height;
 
-        // ─── Dirty rect management ────────────────────────────────────────────
+            const useColorKey = flags !== undefined
+                ? (flags & DDBLTFAST_SRCCOLORKEY) !== 0
+                : src.colorKey !== null;
 
-        /**
-         * Adds an arbitrary dirty rect to the surface's list.
-         *
-         * @param {Surface} surface
-         * @param {number} x
-         * @param {number} y
-         * @param {number} w
-         * @param {number} h
-         */
-        addDirtyRect(surface, x, y, w, h) {
-            if (!surface || surface.offscreen) {
-                return;
-            }
-            _addDirtyRect(surface, x, y, w, h);
-        },
+            const ctx = dst._ctx;
 
-        /**
-         * Marks the entire surface dirty.
-         *
-         * @param {Surface} surface
-         */
-        dirtyAll(surface) {
-            if (!surface || surface.offscreen) {
-                return;
-            }
-            surface._dirty = [{ x: 0, y: 0, w: surface.width, h: surface.height }];
-        },
+            ctx.save();
 
-        // ─── Paint ────────────────────────────────────────────────────────────
-
-        /**
-         * Composites all dirty rects directly onto the surface's own canvas.
-         * For each dirty rect: fill background, then draw intersecting sprites
-         * back to front. Clears the dirty list when done.
-         *
-         * @param {Surface} surface  Onscreen surface only
-         */
-        paint(surface) {
-            if (!surface || surface.offscreen || surface._dirty.length === 0) {
-                return;
+            if (useColorKey) {
+                ctx.globalCompositeOperation = 'source-over';
+            } else {
+                ctx.globalCompositeOperation = 'copy';
             }
 
-            const ctx = surface._ctx;
-            const dirty = surface._dirty;
-            const sprites = surface._sprites;
-
-            for (let i = 0; i < dirty.length; i++) {
-                const { x, y, w, h } = dirty[i];
-
-                _drawBackground(ctx, surface, x, y, w, h);
-
-                for (let j = 0; j < sprites.length; j++) {
-                    const s = sprites[j];
-                    if (!s.visible) {
-                        continue;
-                    }
-                    if (_rectsOverlap(s.rect.x, s.rect.y, s.rect.w, s.rect.h, x, y, w, h)) {
-                        _drawSprite(ctx, s, x, y, w, h);
-                    }
-                }
-            }
-
-            surface._dirty = [];
+            ctx.drawImage(src._ctx.canvas, sx, sy, sw, sh, dx, dy, sw, sh);
+            ctx.restore();
         },
 
         // ─── Pixel access ─────────────────────────────────────────────────────
@@ -723,8 +571,9 @@
          */
         lock(surface) {
             if (!surface || !surface._ctx) {
-                return null;
+                throw new Error('WakaDDraw.lock: surface is required');
             }
+
             const { width, height } = surface._ctx.canvas;
             return surface._ctx.getImageData(0, 0, width, height);
         },
@@ -737,9 +586,14 @@
          * @param {ImageData} imageData
          */
         unlock(surface, imageData) {
-            if (!surface || !surface._ctx || !imageData) {
-                return;
+            if (!surface || !surface._ctx) {
+                throw new Error('WakaDDraw.unlock: surface is required');
             }
+
+            if (!imageData) {
+                throw new Error('WakaDDraw.unlock: imageData is required');
+            }
+
             surface._ctx.putImageData(imageData, 0, 0);
         },
 
@@ -751,16 +605,211 @@
          * @param {Surface} surface
          */
         applyColorKey(surface) {
-            if (!surface || !surface._ctx || !surface.colorKey) {
+            if (!surface || !surface._ctx || surface.colorKey === null) {
                 return;
             }
             _applyColorKey(surface._ctx, surface.colorKey);
         },
+
+        // ─── Scene management ─────────────────────────────────────────────────
+
+        /**
+         * Creates a scene. A scene manages a z-sorted sprite list and a
+         * non-overlapping dirty rect list. The user calls sceneRender() each
+         * frame to composite sprites into the primary surface.
+         *
+         * @param {Object}  [opts]
+         * @param {string}  [opts.background='#000']  Fallback fill color when no
+         *                                             sprite covers a dirty region
+         * @returns {Object} Scene
+         */
+        sceneCreate(opts = {}) {
+            return {
+                _sprites: [],
+                _dirty: [],
+                _background: opts.background ?? '#000'
+            };
+        },
+
+        /**
+         * Destroys a scene. Detaches all sprites and clears state.
+         *
+         * @param {Object} scene
+         */
+        sceneDestroy(scene) {
+            if (!scene) {
+                return;
+            }
+            for (const s of scene._sprites) {
+                s._scene = null;
+            }
+            scene._sprites = [];
+            scene._dirty = [];
+        },
+
+        /**
+         * Marks the entire primary surface dirty, forcing a full redraw on
+         * the next sceneRender(). Call after creating the scene and adding
+         * all initial sprites, and after any background change.
+         *
+         * @param {Object}  scene
+         * @param {Surface} primary
+         */
+        sceneInvalidate(scene, primary) {
+            if (!scene || !primary) {
+                return;
+            }
+            scene._dirty = [{ full: true }];
+        },
+
+        /**
+         * Adds a sprite to a scene. Marks the sprite's initial bounds dirty.
+         * No-op if the sprite is already in this scene.
+         *
+         * @param {Object} scene
+         * @param {Sprite} sprite
+         */
+        sceneAddSprite(scene, sprite) {
+            if (!scene || !sprite) {
+                return;
+            }
+            if (sprite._scene === scene) {
+                return;
+            }
+            if (sprite._scene !== null) {
+                console.warn('WakaDDraw.sceneAddSprite: sprite already belongs to a scene — remove it first');
+                return;
+            }
+
+            sprite._scene = scene;
+            scene._sprites.push(sprite);
+            _sceneSortSprites(scene);
+            _spriteDirty(sprite);
+        },
+
+        /**
+         * Removes a sprite from a scene. Marks the vacated region dirty.
+         *
+         * @param {Object} scene
+         * @param {Sprite} sprite
+         */
+        sceneRemoveSprite(scene, sprite) {
+            if (!scene || !sprite || sprite._scene !== scene) {
+                return;
+            }
+            _spriteDirty(sprite);
+            const idx = scene._sprites.indexOf(sprite);
+            if (idx !== -1) {
+                scene._sprites.splice(idx, 1);
+            }
+            sprite._scene = null;
+        },
+
+        /**
+         * Creates a sprite backed by an offscreen surface.
+         * The sprite is not in any scene until sceneAddSprite() is called.
+         *
+         * rect follows DOMRect conventions (x/left, y/top, width, height).
+         * If omitted, the entire source surface is used.
+         *
+         * z defaults to 0. Sprites with equal z are drawn in insertion order.
+         *
+         * @param {Surface}     surface
+         * @param {Object|null} [rect]
+         * @param {number}      [z=0]
+         * @returns {Sprite}
+         */
+        createSprite(surface, rect, z = 0) {
+            if (!surface || !surface._ctx) {
+                throw new Error('WakaDDraw.createSprite: surface is required');
+            }
+
+            return _createSpriteObject(surface, rect, z);
+        },
+
+        // ─── Scene render ─────────────────────────────────────────────────────
+
+        /**
+         * Composites the scene into the primary surface.
+         * For each dirty rect:
+         *   1. Restore background — fill with background color, then blt any
+         *      sprite that fully covers the region bottom to top.
+         *   2. Blt all visible sprites that intersect the dirty rect, in z-order.
+         * Clears the dirty list when done.
+         *
+         * Call once per frame from the user's timer or rAF.
+         *
+         * @param {Object}  scene
+         * @param {Surface} primary  Onscreen destination surface
+         */
+        sceneRender(scene, primary) {
+            if (!scene || !primary) {
+                return;
+            }
+            if (scene._dirty.length === 0) {
+                return;
+            }
+
+            const ctx = primary._ctx;
+            const sprites = scene._sprites;   // z-sorted ascending
+            const dirty = scene._dirty;
+
+            for (const dr of dirty) {
+                const { x, y, w, h } = dr.full
+                    ? { x: 0, y: 0, w: primary.width, h: primary.height }
+                    : (_clampRect(dr.x, dr.y, dr.w, dr.h, primary.width, primary.height) ?? {});
+
+                if (w === undefined) {
+                    continue;
+                }
+
+                // Step 1: restore background color into this region
+                ctx.fillStyle = scene._background;
+                ctx.fillRect(x, y, w, h);
+
+                // Step 2: blt all visible sprites that intersect this rect,
+                // bottom to top (z ascending = correct painter's order)
+                for (const sprite of sprites) {
+                    if (!sprite.visible) {
+                        continue;
+                    }
+
+                    const b = _spriteBounds(sprite);
+                    if (!_rectsOverlap(b.x, b.y, b.w, b.h, x, y, w, h)) {
+                        continue;
+                    }
+
+                    const sr = sprite._rect;
+                    const sx = sr ? (sr.x ?? sr.left ?? 0) : 0;
+                    const sy = sr ? (sr.y ?? sr.top ?? 0) : 0;
+                    const sw = sr ? sr.width : sprite._surface.width;
+                    const sh = sr ? sr.height : sprite._surface.height;
+
+                    const useColorKey = sprite._surface.colorKey !== null;
+
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(x, y, w, h);
+                    ctx.clip();
+                    ctx.globalCompositeOperation = useColorKey ? 'source-over' : 'copy';
+                    ctx.drawImage(sprite._surface._ctx.canvas, sx, sy, sw, sh,
+                        sprite.x, sprite.y, sw, sh);
+                    ctx.restore();
+                }
+            }
+
+            scene._dirty = [];
+        },
     };
 
     WakaDDraw.VERSION = VERSION;
+    WakaDDraw.DDBLTFAST_NOCOLORKEY = DDBLTFAST_NOCOLORKEY;
+    WakaDDraw.DDBLTFAST_SRCCOLORKEY = DDBLTFAST_SRCCOLORKEY;
 
     const wakaDDraw = new WakaDDraw();
+
+    wakaDDraw.DDBLTFAST_NOCOLORKEY = DDBLTFAST_NOCOLORKEY;
+    wakaDDraw.DDBLTFAST_SRCCOLORKEY = DDBLTFAST_SRCCOLORKEY;
 
     window.WakaDDraw = WakaDDraw;
     window.wakaDDraw = wakaDDraw;

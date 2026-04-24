@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WakaDDraw Diagnostic</title>
+    <title>WakaDDraw Scene Demo</title>
     <style>
         * {
             box-sizing: border-box;
@@ -42,12 +42,6 @@
         #controls {
             font-size: 0.72rem;
             color: #666;
-            line-height: 2;
-        }
-
-        label {
-            cursor: pointer;
-            user-select: none;
         }
     </style>
 </head>
@@ -59,15 +53,11 @@
         tabindex="0"></canvas>
 
 <div id="debug">
-    hero pos: <b id="d-pos">—</b> &nbsp; frame: <b id="d-frame">—</b><br>
-    dirty rects this frame: <b id="d-rects">—</b><br>
-    rect coords: <b id="d-coords">—</b>
+    hero pos: <b id="d-pos">—</b> &nbsp; frame: <b id="d-frame">—</b>
 </div>
 
 <div id="controls">
-    Arrow keys / WASD — move hero &nbsp;|&nbsp;
-    <label><input type="checkbox" id="chk-flash"> show dirty rects</label><br>
-    Target bounces autonomously. Move hero into it to trigger rect splitting.
+    Arrow keys / WASD — move hero &nbsp;|&nbsp; Target bounces autonomously.
 </div>
 
 <script src="../wakapac.js"></script>
@@ -76,7 +66,6 @@
 
     // =============================================================================
     // SURFACE DRAWING
-    // Draw into the offscreen surface's _ctx, then applyColorKey().
     // =============================================================================
 
     function _drawHero(surface) {
@@ -125,15 +114,19 @@
 
     const Demo = {
 
-        primary: null,   // onscreen surface — the visible canvas
-        heroSurface: null,   // offscreen — hero pixel data
-        targetSurface: null,   // offscreen — target pixel data
+        primary: null,
+        scene: null,
+        heroSurface: null,
+        targetSurface: null,
+        heroSprite: null,
+        targetSprite: null,
 
-        hero: null,
-        target: null,
-
+        // Hero animation state
+        heroFrame: 0,
         _heroElapsed: 0,
         HERO_MS_FRAME: 150,
+
+        // Target patrol
         _targetVx: 2,
 
         keys: { left: false, right: false, up: false, down: false },
@@ -141,30 +134,29 @@
         _lastTime: 0,
 
         init() {
-            // Primary surface: represents the existing canvas element
-            this.primary = wakaDDraw.getSurface(this.pacId, {
-                background: '#1a2a3a'
-            });
+            this.primary = wakaDDraw.getSurface(this.pacId);
 
-            // Offscreen surfaces: pixel data for sprites
+            // Offscreen surfaces
             this.heroSurface = wakaDDraw.createSurface(128, 32, 32, 32);
             this.targetSurface = wakaDDraw.createSurface(32, 32, 32, 32);
-
-            if (!this.primary || !this.heroSurface || !this.targetSurface) {
-                console.error('createSurface failed');
-                return;
-            }
 
             _drawHero(this.heroSurface);
             _drawTarget(this.targetSurface);
 
-            this.hero = wakaDDraw.createSprite(this.heroSurface, { x: 40, y: 104, z: 1 });
-            this.target = wakaDDraw.createSprite(this.targetSurface, { x: 144, y: 104, z: 0 });
+            // Scene with fallback background color
+            this.scene = wakaDDraw.sceneCreate({ background: '#1a2a3a' });
 
-            wakaDDraw.addSprite(this.primary, this.target);
-            wakaDDraw.addSprite(this.primary, this.hero);
+            // Target at z=0, hero at z=1
+            this.targetSprite = wakaDDraw.createSprite(this.targetSurface, null, 0);
+            this.heroSprite = wakaDDraw.createSprite(this.heroSurface,
+                { x: 0, y: 0, left: 0, top: 0, width: 32, height: 32 }, 1);
 
-            wakaDDraw.dirtyAll(this.primary);
+            this.targetSprite.moveTo(144, 104);
+            this.heroSprite.moveTo(40, 104);
+
+            wakaDDraw.sceneAddSprite(this.scene, this.targetSprite);
+            wakaDDraw.sceneAddSprite(this.scene, this.heroSprite);
+            wakaDDraw.sceneInvalidate(this.scene, this.primary);
 
             this._lastTime = performance.now();
             this._timer = wakaPAC.setTimer(this.pacId, 16);
@@ -183,40 +175,7 @@
                     this._lastTime = now;
 
                     this._tick(delta);
-
-                    if (this.primary._dirty.length > 0) {
-                        wakaPAC.invalidateRect(this.pacId, null);
-                    }
-
-                    break;
-                }
-
-                case wakaPAC.MSG_PAINT: {
-                    if (!this.primary) {
-                        break;
-                    }
-
-                    const flash = document.getElementById('chk-flash').checked;
-                    const snapRects = this.primary._dirty.map(r => ({ ...r }));
-                    this._debugRects(snapRects);
-
-                    if (flash) {
-                        wakaDDraw.dirtyAll(this.primary);
-                    }
-
-                    // No getDC/releaseDC — paint() writes directly to the canvas
-                    wakaDDraw.paint(this.primary);
-
-                    // Draw dirty rect outlines on top for diagnostic visualization
-                    if (flash && snapRects.length > 0) {
-                        const ctx = this.primary._ctx;
-                        ctx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
-                        ctx.lineWidth = 1;
-                        for (const r of snapRects) {
-                            ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
-                        }
-                    }
-
+                    wakaDDraw.sceneRender(this.scene, this.primary);
                     break;
                 }
 
@@ -235,11 +194,13 @@
                 }
 
                 case wakaPAC.MSG_DESTROYED: {
+                    wakaDDraw.sceneDestroy(this.scene);
+                    this.scene = null;
                     this.primary = null;
                     this.heroSurface = null;
                     this.targetSurface = null;
-                    this.hero = null;
-                    this.target = null;
+                    this.heroSprite = null;
+                    this.targetSprite = null;
                     break;
                 }
             }
@@ -250,11 +211,11 @@
             const k = this.keys;
 
             // Target: autonomous horizontal bounce
-            const tx = this.target.x + this._targetVx * delta * 0.1;
+            const tx = this.targetSprite.x + this._targetVx * delta * 0.1;
             if (tx <= 0 || tx >= W - 32) {
                 this._targetVx *= -1;
             }
-            this.target.moveTo(Math.max(0, Math.min(W - 32, tx)), this.target.y);
+            this.targetSprite.moveTo(Math.round(Math.max(0, Math.min(W - 32, tx))), this.targetSprite.y);
 
             // Hero: keyboard or auto-chase
             let dx = 0, dy = 0;
@@ -272,16 +233,16 @@
             }
 
             if (dx === 0 && dy === 0) {
-                if (this.hero.x < this.target.x) {
+                if (this.heroSprite.x < this.targetSprite.x) {
                     dx = 1;
                 }
-                if (this.hero.x > this.target.x) {
+                if (this.heroSprite.x > this.targetSprite.x) {
                     dx = -1;
                 }
-                if (this.hero.y < this.target.y) {
+                if (this.heroSprite.y < this.targetSprite.y) {
                     dy = 1;
                 }
-                if (this.hero.y > this.target.y) {
+                if (this.heroSprite.y > this.targetSprite.y) {
                     dy = -1;
                 }
             }
@@ -294,32 +255,30 @@
             const moving = dx !== 0 || dy !== 0;
 
             if (moving) {
-                const nx = Math.max(0, Math.min(W - 32, this.hero.x + dx * delta * 0.12));
-                const ny = Math.max(0, Math.min(H - 32, this.hero.y + dy * delta * 0.12));
-                this.hero.moveTo(nx, ny);
+                const nx = Math.round(Math.max(0, Math.min(W - 32, this.heroSprite.x + dx * delta * 0.12)));
+                const ny = Math.round(Math.max(0, Math.min(H - 32, this.heroSprite.y + dy * delta * 0.12)));
+                this.heroSprite.moveTo(nx, ny);
             }
 
-            // Hero animation
+            // Hero animation — advance frame and update source rect
             if (moving) {
                 this._heroElapsed += delta;
                 if (this._heroElapsed >= this.HERO_MS_FRAME) {
                     this._heroElapsed %= this.HERO_MS_FRAME;
-                    this.hero.setFrame((this.hero.frame + 1) % this.heroSurface.frames);
+                    this.heroFrame = (this.heroFrame + 1) % this.heroSurface.frames;
+                    const fx = this.heroFrame * 32;
+                    this.heroSprite.setRect({ x: fx, y: 0, left: fx, top: 0, width: 32, height: 32 });
                 }
             } else {
-                this._heroElapsed = 0;
-                this.hero.setFrame(0);
+                if (this.heroFrame !== 0) {
+                    this.heroFrame = 0;
+                    this._heroElapsed = 0;
+                    this.heroSprite.setRect({ x: 0, y: 0, left: 0, top: 0, width: 32, height: 32 });
+                }
             }
 
-            document.getElementById('d-pos').textContent = `${this.hero.x}, ${this.hero.y}`;
-            document.getElementById('d-frame').textContent = this.hero.frame;
-        },
-
-        _debugRects(rects) {
-            document.getElementById('d-rects').textContent = rects.length;
-            document.getElementById('d-coords').textContent = rects.length === 0
-                ? '—'
-                : rects.map(r => `(${r.x},${r.y} ${r.w}x${r.h})`).join('  ');
+            document.getElementById('d-pos').textContent = `${this.heroSprite.x}, ${this.heroSprite.y}`;
+            document.getElementById('d-frame').textContent = this.heroFrame;
         },
 
         _handleKey(vk, down) {
