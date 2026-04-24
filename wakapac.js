@@ -7372,18 +7372,23 @@
         // Inject container and pacId directly onto the proxy — not through
         // makeDeepReactiveProxy — so the raw DOM element is never wrapped and
         // pacId is never made reactive. Both are infrastructure, not state.
+        // Mark container as an external proxy so the reactive proxy's get trap
+        // returns it as-is without wrapping it in another proxy. DOM elements
+        // break when proxied — native methods receive the Proxy as 'this'.
+        this.container._externalProxy = true;
+
         Object.defineProperty(proxiedReactive, 'container', {
             value:        this.container,
             writable:     false,
             enumerable:   true,
-            configurable: false
+            configurable: true
         });
 
         Object.defineProperty(proxiedReactive, 'pacId', {
             value:        this.container._pacId || this.container.getAttribute('data-pac-id'),
             writable:     false,
             enumerable:   true,
-            configurable: false
+            configurable: true
         });
 
         // Return the proxy
