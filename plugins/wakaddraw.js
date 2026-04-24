@@ -15,27 +15,25 @@
  * ║  surfaces into the onscreen surface. The dirty rect compositor repaints only         ║
  * ║  damaged regions, back to front, directly on the destination surface.                ║
  * ║                                                                                      ║
- * ║  No DCs involved. Surfaces are the only concept.                                    ║
- * ║                                                                                      ║
  * ║  Usage:                                                                              ║
  * ║    wakaPAC.use(wakaDDraw);                                                           ║
  * ║                                                                                      ║
  * ║  Surface management:                                                                 ║
- * ║    // Onscreen surface — wraps the visible canvas element:                           ║
- * ║    const primary = wakaDDraw.createSurface(this.container, {                         ║
- * ║    });                                                                               ║
+ * ║    // Get a surface for an existing canvas (onscreen primary surface):              ║
+ * ║    const primary = wakaDDraw.getSurface(this.pacId, { background: '#1a2a3a' });      ║
  * ║                                                                                      ║
- * ║    // Offscreen surface — blank, drawn into programmatically:                        ║
- * ║    const surface = wakaDDraw.createSurface(128, 32, 32, 32);                         ║
- * ║    // draw into surface._ctx, then:                                                  ║
+ * ║    // Create a new offscreen surface:                                               ║
+ * ║    const surface = wakaDDraw.createSurface(128, 32, 32, 32);                        ║
+ * ║                                                                                      ║
+ * ║    // Load pixel data into a surface from a bitmap:                                 ║
+ * ║    const bitmap = await wakaPAC.loadBitmap('/img/hero.png');                        ║
+ * ║    wakaDDraw.bltBitmap(surface, bitmap);                                            ║
+ * ║    wakaPAC.deleteBitmap(bitmap);                                                    ║
+ * ║                                                                                      ║
+ * ║    // Or draw directly into surface._ctx and apply color key:                       ║
  * ║    wakaDDraw.applyColorKey(surface);                                                 ║
  * ║                                                                                      ║
- * ║    // Offscreen surface — loaded from an image file:                                 ║
- * ║    const surface = await wakaDDraw.loadSurface('/img/hero.png', {                   ║
- * ║        frameW: 32, frameH: 32                                                        ║
- * ║    });                                                                               ║
- * ║                                                                                      ║
- * ║    surface.frames   // total frame count derived from surface dimensions             ║
+ * ║    surface.frames     // total frame count derived from surface dimensions           ║
  * ║    surface.offscreen  // true if offscreen                                           ║
  * ║                                                                                      ║
  * ║  Sprite management:                                                                  ║
@@ -173,13 +171,14 @@
     // =========================================================================
 
     /**
-     * A Surface is a canvas — either the visible onscreen canvas or an offscreen
-     * one. Onscreen surfaces own the sprite list and dirty rect list and are the
-     * destination for paint(). Offscreen surfaces hold pixel data that sprites
-     * blit from.
+     * A Surface is a canvas — either the visible onscreen canvas or an offscreen one.
      *
-     * Both are created via createSurface(). The distinction is whether a canvas
-     * element is passed (onscreen) or width/height dimensions (offscreen).
+     * All surfaces:
+     *   _ctx, _frameW, _frameH, _cols, width, height, frames, offscreen, colorKey, frameRect
+     *
+     * Onscreen surfaces only (_background, _sprites, _dirty):
+     *   These hold the orchestration state for the compositor. Offscreen surfaces
+     *   are pixel data only — they cannot be used as paint() targets.
      *
      * @typedef {{
      *   _ctx:        CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D,
@@ -187,8 +186,8 @@
      *   _frameH:     number,
      *   _cols:       number,
      *   _background: string|null,
-     *   _sprites:    Sprite[],
-     *   _dirty:      Array<{x:number, y:number, w:number, h:number}>,
+     *   _sprites:    Sprite[]|undefined,
+     *   _dirty:      Array<{x:number, y:number, w:number, h:number}>|undefined,
      *   width:       number,
      *   height:      number,
      *   frames:      number,
@@ -215,27 +214,17 @@
         const cols = Math.floor(w / frameW);
         const frames = cols * Math.floor(h / frameH);
 
-        return {
+        const surface = {
             _ctx: ctx,
             _frameW: frameW,
             _frameH: frameH,
             _cols: cols,
-            _background: background ?? null,
-            _sprites: [],
-            _dirty: [],
             width: w,
             height: h,
             frames,
             offscreen,
             colorKey,
 
-            /**
-             * Returns the source rect for a given frame index.
-             * Frames are ordered left to right, top to bottom.
-             *
-             * @param {number} frameIndex
-             * @returns {{ sx: number, sy: number, sw: number, sh: number }}
-             */
             frameRect(frameIndex) {
                 const col = frameIndex % this._cols;
                 const row = Math.floor(frameIndex / this._cols);
@@ -247,6 +236,15 @@
                 };
             }
         };
+
+        // Orchestration state only on onscreen surfaces
+        if (!offscreen) {
+            surface._background = background ?? '#000';
+            surface._sprites = [];
+            surface._dirty = [];
+        }
+
+        return surface;
     }
 
     // =========================================================================
@@ -479,94 +477,83 @@
         // ─── Surface management ───────────────────────────────────────────────
 
         /**
-         * Creates a surface.
+         * Returns a surface that represents the canvas of a wakaPAC component.
+         * Analogous to DirectDraw's GetGDISurface — retrieves a surface handle
+         * for a canvas that already exists rather than creating a new one.
          *
-         * Onscreen — pass a canvas element as first argument:
-         *   createSurface(canvasElement, { background: '#000' })
-         *   The canvas element is wrapped directly; its context is used for painting.
+         * This is the entry point for the onscreen primary surface.
          *
-         * Offscreen — pass dimensions and frame size:
-         *   createSurface(width, height, frameW, frameH, { colorKey: '#ff00ff' })
-         *   Creates an OffscreenCanvas. Draw into surface._ctx, then call applyColorKey().
-         *
-         * @param {HTMLCanvasElement|number} canvasOrWidth
-         * @param {number|Object}            [heightOrOpts]
-         * @param {number}                   [frameW]
-         * @param {number}                   [frameH]
-         * @param {Object}                   [opts]
-         * @param {string|null}              [opts.colorKey='#ff00ff']  Offscreen only
-         * @param {string|Surface}           [opts.background='#000']   Onscreen only
+         * @param {string}         pacId   The data-pac-id of the component
+         * @param {Object}         [opts]
+         * @param {string|Surface} [opts.background='#000']
          * @returns {Surface|null}
          */
-        createSurface(canvasOrWidth, heightOrOpts, frameW, frameH, opts = {}) {
-            // Onscreen: first arg is a canvas element (duck-typed — instanceof
-            // fails across frame boundaries)
-            // Onscreen: first arg is a canvas element
-            if (canvasOrWidth && typeof canvasOrWidth === 'object' && typeof canvasOrWidth.getContext === 'function') {
-                const canvas = canvasOrWidth;
-                const surfaceOpts = heightOrOpts ?? {};
-                const ctx = canvas.getContext('2d');
+        getSurface(pacId, opts = {}) {
+            const canvas = wakaPAC.getContainerByPacId(pacId);
 
-                if (!ctx) {
-                    console.warn('WakaDDraw.createSurface: could not get 2d context from canvas element');
-                    return null;
-                }
-
-                return _buildSurface(ctx, canvas.width, canvas.height, null, surfaceOpts.background ?? '#000', false);
+            if (!canvas || !(canvas instanceof HTMLCanvasElement)) {
+                throw new Error(`WakaDDraw.getSurface: container for pacId "${pacId}" is not a canvas element`);
             }
 
-            // Offscreen: first arg is width
-            const width = canvasOrWidth;
-            const height = heightOrOpts;
+            const ctx = canvas.getContext('2d');
 
-            if (!width || !height || !frameW || !frameH) {
-                console.warn('WakaDDraw.createSurface: width, height, frameW and frameH are required for offscreen surfaces');
+            if (!ctx) {
+                console.warn(`WakaDDraw.getSurface: could not get 2d context for pacId "${pacId}"`);
                 return null;
             }
 
-            const colorKey = opts.hasOwnProperty('colorKey') ? opts.colorKey : DEFAULT_COLOR_KEY;
+            return _buildSurface(ctx, canvas.width, canvas.height, null, opts.background ?? '#000', false);
+        },
+
+        /**
+         * Creates a new offscreen surface backed by an OffscreenCanvas.
+         * Draw into surface._ctx, then call applyColorKey() if needed.
+         *
+         * @param {number}      width
+         * @param {number}      height
+         * @param {number}      frameW
+         * @param {number}      frameH
+         * @param {Object}      [opts]
+         * @param {string|null} [opts.colorKey='#ff00ff']
+         * @returns {Surface|null}
+         */
+        createSurface(width, height, frameW, frameH, opts = {}) {
+            if (!width || !height || !frameW || !frameH) {
+                console.warn('WakaDDraw.createSurface: width, height, frameW and frameH are required');
+                return null;
+            }
+
+            const colorKey = Object.prototype.hasOwnProperty.call(opts, 'colorKey') ? opts.colorKey : DEFAULT_COLOR_KEY;
             const ctx = new OffscreenCanvas(width, height).getContext('2d');
 
             return _buildSurface(ctx, frameW, frameH, colorKey, null, true);
         },
 
         /**
-         * Loads an offscreen surface from an image source accepted by wakaPAC.loadBitmap().
-         * Color key is applied once at load time.
+         * Blits a wakaPAC bitmap into a surface's pixel data.
+         * If the surface has a color key, it is applied after blitting.
          *
-         * @param {string|HTMLImageElement|ImageBitmap|ImageData|Blob|HTMLCanvasElement|OffscreenCanvas} source
-         * @param {Object}      opts
-         * @param {number}      opts.frameW
-         * @param {number}      opts.frameH
-         * @param {string|null} [opts.colorKey='#ff00ff']
-         * @returns {Promise<Surface|null>}
+         * The bitmap is blitted at (0, 0) and must fit within the surface
+         * dimensions. The caller is responsible for the bitmap's lifetime —
+         * call wakaPAC.deleteBitmap() when done.
+         *
+         * @param {Surface} surface
+         * @param {CanvasRenderingContext2D} bitmap  Handle from wakaPAC.loadBitmap()
          */
-        async loadSurface(source, opts = {}) {
-            if (!opts.frameW || !opts.frameH) {
-                console.warn('WakaDDraw.loadSurface: frameW and frameH are required');
-                return null;
+        bltBitmap(surface, bitmap) {
+            if (!surface || !surface._ctx) {
+                throw new Error('WakaDDraw.bltBitmap: surface is required');
             }
 
-            const bitmap = await wakaPAC.loadBitmap(source);
-
-            if (!bitmap) {
-                console.warn('WakaDDraw.loadSurface: could not load bitmap from source');
-                return null;
+            if (!bitmap || !bitmap.canvas) {
+                throw new Error('WakaDDraw.bltBitmap: bitmap is required');
             }
 
-            const colorKey = opts.hasOwnProperty('colorKey') ? opts.colorKey : DEFAULT_COLOR_KEY;
-            const w = bitmap.canvas.width;
-            const h = bitmap.canvas.height;
-            const ctx = new OffscreenCanvas(w, h).getContext('2d');
+            surface._ctx.drawImage(bitmap.canvas, 0, 0);
 
-            ctx.drawImage(bitmap.canvas, 0, 0);
-            wakaPAC.deleteBitmap(bitmap);
-
-            if (colorKey) {
-                _applyColorKey(ctx, colorKey);
+            if (surface.colorKey) {
+                _applyColorKey(surface._ctx, surface.colorKey);
             }
-
-            return _buildSurface(ctx, opts.frameW, opts.frameH, colorKey, null, true);
         },
 
         // ─── Sprite management ────────────────────────────────────────────────
@@ -608,6 +595,11 @@
                 return;
             }
 
+            if (surface.offscreen) {
+                console.warn('WakaDDraw.addSprite: surface must be onscreen');
+                return;
+            }
+
             if (sprite._parent === surface) {
                 return;
             }
@@ -639,6 +631,9 @@
             if (!surface || !sprite || sprite._parent !== surface) {
                 return;
             }
+            if (surface.offscreen) {
+                return;
+            }
 
             _markSpriteDirty(sprite);
 
@@ -662,7 +657,7 @@
          * @param {number} h
          */
         addDirtyRect(surface, x, y, w, h) {
-            if (!surface) {
+            if (!surface || surface.offscreen) {
                 return;
             }
             _addDirtyRect(surface, x, y, w, h);
@@ -674,7 +669,7 @@
          * @param {Surface} surface
          */
         dirtyAll(surface) {
-            if (!surface) {
+            if (!surface || surface.offscreen) {
                 return;
             }
             surface._dirty = [{ x: 0, y: 0, w: surface.width, h: surface.height }];
@@ -687,13 +682,10 @@
          * For each dirty rect: fill background, then draw intersecting sprites
          * back to front. Clears the dirty list when done.
          *
-         * Call this from MSG_PAINT without getDC/releaseDC — the surface owns
-         * its canvas and paints into it directly.
-         *
-         * @param {Surface} surface  Destination surface (typically onscreen)
+         * @param {Surface} surface  Onscreen surface only
          */
         paint(surface) {
-            if (!surface || surface._dirty.length === 0) {
+            if (!surface || surface.offscreen || surface._dirty.length === 0) {
                 return;
             }
 

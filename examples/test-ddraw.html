@@ -141,8 +141,8 @@
         _lastTime: 0,
 
         init() {
-            // Onscreen surface: wraps this.container (the canvas element directly)
-            this.primary = wakaDDraw.createSurface(this.container, {
+            // Primary surface: represents the existing canvas element
+            this.primary = wakaDDraw.getSurface(this.pacId, {
                 background: '#1a2a3a'
             });
 
