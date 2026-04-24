@@ -7369,6 +7369,23 @@
             }
         });
 
+        // Inject container and pacId directly onto the proxy — not through
+        // makeDeepReactiveProxy — so the raw DOM element is never wrapped and
+        // pacId is never made reactive. Both are infrastructure, not state.
+        Object.defineProperty(proxiedReactive, 'container', {
+            value:        this.container,
+            writable:     false,
+            enumerable:   true,
+            configurable: false
+        });
+
+        Object.defineProperty(proxiedReactive, 'pacId', {
+            value:        this.container._pacId || this.container.getAttribute('data-pac-id'),
+            writable:     false,
+            enumerable:   true,
+            configurable: false
+        });
+
         // Return the proxy
         return proxiedReactive;
     };
@@ -7391,10 +7408,6 @@
      * @param {Object} abstraction - The abstraction to enhance
      */
     Context.prototype.injectSystemProperties = function(abstraction) {
-        // Add container element reference and identification
-        abstraction.container = this.container;
-        abstraction.pacId = this.container._pacId || this.container.getAttribute('data-pac-id');
-
         // Initialize online/offline state and network quality
         abstraction.browserOnline = navigator.onLine;
         abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
@@ -11230,6 +11243,39 @@
                         return op.data ?? null;
                     }
                     break;
+
+                case 'polygon': {
+                    const pts = op.points;
+
+                    if (!pts || pts.length < 6) {
+                        break;
+                    }
+
+                    let inside = false;
+
+                    for (let i = 0, j = pts.length - 2; i < pts.length; i += 2) {
+                        const xi = pts[i];
+                        const yi = pts[i + 1];
+                        const xj = pts[j];
+                        const yj = pts[j + 1];
+
+                        const intersect =
+                            ((yi > ly) !== (yj > ly)) &&
+                            (lx < (xj - xi) * (ly - yi) / (yj - yi) + xi);
+
+                        if (intersect) {
+                            inside = !inside;
+                        }
+
+                        j = i;
+                    }
+
+                    if (inside) {
+                        return op.data ?? null;
+                    }
+
+                    break;
+                }
 
                 case 'sector': {
                     // Distance from centre

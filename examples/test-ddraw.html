@@ -56,8 +56,7 @@
 <canvas data-pac-id="game"
         width="320"
         height="240"
-        tabindex="0"
-        data-pac-context="2d"></canvas>
+        tabindex="0"></canvas>
 
 <div id="debug">
     hero pos: <b id="d-pos">—</b> &nbsp; frame: <b id="d-frame">—</b><br>
@@ -77,7 +76,7 @@
 
     // =============================================================================
     // SURFACE DRAWING
-    // Draw into surface._ctx, then call applyColorKey() to make magenta transparent.
+    // Draw into the offscreen surface's _ctx, then applyColorKey().
     // =============================================================================
 
     function _drawHero(surface) {
@@ -108,7 +107,6 @@
 
     function _drawTarget(surface) {
         const ctx = surface._ctx;
-
         ctx.fillStyle = '#ff00ff';
         ctx.fillRect(0, 0, 32, 32);
         ctx.fillStyle = '#e05030';
@@ -116,7 +114,6 @@
         ctx.fillStyle = '#fff';
         ctx.fillRect(14, 6, 4, 20);
         ctx.fillRect(6, 14, 20, 4);
-
         wakaDDraw.applyColorKey(surface);
     }
 
@@ -128,13 +125,9 @@
 
     const Demo = {
 
-        // The primary surface is also the compositor — it owns the background,
-        // the sprite list, and the dirty rect list.
-        surface: null,
-
-        // Sprite source surfaces
-        heroSurface: null,
-        targetSurface: null,
+        primary: null,   // onscreen surface — the visible canvas
+        heroSurface: null,   // offscreen — hero pixel data
+        targetSurface: null,   // offscreen — target pixel data
 
         hero: null,
         target: null,
@@ -147,19 +140,17 @@
         _timer: 0,
         _lastTime: 0,
 
-        async init() {
-            // Primary surface: the compositor. Owns background, sprites, dirty rects.
-            // No pixel data of its own — background is a solid color.
-            this.surface = wakaDDraw.createSurface(320, 240, 320, 240, {
-                background: '#1a2a3a',
-                colorKey: null      // no color key on the compositor surface
+        init() {
+            // Onscreen surface: wraps this.container (the canvas element directly)
+            this.primary = wakaDDraw.createSurface(this.container, {
+                background: '#1a2a3a'
             });
 
-            // Sprite source surfaces: pixel data only, no background needed.
+            // Offscreen surfaces: pixel data for sprites
             this.heroSurface = wakaDDraw.createSurface(128, 32, 32, 32);
             this.targetSurface = wakaDDraw.createSurface(32, 32, 32, 32);
 
-            if (!this.surface || !this.heroSurface || !this.targetSurface) {
+            if (!this.primary || !this.heroSurface || !this.targetSurface) {
                 console.error('createSurface failed');
                 return;
             }
@@ -170,10 +161,10 @@
             this.hero = wakaDDraw.createSprite(this.heroSurface, { x: 40, y: 104, z: 1 });
             this.target = wakaDDraw.createSprite(this.targetSurface, { x: 144, y: 104, z: 0 });
 
-            wakaDDraw.addSprite(this.surface, this.target);
-            wakaDDraw.addSprite(this.surface, this.hero);
+            wakaDDraw.addSprite(this.primary, this.target);
+            wakaDDraw.addSprite(this.primary, this.hero);
 
-            wakaDDraw.dirtyAll(this.surface);
+            wakaDDraw.dirtyAll(this.primary);
 
             this._lastTime = performance.now();
             this._timer = wakaPAC.setTimer(this.pacId, 16);
@@ -193,7 +184,7 @@
 
                     this._tick(delta);
 
-                    if (this.surface._dirty.length > 0) {
+                    if (this.primary._dirty.length > 0) {
                         wakaPAC.invalidateRect(this.pacId, null);
                     }
 
@@ -201,31 +192,31 @@
                 }
 
                 case wakaPAC.MSG_PAINT: {
-                    if (!this.surface) {
+                    if (!this.primary) {
                         break;
                     }
 
-                    const dc = wakaPAC.getDC(this.pacId);
                     const flash = document.getElementById('chk-flash').checked;
-
-                    const snapRects = this.surface._dirty.map(r => ({ ...r }));
+                    const snapRects = this.primary._dirty.map(r => ({ ...r }));
                     this._debugRects(snapRects);
 
                     if (flash) {
-                        wakaDDraw.dirtyAll(this.surface);
+                        wakaDDraw.dirtyAll(this.primary);
                     }
 
-                    wakaDDraw.paint(this.surface, dc);
+                    // No getDC/releaseDC — paint() writes directly to the canvas
+                    wakaDDraw.paint(this.primary);
 
+                    // Draw dirty rect outlines on top for diagnostic visualization
                     if (flash && snapRects.length > 0) {
-                        dc.strokeStyle = 'rgba(255, 80, 80, 0.9)';
-                        dc.lineWidth = 1;
+                        const ctx = this.primary._ctx;
+                        ctx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
+                        ctx.lineWidth = 1;
                         for (const r of snapRects) {
-                            dc.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+                            ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
                         }
                     }
 
-                    wakaPAC.releaseDC(dc);
                     break;
                 }
 
@@ -244,7 +235,7 @@
                 }
 
                 case wakaPAC.MSG_DESTROYED: {
-                    this.surface = null;
+                    this.primary = null;
                     this.heroSurface = null;
                     this.targetSurface = null;
                     this.hero = null;
@@ -311,7 +302,6 @@
             // Hero animation
             if (moving) {
                 this._heroElapsed += delta;
-
                 if (this._heroElapsed >= this.HERO_MS_FRAME) {
                     this._heroElapsed %= this.HERO_MS_FRAME;
                     this.hero.setFrame((this.hero.frame + 1) % this.heroSurface.frames);
