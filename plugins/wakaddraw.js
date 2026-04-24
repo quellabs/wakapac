@@ -1,17 +1,17 @@
 /*
  * ╔══════════════════════════════════════════════════════════════════════════════════════╗
  * ║                                                                                      ║
- * ║  ██╗    ██╗ █████╗ ██╗  ██╗ █████╗ ██████╗ ██████╗ ██████╗  █████╗ ██╗    ██╗       ║
- * ║  ██║    ██║██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗██║    ██║       ║
- * ║  ██║ █╗ ██║███████║█████╔╝ ███████║██║  ██║██║  ██║██████╔╝███████║██║ █╗ ██║       ║
- * ║  ██║███╗██║██╔══██║██╔═██╗ ██╔══██║██║  ██║██║  ██║██╔══██╗██╔══██║██║███╗██║       ║
- * ║  ╚███╔███╔╝██║  ██║██║  ██╗██║  ██║██████╔╝██████╔╝██║  ██║██║  ██║╚███╔███╔╝       ║
- * ║   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝        ║
+ * ║  ██╗    ██╗ █████╗ ██╗  ██╗ █████╗ ██████╗ ██████╗ ██████╗  █████╗ ██╗    ██╗        ║
+ * ║  ██║    ██║██╔══██╗██║ ██╔╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗██║    ██║        ║
+ * ║  ██║ █╗ ██║███████║█████╔╝ ███████║██║  ██║██║  ██║██████╔╝███████║██║ █╗ ██║        ║
+ * ║  ██║███╗██║██╔══██║██╔═██╗ ██╔══██║██║  ██║██║  ██║██╔══██╗██╔══██║██║███╗██║        ║
+ * ║  ╚███╔███╔╝██║  ██║██║  ██╗██║  ██║██████╔╝██████╔╝██║  ██║██║  ██║╚███╔███╔╝        ║
+ * ║   ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝         ║
  * ║                                                                                      ║
  * ║  WakaDDraw — DirectDraw-inspired blitter plugin for wakaPAC                          ║
  * ║                                                                                      ║
  * ║  A pure blitter. A Surface is a canvas — either the visible onscreen canvas          ║
- * ║  or an offscreen one. bltFast copies pixels from one surface to another             ║
+ * ║  or an offscreen one. bltFast copies pixels from one surface to another              ║
  * ║  immediately. No sprite tracking, no dirty rects, no deferred execution.             ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
@@ -22,52 +22,59 @@
  * ║    const primary = wakaDDraw.getSurface(this.pacId);                                 ║
  * ║                                                                                      ║
  * ║    // Offscreen surface (blank):                                                     ║
- * ║    const surface = wakaDDraw.createSurface(128, 32, 32, 32);                        ║
+ * ║    const surface = wakaDDraw.createSurface(128, 32, 32, 32);                         ║
  * ║    // draw into surface._ctx, then:                                                  ║
  * ║    wakaDDraw.applyColorKey(surface);                                                 ║
  * ║                                                                                      ║
  * ║    // Blt a wakaPAC bitmap onto a surface:                                           ║
- * ║    const bitmap = await wakaPAC.loadBitmap('/img/hero.png');                        ║
- * ║    wakaDDraw.bltBitmap(surface, bitmap);                                            ║
- * ║    wakaPAC.deleteBitmap(bitmap);                                                    ║
+ * ║    const bitmap = await wakaPAC.loadBitmap('/img/hero.png');                         ║
+ * ║    wakaDDraw.bltBitmap(surface, bitmap);                                             ║
+ * ║    wakaPAC.deleteBitmap(bitmap);                                                     ║
  * ║                                                                                      ║
- * ║    surface.frames     // total frame count derived from dimensions                   ║
+ * ║    surface.width      // canvas width in pixels                                      ║
+ * ║    surface.height     // canvas height in pixels                                     ║
  * ║    surface.offscreen  // true if offscreen                                           ║
  * ║                                                                                      ║
  * ║  Blitting:                                                                           ║
  * ║    // Blt entire source surface:                                                     ║
- * ║    wakaDDraw.bltFast(dst, dx, dy, src);                                             ║
+ * ║    wakaDDraw.bltFast(dst, dx, dy, src);                                              ║
  * ║                                                                                      ║
- * ║    // Blt a specific region (DOMRect conventions — x/left and y/top both work):     ║
- * ║    wakaDDraw.bltFast(dst, dx, dy, src, { x, y, width, height });                   ║
+ * ║    // Blt a specific region (DOMRect conventions — x/left and y/top both work):      ║
+ * ║    wakaDDraw.bltFast(dst, dx, dy, src, { x, y, width, height });                     ║
  * ║                                                                                      ║
  * ║    // Blt with explicit flags:                                                       ║
- * ║    wakaDDraw.bltFast(dst, dx, dy, src, rect, wakaDDraw.DDBLTFAST_NOCOLORKEY);       ║
+ * ║    wakaDDraw.bltFast(dst, dx, dy, src, rect, wakaDDraw.DDBLTFAST_NOCOLORKEY);        ║
  * ║                                                                                      ║
  * ║  Flags:                                                                              ║
  * ║    wakaDDraw.DDBLTFAST_NOCOLORKEY   // ignore color key, copy all pixels             ║
  * ║    wakaDDraw.DDBLTFAST_SRCCOLORKEY  // respect source color key (default if set)     ║
  * ║                                                                                      ║
- * ║  Scene system (higher-level, built on bltFast):                                     ║
- * ║    const scene  = wakaDDraw.sceneCreate({ background: '#1a2a3a' });                 ║
- * ║    const sprite = wakaDDraw.createSprite(surface, rect, z);                         ║
- * ║    wakaDDraw.sceneAddSprite(scene, sprite);                                         ║
- * ║    wakaDDraw.sceneRemoveSprite(scene, sprite);                                      ║
- * ║    wakaDDraw.sceneDestroy(scene);                                                   ║
+ * ║  Scene system (higher-level, built on bltFast):                                      ║
+ * ║    const scene  = wakaDDraw.sceneCreate({ background: '#1a2a3a' });                  ║
+ * ║    const sprite = wakaDDraw.createSprite(surface, rect, z);                          ║
+ * ║    wakaDDraw.sceneAddSprite(scene, sprite);                                          ║
+ * ║    wakaDDraw.sceneRemoveSprite(scene, sprite);                                       ║
+ * ║    wakaDDraw.sceneDestroy(scene);                                                    ║
  * ║                                                                                      ║
- * ║    sprite.moveTo(x, y);   // marks dirty automatically                              ║
- * ║    sprite.setRect(rect);  // change source rect                                     ║
- * ║    sprite.setZ(z);        // change z-order                                         ║
+ * ║    sprite.moveTo(x, y);   // marks dirty automatically                               ║
+ * ║    sprite.setRect(rect);  // change source rect                                      ║
+ * ║    sprite.setZ(z);        // change z-order                                          ║
  * ║    sprite.show();         // marks dirty                                             ║
  * ║    sprite.hide();         // marks dirty                                             ║
  * ║                                                                                      ║
  * ║    // Call once per frame from user's timer:                                         ║
- * ║    wakaDDraw.sceneRender(scene, primary);                                           ║
+ * ║    wakaDDraw.sceneRender(scene, primary);                                            ║
  * ║                                                                                      ║
  * ║    const pixels = wakaDDraw.lock(surface);                                           ║
  * ║    // ... mutate pixels.data ...                                                     ║
  * ║    wakaDDraw.unlock(surface, pixels);                                                ║
  * ║    wakaDDraw.applyColorKey(surface);                                                 ║
+ * ║                                                                                      ║
+ * ║  Tilemap:                                                                            ║
+ * ║    const map = wakaDDraw.createTilemap(tileSheet, mapData, mapWidth, mapHeight);     ║
+ * ║    // mapData is a Uint16Array of tile indices, row-major                            ║
+ * ║    // Render into an offscreen surface, use that surface as a sprite source:         ║
+ * ║    map.drawTo(tileSurface, scrollX, scrollY);                                        ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -121,17 +128,22 @@
     const DEFAULT_COLOR_KEY = '#ff00ff';
 
     /**
-     * Parses a CSS color string into { r, g, b }.
-     * Supports #rgb, #rrggbb, and rgb()/rgba() notation.
-     *
+     * Parses a CSS color string (#rgb, #rrggbb, rgb(), rgba()) into {r, g, b}.
+     * Returns null if the color cannot be parsed.
      * @param {string} color
-     * @returns {{ r: number, g: number, b: number } | null}
+     * @returns {{r:number, g:number, b:number}|null}
      */
     function _parseColor(color) {
         if (!color) {
             return null;
         }
+
         color = color.trim();
+
+        // Expand #rgb to #rrggbb
+        if (/^#[0-9a-fA-F]{3}$/.test(color)) {
+            color = '#' + color[1] + color[1] + color[2] + color[2] + color[3] + color[3];
+        }
 
         if (/^#[0-9a-fA-F]{6}$/.test(color)) {
             return {
@@ -141,20 +153,8 @@
             };
         }
 
-        if (/^#[0-9a-fA-F]{3}$/.test(color)) {
-            return {
-                r: parseInt(color[1] + color[1], 16),
-                g: parseInt(color[2] + color[2], 16),
-                b: parseInt(color[3] + color[3], 16)
-            };
-        }
-
         const m = color.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-        if (m) {
-            return { r: parseInt(m[1]), g: parseInt(m[2]), b: parseInt(m[3]) };
-        }
-
-        return null;
+        return m ? { r: +m[1], g: +m[2], b: +m[3] } : null;
     }
 
     /**
@@ -198,12 +198,8 @@
      *
      * @typedef {{
      *   _ctx:      CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D,
-     *   _frameW:   number,
-     *   _frameH:   number,
-     *   _cols:     number,
      *   width:     number,
      *   height:    number,
-     *   frames:    number,
      *   offscreen: boolean,
      *   colorKey:  string|null
      * }} Surface
@@ -211,25 +207,15 @@
 
     /**
      * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
-     * @param {number}      frameW
-     * @param {number}      frameH
      * @param {string|null} colorKey
      * @param {boolean}     offscreen
      * @returns {Surface}
      */
-    function _buildSurface(ctx, frameW, frameH, colorKey, offscreen) {
-        const w = ctx.canvas.width;
-        const h = ctx.canvas.height;
-        const cols = Math.floor(w / frameW);
-
+    function _buildSurface(ctx, colorKey, offscreen) {
         return {
             _ctx: ctx,
-            _frameW: frameW,
-            _frameH: frameH,
-            _cols: cols,
-            width: w,
-            height: h,
-            frames: cols * Math.floor(h / frameH),
+            width: ctx.canvas.width,
+            height: ctx.canvas.height,
             offscreen,
             colorKey
         };
@@ -239,41 +225,71 @@
     // RECT HELPERS (scene system)
     // =========================================================================
 
+    /**
+     * Returns true if two rectangles overlap. Touching edges do not count.
+     *
+     * @param {number} ax @param {number} ay @param {number} aw @param {number} ah
+     * @param {number} bx @param {number} by @param {number} bw @param {number} bh
+     * @returns {boolean}
+     */
     function _rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
         return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
     }
 
+    /**
+     * Clamps a rectangle to fit within a bounding box.
+     * Returns null if the result has zero or negative area.
+     *
+     * @param {number} x @param {number} y @param {number} w @param {number} h
+     * @param {number} bw Bounding width @param {number} bh Bounding height
+     * @returns {{x:number, y:number, w:number, h:number}|null}
+     */
     function _clampRect(x, y, w, h, bw, bh) {
         const cx = Math.max(x, 0);
         const cy = Math.max(y, 0);
         const cw = Math.min(x + w, bw) - cx;
         const ch = Math.min(y + h, bh) - cy;
+
         if (cw <= 0 || ch <= 0) {
             return null;
         }
+
         return { x: cx, y: cy, w: cw, h: ch };
     }
 
+    /**
+     * Subtracts rectangle B from rectangle A, returning the non-overlapping
+     * fragments of A. Returns 0–4 rects.
+     * @param {number} ax @param {number} ay @param {number} aw @param {number} ah
+     * @param {number} bx @param {number} by @param {number} bw @param {number} bh
+     * @returns {Array<{x:number, y:number, w:number, h:number}>}
+     */
     function _subtractRect(ax, ay, aw, ah, bx, by, bw, bh) {
         const ix = Math.max(ax, bx);
         const iy = Math.max(ay, by);
         const ix2 = Math.min(ax + aw, bx + bw);
         const iy2 = Math.min(ay + ah, by + bh);
 
+        // Not split needed
         if (ix >= ix2 || iy >= iy2) {
             return [{ x: ax, y: ay, w: aw, h: ah }];
         }
 
+        // Split the rect
         const frags = [];
+
         if (ix > ax) {
             frags.push({ x: ax, y: ay, w: ix - ax, h: ah });
         }
+
         if (ix2 < ax + aw) {
             frags.push({ x: ix2, y: ay, w: (ax + aw) - ix2, h: ah });
         }
+
         if (iy > ay) {
             frags.push({ x: ix, y: ay, w: ix2 - ix, h: iy - ay });
         }
+
         if (iy2 < ay + ah) {
             frags.push({ x: ix, y: iy2, w: ix2 - ix, h: (ay + ah) - iy2 });
         }
@@ -281,6 +297,13 @@
         return frags;
     }
 
+    /**
+     * Adds a dirty rect to a scene's list, splitting it against existing rects
+     * so the list remains non-overlapping. Collapses to a full-redraw sentinel
+     * when the list exceeds MAX_DIRTY_RECTS.
+     * @param {Object} scene
+     * @param {number} x @param {number} y @param {number} w @param {number} h
+     */
     function _sceneDirtyRect(scene, x, y, w, h) {
         // If already collapsed to full-redraw, nothing to do
         if (scene._dirty.length === 1 && scene._dirty[0].full) {
@@ -300,12 +323,15 @@
             if (candidates.length === 0) {
                 break;
             }
+
             const next = [];
+
             for (const c of candidates) {
                 for (const f of _subtractRect(c.x, c.y, c.w, c.h, existing.x, existing.y, existing.w, existing.h)) {
                     next.push(f);
                 }
             }
+
             candidates = next;
         }
 
@@ -338,8 +364,15 @@
 
     let _spriteSeq = 0;
 
+    /**
+     * Creates a Sprite object backed by a surface.
+     * @param {Surface}     surface
+     * @param {Object|null} rect     Source rect (DOMRect conventions), or null for full surface
+     * @param {number}      z        Z-order
+     * @returns {Sprite}
+     */
     function _createSpriteObject(surface, rect, z) {
-        const sprite = {
+        return {
             _scene: null,
             _surface: surface,
             _rect: rect ? { ...rect } : null,
@@ -391,10 +424,13 @@
                 this.visible = false;
             }
         };
-
-        return sprite;
     }
 
+    /**
+     * Returns the bounding rect of a sprite in scene space.
+     * @param {Sprite} sprite
+     * @returns {{x:number, y:number, w:number, h:number}}
+     */
     function _spriteBounds(sprite) {
         const r = sprite._rect;
         const w = r ? r.width : sprite._surface.width;
@@ -402,14 +438,25 @@
         return { x: sprite.x, y: sprite.y, w, h };
     }
 
+    /**
+     * Marks the sprite's current bounding rect dirty on its parent scene.
+     * No-op if the sprite has no scene or is hidden.
+     * @param {Sprite} sprite
+     */
     function _spriteDirty(sprite) {
         if (!sprite._scene || !sprite.visible) {
             return;
         }
+
         const b = _spriteBounds(sprite);
         _sceneDirtyRect(sprite._scene, b.x, b.y, b.w, b.h);
     }
 
+    /**
+     * Sorts the scene's sprite list by z ascending, using insertion sequence
+     * as a stable tiebreaker.
+     * @param {Object} scene
+     */
     function _sceneSortSprites(scene) {
         scene._sprites.sort((a, b) => a._z !== b._z ? a._z - b._z : a._zSeq - b._zSeq);
     }
@@ -426,6 +473,13 @@
     WakaDDraw.prototype = {
         constructor: WakaDDraw,
 
+        /**
+         * Called by wakaPAC.use(wakaDDraw). Captures the pac reference for
+         * internal use. Returns an empty plugin descriptor — WakaDDraw does
+         * not register template functions or units.
+         * @param {Object} pac
+         * @returns {{}}
+         */
         createPacPlugin(pac) {
             _pac = pac;
             return {};
@@ -461,30 +515,28 @@
                 throw new Error(`WakaDDraw.getSurface: could not get 2d context for pacId "${pacId}"`);
             }
 
-            return _buildSurface(ctx, canvas.width, canvas.height, null, false);
+            return _buildSurface(ctx, null, false);
         },
 
         /**
-         * Creates a new offscreen surface backed by an OffscreenCanvas.
+         * Creates a new offscreen surface backed by a canvas.
          * Draw into surface._ctx, then call applyColorKey() if needed.
          *
          * @param {number}      width
          * @param {number}      height
-         * @param {number}      frameW
-         * @param {number}      frameH
          * @param {Object}      [opts]
          * @param {string|null} [opts.colorKey='#ff00ff']
          * @returns {Surface}
          */
-        createSurface(width, height, frameW, frameH, opts = {}) {
-            if (!width || !height || !frameW || !frameH) {
-                throw new Error('WakaDDraw.createSurface: width, height, frameW and frameH are required');
+        createSurface(width, height, opts = {}) {
+            if (!width || !height) {
+                throw new Error('WakaDDraw.createSurface: width and height are required');
             }
 
             const colorKey = Object.prototype.hasOwnProperty.call(opts, 'colorKey') ? opts.colorKey : DEFAULT_COLOR_KEY;
             const ctx = _create2DContext(width, height);
 
-            return _buildSurface(ctx, frameW, frameH, colorKey, true);
+            return _buildSurface(ctx, colorKey, true);
         },
 
         // ─── Blitting ─────────────────────────────────────────────────────────
@@ -533,6 +585,7 @@
             if (!dst || !dst._ctx) {
                 throw new Error('WakaDDraw.bltFast: dst is required');
             }
+
             if (!src || !src._ctx) {
                 throw new Error('WakaDDraw.bltFast: src is required');
             }
@@ -608,6 +661,7 @@
             if (!surface || !surface._ctx || surface.colorKey === null) {
                 return;
             }
+
             _applyColorKey(surface._ctx, surface.colorKey);
         },
 
@@ -640,9 +694,11 @@
             if (!scene) {
                 return;
             }
+
             for (const s of scene._sprites) {
                 s._scene = null;
             }
+
             scene._sprites = [];
             scene._dirty = [];
         },
@@ -651,7 +707,6 @@
          * Marks the entire primary surface dirty, forcing a full redraw on
          * the next sceneRender(). Call after creating the scene and adding
          * all initial sprites, and after any background change.
-         *
          * @param {Object}  scene
          * @param {Surface} primary
          */
@@ -659,6 +714,7 @@
             if (!scene || !primary) {
                 return;
             }
+
             scene._dirty = [{ full: true }];
         },
 
@@ -673,9 +729,11 @@
             if (!scene || !sprite) {
                 return;
             }
+
             if (sprite._scene === scene) {
                 return;
             }
+
             if (sprite._scene !== null) {
                 console.warn('WakaDDraw.sceneAddSprite: sprite already belongs to a scene — remove it first');
                 return;
@@ -697,11 +755,15 @@
             if (!scene || !sprite || sprite._scene !== scene) {
                 return;
             }
+
             _spriteDirty(sprite);
+
             const idx = scene._sprites.indexOf(sprite);
+
             if (idx !== -1) {
                 scene._sprites.splice(idx, 1);
             }
+
             sprite._scene = null;
         },
 
@@ -746,6 +808,7 @@
             if (!scene || !primary) {
                 return;
             }
+
             if (scene._dirty.length === 0) {
                 return;
             }
@@ -775,6 +838,7 @@
                     }
 
                     const b = _spriteBounds(sprite);
+
                     if (!_rectsOverlap(b.x, b.y, b.w, b.h, x, y, w, h)) {
                         continue;
                     }
@@ -792,13 +856,138 @@
                     ctx.rect(x, y, w, h);
                     ctx.clip();
                     ctx.globalCompositeOperation = useColorKey ? 'source-over' : 'copy';
-                    ctx.drawImage(sprite._surface._ctx.canvas, sx, sy, sw, sh,
-                        sprite.x, sprite.y, sw, sh);
+                    ctx.drawImage(sprite._surface._ctx.canvas, sx, sy, sw, sh, sprite.x, sprite.y, sw, sh);
                     ctx.restore();
                 }
             }
 
             scene._dirty = [];
+        },
+
+        // ─── Tilemap ──────────────────────────────────────────────────────────
+
+        /**
+         * Creates a tilemap.
+         *
+         * A tilemap is a pure renderer — it has no position or scroll state of
+         * its own. Call drawTo() to render the visible portion of the map into
+         * a surface at a given scroll offset.
+         *
+         * tileSheet must be an offscreen surface. tileW and tileH define the
+         * the tile dimensions. Tiles are addressed by index (0-based, left to
+         * right, top to bottom on the sheet).
+         *
+         * mapData is a Uint16Array of tile indices, row-major. Index 0 is the
+         * first tile on the sheet — there is no reserved empty tile.
+         *
+         * Tiles beyond the map bounds are not drawn (clamp to edges).
+         *
+         * @param {Surface}     tileSheet   Offscreen surface containing tile images
+         * @param {number}      tileW       Tile width in pixels
+         * @param {number}      tileH       Tile height in pixels
+         * @param {Uint16Array} mapData     Tile index array, row-major
+         * @param {number}      mapWidth    Map width in tiles
+         * @param {number}      mapHeight   Map height in tiles
+         * @returns {{
+         *   drawTo: function(Surface, number, number): void
+         * }}
+         */
+        createTilemap(tileSheet, tileW, tileH, mapData, mapWidth, mapHeight) {
+            if (!tileSheet || !tileSheet._ctx) {
+                throw new Error('WakaDDraw.createTilemap: tileSheet is required');
+            }
+
+            if (!tileW || !tileH) {
+                throw new Error('WakaDDraw.createTilemap: tileW and tileH are required');
+            }
+
+            if (!(mapData instanceof Uint16Array)) {
+                throw new Error('WakaDDraw.createTilemap: mapData must be a Uint16Array');
+            }
+
+            if (!mapWidth || !mapHeight) {
+                throw new Error('WakaDDraw.createTilemap: mapWidth and mapHeight are required');
+            }
+
+            if (mapData.length !== mapWidth * mapHeight) {
+                throw new Error(`WakaDDraw.createTilemap: mapData length (${mapData.length}) must equal mapWidth × mapHeight (${mapWidth * mapHeight})`);
+            }
+
+            // Precompute columns on tile sheet — not recalculated per tile
+            const cols = Math.floor(tileSheet.width / tileW);
+
+            return {
+                /**
+                 * Renders the visible portion of the tilemap into a surface.
+                 *
+                 * scrollX/scrollY are pixel offsets into the map. The destination
+                 * surface defines the visible window size. Only tiles that fall
+                 * within the destination surface bounds are drawn.
+                 *
+                 * Call when the scroll position changes — not every frame if the
+                 * map is stationary.
+                 *
+                 * @param {Surface} dst     Destination surface (typically an offscreen surface used as a sprite source)
+                 * @param {number}  scrollX Horizontal pixel scroll offset
+                 * @param {number}  scrollY Vertical pixel scroll offset
+                 */
+                drawTo(dst, scrollX, scrollY) {
+                    if (!dst || !dst._ctx) {
+                        throw new Error('WakaDDraw.tilemap.drawTo: dst surface is required');
+                    }
+
+                    scrollX = Math.round(scrollX);
+                    scrollY = Math.round(scrollY);
+
+                    const ctx = dst._ctx;
+                    const dstW = dst.width;
+                    const dstH = dst.height;
+
+                    // First visible tile — clamped to map bounds.
+                    // floor handles negative scroll correctly (camera left of origin).
+                    const startTileX = Math.max(0, Math.floor(scrollX / tileW));
+                    const startTileY = Math.max(0, Math.floor(scrollY / tileH));
+
+                    // Last visible tile — +1 ensures partial tiles at right/bottom
+                    // edge are included and avoids gap pop-in during scrolling.
+                    const endTileX = Math.min(mapWidth - 1, Math.floor((scrollX + dstW - 1) / tileW) + 1);
+                    const endTileY = Math.min(mapHeight - 1, Math.floor((scrollY + dstH - 1) / tileH) + 1);
+
+                    for (let ty = startTileY; ty <= endTileY; ty++) {
+                        for (let tx = startTileX; tx <= endTileX; tx++) {
+                            // Guard against negative indices (can occur at map edges
+                            // when scroll is negative)
+                            if (tx < 0 || ty < 0) {
+                                continue;
+                            }
+
+                            const tileIndex = mapData[ty * mapWidth + tx];
+
+                            // Skip invalid tile indices
+                            if (tileIndex < 0) {
+                                continue;
+                            }
+
+                            // Source rect on tile sheet — cols is precomputed once
+                            // on createTilemap, not recalculated per tile
+                            const srcCol = tileIndex % cols;
+                            const srcRow = Math.floor(tileIndex / cols);
+                            const sx = srcCol * tileW;
+                            const sy = srcRow * tileH;
+
+                            // Destination position in dst surface
+                            const dx = tx * tileW - scrollX;
+                            const dy = ty * tileH - scrollY;
+
+                            ctx.drawImage(
+                                tileSheet._ctx.canvas,
+                                sx, sy, tileW, tileH,
+                                dx, dy, tileW, tileH
+                            );
+                        }
+                    }
+                }
+            };
         },
     };
 
