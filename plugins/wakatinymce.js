@@ -450,6 +450,13 @@
             // Copy initial content from the custom element's text nodes, if any.
             ta.value = container.textContent.trim();
 
+            // Remove only text nodes (preserves future flexibility)
+            for (const node of Array.from(container.childNodes)) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    container.removeChild(node);
+                }
+            }
+
             // Add textarea as a child of the custom element
             container.appendChild(ta);
         }
