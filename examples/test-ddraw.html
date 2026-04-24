@@ -77,7 +77,7 @@
     function _drawTileSheet() {
         const TW = 16, TH = 16;
         const surface = wakaDDraw.createSurface(64, 16, { colorKey: null });
-        const ctx = surface._ctx;
+        const ctx = wakaDDraw.getContext(surface);
 
         // Tile 0: grass
         ctx.fillStyle = '#3a7d44';
@@ -120,7 +120,7 @@
 
     function _drawHero() {
         const surface = wakaDDraw.createSurface(16, 16);
-        const ctx = surface._ctx;
+        const ctx = wakaDDraw.getContext(surface);
 
         ctx.fillStyle = '#ff00ff';
         ctx.fillRect(0, 0, 16, 16);
