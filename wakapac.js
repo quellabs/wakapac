@@ -20,6 +20,32 @@
     "use strict";
 
     // =============================================================================
+    // CANVAS HELPERS
+    // =============================================================================
+
+    /**
+     * Creates a canvas context of the given dimensions and type.
+     * Uses OffscreenCanvas where available, falling back to HTMLCanvasElement
+     * for environments that do not support it (notably older Safari versions).
+     *
+     * @param {number} width
+     * @param {number} height
+     * @param {string} [contextType='2d']
+     * @param {Object} [attributes]
+     * @returns {RenderingContext}
+     */
+    function _createCanvas(width, height, contextType = '2d', attributes) {
+        if (typeof OffscreenCanvas !== 'undefined') {
+            return new OffscreenCanvas(width, height).getContext(contextType, attributes);
+        }
+
+        const canvas  = document.createElement('canvas');
+        canvas.width  = width;
+        canvas.height = height;
+        return canvas.getContext(contextType, attributes);
+    }
+
+    // =============================================================================
     // CONSTANTS AND CONFIGURATION
     // =============================================================================
 
@@ -10618,7 +10644,7 @@
         const pacContext = window.PACRegistry.get(pacId);
         const attributes = pacContext?.config?.dcAttributes;
 
-        return new OffscreenCanvas(container.width, container.height).getContext(contextType, attributes);
+        return _createCanvas(container.width, container.height, contextType, attributes);
     };
 
     /**
@@ -10930,7 +10956,7 @@
             } else if (source instanceof ImageBitmap) {
                 // Already an ImageBitmap — use directly; caller retains ownership
                 // and is responsible for closing it
-                const dc = new OffscreenCanvas(source.width, source.height).getContext('2d');
+                const dc = _createCanvas(source.width, source.height);
                 dc.drawImage(source, 0, 0);
                 return /** @type {CanvasRenderingContext2D} */ (dc);
             } else if (
@@ -10945,8 +10971,8 @@
                 return null;
             }
 
-            // Draw the bitmap into a fresh OffscreenCanvas-backed DC
-            const dc = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d');
+            // Draw the bitmap into a fresh canvas-backed DC
+            const dc = _createCanvas(bitmap.width, bitmap.height);
             dc.drawImage(bitmap, 0, 0);
 
             // ImageBitmap holds GPU-side memory and must be explicitly released;
