@@ -42,11 +42,17 @@ Two-way binding, reactive updates, zero configuration.
 **Canvas**
 - Win32-style paint cycle with dirty rect accumulation and automatic clipping
 - Metafile API: display list recording, playback, and hit testing
+- WakaCanvas plugin: GDI-style drawing primitives, pens, brushes, and text
+- WakaDDraw plugin: DirectDraw-style blitter with sprite scene system and tilemap renderer
 
 **Units** — optional utility libraries callable from templates and component methods:
 Stdlib (built-in), Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, EscapeUtils, ColorUtils
 
 ## Plugins
+
+**WakaCanvas** — Win32-style GDI drawing API for wakaPAC canvas components. Provides stateful device context management with pens, brushes, and a complete set of drawing primitives (lines, rectangles, ellipses, arcs, polygons, text, bitmaps). Includes a MetaFile API for recording, replaying, and hit-testing display lists — enabling resolution-independent rendering and decoupled paint logic.
+
+**WakaDDraw** — DirectDraw-inspired blitter plugin for pixel-level canvas work. Provides a two-tier API: a low-level stateless blitter (`bltFast`) for immediate surface-to-surface pixel transfer with color key transparency, and a higher-level scene system that manages sprites, z-ordering, and dirty rectangle compositing automatically. Includes a tilemap renderer for scrolling tile-based worlds with parallax support via layered z-ordered tilemaps.
 
 **WakaChart** — renders pie, bar, line, and sparkline charts onto WakaPAC canvas components via the metafile/display list API. Global defaults (colors, font, padding) are set at registration time; all options can be overridden per call.
 
