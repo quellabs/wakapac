@@ -22,8 +22,8 @@
  * ║    const primary = wakaDDraw.getSurface(this.pacId);                                 ║
  * ║                                                                                      ║
  * ║    // Offscreen surface (blank):                                                     ║
- * ║    const surface = wakaDDraw.createSurface(128, 32, 32, 32);                         ║
- * ║    // draw into surface._ctx, then:                                                  ║
+ * ║    const surface = wakaDDraw.createSurface(128, 32);                                 ║
+ * ║    const ctx = wakaDDraw.getContext(surface);  // draw into ctx                      ║
  * ║    wakaDDraw.applyColorKey(surface);                                                 ║
  * ║                                                                                      ║
  * ║    // Blt a wakaPAC bitmap onto a surface:                                           ║
@@ -663,6 +663,29 @@
             }
 
             _applyColorKey(surface._ctx, surface.colorKey);
+        },
+
+        /**
+         * Returns the 2D rendering context of an offscreen surface for direct
+         * drawing. Use this to draw programmatically into a surface before
+         * calling applyColorKey().
+         *
+         * Throws if called on an onscreen surface — drawing directly into the
+         * primary canvas bypasses the compositor and produces unpredictable results.
+         *
+         * @param {Surface} surface
+         * @returns {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D}
+         */
+        getContext(surface) {
+            if (!surface) {
+                throw new Error('WakaDDraw.getContext: surface is required');
+            }
+
+            if (!surface.offscreen) {
+                throw new Error('WakaDDraw.getContext: cannot get context of onscreen surface');
+            }
+
+            return surface._ctx;
         },
 
         // ─── Scene management ─────────────────────────────────────────────────
