@@ -384,15 +384,11 @@
                 ta.name = container.getAttribute('name');
             }
 
-            // Copy initial content from the custom element's text nodes, if any.
-            ta.value = container.textContent.trim();
+            // Copy initial content
+            ta.value = container.innerHTML.trim();
 
-            // Remove only text nodes (preserves future flexibility)
-            for (const node of Array.from(container.childNodes)) {
-                if (node.nodeType === Node.TEXT_NODE) {
-                    container.removeChild(node);
-                }
-            }
+            // Remove inner HTML
+            container.innerHTML = '';
 
             // Add textarea as a child of the custom element
             container.appendChild(ta);
