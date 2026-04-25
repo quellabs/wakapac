@@ -154,10 +154,10 @@
             if (!abstraction) return;
 
             // Values read from the abstraction proxy may themselves be reactive
-            // proxies wrapping the raw handle. Unwrap via .toRaw() — a method
+            // proxies wrapping the raw handle. Unwrap via .unwrap() — a method
             // injected by wakapac.js into every reactive proxy via proxyGetHandler.
             const found = Object.values(abstraction).some(v => {
-                const unwrapped = typeof v?.toRaw === 'function' ? v.toRaw() : v;
+                const unwrapped = typeof v?.unwrap === 'function' ? v.unwrap() : v;
                 return unwrapped === handle;
             });
 

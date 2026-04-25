@@ -1332,8 +1332,8 @@
          * @returns {*} The property value (potentially wrapped in a proxy)
          */
         function proxyGetHandler(target, prop, currentPath) {
-            // Allow proxy.toRaw() to retrieve the unwrapped target
-            if (prop === 'toRaw') {
+            // Allow proxy.unwrap() to retrieve the unwrapped target
+            if (prop === 'unwrap') {
                 return () => target;
             }
 
