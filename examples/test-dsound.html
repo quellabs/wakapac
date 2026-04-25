@@ -433,13 +433,13 @@
                 case W.MSG_BUFFER_STOPPED:  log('→ MSG_BUFFER_STOPPED',  'log-wrn'); break;
                 case W.MSG_STREAM_STARTED:  log('→ MSG_STREAM_STARTED',  'log-ok');  break;
                 case W.MSG_STREAM_STOPPED:  log('→ MSG_STREAM_STOPPED',  'log-wrn'); break;
-                case W.MSG_VOLUME_CHANGED:  log(`→ MSG_VOLUME_CHANGED  volume=${event.lParam.volume.toFixed(2)}`, 'log-inf'); break;
-                case W.MSG_PAN_CHANGED:     log(`→ MSG_PAN_CHANGED  pan=${event.lParam.pan.toFixed(2)}`,         'log-inf'); break;
+                case W.MSG_VOLUME_CHANGED:  log(`→ MSG_VOLUME_CHANGED  volume=${event.detail.volume.toFixed(2)}`, 'log-inf'); break;
+                case W.MSG_PAN_CHANGED:     log(`→ MSG_PAN_CHANGED  pan=${event.detail.pan.toFixed(2)}`,         'log-inf'); break;
                 case W.MSG_BUFFER_LOADED:   log('→ MSG_BUFFER_LOADED',   'log-ok');  break;
                 case W.MSG_BUFFER_FAILED:   log('→ MSG_BUFFER_FAILED',   'log-err'); break;
                 case W.MSG_STREAM_LOADED:   log('→ MSG_STREAM_LOADED',   'log-ok');  break;
                 case W.MSG_STREAM_FAILED:   log('→ MSG_STREAM_FAILED',   'log-err'); break;
-                case W.MSG_STREAM_ENDED:    log('→ MSG_STREAM_ENDED',    'log-wrn'); break;
+                case W.MSG_STREAM_STOPPED:    log('→ MSG_STREAM_STOPPED',    'log-wrn'); break;
             }
         }
     });

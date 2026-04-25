@@ -58,7 +58,6 @@
  * ║    WakaDSound.MSG_BUFFER_FAILED   // wParam: 0, lParam: { url, error }                        ║
  * ║    WakaDSound.MSG_STREAM_LOADED   // wParam: 0, lParam: { url, stream }                       ║
  * ║    WakaDSound.MSG_STREAM_FAILED   // wParam: 0, lParam: { url, error }                        ║
- * ║    WakaDSound.MSG_STREAM_ENDED    // wParam: 0, lParam: { stream }                            ║
  * ║                                                                                               ║
  * ║  Messages — sent to owning component only (handle must be in abstraction root):               ║
  * ║    WakaDSound.MSG_BUFFER_STARTED  // wParam: 0, lParam: { handle }                            ║
@@ -85,7 +84,6 @@
     const MSG_BUFFER_FAILED = 0xD002;
     const MSG_STREAM_LOADED = 0xD003;
     const MSG_STREAM_FAILED = 0xD004;
-    const MSG_STREAM_ENDED = 0xD005;
     const MSG_BUFFER_STARTED = 0xD006;
     const MSG_BUFFER_STOPPED = 0xD007;
     const MSG_STREAM_STARTED = 0xD008;
@@ -186,13 +184,13 @@
      * @param {number} wParam
      * @param {Object} lParam
      */
-    function _sendToOwner(handle, msg, wParam, lParam) {
+    function _sendToOwner(handle, msg, wParam, lParam, extended) {
         if (!_pac) {
             return;
         }
         const pacId = _findOwner(handle);
         if (pacId) {
-            _pac.sendMessage(pacId, msg, wParam, lParam);
+            _pac.sendMessage(pacId, msg, wParam, lParam, extended);
         }
     }
 
@@ -233,7 +231,7 @@
                 buf._source = null;
                 buf._playing = false;
 
-                _sendToOwner(buf, MSG_BUFFER_STOPPED, 0, { handle: buf });
+                _sendToOwner(buf, MSG_BUFFER_STOPPED, 0, 0, { handle: buf });
             }
         };
 
@@ -244,7 +242,7 @@
         buf._playing = true;
         source.start(0);
 
-        _sendToOwner(buf, MSG_BUFFER_STARTED, 0, { handle: buf });
+        _sendToOwner(buf, MSG_BUFFER_STARTED, 0, 0, { handle: buf });
     }
 
     /**
@@ -267,7 +265,7 @@
         buf._source = null;
         buf._playing = false;
 
-        _sendToOwner(buf, MSG_BUFFER_STOPPED, 0, { handle: buf });
+        _sendToOwner(buf, MSG_BUFFER_STOPPED, 0, 0, { handle: buf });
     }
 
     /**
@@ -355,7 +353,7 @@
 
         const resume = _ctx.state === 'suspended' ? _ctx.resume() : Promise.resolve();
         resume.then(() => stream._el.play().then(() => {
-            _sendToOwner(stream, MSG_STREAM_STARTED, 0, { handle: stream });
+            _sendToOwner(stream, MSG_STREAM_STARTED, 0, 0, { handle: stream });
         }).catch(() => {
         }))
             .finally(() => {
@@ -371,7 +369,7 @@
         stream._el.pause();
         stream._el.currentTime = 0;
 
-        _sendToOwner(stream, MSG_STREAM_STOPPED, 0, { handle: stream });
+        _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
     }
 
     /**
@@ -498,7 +496,7 @@
                 console.warn(`WakaDSound.loadBuffer: failed to load "${url}"`, err);
 
                 if (_pac) {
-                    _pac.broadcastMessage(MSG_BUFFER_FAILED, 0, { url, error: err });
+                    _pac.broadcastMessage(MSG_BUFFER_FAILED, 0, 0, { url, error: err });
                 }
 
                 return null;
@@ -546,7 +544,7 @@
             };
 
             if (_pac) {
-                _pac.broadcastMessage(MSG_BUFFER_LOADED, 0, { url, buffer: buf });
+                _pac.broadcastMessage(MSG_BUFFER_LOADED, 0, 0, { url, buffer: buf });
             }
 
             return buf;
@@ -591,7 +589,7 @@
                 console.warn(`WakaDSound.loadStream: failed to load "${url}"`);
 
                 if (_pac) {
-                    _pac.broadcastMessage(MSG_STREAM_FAILED, 0, { url, error: el.error });
+                    _pac.broadcastMessage(MSG_STREAM_FAILED, 0, 0, { url, error: el.error });
                 }
 
                 return null;
@@ -612,13 +610,11 @@
             };
 
             el.addEventListener('ended', () => {
-                if (_pac) {
-                    _pac.broadcastMessage(MSG_STREAM_ENDED, 0, { stream });
-                }
+                _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
             });
 
             if (_pac) {
-                _pac.broadcastMessage(MSG_STREAM_LOADED, 0, { url, stream });
+                _pac.broadcastMessage(MSG_STREAM_LOADED, 0, 0, { url, stream });
             }
 
             return stream;
@@ -682,7 +678,7 @@
             handle._volume = Math.max(0, Math.min(1, volume));
             handle._gainNode.gain.setValueAtTime(handle._volume, _ctx.currentTime);
 
-            _sendToOwner(handle, MSG_VOLUME_CHANGED, 0, { handle, volume: handle._volume });
+            _sendToOwner(handle, MSG_VOLUME_CHANGED, 0, 0, { handle, volume: handle._volume });
         },
 
         /**
@@ -744,7 +740,7 @@
             handle._pan = Math.max(-1, Math.min(1, pan));
             handle._panNode.pan.setValueAtTime(handle._pan, _ctx.currentTime);
 
-            _sendToOwner(handle, MSG_PAN_CHANGED, 0, { handle, pan: handle._pan });
+            _sendToOwner(handle, MSG_PAN_CHANGED, 0, 0, { handle, pan: handle._pan });
         },
 
         // ─── Stream-only ──────────────────────────────────────────────────────
@@ -957,7 +953,6 @@
     WakaDSound.MSG_BUFFER_FAILED = MSG_BUFFER_FAILED;
     WakaDSound.MSG_STREAM_LOADED = MSG_STREAM_LOADED;
     WakaDSound.MSG_STREAM_FAILED = MSG_STREAM_FAILED;
-    WakaDSound.MSG_STREAM_ENDED = MSG_STREAM_ENDED;
     WakaDSound.MSG_BUFFER_STARTED = MSG_BUFFER_STARTED;
     WakaDSound.MSG_BUFFER_STOPPED = MSG_BUFFER_STOPPED;
     WakaDSound.MSG_STREAM_STARTED = MSG_STREAM_STARTED;
