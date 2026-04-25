@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WakaDSound — Test Harness</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+
+        :root {
+            --bg: #ffffff;
+            --surface: #f5f5f5;
+            --border: #d0d0d0;
+            --accent: #0077cc;
+            --accent2: #cc4400;
+            --ok: #1a8a00;
+            --fail: #cc0033;
+            --warn: #aa7700;
+            --text: #111111;
+            --muted: #666666;
+            --mono: 'Share Tech Mono', monospace;
+            --sans: 'Rajdhani', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 15px;
+            min-height: 100vh;
+            padding: 32px 24px;
+        }
+
+        )
+        ;
+        }
+
+        h1 {
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--accent);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--muted);
+            letter-spacing: 0.1em;
+            margin-bottom: 32px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--accent);
+            opacity: 0.5;
+        }
+
+        .card.stream::before {
+            background: var(--accent2);
+        }
+
+        .card.device::before {
+            background: var(--warn);
+        }
+
+        .card.positional::before {
+            background: var(--ok);
+        }
+
+        .card-title {
+            font-family: var(--mono);
+            font-size: 10px;
+            color: var(--muted);
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            margin-bottom: 14px;
+        }
+
+        .card-title span {
+            color: var(--accent);
+        }
+
+        .card.stream .card-title span {
+            color: var(--accent2);
+        }
+
+        .card.device .card-title span {
+            color: var(--warn);
+        }
+
+        .card.positional .card-title span {
+            color: var(--ok);
+        }
+
+        .btn-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        button {
+            font-family: var(--mono);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            padding: 7px 14px;
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            background: transparent;
+            color: var(--text);
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s, background 0.15s;
+            white-space: nowrap;
+        }
+
+        button:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        button.stream-btn:hover {
+            border-color: var(--accent2);
+            color: var(--accent2);
+        }
+
+        button.device-btn:hover {
+            border-color: var(--warn);
+            color: var(--warn);
+        }
+
+        button.positional-btn:hover {
+            border-color: var(--ok);
+            color: var(--ok);
+        }
+
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            border-color: var(--border);
+            color: var(--muted);
+        }
+
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .slider-row label {
+            width: 80px;
+            flex-shrink: 0;
+        }
+
+        input[type=range] {
+            flex: 1;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        .slider-row .val {
+            width: 38px;
+            text-align: right;
+            color: var(--text);
+        }
+
+        .status {
+            font-family: var(--mono);
+            font-size: 11px;
+            padding: 6px 10px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.04);
+            color: var(--muted);
+            margin-top: 10px;
+            min-height: 28px;
+            transition: color 0.2s;
+        }
+
+        .status.ok {
+            color: var(--ok);
+            border-color: rgba(57, 255, 20, 0.2);
+        }
+
+        .status.fail {
+            color: var(--fail);
+            border-color: rgba(255, 32, 86, 0.2);
+        }
+
+        .status.info {
+            color: var(--accent);
+            border-color: rgba(0, 229, 255, 0.2);
+        }
+
+        .status.warn {
+            color: var(--warn);
+            border-color: rgba(255, 204, 0, 0.2);
+        }
+
+        /* Log panel */
+        #log {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 16px;
+            font-family: var(--mono);
+            font-size: 11px;
+            line-height: 1.8;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        #log .log-title {
+            color: var(--muted);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            font-size: 10px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 6px;
+        }
+
+        .log-entry {
+            display: flex;
+            gap: 12px;
+        }
+
+        .log-ts {
+            color: var(--muted);
+            flex-shrink: 0;
+        }
+
+        .log-ok {
+            color: var(--ok);
+        }
+
+        .log-err {
+            color: var(--fail);
+        }
+
+        .log-inf {
+            color: var(--accent);
+        }
+
+        .log-wrn {
+            color: var(--warn);
+        }
+
+        .indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--muted);
+            margin-right: 6px;
+            vertical-align: middle;
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+
+        .indicator.on {
+            background: var(--ok);
+            box-shadow: 0 0 6px var(--ok);
+        }
+    </style>
+</head>
+<body>
+
+<h1>// WakaDSound</h1>
+<p class="subtitle">test harness — web audio api — no files required</p>
+
+<div class="grid">
+
+    <!-- DEVICE -->
+    <div class="card device">
+        <div class="card-title">01 / <span>device</span></div>
+        <div class="btn-row">
+            <button class="device-btn" onclick="initDevice()">init</button>
+            <button class="device-btn" onclick="wakaDSound.suspend()">suspend</button>
+            <button class="device-btn" onclick="wakaDSound.resume()">resume</button>
+        </div>
+        <div class="slider-row">
+            <label>master vol</label>
+            <input type="range" min="0" max="1" step="0.01" value="1"
+                   oninput="wakaDSound.masterVolume(+this.value); this.nextElementSibling.textContent=this.value">
+            <span class="val">1</span>
+        </div>
+        <div class="status info" id="device-status">awaiting init</div>
+    </div>
+
+    <!-- BUFFER — SYNTH TONE -->
+    <div class="card">
+        <div class="card-title">02 / <span>buffer</span> — synth tone</div>
+        <div class="btn-row">
+            <button onclick="loadTone()">load (440 Hz)</button>
+            <button onclick="wakaDSound.play(bufHandle)" id="btn-play">play</button>
+            <button onclick="wakaDSound.stop(bufHandle)" id="btn-stop">stop</button>
+            <button onclick="freeBuf()">free</button>
+        </div>
+        <div class="slider-row">
+            <label>volume</label>
+            <input type="range" min="0" max="1" step="0.01" value="1"
+                   oninput="wakaDSound.setVolume(bufHandle,+this.value);this.nextElementSibling.textContent=this.value">
+            <span class="val">1</span>
+        </div>
+        <div class="slider-row">
+            <label>pan</label>
+            <input type="range" min="-1" max="1" step="0.01" value="0"
+                   oninput="wakaDSound.setPan(bufHandle,+this.value);this.nextElementSibling.textContent=(+this.value).toFixed(2)">
+            <span class="val">0</span>
+        </div>
+        <div class="status" id="buf-status">
+            <span class="indicator" id="buf-ind"></span>not loaded
+        </div>
+    </div>
+
+    <!-- BUFFER — DOUBLE PLAY (no-op test) -->
+    <div class="card">
+        <div class="card-title">03 / <span>buffer</span> — double play no-op</div>
+        <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+            Plays a 2 s tone. Calls play() again at t=1 s.<br>
+            If no-op: ends at t=2 s. If restarted: still<br>
+            playing at t=2.2 s — caught and reported as fail.
+        </p>
+        <div class="btn-row">
+            <button onclick="doublePlayTest()">run test</button>
+        </div>
+        <div class="status" id="dbl-status">ready</div>
+    </div>
+
+    <!-- BUFFER — REPLAY AFTER NATURAL END -->
+    <div class="card">
+        <div class="card-title">04 / <span>buffer</span> — replay after end</div>
+        <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+            Loads a 0.3 s click. Plays it, waits for natural<br>
+            end, then plays again. Both plays must be audible.
+        </p>
+        <div class="btn-row">
+            <button onclick="replayTest()">run test</button>
+        </div>
+        <div class="status" id="replay-status">ready</div>
+    </div>
+
+    <!-- BUFFER — FREE THEN USE -->
+    <div class="card">
+        <div class="card-title">05 / <span>buffer</span> — free then use</div>
+        <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+            Loads a tone, frees it, then calls play/stop.<br>
+            Both must silently no-op — no errors thrown.
+        </p>
+        <div class="btn-row">
+            <button onclick="freeThenUseTest()">run test</button>
+        </div>
+        <div class="status" id="free-status">ready</div>
+    </div>
+
+    <!-- STREAM -->
+    <div class="card stream">
+        <div class="card-title">06 / <span>stream</span> — long audio</div>
+        <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+            Uses a public domain MP3 URL.<br>
+            Paste your own or use the default.
+        </p>
+        <input id="stream-url" type="text"
+               value="https://upload.wikimedia.org/wikipedia/commons/a/a9/Tromboon-sample.ogg"
+               style="width:100%;background:#ffffff;border:1px solid var(--border);color:var(--text);
+                   font-family:var(--mono);font-size:10px;padding:6px 8px;border-radius:3px;margin-bottom:10px">
+        <div class="btn-row">
+            <button class="stream-btn" onclick="loadStream()">load</button>
+            <button class="stream-btn" onclick="wakaDSound.play(streamHandle)">play</button>
+            <button class="stream-btn" onclick="wakaDSound.stop(streamHandle)">stop</button>
+            <button class="stream-btn" onclick="wakaDSound.loop(streamHandle,true)">loop on</button>
+            <button class="stream-btn" onclick="wakaDSound.loop(streamHandle,false)">loop off</button>
+            <button class="stream-btn" onclick="wakaDSound.seek(streamHandle,0)">seek 0</button>
+            <button class="stream-btn" onclick="freeStream()">free</button>
+        </div>
+        <div class="slider-row">
+            <label>volume</label>
+            <input type="range" min="0" max="1" step="0.01" value="1"
+                   oninput="wakaDSound.setVolume(streamHandle,+this.value);this.nextElementSibling.textContent=this.value">
+            <span class="val">1</span>
+        </div>
+        <div class="status" id="stream-status">
+            <span class="indicator" id="stream-ind"></span>not loaded
+        </div>
+    </div>
+
+    <!-- STREAM — DOUBLE PLAY NO-OP -->
+    <div class="card stream">
+        <div class="card-title">07 / <span>stream</span> — double play no-op</div>
+        <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+            Plays stream, waits 500 ms, calls play() again.<br>
+            Checks currentTime did not reset to ~0.<br>
+            Requires the stream URL to be loaded first.
+        </p>
+        <div class="btn-row">
+            <button class="stream-btn" onclick="streamDoublePlayTest()">run test</button>
+        </div>
+        <div class="status" id="sdbl-status">ready</div>
+    </div>
+
+    <!-- POSITIONAL -->
+    <div class="card positional">
+        <div class="card-title">08 / <span>positional</span> — 3D audio</div>
+        <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+            Loads a repeating tone with positional:true.<br>
+            Move the X slider to pan left/right via 3D.
+        </p>
+        <div class="btn-row">
+            <button class="positional-btn" onclick="loadPositional()">load</button>
+            <button class="positional-btn" onclick="wakaDSound.play(posHandle)">play</button>
+            <button class="positional-btn" onclick="wakaDSound.stop(posHandle)">stop</button>
+            <button class="positional-btn" onclick="wakaDSound.free(posHandle);setHandle('posHandle',null)">free
+            </button>
+        </div>
+        <div class="slider-row">
+            <label>source X</label>
+            <input type="range" min="-10" max="10" step="0.1" value="0"
+                   oninput="wakaDSound.setPosition(posHandle,+this.value,0,1);this.nextElementSibling.textContent=(+this.value).toFixed(1)">
+            <span class="val">0</span>
+        </div>
+        <div class="status" id="pos-status">
+            <span class="indicator" id="pos-ind"></span>not loaded
+        </div>
+    </div>
+
+</div>
+
+<!-- PAC container — owns all handles so _findOwner can locate them -->
+<div data-pac-id="dsound-test" style="display:none"></div>
+
+<!-- LOG -->
+<div id="log">
+    <div class="log-title">event log</div>
+</div>
+
+<script src="../wakapac.js"></script>
+<script src="../plugins/wakadsound.js"></script>
+<script>
+    // ── PAC setup ──────────────────────────────────────────────────────────────
+    // Register WakaDSound plugin then instantiate the test component.
+    // All handles live at the abstraction root so _findOwner() can locate them.
+    wakaPAC.use(wakaDSound);
+
+    // Global vars — accessible from inline onclick attributes.
+    // Assigned via setHandle() which mirrors each value into the PAC abstraction
+    // so _findOwner() can locate the handle by reference equality.
+    var bufHandle = null;
+    var streamHandle = null;
+    var posHandle = null;
+
+    var _ab = wakaPAC('dsound-test', {
+        bufHandle: null,
+        streamHandle: null,
+        posHandle: null,
+
+        msgProc(event) {
+            const W = WakaDSound;
+            switch (event.message) {
+                case W.MSG_BUFFER_STARTED:
+                    log('→ MSG_BUFFER_STARTED', 'log-ok');
+                    break;
+                case W.MSG_BUFFER_STOPPED:
+                    log('→ MSG_BUFFER_STOPPED', 'log-wrn');
+                    break;
+                case W.MSG_STREAM_STARTED:
+                    log('→ MSG_STREAM_STARTED', 'log-ok');
+                    break;
+                case W.MSG_STREAM_STOPPED:
+                    log('→ MSG_STREAM_STOPPED', 'log-wrn');
+                    break;
+                case W.MSG_VOLUME_CHANGED:
+                    log(`→ MSG_VOLUME_CHANGED  volume=${event.lParam.volume.toFixed(2)}`, 'log-inf');
+                    break;
+                case W.MSG_PAN_CHANGED:
+                    log(`→ MSG_PAN_CHANGED  pan=${event.lParam.pan.toFixed(2)}`, 'log-inf');
+                    break;
+                case W.MSG_BUFFER_LOADED:
+                    log('→ MSG_BUFFER_LOADED', 'log-ok');
+                    break;
+                case W.MSG_BUFFER_FAILED:
+                    log('→ MSG_BUFFER_FAILED', 'log-err');
+                    break;
+                case W.MSG_STREAM_LOADED:
+                    log('→ MSG_STREAM_LOADED', 'log-ok');
+                    break;
+                case W.MSG_STREAM_FAILED:
+                    log('→ MSG_STREAM_FAILED', 'log-err');
+                    break;
+                case W.MSG_STREAM_ENDED:
+                    log('→ MSG_STREAM_ENDED', 'log-wrn');
+                    break;
+            }
+        }
+    });
+
+    // Assigns a handle to both the global var and the abstraction root.
+    function setHandle(name, value) {
+        window[name] = value;
+        if (_ab) {
+            _ab[name] = value;
+        }
+    }
+
+    // ── Logging ────────────────────────────────────────────────────────────────
+    function log(msg, cls = 'log-inf') {
+        const el = document.getElementById('log');
+        const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+        const line = document.createElement('div');
+        line.className = 'log-entry';
+        line.innerHTML = `<span class="log-ts">${ts}</span><span class="${cls}">${msg}</span>`;
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function setStatus(id, msg, cls = '') {
+        const el = document.getElementById(id);
+        el.className = 'status ' + cls;
+        // Preserve indicator span if present
+        const ind = el.querySelector('.indicator');
+        el.textContent = msg;
+        if (ind) {
+            el.prepend(ind);
+        }
+    }
+
+    function setIndicator(id, on) {
+        const el = document.getElementById(id);
+
+        if (el) {
+            el.className = 'indicator' + (on ? ' on' : '');
+        }
+    }
+
+    // ── Synth helpers ──────────────────────────────────────────────────────────
+
+    /**
+     * Encodes a Float32Array of PCM samples as a minimal WAV file (mono, 44100 Hz)
+     * and returns an object URL. Passed to wakaDSound.loadBuffer() so the handle
+     * is created through the real load path using WakaDSound's own AudioContext.
+     */
+    function _pcmToWavUrl(samples, sampleRate = 44100) {
+        const numSamples = samples.length;
+        const buf = new ArrayBuffer(44 + numSamples * 2);
+        const view = new DataView(buf);
+
+        function str(off, s) {
+            for (let i = 0; i < s.length; i++) {
+                view.setUint8(off + i, s.charCodeAt(i));
+            }
+        }
+
+        str(0, 'RIFF');
+        view.setUint32(4, 36 + numSamples * 2, true);
+        str(8, 'WAVE');
+        str(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);   // PCM
+        view.setUint16(22, 1, true);   // mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);   // byte rate
+        view.setUint16(32, 2, true);   // block align
+        view.setUint16(34, 16, true);   // bits per sample
+        str(36, 'data');
+        view.setUint32(40, numSamples * 2, true);
+
+        for (let i = 0; i < numSamples; i++) {
+            const s = Math.max(-1, Math.min(1, samples[i]));
+            view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+
+        return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+    }
+
+    /**
+     * Synthesises a sine tone, encodes it as a WAV blob URL, loads it through
+     * wakaDSound.loadBuffer(), revokes the URL, and returns the real handle.
+     * The handle is fully wired into WakaDSound's own audio graph.
+     */
+    async function _renderTone(freq, duration, options = {}) {
+        const sampleRate = 44100;
+        const volume = options.volume ?? 0.5;
+        const numSamples = Math.floor(sampleRate * duration);
+        const samples = new Float32Array(numSamples);
+
+        for (let i = 0; i < numSamples; i++) {
+            samples[i] = volume * Math.sin(2 * Math.PI * freq * i / sampleRate);
+        }
+
+        const url = _pcmToWavUrl(samples, sampleRate);
+        const handle = await wakaDSound.loadBuffer(url, options);
+        URL.revokeObjectURL(url);
+        return handle;
+    }
+
+    // ── Device ─────────────────────────────────────────────────────────────────
+    async function initDevice() {
+        await wakaDSound.resume();
+        window._dsReady = true;
+        setStatus('device-status', 'AudioContext running', 'ok');
+        log('Device initialised — AudioContext created', 'log-ok');
+    }
+
+    // ── Buffer ─────────────────────────────────────────────────────────────────
+    async function loadTone() {
+        if (!window._dsReady) {
+            await initDevice();
+        }
+        setHandle('bufHandle', await _renderTone(440, 2.0));
+        setStatus('buf-status', 'loaded — 440 Hz / 2 s', 'ok');
+        setIndicator('buf-ind', false);
+        log('Buffer loaded (440 Hz sine, 2 s)', 'log-ok');
+
+        // Poll isPlaying to update indicator
+        clearInterval(window._bufPoll);
+        window._bufPoll = setInterval(() => {
+            const playing = wakaDSound.isPlaying(bufHandle);
+            setIndicator('buf-ind', playing);
+            if (playing) {
+                setStatus('buf-status', 'playing ▶', 'info');
+            } else {
+                setStatus('buf-status', 'stopped ■', 'ok');
+            }
+        }, 100);
+    }
+
+    function freeBuf() {
+        wakaDSound.free(bufHandle);
+        clearInterval(window._bufPoll);
+        setHandle('bufHandle', null);
+        setIndicator('buf-ind', false);
+        setStatus('buf-status', 'freed — handle is dead', 'warn');
+        log('Buffer freed', 'log-wrn');
+    }
+
+    // ── Double play no-op ──────────────────────────────────────────────────────
+    // Strategy: render a 2 s tone. Start it, then call play() again after 1 s.
+    // If the second call restarted playback, the sound will still be playing
+    // at t = 2.2 s (1 s offset + 2 s duration). If it was a true no-op, the
+    // sound will have ended at t = 2.0 s from first play and be silent by then.
+    async function doublePlayTest() {
+        if (window._runningDbl) {
+            return;
+        }
+        window._runningDbl = true;
+        if (!window._dsReady) {
+            await initDevice();
+        }
+        setStatus('dbl-status', 'playing… (2 s tone, second play() at 1 s)', 'info');
+        log('Double play test: play 1 started (660 Hz, 2 s)', 'log-inf');
+
+        const h = await _renderTone(660, 2.0);
+        wakaDSound.play(h);                         // t=0: start
+
+        setTimeout(() => {
+            wakaDSound.play(h);                     // t=1s: must be a no-op
+            log('Double play test: play() called again at t=1 s', 'log-inf');
+        }, 1000);
+
+        setTimeout(() => {
+            // t=2.2s: if no-op, the 2 s tone started at t=0 has ended.
+            // If restarted at t=1s, it would still be playing.
+            const stillPlaying = wakaDSound.isPlaying(h);
+            if (!stillPlaying) {
+                setStatus('dbl-status', '✓ ended at t=2 s — second play() was a no-op', 'ok');
+                log('Double play test passed', 'log-ok');
+            } else {
+                setStatus('dbl-status', '✗ still playing at t=2.2 s — second play() restarted', 'fail');
+                log('Double play test FAILED: sound restarted', 'log-err');
+            }
+            setTimeout(() => {
+                wakaDSound.free(h);
+                window._runningDbl = false;
+            }, 500);
+        }, 2200);
+    }
+
+    // ── Replay after natural end ───────────────────────────────────────────────
+    async function replayTest() {
+        if (window._runningReplay) {
+            return;
+        }
+        window._runningReplay = true;
+        if (!window._dsReady) {
+            await initDevice();
+        }
+        setStatus('replay-status', 'play 1…', 'info');
+        const h = await _renderTone(880, 0.3);
+        wakaDSound.play(h);
+        log('Replay test: play 1 started (880 Hz, 0.3 s)', 'log-inf');
+
+        setTimeout(() => {
+            const stillPlaying = wakaDSound.isPlaying(h);
+            if (stillPlaying) {
+                setStatus('replay-status', '✗ still playing after 0.5 s — expected ended', 'fail');
+                log('Replay test FAILED: sound did not end', 'log-err');
+                return;
+            }
+
+            setStatus('replay-status', 'play 2…', 'info');
+            wakaDSound.play(h);
+            log('Replay test: play 2 started after natural end', 'log-inf');
+
+            setTimeout(() => {
+                const playing2 = wakaDSound.isPlaying(h);
+                if (playing2) {
+                    setStatus('replay-status', '✓ replayed after natural end', 'ok');
+                    log('Replay test passed', 'log-ok');
+                } else {
+                    setStatus('replay-status', '✗ play 2 did not start', 'fail');
+                    log('Replay test FAILED: play 2 did not start', 'log-err');
+                }
+                setTimeout(() => {
+                    wakaDSound.free(h);
+                    window._runningReplay = false;
+                }, 500);
+            }, 200);
+        }, 500);
+    }
+
+    // ── Free then use ──────────────────────────────────────────────────────────
+    async function freeThenUseTest() {
+        if (window._runningFree) {
+            return;
+        }
+        window._runningFree = true;
+        if (!window._dsReady) {
+            await initDevice();
+        }
+        setStatus('free-status', 'loading…', 'info');
+        const h = await _renderTone(440, 1.0);
+        wakaDSound.free(h);
+
+        let threw = false;
+        try {
+            wakaDSound.play(h);
+            wakaDSound.stop(h);
+            wakaDSound.setVolume(h, 0.5);
+            wakaDSound.isPlaying(h);
+        } catch (e) {
+            threw = true;
+            log('Free-then-use test FAILED: ' + e.message, 'log-err');
+        }
+
+        if (!threw) {
+            setStatus('free-status', '✓ all calls on freed handle silently no-op', 'ok');
+            log('Free-then-use test passed', 'log-ok');
+        } else {
+            setStatus('free-status', '✗ exception thrown on freed handle', 'fail');
+        }
+        window._runningFree = false;
+    }
+
+    // ── Stream ─────────────────────────────────────────────────────────────────
+    async function loadStream() {
+        if (!window._dsReady) {
+            await initDevice();
+        }
+        const url = document.getElementById('stream-url').value.trim();
+        if (!url) {
+            return;
+        }
+
+        setStatus('stream-status', 'loading…', 'info');
+        log(`Stream loading: ${url}`, 'log-inf');
+
+        setHandle('streamHandle', await wakaDSound.loadStream(url));
+
+        if (streamHandle) {
+            setStatus('stream-status', 'loaded', 'ok');
+            setIndicator('stream-ind', false);
+            log('Stream loaded', 'log-ok');
+
+            clearInterval(window._streamPoll);
+            window._streamPoll = setInterval(() => {
+                const playing = wakaDSound.isPlaying(streamHandle);
+                setIndicator('stream-ind', playing);
+            }, 100);
+        } else {
+            setStatus('stream-status', 'load failed — check URL and CORS', 'fail');
+            log('Stream load failed', 'log-err');
+        }
+    }
+
+    function freeStream() {
+        wakaDSound.free(streamHandle);
+        clearInterval(window._streamPoll);
+        setHandle('streamHandle', null);
+        setIndicator('stream-ind', false);
+        setStatus('stream-status', 'freed — handle is dead', 'warn');
+        log('Stream freed', 'log-wrn');
+    }
+
+    // ── Stream double play no-op ───────────────────────────────────────────────
+    // Strategy: play the stream, wait 500 ms for currentTime to advance, record
+    // it, then call play() again. If play() restarted the stream, currentTime
+    // resets to ~0. If it was a no-op, currentTime continues advancing from
+    // where it was. Check immediately after the second call.
+    async function streamDoublePlayTest() {
+        if (window._runningSDbl) {
+            return;
+        }
+        window._runningSDbl = true;
+        if (!window._dsReady) {
+            await initDevice();
+        }
+        const url = document.getElementById('stream-url').value.trim();
+        if (!url) {
+            setStatus('sdbl-status', 'enter a stream URL first', 'warn');
+            window._runningSDbl = false;
+            return;
+        }
+
+        setStatus('sdbl-status', 'loading…', 'info');
+        const h = await wakaDSound.loadStream(url);
+        if (!h) {
+            setStatus('sdbl-status', 'load failed — check URL and CORS', 'fail');
+            window._runningSDbl = false;
+            return;
+        }
+
+        wakaDSound.play(h);
+        log('Stream double play test: play 1 started', 'log-inf');
+
+        setTimeout(() => {
+            const timeBefore = h._el.currentTime;
+            log(`Stream double play test: currentTime before second play() = ${timeBefore.toFixed(3)} s`, 'log-inf');
+
+            wakaDSound.play(h);     // Must be a no-op
+
+            // Check immediately — a restart resets currentTime to ~0 synchronously
+            const timeAfter = h._el.currentTime;
+            log(`Stream double play test: currentTime after second play() = ${timeAfter.toFixed(3)} s`, 'log-inf');
+
+            // A restart would drop currentTime back near 0. Allow 50 ms tolerance.
+            if (timeBefore > 0.05 && timeAfter >= timeBefore - 0.05) {
+                setStatus('sdbl-status', '✓ currentTime held — second play() was a no-op', 'ok');
+                log('Stream double play test passed', 'log-ok');
+            } else if (timeBefore <= 0.05) {
+                setStatus('sdbl-status', '⚠ stream too short to measure — increase audio length', 'warn');
+                log('Stream double play test inconclusive: audio too short', 'log-wrn');
+            } else {
+                setStatus('sdbl-status', '✗ currentTime reset — second play() restarted stream', 'fail');
+                log('Stream double play test FAILED: stream restarted', 'log-err');
+            }
+
+            setTimeout(() => {
+                wakaDSound.free(h);
+                window._runningSDbl = false;
+            }, 2000);
+        }, 500);
+    }
+
+    // ── Positional ─────────────────────────────────────────────────────────────
+    async function loadPositional() {
+        if (!window._dsReady) {
+            await initDevice();
+        }
+
+        if (posHandle) {
+            wakaDSound.free(posHandle);
+            setHandle('posHandle', null);
+            clearInterval(window._posPoll);
+        }
+
+        setStatus('pos-status', 'loading…', 'info');
+        setHandle('posHandle', await _renderTone(330, 4.0, { volume: 0.7, positional: true }));
+
+        if (!posHandle) {
+            setStatus('pos-status', 'load failed', 'fail');
+            log('Positional buffer load failed', 'log-err');
+            return;
+        }
+
+        // Set listener at origin facing -Z
+        wakaDSound.setListenerPosition(0, 0, 0);
+        wakaDSound.setListenerOrientation(0, 0, -1);
+
+        setStatus('pos-status', 'loaded — use slider to move source', 'ok');
+        setIndicator('pos-ind', false);
+        log('Positional buffer loaded (330 Hz, 4 s)', 'log-ok');
+
+        clearInterval(window._posPoll);
+        window._posPoll = setInterval(() => {
+            setIndicator('pos-ind', wakaDSound.isPlaying(posHandle));
+        }, 100);
+    }
+</script>
+</body>
+</html>
