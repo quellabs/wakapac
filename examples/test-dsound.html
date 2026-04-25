@@ -8,25 +8,21 @@
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
 
         :root {
-            --bg: #ffffff;
-            --surface: #f5f5f5;
-            --border: #d0d0d0;
-            --accent: #0077cc;
-            --accent2: #cc4400;
-            --ok: #1a8a00;
-            --fail: #cc0033;
-            --warn: #aa7700;
-            --text: #111111;
-            --muted: #666666;
-            --mono: 'Share Tech Mono', monospace;
-            --sans: 'Rajdhani', sans-serif;
+            --bg:        #ffffff;
+            --surface:   #f5f5f5;
+            --border:    #d0d0d0;
+            --accent:    #0077cc;
+            --accent2:   #cc4400;
+            --ok:        #1a8a00;
+            --fail:      #cc0033;
+            --warn:      #aa7700;
+            --text:      #111111;
+            --muted:     #666666;
+            --mono:      'Share Tech Mono', monospace;
+            --sans:      'Rajdhani', sans-serif;
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             background: var(--bg);
@@ -37,8 +33,7 @@
             padding: 32px 24px;
         }
 
-        )
-        ;
+        );
         }
 
         h1 {
@@ -77,25 +72,15 @@
         .card::before {
             content: '';
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
+            top: 0; left: 0; right: 0;
             height: 2px;
             background: var(--accent);
             opacity: 0.5;
         }
 
-        .card.stream::before {
-            background: var(--accent2);
-        }
-
-        .card.device::before {
-            background: var(--warn);
-        }
-
-        .card.positional::before {
-            background: var(--ok);
-        }
+        .card.stream::before { background: var(--accent2); }
+        .card.device::before { background: var(--warn); }
+        .card.positional::before { background: var(--ok); }
 
         .card-title {
             font-family: var(--mono);
@@ -109,18 +94,9 @@
         .card-title span {
             color: var(--accent);
         }
-
-        .card.stream .card-title span {
-            color: var(--accent2);
-        }
-
-        .card.device .card-title span {
-            color: var(--warn);
-        }
-
-        .card.positional .card-title span {
-            color: var(--ok);
-        }
+        .card.stream .card-title span { color: var(--accent2); }
+        .card.device .card-title span { color: var(--warn); }
+        .card.positional .card-title span { color: var(--ok); }
 
         .btn-row {
             display: flex;
@@ -148,20 +124,9 @@
             color: var(--accent);
         }
 
-        button.stream-btn:hover {
-            border-color: var(--accent2);
-            color: var(--accent2);
-        }
-
-        button.device-btn:hover {
-            border-color: var(--warn);
-            color: var(--warn);
-        }
-
-        button.positional-btn:hover {
-            border-color: var(--ok);
-            color: var(--ok);
-        }
+        button.stream-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+        button.device-btn:hover { border-color: var(--warn);   color: var(--warn); }
+        button.positional-btn:hover { border-color: var(--ok); color: var(--ok); }
 
         button:disabled {
             opacity: 0.3;
@@ -180,10 +145,7 @@
             color: var(--muted);
         }
 
-        .slider-row label {
-            width: 80px;
-            flex-shrink: 0;
-        }
+        .slider-row label { width: 80px; flex-shrink: 0; }
 
         input[type=range] {
             flex: 1;
@@ -203,32 +165,17 @@
             padding: 6px 10px;
             border-radius: 3px;
             border: 1px solid var(--border);
-            background: rgba(0, 0, 0, 0.04);
+            background: rgba(0,0,0,0.04);
             color: var(--muted);
             margin-top: 10px;
             min-height: 28px;
             transition: color 0.2s;
         }
 
-        .status.ok {
-            color: var(--ok);
-            border-color: rgba(57, 255, 20, 0.2);
-        }
-
-        .status.fail {
-            color: var(--fail);
-            border-color: rgba(255, 32, 86, 0.2);
-        }
-
-        .status.info {
-            color: var(--accent);
-            border-color: rgba(0, 229, 255, 0.2);
-        }
-
-        .status.warn {
-            color: var(--warn);
-            border-color: rgba(255, 204, 0, 0.2);
-        }
+        .status.ok   { color: var(--ok);   border-color: rgba(57,255,20,0.2); }
+        .status.fail { color: var(--fail); border-color: rgba(255,32,86,0.2); }
+        .status.info { color: var(--accent); border-color: rgba(0,229,255,0.2); }
+        .status.warn { color: var(--warn); border-color: rgba(255,204,0,0.2); }
 
         /* Log panel */
         #log {
@@ -253,36 +200,16 @@
             padding-bottom: 6px;
         }
 
-        .log-entry {
-            display: flex;
-            gap: 12px;
-        }
-
-        .log-ts {
-            color: var(--muted);
-            flex-shrink: 0;
-        }
-
-        .log-ok {
-            color: var(--ok);
-        }
-
-        .log-err {
-            color: var(--fail);
-        }
-
-        .log-inf {
-            color: var(--accent);
-        }
-
-        .log-wrn {
-            color: var(--warn);
-        }
+        .log-entry { display: flex; gap: 12px; }
+        .log-ts  { color: var(--muted); flex-shrink: 0; }
+        .log-ok  { color: var(--ok); }
+        .log-err { color: var(--fail); }
+        .log-inf { color: var(--accent); }
+        .log-wrn { color: var(--warn); }
 
         .indicator {
             display: inline-block;
-            width: 8px;
-            height: 8px;
+            width: 8px; height: 8px;
             border-radius: 50%;
             background: var(--muted);
             margin-right: 6px;
@@ -442,8 +369,7 @@
             <button class="positional-btn" onclick="loadPositional()">load</button>
             <button class="positional-btn" onclick="wakaDSound.play(posHandle)">play</button>
             <button class="positional-btn" onclick="wakaDSound.stop(posHandle)">stop</button>
-            <button class="positional-btn" onclick="wakaDSound.free(posHandle);setHandle('posHandle',null)">free
-            </button>
+            <button class="positional-btn" onclick="wakaDSound.free(posHandle);setHandle('posHandle',null)">free</button>
         </div>
         <div class="slider-row">
             <label>source X</label>
@@ -456,6 +382,20 @@
         </div>
     </div>
 
+</div>
+
+<!-- OSCILLOSCOPE -->
+<div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">09 / <span>analyser</span> — oscilloscope</div>
+    <div class="btn-row">
+        <button onclick="startOscilloscope()">start</button>
+        <button onclick="stopOscilloscope()">stop</button>
+    </div>
+    <canvas id="oscilloscope" width="800" height="120"
+            style="width:100%;height:120px;display:block;margin-top:10px;
+                   border:1px solid var(--border);border-radius:3px;background:#f9f9f9;">
+    </canvas>
+    <div class="status" id="osc-status">not running</div>
 </div>
 
 <!-- PAC container — owns all handles so _findOwner can locate them -->
@@ -477,51 +417,29 @@
     // Global vars — accessible from inline onclick attributes.
     // Assigned via setHandle() which mirrors each value into the PAC abstraction
     // so _findOwner() can locate the handle by reference equality.
-    var bufHandle = null;
+    var bufHandle    = null;
     var streamHandle = null;
-    var posHandle = null;
+    var posHandle    = null;
 
     var _ab = wakaPAC('dsound-test', {
-        bufHandle: null,
+        bufHandle:    null,
         streamHandle: null,
-        posHandle: null,
+        posHandle:    null,
 
         msgProc(event) {
             const W = WakaDSound;
             switch (event.message) {
-                case W.MSG_BUFFER_STARTED:
-                    log('→ MSG_BUFFER_STARTED', 'log-ok');
-                    break;
-                case W.MSG_BUFFER_STOPPED:
-                    log('→ MSG_BUFFER_STOPPED', 'log-wrn');
-                    break;
-                case W.MSG_STREAM_STARTED:
-                    log('→ MSG_STREAM_STARTED', 'log-ok');
-                    break;
-                case W.MSG_STREAM_STOPPED:
-                    log('→ MSG_STREAM_STOPPED', 'log-wrn');
-                    break;
-                case W.MSG_VOLUME_CHANGED:
-                    log(`→ MSG_VOLUME_CHANGED  volume=${event.lParam.volume.toFixed(2)}`, 'log-inf');
-                    break;
-                case W.MSG_PAN_CHANGED:
-                    log(`→ MSG_PAN_CHANGED  pan=${event.lParam.pan.toFixed(2)}`, 'log-inf');
-                    break;
-                case W.MSG_BUFFER_LOADED:
-                    log('→ MSG_BUFFER_LOADED', 'log-ok');
-                    break;
-                case W.MSG_BUFFER_FAILED:
-                    log('→ MSG_BUFFER_FAILED', 'log-err');
-                    break;
-                case W.MSG_STREAM_LOADED:
-                    log('→ MSG_STREAM_LOADED', 'log-ok');
-                    break;
-                case W.MSG_STREAM_FAILED:
-                    log('→ MSG_STREAM_FAILED', 'log-err');
-                    break;
-                case W.MSG_STREAM_ENDED:
-                    log('→ MSG_STREAM_ENDED', 'log-wrn');
-                    break;
+                case W.MSG_BUFFER_STARTED:  log('→ MSG_BUFFER_STARTED',  'log-ok');  break;
+                case W.MSG_BUFFER_STOPPED:  log('→ MSG_BUFFER_STOPPED',  'log-wrn'); break;
+                case W.MSG_STREAM_STARTED:  log('→ MSG_STREAM_STARTED',  'log-ok');  break;
+                case W.MSG_STREAM_STOPPED:  log('→ MSG_STREAM_STOPPED',  'log-wrn'); break;
+                case W.MSG_VOLUME_CHANGED:  log(`→ MSG_VOLUME_CHANGED  volume=${event.lParam.volume.toFixed(2)}`, 'log-inf'); break;
+                case W.MSG_PAN_CHANGED:     log(`→ MSG_PAN_CHANGED  pan=${event.lParam.pan.toFixed(2)}`,         'log-inf'); break;
+                case W.MSG_BUFFER_LOADED:   log('→ MSG_BUFFER_LOADED',   'log-ok');  break;
+                case W.MSG_BUFFER_FAILED:   log('→ MSG_BUFFER_FAILED',   'log-err'); break;
+                case W.MSG_STREAM_LOADED:   log('→ MSG_STREAM_LOADED',   'log-ok');  break;
+                case W.MSG_STREAM_FAILED:   log('→ MSG_STREAM_FAILED',   'log-err'); break;
+                case W.MSG_STREAM_ENDED:    log('→ MSG_STREAM_ENDED',    'log-wrn'); break;
             }
         }
     });
@@ -529,15 +447,13 @@
     // Assigns a handle to both the global var and the abstraction root.
     function setHandle(name, value) {
         window[name] = value;
-        if (_ab) {
-            _ab[name] = value;
-        }
+        if (_ab) _ab[name] = value;
     }
 
     // ── Logging ────────────────────────────────────────────────────────────────
     function log(msg, cls = 'log-inf') {
-        const el = document.getElementById('log');
-        const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+        const el   = document.getElementById('log');
+        const ts   = new Date().toLocaleTimeString('en-GB', { hour12: false });
         const line = document.createElement('div');
         line.className = 'log-entry';
         line.innerHTML = `<span class="log-ts">${ts}</span><span class="${cls}">${msg}</span>`;
@@ -551,17 +467,12 @@
         // Preserve indicator span if present
         const ind = el.querySelector('.indicator');
         el.textContent = msg;
-        if (ind) {
-            el.prepend(ind);
-        }
+        if (ind) el.prepend(ind);
     }
 
     function setIndicator(id, on) {
         const el = document.getElementById(id);
-
-        if (el) {
-            el.className = 'indicator' + (on ? ' on' : '');
-        }
+        if (el) el.className = 'indicator' + (on ? ' on' : '');
     }
 
     // ── Synth helpers ──────────────────────────────────────────────────────────
@@ -573,26 +484,22 @@
      */
     function _pcmToWavUrl(samples, sampleRate = 44100) {
         const numSamples = samples.length;
-        const buf = new ArrayBuffer(44 + numSamples * 2);
+        const buf  = new ArrayBuffer(44 + numSamples * 2);
         const view = new DataView(buf);
 
-        function str(off, s) {
-            for (let i = 0; i < s.length; i++) {
-                view.setUint8(off + i, s.charCodeAt(i));
-            }
-        }
+        function str(off, s) { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); }
 
-        str(0, 'RIFF');
-        view.setUint32(4, 36 + numSamples * 2, true);
-        str(8, 'WAVE');
+        str(0,  'RIFF');
+        view.setUint32(4,  36 + numSamples * 2, true);
+        str(8,  'WAVE');
         str(12, 'fmt ');
-        view.setUint32(16, 16, true);
-        view.setUint16(20, 1, true);   // PCM
-        view.setUint16(22, 1, true);   // mono
-        view.setUint32(24, sampleRate, true);
+        view.setUint32(16, 16,             true);
+        view.setUint16(20, 1,              true);   // PCM
+        view.setUint16(22, 1,              true);   // mono
+        view.setUint32(24, sampleRate,     true);
         view.setUint32(28, sampleRate * 2, true);   // byte rate
-        view.setUint16(32, 2, true);   // block align
-        view.setUint16(34, 16, true);   // bits per sample
+        view.setUint16(32, 2,              true);   // block align
+        view.setUint16(34, 16,             true);   // bits per sample
         str(36, 'data');
         view.setUint32(40, numSamples * 2, true);
 
@@ -611,15 +518,15 @@
      */
     async function _renderTone(freq, duration, options = {}) {
         const sampleRate = 44100;
-        const volume = options.volume ?? 0.5;
+        const volume     = options.volume ?? 0.5;
         const numSamples = Math.floor(sampleRate * duration);
-        const samples = new Float32Array(numSamples);
+        const samples    = new Float32Array(numSamples);
 
         for (let i = 0; i < numSamples; i++) {
             samples[i] = volume * Math.sin(2 * Math.PI * freq * i / sampleRate);
         }
 
-        const url = _pcmToWavUrl(samples, sampleRate);
+        const url    = _pcmToWavUrl(samples, sampleRate);
         const handle = await wakaDSound.loadBuffer(url, options);
         URL.revokeObjectURL(url);
         return handle;
@@ -635,9 +542,7 @@
 
     // ── Buffer ─────────────────────────────────────────────────────────────────
     async function loadTone() {
-        if (!window._dsReady) {
-            await initDevice();
-        }
+        if (!window._dsReady) await initDevice();
         setHandle('bufHandle', await _renderTone(440, 2.0));
         setStatus('buf-status', 'loaded — 440 Hz / 2 s', 'ok');
         setIndicator('buf-ind', false);
@@ -648,11 +553,8 @@
         window._bufPoll = setInterval(() => {
             const playing = wakaDSound.isPlaying(bufHandle);
             setIndicator('buf-ind', playing);
-            if (playing) {
-                setStatus('buf-status', 'playing ▶', 'info');
-            } else {
-                setStatus('buf-status', 'stopped ■', 'ok');
-            }
+            if (playing) setStatus('buf-status', 'playing ▶', 'info');
+            else setStatus('buf-status', 'stopped ■', 'ok');
         }, 100);
     }
 
@@ -671,13 +573,9 @@
     // at t = 2.2 s (1 s offset + 2 s duration). If it was a true no-op, the
     // sound will have ended at t = 2.0 s from first play and be silent by then.
     async function doublePlayTest() {
-        if (window._runningDbl) {
-            return;
-        }
+        if (window._runningDbl) return;
         window._runningDbl = true;
-        if (!window._dsReady) {
-            await initDevice();
-        }
+        if (!window._dsReady) await initDevice();
         setStatus('dbl-status', 'playing… (2 s tone, second play() at 1 s)', 'info');
         log('Double play test: play 1 started (660 Hz, 2 s)', 'log-inf');
 
@@ -700,22 +598,15 @@
                 setStatus('dbl-status', '✗ still playing at t=2.2 s — second play() restarted', 'fail');
                 log('Double play test FAILED: sound restarted', 'log-err');
             }
-            setTimeout(() => {
-                wakaDSound.free(h);
-                window._runningDbl = false;
-            }, 500);
+            setTimeout(() => { wakaDSound.free(h); window._runningDbl = false; }, 500);
         }, 2200);
     }
 
     // ── Replay after natural end ───────────────────────────────────────────────
     async function replayTest() {
-        if (window._runningReplay) {
-            return;
-        }
+        if (window._runningReplay) return;
         window._runningReplay = true;
-        if (!window._dsReady) {
-            await initDevice();
-        }
+        if (!window._dsReady) await initDevice();
         setStatus('replay-status', 'play 1…', 'info');
         const h = await _renderTone(880, 0.3);
         wakaDSound.play(h);
@@ -742,23 +633,16 @@
                     setStatus('replay-status', '✗ play 2 did not start', 'fail');
                     log('Replay test FAILED: play 2 did not start', 'log-err');
                 }
-                setTimeout(() => {
-                    wakaDSound.free(h);
-                    window._runningReplay = false;
-                }, 500);
+                setTimeout(() => { wakaDSound.free(h); window._runningReplay = false; }, 500);
             }, 200);
         }, 500);
     }
 
     // ── Free then use ──────────────────────────────────────────────────────────
     async function freeThenUseTest() {
-        if (window._runningFree) {
-            return;
-        }
+        if (window._runningFree) return;
         window._runningFree = true;
-        if (!window._dsReady) {
-            await initDevice();
-        }
+        if (!window._dsReady) await initDevice();
         setStatus('free-status', 'loading…', 'info');
         const h = await _renderTone(440, 1.0);
         wakaDSound.free(h);
@@ -785,13 +669,9 @@
 
     // ── Stream ─────────────────────────────────────────────────────────────────
     async function loadStream() {
-        if (!window._dsReady) {
-            await initDevice();
-        }
+        if (!window._dsReady) await initDevice();
         const url = document.getElementById('stream-url').value.trim();
-        if (!url) {
-            return;
-        }
+        if (!url) return;
 
         setStatus('stream-status', 'loading…', 'info');
         log(`Stream loading: ${url}`, 'log-inf');
@@ -829,13 +709,9 @@
     // resets to ~0. If it was a no-op, currentTime continues advancing from
     // where it was. Check immediately after the second call.
     async function streamDoublePlayTest() {
-        if (window._runningSDbl) {
-            return;
-        }
+        if (window._runningSDbl) return;
         window._runningSDbl = true;
-        if (!window._dsReady) {
-            await initDevice();
-        }
+        if (!window._dsReady) await initDevice();
         const url = document.getElementById('stream-url').value.trim();
         if (!url) {
             setStatus('sdbl-status', 'enter a stream URL first', 'warn');
@@ -876,18 +752,13 @@
                 log('Stream double play test FAILED: stream restarted', 'log-err');
             }
 
-            setTimeout(() => {
-                wakaDSound.free(h);
-                window._runningSDbl = false;
-            }, 2000);
+            setTimeout(() => { wakaDSound.free(h); window._runningSDbl = false; }, 2000);
         }, 500);
     }
 
     // ── Positional ─────────────────────────────────────────────────────────────
     async function loadPositional() {
-        if (!window._dsReady) {
-            await initDevice();
-        }
+        if (!window._dsReady) await initDevice();
 
         if (posHandle) {
             wakaDSound.free(posHandle);
@@ -916,6 +787,57 @@
         window._posPoll = setInterval(() => {
             setIndicator('pos-ind', wakaDSound.isPlaying(posHandle));
         }, 100);
+    }
+
+    // ── Oscilloscope ───────────────────────────────────────────────────────────
+    var _analyserHandle = null;
+
+    function startOscilloscope() {
+        if (_analyserHandle) return;
+        if (!window._dsReady) initDevice().then(_doStartOscilloscope);
+        else _doStartOscilloscope();
+    }
+
+    function _doStartOscilloscope() {
+        const canvas = document.getElementById('oscilloscope');
+        const ctx2d  = canvas.getContext('2d');
+
+        _analyserHandle = wakaDSound.createAnalyser(data => {
+            const W = canvas.width;
+            const H = canvas.height;
+            ctx2d.clearRect(0, 0, W, H);
+            ctx2d.beginPath();
+            ctx2d.strokeStyle = '#0077cc';
+            ctx2d.lineWidth   = 2;
+
+            const sliceWidth = W / data.length;
+            let x = 0;
+
+            for (let i = 0; i < data.length; i++) {
+                const v = data[i] / 128.0;
+                const y = (v * H) / 2;
+                i === 0 ? ctx2d.moveTo(x, y) : ctx2d.lineTo(x, y);
+                x += sliceWidth;
+            }
+
+            ctx2d.lineTo(W, H / 2);
+            ctx2d.stroke();
+        }, { fftSize: 2048 });
+
+        setStatus('osc-status', 'running — play any sound to see waveform', 'ok');
+        log('Oscilloscope started', 'log-ok');
+    }
+
+    function stopOscilloscope() {
+        if (!_analyserHandle) return;
+        wakaDSound.destroyAnalyser(_analyserHandle);
+        _analyserHandle = null;
+
+        const canvas = document.getElementById('oscilloscope');
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+
+        setStatus('osc-status', 'not running', '');
+        log('Oscilloscope stopped', 'log-wrn');
     }
 </script>
 </body>

@@ -48,6 +48,11 @@
  * ║    WakaDSound.setListenerPosition(x, y, z)                                                    ║
  * ║    WakaDSound.setListenerOrientation(fx, fy, fz)  // forward vector                           ║
  * ║                                                                                               ║
+ * ║  Analyser:                                                                                    ║
+ * ║    const a = WakaDSound.createAnalyser(data => { // Uint8Array each frame })               ║
+ * ║    const a = WakaDSound.createAnalyser(data => { ... }, { fftSize: 1024 })                    ║
+ * ║    WakaDSound.destroyAnalyser(a)   // stop loop and remove from graph                         ║
+ * ║                                                                                               ║
  * ║  Messages — broadcast to all components (global):                                             ║
  * ║    WakaDSound.MSG_BUFFER_LOADED   // wParam: 0, lParam: { url, buffer }                       ║
  * ║    WakaDSound.MSG_BUFFER_FAILED   // wParam: 0, lParam: { url, error }                        ║
@@ -86,7 +91,7 @@
     const MSG_STREAM_STARTED = 0xD008;
     const MSG_STREAM_STOPPED = 0xD009;
     const MSG_VOLUME_CHANGED = 0xD00A;
-    const MSG_PAN_CHANGED    = 0xD00B;
+    const MSG_PAN_CHANGED = 0xD00B;
 
     // =========================================================================
     // STATE
@@ -148,10 +153,14 @@
         let owner = null;
 
         window.PACRegistry.components.forEach((context, pacId) => {
-            if (owner) return;
+            if (owner) {
+                return;
+            }
 
             const abstraction = context.abstraction;
-            if (!abstraction) return;
+            if (!abstraction) {
+                return;
+            }
 
             // Values read from the abstraction proxy may themselves be reactive
             // proxies wrapping the raw handle. Unwrap via .unwrap() — a method
@@ -161,7 +170,9 @@
                 return unwrapped === handle;
             });
 
-            if (found) owner = pacId;
+            if (found) {
+                owner = pacId;
+            }
         });
 
         return owner;
@@ -176,9 +187,13 @@
      * @param {Object} lParam
      */
     function _sendToOwner(handle, msg, wParam, lParam) {
-        if (!_pac) return;
+        if (!_pac) {
+            return;
+        }
         const pacId = _findOwner(handle);
-        if (pacId) _pac.sendMessage(pacId, msg, wParam, lParam);
+        if (pacId) {
+            _pac.sendMessage(pacId, msg, wParam, lParam);
+        }
     }
 
     // =========================================================================
@@ -341,8 +356,11 @@
         const resume = _ctx.state === 'suspended' ? _ctx.resume() : Promise.resolve();
         resume.then(() => stream._el.play().then(() => {
             _sendToOwner(stream, MSG_STREAM_STARTED, 0, { handle: stream });
-        }).catch(() => {}))
-            .finally(() => { stream._pending = false; });
+        }).catch(() => {
+        }))
+            .finally(() => {
+                stream._pending = false;
+            });
     }
 
     /**
@@ -590,7 +608,7 @@
                 _gainNode: gainNode,
                 _volume: volume,
                 _connected: false,
-                _pending:   false,
+                _pending: false,
             };
 
             el.addEventListener('ended', () => {
@@ -815,6 +833,102 @@
          * @param {number} y  Forward Y component
          * @param {number} z  Forward Z component
          */
+
+        // ─── Analyser ─────────────────────────────────────────────────────────────
+
+        /**
+         * Inserts an AnalyserNode into the master audio graph and starts a RAF
+         * loop that calls the provided callback with time-domain waveform data
+         * on every animation frame. The loop pauses automatically when the
+         * AudioContext is suspended and resumes when it runs again.
+         *
+         * The callback receives a pre-allocated Uint8Array of time-domain samples
+         * on each frame. The same buffer is reused across frames — do not store
+         * a reference to it; copy the data if you need it to persist.
+         *
+         * Returns an analyser handle that must be passed to destroyAnalyser()
+         * when the oscilloscope is no longer needed.
+         *
+         * @param {Function} callback  Called each frame with (data: Uint8Array)
+         * @param {Object}   [options]
+         * @param {number}   [options.fftSize=2048]  FFT size. Must be a power of 2.
+         * @returns {Object|null}  Analyser handle, or null if context unavailable
+         */
+        createAnalyser(callback, options = {}) {
+            if (typeof callback !== 'function') {
+                console.warn('WakaDSound.createAnalyser: callback is required');
+                return null;
+            }
+
+            _ensureContext();
+
+            const node = _ctx.createAnalyser();
+            node.fftSize = options.fftSize ?? 2048;
+
+            // Tap off master gain: masterGain → analyser → destination
+            // We reconnect masterGain through the analyser so all audio is captured.
+            _masterGain.disconnect();
+            _masterGain.connect(node);
+            node.connect(_ctx.destination);
+
+            const data = new Uint8Array(node.frequencyBinCount);
+            let rafId = null;
+            let stopped = false;
+
+            const handle = {
+                _type: 'analyser',
+                _node: node,
+                _callback: callback,
+                _data: data,
+            };
+
+            function tick() {
+                if (stopped) {
+                    return;
+                }
+                rafId = requestAnimationFrame(tick);
+                if (_ctx.state !== 'running') {
+                    return;
+                }
+                node.getByteTimeDomainData(data);
+                callback(data);
+            }
+
+            rafId = requestAnimationFrame(tick);
+            handle._stop = () => {
+                stopped = true;
+                cancelAnimationFrame(rafId);
+            };
+
+            return handle;
+        },
+
+        /**
+         * Stops the RAF loop and removes the AnalyserNode from the audio graph.
+         * The handle must not be used after this call.
+         *
+         * @param {Object} handle  Analyser handle from createAnalyser()
+         */
+        destroyAnalyser(handle) {
+            if (!handle || handle._type !== 'analyser') {
+                return;
+            }
+
+            handle._stop();
+
+            // Restore direct masterGain → destination connection
+            try {
+                handle._node.disconnect();
+                _masterGain.disconnect();
+            } catch (_) {
+                // Nodes may already be disconnected
+            }
+
+            _masterGain.connect(_ctx.destination);
+
+            handle._type = null;
+        },
+
         setListenerOrientation(x, y, z) {
             _ensureContext();
             const listener = _ctx.listener;
@@ -849,7 +963,7 @@
     WakaDSound.MSG_STREAM_STARTED = MSG_STREAM_STARTED;
     WakaDSound.MSG_STREAM_STOPPED = MSG_STREAM_STOPPED;
     WakaDSound.MSG_VOLUME_CHANGED = MSG_VOLUME_CHANGED;
-    WakaDSound.MSG_PAN_CHANGED    = MSG_PAN_CHANGED;
+    WakaDSound.MSG_PAN_CHANGED = MSG_PAN_CHANGED;
 
     /** @type {WakaDSound} */
     const wakaDSound = new WakaDSound();
