@@ -591,4 +591,6 @@
         }
     };
 
+    window.wakaCKEditor = window.WakaCKEditor;
+
 })();

@@ -685,4 +685,6 @@
         }
     };
 
+    window.wakaYouTube = window.WakaYouTube;
+
 })();

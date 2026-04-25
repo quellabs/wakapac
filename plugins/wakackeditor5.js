@@ -751,4 +751,6 @@
         }
     };
 
+    window.wakaCKEditor = window.WakaCKEditor;
+
 })();

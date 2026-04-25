@@ -849,4 +849,6 @@
         return '#' + window.WakaColorPicker.rgbToHex((colorRef >> 16) & 0xFF, (colorRef >> 8) & 0xFF, colorRef & 0xFF);
     };
 
+    window.wakaColorPicker = window.WakaColorPicker;
+
 })();

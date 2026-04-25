@@ -658,4 +658,6 @@
         }
     };
 
+    window.wakaJodit = window.WakaJodit;
+
 })();
