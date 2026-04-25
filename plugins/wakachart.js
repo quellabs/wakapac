@@ -637,4 +637,6 @@
         }
     };
 
+    window.wakaChart = window.WakaChart;
+
 })();

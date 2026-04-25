@@ -657,4 +657,6 @@
         }
     };
 
+    window.wakaTinyMCE = window.WakaTinyMCE;
+
 })();

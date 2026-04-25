@@ -639,4 +639,6 @@
         }
     };
 
+    window.wakaVimeo = window.WakaVimeo;
+
 })();
