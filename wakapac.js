@@ -1332,6 +1332,11 @@
          * @returns {*} The property value (potentially wrapped in a proxy)
          */
         function proxyGetHandler(target, prop, currentPath) {
+            // Allow proxy.unwrap() to retrieve the unwrapped target
+            if (prop === 'unwrap') {
+                return () => target;
+            }
+
             const val = target[prop];
 
             // Handle array methods first
@@ -9789,6 +9794,7 @@
     wakaPAC.getContextByPacId = function (pacId) {
         return window.PACRegistry.get(pacId);
     };
+
 
     /**
      * Resolve a WakaPAC container element by its data-pac-id.
