@@ -240,9 +240,9 @@
         </div>
         <div class="slider-row">
             <label>master vol</label>
-            <input type="range" min="0" max="1" step="0.01" value="1"
+            <input type="range" min="0" max="100" step="1" value="100"
                    oninput="wakaDSound.masterVolume(+this.value); this.nextElementSibling.textContent=this.value">
-            <span class="val">1</span>
+            <span class="val">100</span>
         </div>
         <div class="status info" id="device-status">awaiting init</div>
     </div>
@@ -258,9 +258,9 @@
         </div>
         <div class="slider-row">
             <label>volume</label>
-            <input type="range" min="0" max="1" step="0.01" value="1"
+            <input type="range" min="0" max="100" step="1" value="100"
                    oninput="wakaDSound.setVolume(bufHandle,+this.value);this.nextElementSibling.textContent=this.value">
-            <span class="val">1</span>
+            <span class="val">100</span>
         </div>
         <div class="slider-row">
             <label>pan</label>
@@ -327,17 +327,17 @@
         <div class="btn-row">
             <button class="stream-btn" onclick="loadStream()">load</button>
             <button class="stream-btn" onclick="wakaDSound.play(streamHandle)">play</button>
-            <button class="stream-btn" onclick="wakaDSound.stop(streamHandle)">stop</button>
+            <button class="stream-btn" onclick="wakaDSound.stop(streamHandle);setHandle('streamHandle',null)">stop</button>
             <button class="stream-btn" onclick="wakaDSound.loop(streamHandle,true)">loop on</button>
             <button class="stream-btn" onclick="wakaDSound.loop(streamHandle,false)">loop off</button>
             <button class="stream-btn" onclick="wakaDSound.seek(streamHandle,0)">seek 0</button>
-            <button class="stream-btn" onclick="freeStream()">free</button>
+            <button class="stream-btn" onclick="freeStream()" title="streams are auto-freed on stop">free</button>
         </div>
         <div class="slider-row">
             <label>volume</label>
-            <input type="range" min="0" max="1" step="0.01" value="1"
+            <input type="range" min="0" max="100" step="1" value="100"
                    oninput="wakaDSound.setVolume(streamHandle,+this.value);this.nextElementSibling.textContent=this.value">
-            <span class="val">1</span>
+            <span class="val">100</span>
         </div>
         <div class="status" id="stream-status">
             <span class="indicator" id="stream-ind"></span>not loaded
@@ -433,7 +433,7 @@
                 case W.MSG_BUFFER_STOPPED:  log('→ MSG_BUFFER_STOPPED',  'log-wrn'); break;
                 case W.MSG_STREAM_STARTED:  log('→ MSG_STREAM_STARTED',  'log-ok');  break;
                 case W.MSG_STREAM_STOPPED:  log('→ MSG_STREAM_STOPPED',  'log-wrn'); break;
-                case W.MSG_VOLUME_CHANGED:  log(`→ MSG_VOLUME_CHANGED  volume=${event.detail.volume.toFixed(2)}`, 'log-inf'); break;
+                case W.MSG_VOLUME_CHANGED:  log(`→ MSG_VOLUME_CHANGED  volume=${Math.round(event.detail.volume)}`, 'log-inf'); break;
                 case W.MSG_PAN_CHANGED:     log(`→ MSG_PAN_CHANGED  pan=${event.detail.pan.toFixed(2)}`,         'log-inf'); break;
                 case W.MSG_BUFFER_LOADED:   log('→ MSG_BUFFER_LOADED',   'log-ok');  break;
                 case W.MSG_BUFFER_FAILED:   log('→ MSG_BUFFER_FAILED',   'log-err'); break;
@@ -767,7 +767,7 @@
         }
 
         setStatus('pos-status', 'loading…', 'info');
-        setHandle('posHandle', await _renderTone(330, 4.0, { volume: 0.7, positional: true }));
+        setHandle('posHandle', await _renderTone(330, 4.0, { volume: 70, positional: true }));
 
         if (!posHandle) {
             setStatus('pos-status', 'load failed', 'fail');
