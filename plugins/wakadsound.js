@@ -58,6 +58,9 @@
  * ║    WakaDSound.MSG_BUFFER_FAILED   // wParam: 0, lParam: { url, error }                        ║
  * ║    WakaDSound.MSG_STREAM_LOADED   // wParam: 0, lParam: { url, stream }                       ║
  * ║    WakaDSound.MSG_STREAM_FAILED   // wParam: 0, lParam: { url, error }                        ║
+ * ║    WakaDSound.MSG_STREAM_ERROR    // wParam: 0, event.detail: { handle, error }                 ║
+ * ║    WakaDSound.MSG_STREAM_BUFFERING  // wParam: 0, event.detail: { handle }                        ║
+ * ║    WakaDSound.MSG_STREAM_READY // wParam: 0, event.detail: { handle }                       ║
  * ║                                                                                               ║
  * ║  Messages — sent to owning component only (handle must be in abstraction root):               ║
  * ║    WakaDSound.MSG_BUFFER_STARTED  // wParam: 0, lParam: { handle }                            ║
@@ -84,12 +87,15 @@
     const MSG_BUFFER_FAILED = 0xD002;
     const MSG_STREAM_LOADED = 0xD003;
     const MSG_STREAM_FAILED = 0xD004;
+    const MSG_STREAM_ERROR   = 0xD00C;
+    const MSG_STREAM_BUFFERING   = 0xD00D;
+    const MSG_STREAM_READY = 0xD00E;
     const MSG_BUFFER_STARTED = 0xD006;
     const MSG_BUFFER_STOPPED = 0xD007;
     const MSG_STREAM_STARTED = 0xD008;
     const MSG_STREAM_STOPPED = 0xD009;
     const MSG_VOLUME_CHANGED = 0xD00A;
-    const MSG_PAN_CHANGED = 0xD00B;
+    const MSG_PAN_CHANGED    = 0xD00B;
 
     // =========================================================================
     // STATE
@@ -151,14 +157,10 @@
         let owner = null;
 
         window.PACRegistry.components.forEach((context, pacId) => {
-            if (owner) {
-                return;
-            }
+            if (owner) return;
 
             const abstraction = context.abstraction;
-            if (!abstraction) {
-                return;
-            }
+            if (!abstraction) return;
 
             // Values read from the abstraction proxy may themselves be reactive
             // proxies wrapping the raw handle. Unwrap via .unwrap() — a method
@@ -168,9 +170,7 @@
                 return unwrapped === handle;
             });
 
-            if (found) {
-                owner = pacId;
-            }
+            if (found) owner = pacId;
         });
 
         return owner;
@@ -185,13 +185,9 @@
      * @param {Object} lParam
      */
     function _sendToOwner(handle, msg, wParam, lParam, extended) {
-        if (!_pac) {
-            return;
-        }
+        if (!_pac) return;
         const pacId = _findOwner(handle);
-        if (pacId) {
-            _pac.sendMessage(pacId, msg, wParam, lParam, extended);
-        }
+        if (pacId) _pac.sendMessage(pacId, msg, wParam, lParam, extended);
     }
 
     // =========================================================================
@@ -321,6 +317,8 @@
     //   _connected: boolean,   // MediaElementSourceNode is one-time per element
     //   _pending:   boolean,   // play() promise in flight — guards against rapid double-call race
     // }
+    //
+    // Streams are single-use: stop() auto-frees the handle. Reload to play again.
     // =========================================================================
 
     /**
@@ -354,11 +352,8 @@
         const resume = _ctx.state === 'suspended' ? _ctx.resume() : Promise.resolve();
         resume.then(() => stream._el.play().then(() => {
             _sendToOwner(stream, MSG_STREAM_STARTED, 0, 0, { handle: stream });
-        }).catch(() => {
-        }))
-            .finally(() => {
-                stream._pending = false;
-            });
+        }).catch(() => {}))
+            .finally(() => { stream._pending = false; });
     }
 
     /**
@@ -370,6 +365,10 @@
         stream._el.currentTime = 0;
 
         _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
+
+        // Streams are auto-freed on stop to prevent accumulation of dangling
+        // media nodes. The handle is poisoned after this — do not reuse it.
+        _freeStream(stream);
     }
 
     /**
@@ -606,12 +605,39 @@
                 _gainNode: gainNode,
                 _volume: volume,
                 _connected: false,
-                _pending: false,
+                _pending:   false,
             };
 
             el.addEventListener('ended', () => {
                 _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
             });
+
+            // Surface mid-playback failures so state stays consistent
+            const _onMediaError = () => {
+                if (!stream._type) return;         // already freed
+                console.warn(`WakaDSound: stream error on "${url}"`, el.error);
+                stream._pending = false;
+                _sendToOwner(stream, MSG_STREAM_ERROR, 0, 0, { handle: stream, error: el.error });
+            };
+
+            el.addEventListener('error',   _onMediaError);
+            el.addEventListener('abort',   _onMediaError);
+            let _stalled = false;
+
+            el.addEventListener('stalled', () => {
+                if (!stream._type) return;
+                _stalled = true;
+                _sendToOwner(stream, MSG_STREAM_BUFFERING, 0, 0, { handle: stream });
+            });
+
+            const _onUnstalled = () => {
+                if (!stream._type || !_stalled) return;
+                _stalled = false;
+                _sendToOwner(stream, MSG_STREAM_READY, 0, 0, { handle: stream });
+            };
+
+            el.addEventListener('playing', _onUnstalled);
+            el.addEventListener('canplay', _onUnstalled);
 
             if (_pac) {
                 _pac.broadcastMessage(MSG_STREAM_LOADED, 0, 0, { url, stream });
@@ -641,9 +667,9 @@
         },
 
         /**
-         * Stops a playing buffer or stream. No-op if not playing.
-         * Resets playback position to the beginning in both cases.
-         * The handle remains valid and can be played again.
+         * Stops a buffer or stream. No-op if not playing.
+         * For buffers: resets to the beginning. The handle remains valid and can be played again.
+         * For streams: auto-frees the handle. The handle must not be used after this call.
          *
          * @param {Object} handle  Buffer or stream handle
          */
@@ -858,8 +884,8 @@
 
             _ensureContext();
 
-            const node = _ctx.createAnalyser();
-            node.fftSize = options.fftSize ?? 2048;
+            const node    = _ctx.createAnalyser();
+            node.fftSize  = options.fftSize ?? 2048;
 
             // Tap off master gain: masterGain → analyser → destination
             // We reconnect masterGain through the analyser so all audio is captured.
@@ -867,34 +893,27 @@
             _masterGain.connect(node);
             node.connect(_ctx.destination);
 
-            const data = new Uint8Array(node.frequencyBinCount);
-            let rafId = null;
-            let stopped = false;
+            const data   = new Uint8Array(node.frequencyBinCount);
+            let rafId    = null;
+            let stopped  = false;
 
             const handle = {
-                _type: 'analyser',
-                _node: node,
+                _type:     'analyser',
+                _node:     node,
                 _callback: callback,
-                _data: data,
+                _data:     data,
             };
 
             function tick() {
-                if (stopped) {
-                    return;
-                }
+                if (stopped) return;
                 rafId = requestAnimationFrame(tick);
-                if (_ctx.state !== 'running') {
-                    return;
-                }
+                if (_ctx.state !== 'running') return;
                 node.getByteTimeDomainData(data);
                 callback(data);
             }
 
             rafId = requestAnimationFrame(tick);
-            handle._stop = () => {
-                stopped = true;
-                cancelAnimationFrame(rafId);
-            };
+            handle._stop = () => { stopped = true; cancelAnimationFrame(rafId); };
 
             return handle;
         },
@@ -958,7 +977,7 @@
     WakaDSound.MSG_STREAM_STARTED = MSG_STREAM_STARTED;
     WakaDSound.MSG_STREAM_STOPPED = MSG_STREAM_STOPPED;
     WakaDSound.MSG_VOLUME_CHANGED = MSG_VOLUME_CHANGED;
-    WakaDSound.MSG_PAN_CHANGED = MSG_PAN_CHANGED;
+    WakaDSound.MSG_PAN_CHANGED    = MSG_PAN_CHANGED;
 
     /** @type {WakaDSound} */
     const wakaDSound = new WakaDSound();
