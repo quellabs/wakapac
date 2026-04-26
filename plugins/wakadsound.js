@@ -49,7 +49,7 @@
  * ║    WakaDSound.setListenerOrientation(fx, fy, fz)  // forward vector                           ║
  * ║                                                                                               ║
  * ║  Analyser:                                                                                    ║
- * ║    const a = WakaDSound.createAnalyser(data => { // Uint8Array each frame })               ║
+ * ║    const a = WakaDSound.createAnalyser(data => { // Uint8Array each frame })                  ║
  * ║    const a = WakaDSound.createAnalyser(data => { ... }, { fftSize: 1024 })                    ║
  * ║    WakaDSound.destroyAnalyser(a)   // stop loop and remove from graph                         ║
  * ║                                                                                               ║
@@ -58,9 +58,9 @@
  * ║    WakaDSound.MSG_BUFFER_FAILED   // wParam: 0, lParam: { url, error }                        ║
  * ║    WakaDSound.MSG_STREAM_LOADED   // wParam: 0, lParam: { url, stream }                       ║
  * ║    WakaDSound.MSG_STREAM_FAILED   // wParam: 0, lParam: { url, error }                        ║
- * ║    WakaDSound.MSG_STREAM_ERROR    // wParam: 0, event.detail: { handle, error }                 ║
- * ║    WakaDSound.MSG_STREAM_BUFFERING  // wParam: 0, event.detail: { handle }                        ║
- * ║    WakaDSound.MSG_STREAM_READY // wParam: 0, event.detail: { handle }                       ║
+ * ║    WakaDSound.MSG_STREAM_ERROR    // wParam: 0, event.detail: { handle, error }               ║
+ * ║    WakaDSound.MSG_STREAM_BUFFERING  // wParam: 0, event.detail: { handle }                    ║
+ * ║    WakaDSound.MSG_STREAM_READY // wParam: 0, event.detail: { handle }                         ║
  * ║                                                                                               ║
  * ║  Messages — sent to owning component only (handle must be in abstraction root):               ║
  * ║    WakaDSound.MSG_BUFFER_STARTED  // wParam: 0, lParam: { handle }                            ║
