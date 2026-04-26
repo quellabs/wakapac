@@ -12,6 +12,7 @@
  * ║                                                                                               ║
  * ║  Static buffers for sound effects, streaming buffers for music/ambience.                      ║
  * ║  One playback slot per handle. play() is a no-op if already playing.                          ║
+ * ║  stop() is non-destructive for both buffers and streams — free() releases the handle.         ║
  * ║  The Web Audio node graph is entirely hidden from the caller.                                 ║
  * ║                                                                                               ║
  * ║  Usage:                                                                                       ║
@@ -331,75 +332,149 @@
     //
     // {
     //   _type:      'stream',
-    //   _el:        HTMLAudioElement,
+    //   _el:        HTMLAudioElement,          // replaced on each play() call
     //   _source:    MediaElementAudioSourceNode | null,
-    //   _gainNode:  GainNode,
+    //   _gainNode:  GainNode,                  // persists across reloads
     //   _volume:    number,
-    //   _connected: boolean,   // MediaElementSourceNode is one-time per element
-    //   _pending:   boolean,   // play() promise in flight — guards against rapid double-call race
+    //   _url:       string,                    // stored for internal reload on play()
+    //   _loop:      boolean,
+    //   _connected: boolean,                   // true after _reloadStreamEl wires the element
+    //   _pending:   boolean,                   // reload in flight
     // }
     //
-    // Streams are single-use: stop() auto-frees the handle. Reload to play again.
+    // On each play(), _reloadStreamEl() creates a fresh Audio element and a new
+    // MediaElementAudioSourceNode wired into the existing _gainNode. This avoids
+    // the decoder-resume click that browsers produce when resuming a paused
+    // MediaElementAudioSourceNode — starting from a fresh element always produces
+    // clean audio from position 0.
+    //
+    // Streams survive stop() — the handle remains valid and can be played again.
+    // Call free() to release all resources when the stream is no longer needed.
     // =========================================================================
 
     /**
-     * Creates the MediaElementSourceNode for a stream on first play.
-     * Idempotent — safe to call multiple times.
+     * Attaches all event listeners to stream._el.
+     * Called after initial load and after each internal reload on play().
      * @param {Object} stream
      */
-    function _ensureStreamConnected(stream) {
-        if (stream._connected) {
-            return;
-        }
+    function _wireStreamEl(stream) {
+        const el = stream._el;
 
-        // MediaElementAudioSourceNode can only be created once per element —
-        // creating it a second time throws. The flag prevents that.
-        const source = _ctx.createMediaElementSource(stream._el);
-        source.connect(stream._gainNode);
-        stream._source = source;
-        stream._connected = true;
+        el.addEventListener('ended', () => {
+            if (!stream._type) return;
+            _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
+        });
+
+        const _onMediaError = () => {
+            if (!stream._type) return;
+            stream._pending = false;
+            _sendToOwner(stream, MSG_STREAM_ERROR, 0, 0, { handle: stream, error: el.error });
+        };
+
+        el.addEventListener('error', _onMediaError);
+        el.addEventListener('abort', _onMediaError);
+
+        let _stalled = false;
+
+        el.addEventListener('stalled', () => {
+            if (!stream._type) return;
+            _stalled = true;
+            _sendToOwner(stream, MSG_STREAM_BUFFERING, 0, 0, { handle: stream });
+        });
+
+        const _onUnstalled = () => {
+            if (!stream._type || !_stalled) return;
+            _stalled = false;
+            _sendToOwner(stream, MSG_STREAM_READY, 0, 0, { handle: stream });
+        };
+
+        el.addEventListener('playing', _onUnstalled);
+        el.addEventListener('canplay', _onUnstalled);
     }
 
     /**
-     * Plays a stream handle. No-op if already playing.
+     * Replaces stream._el with a fresh Audio element loaded from stream._url.
+     * Resolves true on canplay, false on error.
+     * The old element is already paused and inert by the time this is called.
+     * @param {Object} stream
+     * @returns {Promise<boolean>}
+     */
+    function _reloadStreamEl(stream) {
+        const el = new Audio();
+        el.preload    = 'auto';
+        el.crossOrigin = 'anonymous';
+        el.loop       = stream._loop;
+        el.volume     = 0;
+
+        return new Promise((resolve) => {
+            el.addEventListener('canplay', () => resolve(true),  { once: true });
+            el.addEventListener('error',   () => resolve(false), { once: true });
+            el.src = stream._url;
+            el.load();
+        }).then((ok) => {
+            if (!ok) return false;
+
+            // Wire new element into the existing gain node
+            const source = _ctx.createMediaElementSource(el);
+            source.connect(stream._gainNode);
+
+            stream._el        = el;
+            stream._source    = source;
+            stream._connected = true;
+
+            _wireStreamEl(stream);
+            return true;
+        });
+    }
+
+    /**
+     * Plays a stream handle. No-op if already playing or a reload is in flight.
+     * The underlying Audio element is replaced with a fresh one on every play()
+     * call — this eliminates the decoder-resume click that occurs when resuming
+     * a paused MediaElementAudioSourceNode.
      * @param {Object} stream
      */
     function _playStream(stream) {
-        // _pending guards against a rapid double-call race where paused is still
-        // true while the play() promise is already in flight.
-        if (!stream._el.paused || stream._pending) {
+        if (stream._pending || !stream._el.paused) {
             return;
         }
 
         stream._pending = true;
 
-        _ensureStreamConnected(stream);
-
         const resume = _ctx.state === 'suspended' ? _ctx.resume() : Promise.resolve();
 
-        resume.then(() => stream._el.play().then(() => {
-            _sendToOwner(stream, MSG_STREAM_STARTED, 0, 0, { handle: stream });
-        }).catch(() => {}))
-            .finally(() => {
-                stream._pending = false;
-            });
+        resume.then(() => _reloadStreamEl(stream)).then((ok) => {
+            if (!ok) return;
+            // el.volume is 0 from _reloadStreamEl — first frames are silent
+            return stream._el.play().then(() => {
+                // Ramp up via el.volume — synchronised with the media pipeline
+                const STEP_MS = 10;
+                const steps   = 3;  // 30 ms
+                let   count   = 0;
+                const id = setInterval(() => {
+                    count++;
+                    stream._el.volume = Math.min(1, count / steps);
+                    if (count >= steps) clearInterval(id);
+                }, STEP_MS);
+                _sendToOwner(stream, MSG_STREAM_STARTED, 0, 0, { handle: stream });
+            }).catch(() => {});
+        }).finally(() => {
+            stream._pending = false;
+        });
     }
 
     /**
-     * Stops a stream and resets playback to the beginning.
+     * Stops a stream. Pauses and discards the current Audio element immediately —
+     * no fade needed since _playStream always starts a fresh element from silence.
      * @param {Object} stream
      */
     function _stopStream(stream) {
-        // Pause the stream and rewind to 0
+        if (stream._el.paused && !stream._pending) {
+            return;
+        }
+
         stream._el.pause();
-        stream._el.currentTime = 0;
-
-        // Send stop event to owner
         _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
-
-        // Streams are auto-freed on stop to prevent accumulation of dangling
-        // media nodes. The handle is poisoned after this — do not reuse it.
-        _freeStream(stream);
     }
 
     /**
@@ -634,60 +709,18 @@
             gainNode.connect(_masterGain);
 
             const stream = {
-                _type: 'stream',
-                _el: el,
-                _source: null,
-                _gainNode: gainNode,
-                _volume: volume,
+                _type:      'stream',
+                _el:        el,
+                _source:    null,
+                _gainNode:  gainNode,
+                _volume:    volume,
+                _url:       url,
+                _loop:      !!options.loop,
                 _connected: false,
-                _pending: false,
+                _pending:   false,
             };
 
-            el.addEventListener('ended', () => {
-                _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
-            });
-
-            // Surface mid-playback failures so state stays consistent
-            const _onMediaError = () => {
-                if (!stream._type) {
-                    return;  // already freed
-                }
-
-                // already freed
-                stream._pending = false;
-
-                // Report stream error
-                _sendToOwner(stream, MSG_STREAM_ERROR, 0, 0, { handle: stream, error: el.error });
-            };
-
-            el.addEventListener('error', _onMediaError);
-            el.addEventListener('abort', _onMediaError);
-
-            // Track stall state so MSG_STREAM_READY is only sent after an actual stall.
-            let _stalled = false;
-
-            el.addEventListener('stalled', () => {
-                if (!stream._type) {
-                    return;
-                }
-
-                _stalled = true;
-
-                _sendToOwner(stream, MSG_STREAM_BUFFERING, 0, 0, { handle: stream });
-            });
-
-            const _onUnstalled = () => {
-                if (!stream._type || !_stalled) {
-                    return;
-                }
-
-                _stalled = false;
-
-                _sendToOwner(stream, MSG_STREAM_READY, 0, 0, { handle: stream });
-            };
-
-            el.addEventListener('playing', _onUnstalled);
-            el.addEventListener('canplay', _onUnstalled);
+            _wireStreamEl(stream);
 
             if (_pac) {
                 _pac.broadcastMessage(MSG_STREAM_LOADED, 0, 0, { url, stream });
@@ -718,8 +751,8 @@
 
         /**
          * Stops a buffer or stream. No-op if not playing.
-         * For buffers: resets to the beginning. The handle remains valid and can be played again.
-         * For streams: auto-frees the handle. The handle must not be used after this call.
+         * Resets playback to the beginning. The handle remains valid and can be played again.
+         * To release all resources, call free() instead.
          *
          * @param {Object} handle  Buffer or stream handle
          */
@@ -795,7 +828,7 @@
                 _freeBuffer(handle);
             } else if (handle._type === 'stream') {
                 _stopStream(handle);
-                _freeStream(handle);
+                _freeStream(handle);  // _stopStream no longer frees; this is the sole free path
             }
         },
 

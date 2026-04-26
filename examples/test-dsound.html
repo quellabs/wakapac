@@ -327,11 +327,11 @@
         <div class="btn-row">
             <button class="stream-btn" onclick="loadStream()">load</button>
             <button class="stream-btn" onclick="wakaDSound.play(streamHandle)">play</button>
-            <button class="stream-btn" onclick="wakaDSound.stop(streamHandle);setHandle('streamHandle',null)">stop</button>
+            <button class="stream-btn" onclick="wakaDSound.stop(streamHandle)">stop</button>
             <button class="stream-btn" onclick="wakaDSound.loop(streamHandle,true)">loop on</button>
             <button class="stream-btn" onclick="wakaDSound.loop(streamHandle,false)">loop off</button>
             <button class="stream-btn" onclick="wakaDSound.seek(streamHandle,0)">seek 0</button>
-            <button class="stream-btn" onclick="freeStream()" title="streams are auto-freed on stop">free</button>
+            <button class="stream-btn" onclick="freeStream()">free</button>
         </div>
         <div class="slider-row">
             <label>volume</label>
@@ -439,7 +439,6 @@
                 case W.MSG_BUFFER_FAILED:   log('→ MSG_BUFFER_FAILED',   'log-err'); break;
                 case W.MSG_STREAM_LOADED:   log('→ MSG_STREAM_LOADED',   'log-ok');  break;
                 case W.MSG_STREAM_FAILED:   log('→ MSG_STREAM_FAILED',   'log-err'); break;
-                case W.MSG_STREAM_STOPPED:    log('→ MSG_STREAM_STOPPED',    'log-wrn'); break;
             }
         }
     });
