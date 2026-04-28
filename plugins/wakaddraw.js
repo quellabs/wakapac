@@ -124,7 +124,7 @@
     // COLOR KEY
     // =========================================================================
 
-    const DEFAULT_COLOR_KEY = '#ff00ff';
+    const DEFAULT_COLOR_KEY = null;
 
     /**
      * Parses a CSS color string (#rgb, #rrggbb, rgb(), rgba()) into {r, g, b}.
@@ -523,7 +523,7 @@
          * @param {number}      width
          * @param {number}      height
          * @param {Object}      [opts]
-         * @param {string|null} [opts.colorKey='#ff00ff']
+         * @param {string|null} [opts.colorKey=null]
          * @returns {Surface}
          */
         createSurface(width, height, opts = {}) {
@@ -543,7 +543,7 @@
          * The surface dimensions match the bitmap exactly.
          * @param {string}      url
          * @param {Object}      [opts]
-         * @param {string|null} [opts.colorKey='#ff00ff']
+         * @param {string|null} [opts.colorKey=null]
          * @returns {Promise<Surface>}
          */
         async loadSurface(url, opts = {}) {
