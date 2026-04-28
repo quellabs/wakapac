@@ -82,7 +82,7 @@
 (function() {
     'use strict';
 
-    const VERSION = '1.0.0';
+    const VERSION = '1.0.1';
 
     // =========================================================================
     // FLAGS
@@ -105,7 +105,6 @@
     /**
      * Creates a 2D canvas context of the given dimensions.
      * Falls back to a regular HTMLCanvasElement if OffscreenCanvas is unavailable.
-     *
      * @param {number} width
      * @param {number} height
      * @returns {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D}
@@ -521,7 +520,6 @@
         /**
          * Creates a new offscreen surface backed by a canvas.
          * Draw into surface._ctx, then call applyColorKey() if needed.
-         *
          * @param {number}      width
          * @param {number}      height
          * @param {Object}      [opts]
@@ -537,6 +535,23 @@
             const ctx = _create2DContext(width, height);
 
             return _buildSurface(ctx, colorKey, true);
+        },
+
+        /**
+         * Loads a bitmap from a URL and blits it into a new offscreen surface.
+         * Combines loadBitmap → createSurface → bltBitmap → deleteBitmap.
+         * The surface dimensions match the bitmap exactly.
+         * @param {string}      url
+         * @param {Object}      [opts]
+         * @param {string|null} [opts.colorKey='#ff00ff']
+         * @returns {Promise<Surface>}
+         */
+        async loadSurface(url, opts = {}) {
+            const bitmap = await _pac.loadBitmap(url);
+            const surface = this.createSurface(bitmap.canvas.width, bitmap.canvas.height, opts);
+            this.bltBitmap(surface, bitmap);
+            _pac.deleteBitmap(bitmap);
+            return surface;
         },
 
         // ─── Blitting ─────────────────────────────────────────────────────────
@@ -618,7 +633,6 @@
         /**
          * Locks a surface for direct pixel access.
          * Returns an ImageData snapshot of the canvas.
-         *
          * @param {Surface} surface
          * @returns {ImageData|null}
          */
@@ -634,7 +648,6 @@
         /**
          * Writes ImageData back to the surface canvas.
          * Call applyColorKey() afterward if the key color was drawn.
-         *
          * @param {Surface}   surface
          * @param {ImageData} imageData
          */
@@ -654,7 +667,6 @@
          * Applies the surface's color key to its pixel data in-place.
          * Pixels matching the color key are set to alpha=0.
          * No-op if colorKey is null.
-         *
          * @param {Surface} surface
          */
         applyColorKey(surface) {
@@ -663,6 +675,37 @@
             }
 
             _applyColorKey(surface._ctx, surface.colorKey);
+        },
+
+        /**
+         * Clears a surface to a solid color or to transparent black.
+         *
+         * Use this at the start of each frame when managing the render loop
+         * manually with bltFast (i.e. without the scene system). The scene
+         * system does not need this — it clears only dirty regions itself.
+         *
+         * @param {Surface} surface
+         * @param {string}  [color='#000000'] CSS fill color. Pass 'transparent'
+         *                                    to clear to transparent black.
+         */
+        clearSurface(surface, color = '#000000') {
+            if (!surface || !surface._ctx) {
+                throw new Error('WakaDDraw.clearSurface: surface is required');
+            }
+
+            if (color === undefined || color === null) {
+                throw new Error('WakaDDraw.clearSurface: color is required');
+            }
+
+            const ctx = surface._ctx;
+            const { width, height } = ctx.canvas;
+
+            if (color === 'transparent' || color === surface.colorKey) {
+                ctx.clearRect(0, 0, width, height);
+            } else {
+                ctx.fillStyle = color;
+                ctx.fillRect(0, 0, width, height);
+            }
         },
 
         /**
@@ -694,7 +737,6 @@
          * Creates a scene. A scene manages a z-sorted sprite list and a
          * non-overlapping dirty rect list. The user calls sceneRender() each
          * frame to composite sprites into the primary surface.
-         *
          * @param {Object}  [opts]
          * @param {string}  [opts.background='#000']  Fallback fill color when no
          *                                             sprite covers a dirty region
@@ -710,7 +752,6 @@
 
         /**
          * Destroys a scene. Detaches all sprites and clears state.
-         *
          * @param {Object} scene
          */
         sceneDestroy(scene) {
@@ -744,7 +785,6 @@
         /**
          * Adds a sprite to a scene. Marks the sprite's initial bounds dirty.
          * No-op if the sprite is already in this scene.
-         *
          * @param {Object} scene
          * @param {Sprite} sprite
          */
