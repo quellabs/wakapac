@@ -606,4 +606,6 @@
         }
     };
 
+    window.wakaVideo = window.WakaVideo;
+
 })();

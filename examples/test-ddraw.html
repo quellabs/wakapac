@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaDDraw Tilemap Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: #111;
+            color: #ccc;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px;
+            gap: 12px;
+        }
+
+        canvas[data-pac-id="game"] {
+            display: block;
+            border: 1px solid #444;
+            image-rendering: pixelated;
+        }
+
+        #debug {
+            font-size: 0.72rem;
+            color: #aaa;
+            width: 320px;
+            line-height: 2;
+        }
+
+        #debug b {
+            color: #7eb8f7;
+            font-weight: normal;
+        }
+
+        #controls {
+            font-size: 0.72rem;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+<canvas data-pac-id="game"
+        width="320"
+        height="240"
+        tabindex="0"></canvas>
+
+<div id="debug">
+    scroll: <b id="d-scroll">—</b> &nbsp;
+    hero: <b id="d-pos">—</b>
+</div>
+
+<div id="controls">
+    Arrow keys / WASD — move hero &nbsp;|&nbsp; Map scrolls with hero
+</div>
+
+<script src="../wakapac.js"></script>
+<script src="../plugins/wakaddraw.js"></script>
+<script>
+
+    // =============================================================================
+    // TILE SHEET
+    // 4 tile types, each 16x16:
+    //   0 = grass (green)
+    //   1 = water (blue)
+    //   2 = stone (grey)
+    //   3 = sand  (yellow)
+    // =============================================================================
+
+    function _drawTileSheet() {
+        const TW = 16, TH = 16;
+        const surface = wakaDDraw.createSurface(64, 16, { colorKey: null });
+        const ctx = wakaDDraw.getContext(surface);
+
+        // Tile 0: grass
+        ctx.fillStyle = '#3a7d44';
+        ctx.fillRect(0, 0, TW, TH);
+        ctx.fillStyle = '#2d6235';
+        ctx.fillRect(2, 2, 3, 3);
+        ctx.fillRect(9, 5, 3, 3);
+        ctx.fillRect(5, 10, 3, 3);
+
+        // Tile 1: water
+        ctx.fillStyle = '#1a6ea8';
+        ctx.fillRect(TW, 0, TW, TH);
+        ctx.fillStyle = '#1d84c9';
+        ctx.fillRect(TW + 1, 4, 14, 3);
+        ctx.fillRect(TW + 3, 10, 10, 3);
+
+        // Tile 2: stone
+        ctx.fillStyle = '#6b6b6b';
+        ctx.fillRect(TW * 2, 0, TW, TH);
+        ctx.fillStyle = '#555';
+        ctx.fillRect(TW * 2, 0, TW, 1);
+        ctx.fillRect(TW * 2, 0, 1, TH);
+        ctx.fillRect(TW * 2 + 8, 0, 1, TH);
+        ctx.fillRect(TW * 2, 8, TW, 1);
+
+        // Tile 3: sand
+        ctx.fillStyle = '#c8a84b';
+        ctx.fillRect(TW * 3, 0, TW, TH);
+        ctx.fillStyle = '#b8952f';
+        ctx.fillRect(TW * 3 + 3, 3, 2, 2);
+        ctx.fillRect(TW * 3 + 10, 7, 2, 2);
+        ctx.fillRect(TW * 3 + 6, 12, 2, 2);
+
+        return surface;
+    }
+
+    // =============================================================================
+    // HERO SURFACE (simple 16x16, single frame)
+    // =============================================================================
+
+    function _drawHero() {
+        const surface = wakaDDraw.createSurface(16, 16);
+        const ctx = wakaDDraw.getContext(surface);
+
+        ctx.fillStyle = '#ff00ff';
+        ctx.fillRect(0, 0, 16, 16);
+
+        // Body
+        ctx.fillStyle = '#4a9eff';
+        ctx.fillRect(4, 6, 8, 8);
+
+        // Head
+        ctx.fillStyle = '#c8e6ff';
+        ctx.fillRect(5, 1, 6, 6);
+
+        // Eyes
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(6, 3, 2, 2);
+        ctx.fillRect(9, 3, 2, 2);
+
+        wakaDDraw.applyColorKey(surface);
+        return surface;
+    }
+
+    // =============================================================================
+    // MAP DATA — 32x32 tiles (512x512 world pixels at 16px/tile)
+    // =============================================================================
+
+    function _buildMap() {
+        const W = 32, H = 32;
+        const data = new Uint16Array(W * H);
+
+        // Fill with grass
+        data.fill(0);
+
+        // River running diagonally
+        for (let i = 0; i < 28; i++) {
+            const col = 4 + i;
+            const row = i;
+            if (col < W && row < H) {
+                data[row * W + col] = 1;
+                if (col + 1 < W) {
+                    data[row * W + col + 1] = 1;
+                }
+            }
+        }
+
+        // Stone path across the middle
+        for (let col = 0; col < W; col++) {
+            data[14 * W + col] = 2;
+            data[15 * W + col] = 2;
+        }
+
+        // Sandy beach area bottom-right
+        for (let row = 22; row < H; row++) {
+            for (let col = 20; col < W; col++) {
+                data[row * W + col] = 3;
+            }
+        }
+
+        return { data, width: W, height: H };
+    }
+
+    // =============================================================================
+    // COMPONENT
+    // =============================================================================
+
+    wakaPAC.use(wakaDDraw);
+
+    const Demo = {
+
+        primary: null,
+        scene: null,
+
+        tileSheet: null,
+        tileSurface: null,   // offscreen surface the tilemap renders into
+        tileSprite: null,   // sprite wrapping tileSurface (z=0)
+
+        heroSurface: null,
+        heroSprite: null,   // sprite wrapping heroSurface (z=1)
+
+        tilemap: null,
+        map: null,
+
+        // Hero world position (in pixels)
+        heroX: 80,
+        heroY: 80,
+
+        // Camera (top-left of visible window in world pixels)
+        camX: 0,
+        camY: 0,
+
+        keys: { left: false, right: false, up: false, down: false },
+        _timer: 0,
+        _lastTime: 0,
+
+        init() {
+            this.primary = wakaDDraw.getSurface(this.pacId);
+
+            // Tile sheet and tile surface
+            this.tileSheet = _drawTileSheet();
+            this.tileSurface = wakaDDraw.createSurface(320, 240, { colorKey: null });
+
+            // Hero surface
+            this.heroSurface = _drawHero();
+
+            // Build map
+            this.map = _buildMap();
+            this.tilemap = wakaDDraw.createTilemap(
+                this.tileSheet,
+                16, 16,
+                this.map.data,
+                this.map.width,
+                this.map.height
+            );
+
+            // Scene
+            this.scene = wakaDDraw.sceneCreate({ background: '#000' });
+
+            // Tile layer at z=0, hero at z=1
+            this.tileSprite = wakaDDraw.createSprite(this.tileSurface, null, 0);
+            this.heroSprite = wakaDDraw.createSprite(this.heroSurface, null, 1);
+
+            this.tileSprite.moveTo(0, 0);
+            this.heroSprite.moveTo(this.heroX - this.camX, this.heroY - this.camY);
+
+            wakaDDraw.sceneAddSprite(this.scene, this.tileSprite);
+            wakaDDraw.sceneAddSprite(this.scene, this.heroSprite);
+
+            // Initial tile render — draw unconditionally before first sceneInvalidate
+            this.tilemap.drawTo(this.tileSurface, this.camX, this.camY);
+            this._updateCamera();
+
+            wakaDDraw.sceneInvalidate(this.scene, this.primary);
+
+            this._lastTime = performance.now();
+            this._timer = wakaPAC.setTimer(this.pacId, 16);
+        },
+
+        msgProc(event) {
+            switch (event.message) {
+
+                case wakaPAC.MSG_TIMER: {
+                    if (event.wParam !== this._timer) {
+                        break;
+                    }
+
+                    const now = performance.now();
+                    const delta = now - this._lastTime;
+                    this._lastTime = now;
+
+                    this._tick(delta);
+                    wakaDDraw.sceneRender(this.scene, this.primary);
+                    break;
+                }
+
+                case wakaPAC.MSG_KEYDOWN: {
+                    if (this._handleKey(event.wParam, true)) {
+                        return false;
+                    }
+                    break;
+                }
+
+                case wakaPAC.MSG_KEYUP: {
+                    if (this._handleKey(event.wParam, false)) {
+                        return false;
+                    }
+                    break;
+                }
+
+                case wakaPAC.MSG_DESTROYED: {
+                    wakaDDraw.sceneDestroy(this.scene);
+                    this.scene = null;
+                    this.primary = null;
+                    this.tileSheet = null;
+                    this.tileSurface = null;
+                    this.heroSurface = null;
+                    this.tileSprite = null;
+                    this.heroSprite = null;
+                    break;
+                }
+            }
+        },
+
+        _tick(delta) {
+            const SPEED = 0.1;
+            const WORLD_W = this.map.width * 16;
+            const WORLD_H = this.map.height * 16;
+            const k = this.keys;
+
+            let dx = 0, dy = 0;
+            if (k.left) {
+                dx -= 1;
+            }
+            if (k.right) {
+                dx += 1;
+            }
+            if (k.up) {
+                dy -= 1;
+            }
+            if (k.down) {
+                dy += 1;
+            }
+
+            if (dx !== 0 && dy !== 0) {
+                dx *= 0.707;
+                dy *= 0.707;
+            }
+
+            if (dx !== 0 || dy !== 0) {
+                this.heroX = Math.round(Math.max(0, Math.min(WORLD_W - 16, this.heroX + dx * delta * SPEED)));
+                this.heroY = Math.round(Math.max(0, Math.min(WORLD_H - 16, this.heroY + dy * delta * SPEED)));
+                this._updateCamera();
+            }
+
+            document.getElementById('d-scroll').textContent = `${this.camX}, ${this.camY}`;
+            document.getElementById('d-pos').textContent = `${this.heroX}, ${this.heroY}`;
+        },
+
+        _updateCamera() {
+            // Centre camera on hero, clamped to world bounds
+            const WORLD_W = this.map.width * 16;
+            const WORLD_H = this.map.height * 16;
+
+            const prevCamX = this.camX;
+            const prevCamY = this.camY;
+
+            this.camX = Math.max(0, Math.min(WORLD_W - 320, this.heroX - 320 / 2 + 8));
+            this.camY = Math.max(0, Math.min(WORLD_H - 240, this.heroY - 240 / 2 + 8));
+
+            const cameraChanged = this.camX !== prevCamX || this.camY !== prevCamY;
+
+            if (cameraChanged) {
+                // Redraw tile layer into tileSurface at new scroll position
+                this.tilemap.drawTo(this.tileSurface, this.camX, this.camY);
+
+                // Full scene invalidate — camera movement affects all visible tiles
+                wakaDDraw.sceneInvalidate(this.scene, this.primary);
+            }
+
+            // Update hero sprite to screen position (world pos minus camera)
+            const screenX = this.heroX - this.camX;
+            const screenY = this.heroY - this.camY;
+            this.heroSprite.moveTo(screenX, screenY);
+        },
+
+        _handleKey(vk, down) {
+            switch (vk) {
+                case wakaPAC.VK_LEFT:
+                case wakaPAC.VK_A:
+                    this.keys.left = down;
+                    return true;
+                case wakaPAC.VK_RIGHT:
+                case wakaPAC.VK_D:
+                    this.keys.right = down;
+                    return true;
+                case wakaPAC.VK_UP:
+                case wakaPAC.VK_W:
+                    this.keys.up = down;
+                    return true;
+                case wakaPAC.VK_DOWN:
+                case wakaPAC.VK_S:
+                    this.keys.down = down;
+                    return true;
+            }
+            return false;
+        }
+    };
+
+    wakaPAC('[data-pac-id="game"]', Demo);
+
+</script>
+</body>
+</html>

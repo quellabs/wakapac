@@ -20,6 +20,32 @@
     "use strict";
 
     // =============================================================================
+    // CANVAS HELPERS
+    // =============================================================================
+
+    /**
+     * Creates a canvas context of the given dimensions and type.
+     * Uses OffscreenCanvas where available, falling back to HTMLCanvasElement
+     * for environments that do not support it (notably older Safari versions).
+     *
+     * @param {number} width
+     * @param {number} height
+     * @param {string} [contextType='2d']
+     * @param {Object} [attributes]
+     * @returns {RenderingContext}
+     */
+    function _createCanvas(width, height, contextType = '2d', attributes) {
+        if (typeof OffscreenCanvas !== 'undefined') {
+            return new OffscreenCanvas(width, height).getContext(contextType, attributes);
+        }
+
+        const canvas  = document.createElement('canvas');
+        canvas.width  = width;
+        canvas.height = height;
+        return canvas.getContext(contextType, attributes);
+    }
+
+    // =============================================================================
     // CONSTANTS AND CONFIGURATION
     // =============================================================================
 
@@ -172,7 +198,7 @@
     const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'DETAILS', 'INPUT', 'LABEL', 'SELECT', 'SUMMARY', 'TEXTAREA',]);
 
     // Non-text input types that commit values via the change event.
-    const CHANGE_INPUT_TYPES = new Set(['checkbox', 'radio', 'color', 'range', 'date', 'datetime-local', 'month', 'week', 'time']);
+    const CHANGE_INPUT_TYPES = new Set(['checkbox', 'radio', 'color', 'range', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
 
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
@@ -1306,6 +1332,11 @@
          * @returns {*} The property value (potentially wrapped in a proxy)
          */
         function proxyGetHandler(target, prop, currentPath) {
+            // Allow proxy.unwrap() to retrieve the unwrapped target
+            if (prop === 'unwrap') {
+                return () => target;
+            }
+
             const val = target[prop];
 
             // Handle array methods first
@@ -7369,6 +7400,28 @@
             }
         });
 
+        // Inject container and pacId directly onto the proxy — not through
+        // makeDeepReactiveProxy — so the raw DOM element is never wrapped and
+        // pacId is never made reactive. Both are infrastructure, not state.
+        // Mark container as an external proxy so the reactive proxy's get trap
+        // returns it as-is without wrapping it in another proxy. DOM elements
+        // break when proxied — native methods receive the Proxy as 'this'.
+        this.container._externalProxy = true;
+
+        Object.defineProperty(proxiedReactive, 'container', {
+            value:        this.container,
+            writable:     false,
+            enumerable:   true,
+            configurable: true
+        });
+
+        Object.defineProperty(proxiedReactive, 'pacId', {
+            value:        this.container._pacId || this.container.getAttribute('data-pac-id'),
+            writable:     false,
+            enumerable:   true,
+            configurable: true
+        });
+
         // Return the proxy
         return proxiedReactive;
     };
@@ -7391,10 +7444,6 @@
      * @param {Object} abstraction - The abstraction to enhance
      */
     Context.prototype.injectSystemProperties = function(abstraction) {
-        // Add container element reference and identification
-        abstraction.container = this.container;
-        abstraction.pacId = this.container._pacId || this.container.getAttribute('data-pac-id');
-
         // Initialize online/offline state and network quality
         abstraction.browserOnline = navigator.onLine;
         abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
@@ -9746,6 +9795,7 @@
         return window.PACRegistry.get(pacId);
     };
 
+
     /**
      * Resolve a WakaPAC container element by its data-pac-id.
      * @param {string} pacId Identifier of the target container
@@ -10600,7 +10650,7 @@
         const pacContext = window.PACRegistry.get(pacId);
         const attributes = pacContext?.config?.dcAttributes;
 
-        return new OffscreenCanvas(container.width, container.height).getContext(contextType, attributes);
+        return _createCanvas(container.width, container.height, contextType, attributes);
     };
 
     /**
@@ -10912,7 +10962,7 @@
             } else if (source instanceof ImageBitmap) {
                 // Already an ImageBitmap — use directly; caller retains ownership
                 // and is responsible for closing it
-                const dc = new OffscreenCanvas(source.width, source.height).getContext('2d');
+                const dc = _createCanvas(source.width, source.height);
                 dc.drawImage(source, 0, 0);
                 return /** @type {CanvasRenderingContext2D} */ (dc);
             } else if (
@@ -10927,8 +10977,8 @@
                 return null;
             }
 
-            // Draw the bitmap into a fresh OffscreenCanvas-backed DC
-            const dc = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d');
+            // Draw the bitmap into a fresh canvas-backed DC
+            const dc = _createCanvas(bitmap.width, bitmap.height);
             dc.drawImage(bitmap, 0, 0);
 
             // ImageBitmap holds GPU-side memory and must be explicitly released;

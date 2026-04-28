@@ -384,8 +384,11 @@
                 ta.name = container.getAttribute('name');
             }
 
-            // Copy initial content from the custom element's text nodes, if any.
-            ta.value = container.textContent.trim();
+            // Copy initial content
+            ta.value = container.innerHTML.trim();
+
+            // Remove inner HTML
+            container.innerHTML = '';
 
             // Add textarea as a child of the custom element
             container.appendChild(ta);
@@ -587,5 +590,7 @@
             entry.editor.setReadOnly(Boolean(readOnly));
         }
     };
+
+    window.wakaCKEditor = window.WakaCKEditor;
 
 })();
