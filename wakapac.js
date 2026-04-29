@@ -10935,7 +10935,7 @@
      * Accepted sources:
      *   - string               URL or data URI; fetched and decoded via createImageBitmap()
      *   - HTMLImageElement     Must be fully loaded (complete && naturalWidth > 0)
-     *   - ImageBitmap          Used directly; caller retains ownership and must close it themselves
+     *   - ImageBitmap          Snapshotted into a new handle; caller retains ownership of the source
      *   - ImageData            Raw RGBA pixel buffer; drawn at its own dimensions
      *   - Blob                 Decoded via createImageBitmap()
      *   - HTMLCanvasElement    Snapshot of the canvas at call time
@@ -10960,11 +10960,12 @@
 
                 bitmap = await createImageBitmap(source);
             } else if (source instanceof ImageBitmap) {
-                // Already an ImageBitmap — use directly; caller retains ownership
-                // and is responsible for closing it
-                const dc = _createCanvas(source.width, source.height);
-                dc.drawImage(source, 0, 0);
-                return /** @type {CanvasRenderingContext2D} */ (dc);
+                // Already an ImageBitmap — snapshot it into a new canvas so the
+                // returned handle is fully self-contained and the caller can close
+                // their original ImageBitmap independently without affecting ours.
+                // createImageBitmap() from an ImageBitmap is a zero-copy operation
+                // in most engines, so there is no meaningful performance cost.
+                bitmap = await createImageBitmap(source);
             } else if (
                 source instanceof ImageData        ||
                 source instanceof Blob             ||
@@ -10986,7 +10987,8 @@
             bitmap.close();
 
             return /** @type {CanvasRenderingContext2D} */ (dc);
-        } catch {
+        } catch (err) {
+            console.error('wakaPAC.loadBitmap: failed to load bitmap', err);
             return null;
         }
     };
@@ -11032,7 +11034,8 @@
             a.click();
             URL.revokeObjectURL(url);
             return true;
-        } catch {
+        } catch (err) {
+            console.error('wakaPAC.saveBitmap: failed to save bitmap', err);
             return false;
         }
     };
