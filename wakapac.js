@@ -11425,10 +11425,14 @@
 
     // Initialize the cross-tab broadcast channel so that every tab
     // can receive broadcastMessageGlobal() messages from other tabs.
-    if (typeof BroadcastChannel !== 'undefined') {
-        // All tabs sharing the same origin and channel name form one broadcast
-        // group. 'wakapac' is a fixed name so no configuration is needed.
-        _broadcastChannel = new BroadcastChannel('wakapac');
+    //
+    // Requires a <meta name="wakapac-channel" content="my-app"> tag placed
+    // before the WakaPAC script tag. If the tag is absent, cross-tab broadcast
+    // is disabled and broadcastMessageGlobal() falls back to local-only dispatch.
+    const _channelMeta = document.querySelector('meta[name="wakapac-channel"]');
+
+    if (_channelMeta && typeof BroadcastChannel !== 'undefined') {
+        _broadcastChannel = new BroadcastChannel(_channelMeta.content);
 
         // Handle messages arriving from other tabs.
         // BroadcastChannel never delivers a message back to the tab that posted
