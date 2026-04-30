@@ -25,8 +25,8 @@
  * ║  and initialized once the API is available.                                          ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
- * ║    wakaPAC.use(WakaLightGallery);                         // CDN defaults            ║
- * ║    wakaPAC.use(WakaLightGallery, {                        // custom options          ║
+ * ║    wakaPAC.use(wakaLightGallery);                         // CDN defaults            ║
+ * ║    wakaPAC.use(wakaLightGallery, {                        // custom options          ║
  * ║      src:    '/path/to/lightgallery.umd.min.js',                                     ║
  * ║      cssSrc: '/path/to/lightgallery.min.css',                                        ║
  * ║      plugins: [lgZoom, lgThumbnail]   // pre-loaded plugin objects                   ║
@@ -58,11 +58,11 @@
  * ║    currentIndex  — current slide index (0-based), kept current on every slide        ║
  * ║                                                                                      ║
  * ║  API — all methods take pacId as first argument:                                     ║
- * ║    WakaLightGallery.openGallery(pacId, index)  — open at given index (default 0)     ║
- * ║    WakaLightGallery.closeGallery(pacId)        — close the gallery                   ║
- * ║    WakaLightGallery.slide(pacId, index)        — jump to slide index                 ║
- * ║    WakaLightGallery.refresh(pacId)             — refresh after DOM change            ║
- * ║    WakaLightGallery.destroy(pacId)             — destroy instance                    ║
+ * ║    wakaLightGallery.openGallery(pacId, index)  — open at given index (default 0)     ║
+ * ║    wakaLightGallery.closeGallery(pacId)        — close the gallery                   ║
+ * ║    wakaLightGallery.slide(pacId, index)        — jump to slide index                 ║
+ * ║    wakaLightGallery.refresh(pacId)             — refresh after DOM change            ║
+ * ║    wakaLightGallery.destroy(pacId)             — destroy instance                    ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -204,7 +204,7 @@
     // Plugin definition
     // =========================================================================
 
-    window.WakaLightGallery = {
+    window.wakaLightGallery = {
 
         /**
          * Called on plugin initialization through wakaPAC.use().
@@ -493,7 +493,7 @@
         }
     };
 
-    // Lowercase alias for consistency with WakaCKEditor / wakaCKEditor convention.
-    window.wakaLightGallery = window.WakaLightGallery;
+    // Uppercase alias for consistency with WakaCKEditor / wakaCKEditor convention.
+    window.WakaLightGallery = window.wakaLightGallery;
 
 })();
