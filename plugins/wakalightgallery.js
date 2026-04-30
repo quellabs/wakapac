@@ -278,7 +278,6 @@
              * Instantiates a lightGallery v2 instance on the container element and
              * registers it. Called immediately when the API is available, or deferred
              * via _pendingInits while the script is still loading.
-             *
              * @param {Object} abstraction
              * @param {string} pacId
              * @param {Object} galleryConfig - Merged plugin-level and per-instance config
@@ -299,7 +298,6 @@
                 // Attach DOM event listeners BEFORE calling lightGallery() so that
                 // lgInit (fired synchronously during init) is not missed.
                 // -----------------------------------------------------------------
-
                 container.addEventListener('lgInit', function(event) {
                     // Add pacId to registry
                     _registry.set(pacId, {
