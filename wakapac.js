@@ -109,6 +109,14 @@
     let _nextHookHandle = 1;
 
     /**
+     * The shared BroadcastChannel instance used for cross-tab messaging.
+     * Created eagerly at framework startup so every tab can receive cross-tab
+     * broadcasts even if it never calls broadcastMessageGlobal() itself.
+     * @type {BroadcastChannel|null}
+     */
+    let _broadcastChannel = null;
+
+    /**
      * Matches handlebars-style interpolation: {{variable}}
      * Captures variable name/expression with global flag
      * @type {RegExp}
@@ -1195,7 +1203,6 @@
             }
         }
     }
-
 
     // ========================================================================
     // REACTIVE PROXY
@@ -8328,6 +8335,50 @@
     };
 
     // =============================================================================
+    // CHANNEL BRIDGE
+    // =============================================================================
+
+    /**
+     * Manages the BroadcastChannel used by broadcastMessageGlobal() to deliver
+     * messages across tabs. Activated only when a <meta name="wakapac-channel">
+     * tag is present before the WakaPAC script tag.
+     */
+    const ChannelBridge = {
+        /** @private {boolean} Flag to prevent multiple initializations */
+        _initialized: false,
+
+        /**
+         * Creates the BroadcastChannel and registers the onmessage handler.
+         * Should be called once during framework initialization.
+         */
+        initialize() {
+            if (this._initialized) {
+                return;
+            }
+
+            this._initialized = true;
+
+            // Cross-tab broadcast requires an explicit channel name via meta tag.
+            // If the tag is absent, broadcastMessageGlobal() falls back to local-only dispatch.
+            const meta = document.querySelector('meta[name="wakapac-channel"]');
+
+            if (meta && typeof BroadcastChannel !== 'undefined') {
+                // All tabs sharing the same origin and channel name form one broadcast
+                // group. The meta tag content sets the name, scoping it to this app.
+                _broadcastChannel = new BroadcastChannel(meta.content);
+
+                // Handle messages arriving from other tabs.
+                // BroadcastChannel never delivers a message back to the tab that posted
+                // it, so there is no risk of an infinite loop here.
+                _broadcastChannel.onmessage = function(e) {
+                    const { messageId, wParam, lParam, extended } = e.data;
+                    wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
+                };
+            }
+        }
+    };
+
+    // =============================================================================
     // MOUSE GESTURE RECOGNIZER
     // =============================================================================
 
@@ -9461,6 +9512,9 @@
         // Initialize automatic cleanup observer
         CleanupObserver.initialize();
 
+        // Initialize cross-tab broadcast channel
+        ChannelBridge.initialize();
+
         // Allow passing a pac-id directly instead of a CSS selector
         const originalSelector = selector;
         let isPacId = false;
@@ -10005,6 +10059,32 @@
             const event = this.createPacMessage(messageId, wParam, lParam, extended);
             DomUpdateTracker.dispatchToContainer(node.container, event);
             queue.push(...node.children);
+        }
+    };
+
+    /**
+     * Broadcasts a message to all WakaPAC containers in every tab/window sharing
+     * the same origin. The message is also dispatched locally via broadcastMessage().
+     *
+     * Only primitives and plain objects survive the structured-clone serialization
+     * used by BroadcastChannel. Do not put DOM nodes or component references in
+     * the extended payload.
+     *
+     * Falls back to a local broadcastMessage() if BroadcastChannel is not supported.
+     *
+     * @param {number} messageId - Message identifier (integer constant, e.g., wakaPAC.MSG_USER + 1)
+     * @param {number} [wParam=0] - First message parameter (integer)
+     * @param {number} [lParam=0] - Second message parameter (integer)
+     * @param {Object} [extended={}] - Additional plain-object data; must be structured-clone safe
+     */
+    wakaPAC.broadcastMessageGlobal = function(messageId, wParam = 0, lParam = 0, extended = {}) {
+        // Always dispatch locally first
+        wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
+
+        // Post to other tabs. Receiving tabs call broadcastMessage (not
+        // broadcastMessageGlobal), so the message is never re-posted to the channel.
+        if (_broadcastChannel) {
+            _broadcastChannel.postMessage({ messageId, wParam, lParam, extended });
         }
     };
 
