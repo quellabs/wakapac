@@ -54,11 +54,6 @@
  * ║    MSG_AFTER_SLIDE     — slide transition is complete;                               ║
  * ║                          extended.index, extended.prevIndex                          ║
  * ║                                                                                      ║
- * ║  Reactive properties injected on the abstraction:                                    ║
- * ║    currentIndex  — current slide index (0-based); readable in msgProc to inspect     ║
- * ║                    the active slide; writable to drive the gallery programmatically  ║
- * ║                    (e.g. this.currentIndex = 2 jumps to the 3rd slide).              ║
- * ║                                                                                      ║
  * ║  API — all methods take pacId as first argument:                                     ║
  * ║    wakaLightGallery.openGallery(pacId, index)  — open at given index (default 0)     ║
  * ║    wakaLightGallery.closeGallery(pacId)        — close the gallery                   ║
@@ -121,8 +116,7 @@
      * Registry of active lightGallery component instances keyed by pacId.
      * @type {Map<string, {
      *   pac:         Object,
-     *   instance:    Object,
-     *   abstraction: Object
+     *   instance: Object
      * }>}
      */
     const _registry = new Map();
@@ -266,7 +260,7 @@
             // =====================================================================
 
             /**
-             * @type {Array<{ abstraction: Object, pacId: string, pac: Object, galleryConfig: Object, MSG_GALLERY_ERROR: number }>}
+             * @type {Array<{ pacId: string, pac: Object, galleryConfig: Object, MSG_GALLERY_ERROR: number }>}
              */
             const _pendingInits = [];
 
@@ -278,21 +272,15 @@
              * Instantiates a lightGallery v2 instance on the container element and
              * registers it. Called immediately when the API is available, or deferred
              * via _pendingInits while the script is still loading.
-             * @param {Object} abstraction
              * @param {string} pacId
              * @param {Object} galleryConfig - Merged plugin-level and per-instance config
              */
-            function createGallery(abstraction, pacId, galleryConfig) {
+            function createGallery(pacId, galleryConfig) {
                 const container = pac.getContainerByPacId(pacId);
 
                 if (!container) {
                     return;
                 }
-
-                // Guard that prevents the pac:change → slide() → lgAfterSlide loop.
-                // Set to true while lgAfterSlide is updating currentIndex so the
-                // pac:change listener knows the write originated from the gallery itself.
-                let _slidingFromGallery = false;
 
                 // -----------------------------------------------------------------
                 // Attach DOM event listeners BEFORE calling lightGallery() so that
@@ -302,8 +290,7 @@
                     // Add pacId to registry
                     _registry.set(pacId, {
                         pac,
-                        instance: event.detail.instance,
-                        abstraction
+                        instance: event.detail.instance
                     });
 
                     // Send event to container
@@ -372,40 +359,8 @@
                     // Extract details
                     const { index, prevIndex } = event.detail;
 
-                    // Keep reactive property current. Guard prevents the pac:change
-                    // listener above from re-calling slide() for this write.
-                    _slidingFromGallery = true;
-                    _registry.get(pacId).abstraction.currentIndex = index;
-                    _slidingFromGallery = false;
-
                     // Send event to container
                     pac.sendMessage(pacId, MSG_AFTER_SLIDE, index, prevIndex, { index, prevIndex });
-                });
-
-                // -----------------------------------------------------------------
-                // Drive the gallery when user code writes abstraction.currentIndex.
-                // pac:change fires for every proxy set; filter to currentIndex only.
-                // The _slidingFromGallery guard prevents lgAfterSlide from triggering
-                // a redundant slide() call back into lightGallery.
-                // -----------------------------------------------------------------
-                container.addEventListener('pac:change', function(event) {
-                    const detail = event.detail;
-
-                    if (detail.path.length !== 1 || detail.path[0] !== 'currentIndex') {
-                        return;
-                    }
-
-                    if (_slidingFromGallery) {
-                        return;
-                    }
-
-                    const entry = _registry.get(pacId);
-
-                    if (!entry) {
-                        return;
-                    }
-
-                    entry.instance.slide(detail.newValue);
                 });
 
                 // -----------------------------------------------------------------
@@ -419,7 +374,7 @@
              */
             function drainPendingInits() {
                 for (const pending of _pendingInits) {
-                    createGallery(pending.abstraction, pending.pacId, pending.galleryConfig);
+                    createGallery(pending.pacId, pending.galleryConfig);
                 }
                 _pendingInits.length = 0;
             }
@@ -451,12 +406,6 @@
                         ...(_config.lightgallery ?? {})
                     };
 
-                    // Seed currentIndex on the reactive proxy before the gallery
-                    // initializes so it is available in msgProc from the start.
-                    // Writing to it later (e.g. this.currentIndex = 2) drives the
-                    // gallery via the pac:change listener in createGallery.
-                    abstraction.currentIndex = 0;
-
                     // Always inject CSS (one-shot).
                     ensureCssLoaded();
 
@@ -464,9 +413,9 @@
                     ensureApiLoaded(drainPendingInits, _pendingInits);
 
                     if (_apiReady) {
-                        createGallery(abstraction, pacId, galleryConfig);
+                        createGallery(pacId, galleryConfig);
                     } else {
-                        _pendingInits.push({ abstraction, pacId, pac, galleryConfig, MSG_GALLERY_ERROR });
+                        _pendingInits.push({ pacId, pac, galleryConfig, MSG_GALLERY_ERROR });
                     }
                 },
 
