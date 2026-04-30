@@ -8335,6 +8335,50 @@
     };
 
     // =============================================================================
+    // CHANNEL BRIDGE
+    // =============================================================================
+
+    /**
+     * Manages the BroadcastChannel used by broadcastMessageGlobal() to deliver
+     * messages across tabs. Activated only when a <meta name="wakapac-channel">
+     * tag is present before the WakaPAC script tag.
+     */
+    const ChannelBridge = {
+        /** @private {boolean} Flag to prevent multiple initializations */
+        _initialized: false,
+
+        /**
+         * Creates the BroadcastChannel and registers the onmessage handler.
+         * Should be called once during framework initialization.
+         */
+        initialize() {
+            if (this._initialized) {
+                return;
+            }
+
+            this._initialized = true;
+
+            // Cross-tab broadcast requires an explicit channel name via meta tag.
+            // If the tag is absent, broadcastMessageGlobal() falls back to local-only dispatch.
+            const meta = document.querySelector('meta[name="wakapac-channel"]');
+
+            if (meta && typeof BroadcastChannel !== 'undefined') {
+                // All tabs sharing the same origin and channel name form one broadcast
+                // group. The meta tag content sets the name, scoping it to this app.
+                _broadcastChannel = new BroadcastChannel(meta.content);
+
+                // Handle messages arriving from other tabs.
+                // BroadcastChannel never delivers a message back to the tab that posted
+                // it, so there is no risk of an infinite loop here.
+                _broadcastChannel.onmessage = function(e) {
+                    const { messageId, wParam, lParam, extended } = e.data;
+                    wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
+                };
+            }
+        }
+    };
+
+    // =============================================================================
     // MOUSE GESTURE RECOGNIZER
     // =============================================================================
 
@@ -9467,6 +9511,9 @@
 
         // Initialize automatic cleanup observer
         CleanupObserver.initialize();
+
+        // Initialize cross-tab broadcast channel
+        ChannelBridge.initialize();
 
         // Allow passing a pac-id directly instead of a CSS selector
         const originalSelector = selector;
@@ -11422,26 +11469,6 @@
 
     // Registry file
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
-
-    // Initialize the cross-tab broadcast channel so that every tab
-    // can receive broadcastMessageGlobal() messages from other tabs.
-    //
-    // Requires a <meta name="wakapac-channel" content="my-app"> tag placed
-    // before the WakaPAC script tag. If the tag is absent, cross-tab broadcast
-    // is disabled and broadcastMessageGlobal() falls back to local-only dispatch.
-    const _channelMeta = document.querySelector('meta[name="wakapac-channel"]');
-
-    if (_channelMeta && typeof BroadcastChannel !== 'undefined') {
-        _broadcastChannel = new BroadcastChannel(_channelMeta.content);
-
-        // Handle messages arriving from other tabs.
-        // BroadcastChannel never delivers a message back to the tab that posted
-        // it, so there is no risk of an infinite loop here.
-        _broadcastChannel.onmessage = function(e) {
-            const { messageId, wParam, lParam, extended } = e.data;
-            wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
-        };
-    }
 
     // Export Metafile
     wakaPAC.MetaFile = MetaFile;
