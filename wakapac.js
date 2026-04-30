@@ -110,7 +110,8 @@
 
     /**
      * The shared BroadcastChannel instance used for cross-tab messaging.
-     * Created lazily on first call to broadcastMessageGlobal().
+     * Created eagerly at framework startup so every tab can receive cross-tab
+     * broadcasts even if it never calls broadcastMessageGlobal() itself.
      * @type {BroadcastChannel|null}
      */
     let _broadcastChannel = null;
@@ -1208,56 +1209,6 @@
                 _unitNames.set(library, plugin.name);
             }
         }
-    }
-
-    // ========================================================================
-    // GLOBAL BROADCASTING
-    // ========================================================================
-
-    /**
-     * Returns the shared BroadcastChannel, creating it lazily on first use.
-     * @returns {BroadcastChannel|null} null if BroadcastChannel is not supported
-     */
-    function _getChannel() {
-        // Return the existing channel if already initialized
-        if (_broadcastChannel) {
-            return _broadcastChannel;
-        }
-
-        // BroadcastChannel is unavailable in some older browsers and non-window
-        // contexts (e.g. certain workers). Returning null lets the caller fall
-        // back to local-only broadcast without throwing.
-        if (typeof BroadcastChannel === 'undefined') {
-            return null;
-        }
-
-        // All tabs sharing the same origin and channel name form one broadcast
-        // group. 'wakapac' is a fixed name so no configuration is needed.
-        _broadcastChannel = new BroadcastChannel('wakapac');
-
-        // Handle messages arriving from other tabs.
-        // We must not re-post these back to the channel — doing so would cause
-        // tab A to receive its own message back from tab B, post it again, and
-        // so on indefinitely. The _receivingFromChannel flag breaks that loop.
-        _broadcastChannel.onmessage = function(e) {
-            const { messageId, wParam, lParam, extended } = e.data;
-
-            // Raise the guard before dispatching so that any broadcastMessageGlobal()
-            // call triggered inside a msgProc handler skips the channel post.
-            _receivingFromChannel = true;
-
-            try {
-                // Fan the message out to all local components in this tab,
-                // exactly as if broadcastMessage() had been called directly.
-                wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
-            } finally {
-                // Always lower the guard, even if broadcastMessage() throws.
-                // Leaving it true would permanently silence cross-tab posting.
-                _receivingFromChannel = false;
-            }
-        };
-
-        return _broadcastChannel;
     }
 
     // ========================================================================
@@ -10091,12 +10042,8 @@
         wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
 
         // Post to other tabs unless we are ourselves handling an incoming channel message
-        if (!_receivingFromChannel) {
-            const channel = _getChannel();
-
-            if (channel) {
-                channel.postMessage({ messageId, wParam, lParam, extended });
-            }
+        if (!_receivingFromChannel && _broadcastChannel) {
+            _broadcastChannel.postMessage({ messageId, wParam, lParam, extended });
         }
     };
 
@@ -11481,6 +11428,37 @@
 
     // Registry file
     window.PACRegistry = window.PACRegistry || new ComponentRegistry();
+
+    // Initialise the cross-tab broadcast channel eagerly so that every tab
+    // can receive broadcastMessageGlobal() messages from other tabs, even if
+    // this tab never calls broadcastMessageGlobal() itself.
+    if (typeof BroadcastChannel !== 'undefined') {
+        // All tabs sharing the same origin and channel name form one broadcast
+        // group. 'wakapac' is a fixed name so no configuration is needed.
+        _broadcastChannel = new BroadcastChannel('wakapac');
+
+        // Handle messages arriving from other tabs.
+        // We must not re-post these back to the channel — doing so would cause
+        // tab A to receive its own message back from tab B, post it again, and
+        // so on indefinitely. The _receivingFromChannel flag breaks that loop.
+        _broadcastChannel.onmessage = function(e) {
+            const { messageId, wParam, lParam, extended } = e.data;
+
+            // Raise the guard before dispatching so that any broadcastMessageGlobal()
+            // call triggered inside a msgProc handler skips the channel post.
+            _receivingFromChannel = true;
+
+            try {
+                // Fan the message out to all local components in this tab,
+                // exactly as if broadcastMessage() had been called directly.
+                wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
+            } finally {
+                // Always lower the guard, even if broadcastMessage() throws.
+                // Leaving it true would permanently silence cross-tab posting.
+                _receivingFromChannel = false;
+            }
+        };
+    }
 
     // Export Metafile
     wakaPAC.MetaFile = MetaFile;
