@@ -55,7 +55,9 @@
  * ║                          extended.index, extended.prevIndex                          ║
  * ║                                                                                      ║
  * ║  Reactive properties injected on the abstraction:                                    ║
- * ║    currentIndex  — current slide index (0-based), kept current on every slide        ║
+ * ║    currentIndex  — current slide index (0-based); readable in msgProc to inspect     ║
+ * ║                    the active slide; writable to drive the gallery programmatically  ║
+ * ║                    (e.g. this.currentIndex = 2 jumps to the 3rd slide).              ║
  * ║                                                                                      ║
  * ║  API — all methods take pacId as first argument:                                     ║
  * ║    wakaLightGallery.openGallery(pacId, index)  — open at given index (default 0)     ║
@@ -117,7 +119,6 @@
 
     /**
      * Registry of active lightGallery component instances keyed by pacId.
-     *
      * @type {Map<string, {
      *   pac:         Object,
      *   instance:    Object,
@@ -289,59 +290,124 @@
                     return;
                 }
 
+                // Guard that prevents the pac:change → slide() → lgAfterSlide loop.
+                // Set to true while lgAfterSlide is updating currentIndex so the
+                // pac:change listener knows the write originated from the gallery itself.
+                let _slidingFromGallery = false;
+
                 // -----------------------------------------------------------------
                 // Attach DOM event listeners BEFORE calling lightGallery() so that
                 // lgInit (fired synchronously during init) is not missed.
                 // -----------------------------------------------------------------
 
                 container.addEventListener('lgInit', function(event) {
+                    // Add pacId to registry
                     _registry.set(pacId, {
                         pac,
-                        instance:    event.detail.instance,
+                        instance: event.detail.instance,
                         abstraction
                     });
 
-                    // Inject reactive property on the abstraction.
-                    abstraction.currentIndex = 0;
-
+                    // Send event to container
                     pac.sendMessage(pacId, MSG_GALLERY_READY, 0, 0);
                 });
 
                 container.addEventListener('lgBeforeOpen', function() {
-                    if (!_registry.has(pacId)) { return; }
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Send event to container
                     pac.sendMessage(pacId, MSG_BEFORE_OPEN, 0, 0);
                 });
 
                 container.addEventListener('lgAfterOpen', function() {
-                    if (!_registry.has(pacId)) { return; }
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Send event to container
                     pac.sendMessage(pacId, MSG_AFTER_OPEN, 0, 0);
                 });
 
                 container.addEventListener('lgBeforeClose', function() {
-                    if (!_registry.has(pacId)) { return; }
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Send event to container
                     pac.sendMessage(pacId, MSG_BEFORE_CLOSE, 0, 0);
                 });
 
                 container.addEventListener('lgAfterClose', function() {
-                    if (!_registry.has(pacId)) { return; }
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Send event to container
                     pac.sendMessage(pacId, MSG_AFTER_CLOSE, 0, 0);
                 });
 
                 container.addEventListener('lgBeforeSlide', function(event) {
-                    if (!_registry.has(pacId)) { return; }
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Extract details
                     const { index, prevIndex } = event.detail;
+
+                    // Send event to container
                     pac.sendMessage(pacId, MSG_BEFORE_SLIDE, index, prevIndex, { index, prevIndex });
                 });
 
                 container.addEventListener('lgAfterSlide', function(event) {
-                    if (!_registry.has(pacId)) { return; }
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
 
+                    // Extract details
                     const { index, prevIndex } = event.detail;
 
-                    // Keep reactive property current.
+                    // Keep reactive property current. Guard prevents the pac:change
+                    // listener above from re-calling slide() for this write.
+                    _slidingFromGallery = true;
                     _registry.get(pacId).abstraction.currentIndex = index;
+                    _slidingFromGallery = false;
 
+                    // Send event to container
                     pac.sendMessage(pacId, MSG_AFTER_SLIDE, index, prevIndex, { index, prevIndex });
+                });
+
+                // -----------------------------------------------------------------
+                // Drive the gallery when user code writes abstraction.currentIndex.
+                // pac:change fires for every proxy set; filter to currentIndex only.
+                // The _slidingFromGallery guard prevents lgAfterSlide from triggering
+                // a redundant slide() call back into lightGallery.
+                // -----------------------------------------------------------------
+                container.addEventListener('pac:change', function(event) {
+                    const detail = event.detail;
+
+                    if (detail.path.length !== 1 || detail.path[0] !== 'currentIndex') {
+                        return;
+                    }
+
+                    if (_slidingFromGallery) {
+                        return;
+                    }
+
+                    const entry = _registry.get(pacId);
+
+                    if (!entry) {
+                        return;
+                    }
+
+                    entry.instance.slide(detail.newValue);
                 });
 
                 // -----------------------------------------------------------------
@@ -386,6 +452,12 @@
                         ..._defaultGalleryConfig,
                         ...(_config.lightgallery ?? {})
                     };
+
+                    // Seed currentIndex on the reactive proxy before the gallery
+                    // initializes so it is available in msgProc from the start.
+                    // Writing to it later (e.g. this.currentIndex = 2) drives the
+                    // gallery via the pac:change listener in createGallery.
+                    abstraction.currentIndex = 0;
 
                     // Always inject CSS (one-shot).
                     ensureCssLoaded();
