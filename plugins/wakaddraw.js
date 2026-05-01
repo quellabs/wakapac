@@ -820,7 +820,6 @@
 
         /**
          * Removes a sprite from a scene. Marks the vacated region dirty.
-         *
          * @param {Object} scene
          * @param {Sprite} sprite
          */
@@ -945,8 +944,8 @@
          * Must be called from a user gesture (click, keydown, etc.) — the
          * browser will silently deny the request otherwise. wakaPAC dispatches
          * MSG_SIZE with wParam=SIZE_FULLSCREEN once the transition completes,
-         * carrying the new screen dimensions in lParam (getLow=width,
-         * getHigh=height). On exit, MSG_SIZE fires again with SIZE_RESTORED
+         * carrying the new screen dimensions in lParam (LOWORD=width,
+         * HIWORD=height). On exit, MSG_SIZE fires again with SIZE_RESTORED
          * and the original canvas dimensions. Errors are reported via
          * console.warn and not propagated to the caller.
          *
