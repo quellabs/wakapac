@@ -943,52 +943,38 @@
          * Requests fullscreen for the canvas of a wakaPAC component.
          *
          * Must be called from a user gesture (click, keydown, etc.) — the
-         * browser will reject the promise otherwise. wakaPAC dispatches
+         * browser will silently deny the request otherwise. wakaPAC dispatches
          * MSG_SIZE with wParam=SIZE_FULLSCREEN once the transition completes,
          * carrying the new screen dimensions in lParam (getLow=width,
          * getHigh=height). On exit, MSG_SIZE fires again with SIZE_RESTORED
-         * and the original canvas dimensions.
+         * and the original canvas dimensions. Errors are reported via
+         * console.warn and not propagated to the caller.
          *
          * @param {string} pacId
-         * @returns {Promise<void>}
          */
         requestFullscreen(pacId) {
             const surface = this.getSurface(pacId);
             const canvas = surface._ctx.canvas;
 
-            if (canvas.requestFullscreen) {
-                return canvas.requestFullscreen();
-            }
+            const request = canvas.requestFullscreen?.()
+                ?? canvas.webkitRequestFullscreen?.()
+                ?? Promise.reject(new Error('WakaDDraw.requestFullscreen: Fullscreen API not supported in this browser'));
 
-            // Safari vendor prefix
-            if (canvas.webkitRequestFullscreen) {
-                return canvas.webkitRequestFullscreen();
-            }
-
-            return Promise.reject(new Error('WakaDDraw.requestFullscreen: Fullscreen API not supported in this browser'));
+            request.catch(err => console.warn('WakaDDraw.requestFullscreen:', err));
         },
 
         /**
          * Exits fullscreen mode. No-op if not currently fullscreen.
          * wakaPAC dispatches MSG_SIZE with wParam=SIZE_RESTORED once
          * the transition completes.
-         * @returns {Promise<void>}
          */
         exitFullscreen() {
             if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-                return Promise.resolve();
+                return;
             }
 
-            if (document.exitFullscreen) {
-                return document.exitFullscreen();
-            }
-
-            // Safari vendor prefix
-            if (document.webkitExitFullscreen) {
-                return document.webkitExitFullscreen();
-            }
-
-            return Promise.resolve();
+            const exit = document.exitFullscreen?.() ?? document.webkitExitFullscreen?.();
+            exit?.catch(err => console.warn('WakaDDraw.exitFullscreen:', err));
         },
 
         /**
