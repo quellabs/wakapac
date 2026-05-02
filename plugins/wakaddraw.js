@@ -70,6 +70,16 @@
  * ║    wakaDDraw.unlock(surface, pixels);                                                ║
  * ║    wakaDDraw.applyColorKey(surface);                                                 ║
  * ║                                                                                      ║
+ * ║  Fullscreen:                                                                         ║
+ * ║    // Call from a user gesture (click, keydown):                                     ║
+ * ║    wakaDDraw.requestFullscreen(this.pacId);                                          ║
+ * ║    wakaDDraw.exitFullscreen();                                                       ║
+ * ║    wakaDDraw.isFullscreen   // true if fullscreen                                    ║
+ * ║                                                                                      ║
+ * ║    // wakaPAC fires MSG_SIZE automatically on enter/exit:                            ║
+ * ║    // wParam === wakaPAC.SIZE_FULLSCREEN  → entered, lParam carries screen w/h       ║
+ * ║    // wParam === wakaPAC.SIZE_RESTORED    → exited,  lParam carries original w/h     ║
+ * ║                                                                                      ║
  * ║  Tilemap:                                                                            ║
  * ║    const map = wakaDDraw.createTilemap(tileSheet, mapData, mapWidth, mapHeight);     ║
  * ║    // mapData is a Uint16Array of tile indices, row-major                            ║
@@ -810,7 +820,6 @@
 
         /**
          * Removes a sprite from a scene. Marks the vacated region dirty.
-         *
          * @param {Object} scene
          * @param {Sprite} sprite
          */
@@ -925,6 +934,54 @@
             }
 
             scene._dirty = [];
+        },
+
+        // ─── Fullscreen ───────────────────────────────────────────────────────
+
+        /**
+         * Requests fullscreen for the canvas of a wakaPAC component.
+         *
+         * Must be called from a user gesture (click, keydown, etc.) — the
+         * browser will silently deny the request otherwise. wakaPAC dispatches
+         * MSG_SIZE with wParam=SIZE_FULLSCREEN once the transition completes,
+         * carrying the new screen dimensions in lParam (LOWORD=width,
+         * HIWORD=height). On exit, MSG_SIZE fires again with SIZE_RESTORED
+         * and the original canvas dimensions. Errors are reported via
+         * console.warn and not propagated to the caller.
+         *
+         * @param {string} pacId
+         */
+        requestFullscreen(pacId) {
+            const surface = this.getSurface(pacId);
+            const canvas = surface._ctx.canvas;
+
+            const request = canvas.requestFullscreen?.()
+                ?? canvas.webkitRequestFullscreen?.()
+                ?? Promise.reject(new Error('WakaDDraw.requestFullscreen: Fullscreen API not supported in this browser'));
+
+            request.catch(err => console.warn('WakaDDraw.requestFullscreen:', err));
+        },
+
+        /**
+         * Exits fullscreen mode. No-op if not currently fullscreen.
+         * wakaPAC dispatches MSG_SIZE with wParam=SIZE_RESTORED once
+         * the transition completes.
+         */
+        exitFullscreen() {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                return;
+            }
+
+            const exit = document.exitFullscreen?.() ?? document.webkitExitFullscreen?.();
+            exit?.catch(err => console.warn('WakaDDraw.exitFullscreen:', err));
+        },
+
+        /**
+         * Returns true if any element is currently fullscreen.
+         * @returns {boolean}
+         */
+        get isFullscreen() {
+            return !!(document.fullscreenElement || document.webkitFullscreenElement);
         },
 
         // ─── Tilemap ──────────────────────────────────────────────────────────
