@@ -16,7 +16,7 @@
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
-(function () {
+(function() {
     "use strict";
 
     // =============================================================================
@@ -248,9 +248,9 @@
     const MSG_CONTEXTMENU = 0x007B;
     const MSG_CAPTURECHANGED = 0x0215;
     const MSG_DRAGENTER = 0x0231;
-    const MSG_DRAGOVER  = 0x0232;
+    const MSG_DRAGOVER = 0x0232;
     const MSG_DRAGLEAVE = 0x0233;
-    const MSG_DROP      = 0x0234;
+    const MSG_DROP = 0x0234;
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
@@ -1132,7 +1132,7 @@
         unionRect(a, b) {
             const x = Math.min(a.x, b.x);
             const y = Math.min(a.y, b.y);
-            const right  = Math.max(a.x + a.width,  b.x + b.width);
+            const right = Math.max(a.x + a.width, b.x + b.width);
             const bottom = Math.max(a.y + a.height, b.y + b.height);
             return { x, y, width: right - x, height: bottom - y };
         },
@@ -1235,7 +1235,7 @@
          * @returns {Function} Wrapped array method
          */
         function createReactiveArrayMethod(target, methodName, currentPath) {
-            return function () {
+            return function() {
                 // Store the old array state before modification
                 const oldArray = Array.prototype.slice.call(target);
 
@@ -1491,15 +1491,15 @@
             currentPath = currentPath || [];
 
             return new Proxy(obj, {
-                get: function (target, prop) {
+                get: function(target, prop) {
                     return proxyGetHandler(target, prop, currentPath);
                 },
 
-                set: function (target, prop, newValue) {
+                set: function(target, prop, newValue) {
                     return proxySetHandler(target, prop, newValue, currentPath);
                 },
 
-                deleteProperty: function (target, prop) {
+                deleteProperty: function(target, prop) {
                     return proxyDeleteHandler(target, prop, currentPath);
                 }
             });
@@ -1540,7 +1540,7 @@
         _resizeObserver: null,
 
         // Keep track of key repeat count
-        _repeatCounts : new Map(),
+        _repeatCounts: new Map(),
 
         /** @type {string[]} List of valid drop effects for drag/drop */
         validDropEffects: ['none', 'copy', 'link', 'move'],
@@ -1870,7 +1870,7 @@
             this.setupMoveCoalescer(
                 'mousemove',
                 wakaPAC.mouseMoveThrottleFps,
-                function (event) {
+                function(event) {
                     // Feed the gesture recognizer before anything else
                     if (MouseGestureRecognizer.isRecording) {
                         MouseGestureRecognizer.recordPoint(event);
@@ -2086,7 +2086,7 @@
         _onDragEnter() {
             const self = this;
 
-            document.addEventListener('dragenter', function (event) {
+            document.addEventListener('dragenter', function(event) {
                 // Find container
                 const container = self.getContainerForEvent(MSG_DRAGENTER, event);
 
@@ -2128,7 +2128,7 @@
         _onDragLeave() {
             const self = this;
 
-            document.addEventListener('dragleave', function (event) {
+            document.addEventListener('dragleave', function(event) {
                 // Find container
                 const container = self.getContainerForEvent(MSG_DRAGLEAVE, event);
 
@@ -2171,7 +2171,7 @@
         _onDragOver() {
             const self = this;
 
-            document.addEventListener('dragover', function (event) {
+            document.addEventListener('dragover', function(event) {
                 // Fetch the container
                 const container = self.getContainerForEvent(MSG_DRAGOVER, event);
 
@@ -2233,7 +2233,7 @@
         _onDrop() {
             const self = this;
 
-            document.addEventListener('drop', function (event) {
+            document.addEventListener('drop', function(event) {
                 // Fetch container
                 const container = self.getContainerForEvent(MSG_DROP, event);
 
@@ -2283,7 +2283,7 @@
          * @returns {Array<{name: string, size: number, type: string}>}
          */
         _extractFileMetadata(fileList) {
-            return Array.from(fileList).map(function (f) {
+            return Array.from(fileList).map(function(f) {
                 return { name: f.name, size: f.size, type: f.type };
             });
         },
@@ -3010,7 +3010,7 @@
                     const originalCustomMethod = customEvent[methodName];
 
                     // Override the method to call both the custom event method and original event method
-                    customEvent[methodName] = function () {
+                    customEvent[methodName] = function() {
                         // Call the custom event's method first (if it exists)
                         if (originalCustomMethod) {
                             originalCustomMethod.call(this);
@@ -3143,7 +3143,7 @@
 
                     try {
                         fn(event, callNextHookEx);
-                    } catch(e) {
+                    } catch (e) {
                         // A throwing hook must not break message delivery for the container.
                         // Log the error and continue the chain as if the hook called
                         // callNextHookEx() itself — fault isolation over silent failure.
@@ -3171,7 +3171,7 @@
          * @param {HTMLElement} container
          * @param {Object} extended
          */
-        dispatchMouseMessage(msgType, domEvent, container, extended={}) {
+        dispatchMouseMessage(msgType, domEvent, container, extended = {}) {
             const wParam = this.getModifierState(domEvent);
             const lParam = this.buildMouseLParam(domEvent, container);
             const targetOverride = (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) ? container : null;
@@ -3775,7 +3775,7 @@
 
                 if (multiChar) {
                     const op = multiChar[1];
-                    tokens.push({type: 'OPERATOR', value: op, precedence: this.getOperatorPrecedence(op)});
+                    tokens.push({ type: 'OPERATOR', value: op, precedence: this.getOperatorPrecedence(op) });
                     i += op.length;
                     continue;
                 }
@@ -3784,7 +3784,7 @@
                 const singleCharTokens = this.SINGLE_CHAR_TOKENS;
 
                 if (singleCharTokens[char]) {
-                    tokens.push({type: singleCharTokens[char], value: char});
+                    tokens.push({ type: singleCharTokens[char], value: char });
                     i++;
                     continue;
                 }
@@ -3808,7 +3808,7 @@
                             break;
                     }
 
-                    tokens.push({type, value: char, precedence});
+                    tokens.push({ type, value: char, precedence });
                     i++;
                     continue;
                 }
@@ -3856,7 +3856,7 @@
                 } else if (char === quote) {
                     // End of string
                     return {
-                        token: {type: 'STRING', value},
+                        token: { type: 'STRING', value },
                         nextIndex: i + 1
                     };
                 } else {
@@ -3880,7 +3880,7 @@
 
             if (numberMatch) {
                 return {
-                    token: {type: 'NUMBER', value: parseFloat(numberMatch[1])},
+                    token: { type: 'NUMBER', value: parseFloat(numberMatch[1]) },
                     nextIndex: start + numberMatch[1].length
                 };
             }
@@ -3900,7 +3900,7 @@
                 const type = ['true', 'false', 'null', 'undefined'].includes(value) ? 'KEYWORD' : 'IDENTIFIER';
 
                 return {
-                    token: {type, value},
+                    token: { type, value },
                     nextIndex: start + value.length
                 };
             }
@@ -3973,7 +3973,7 @@
 
                 // Create a new binary expression node with the parsed components
                 // This becomes the new left operand for potential further parsing
-                left = {type, left, operator: op, right};
+                left = { type, left, operator: op, right };
             }
 
             // Return the final parsed expression (could be the original left operand
@@ -4216,7 +4216,7 @@
                     // Parse value
                     const value = this.parseTernary();
 
-                    pairs.push({key, value});
+                    pairs.push({ key, value });
 
                 } while (this.match('COMMA') && !this.check('RBRACE'));
             }
@@ -4349,7 +4349,7 @@
          * @returns {Object} Current token
          */
         peek() {
-            return this.tokens[this.currentToken] || {type: 'EOF', value: null};
+            return this.tokens[this.currentToken] || { type: 'EOF', value: null };
         },
 
         /**
@@ -4677,7 +4677,7 @@
             const result = {};
 
             if (node.pairs) {
-                node.pairs.forEach(function({key, value}) {
+                node.pairs.forEach(function({ key, value }) {
                     result[key] = self.evaluate(value, context, scope);
                 });
             }
@@ -4994,6 +4994,38 @@
     };
 
     /**
+     * Captures an element's current display value into data-pac-orig-display before hiding.
+     * Reads the inline style first to avoid a forced synchronous layout recalculation.
+     * Falls back to getComputedStyle deferred via requestAnimationFrame when no inline
+     * style is set, so the read never blocks a style write.
+     * @param {Element} element
+     */
+    function captureOriginalDisplay(element) {
+        const inlineDisplay = element.style.display;
+
+        // Inline style is set and visible — capture it directly without touching the layout engine
+        if (inlineDisplay && inlineDisplay !== 'none') {
+            element.setAttribute('data-pac-orig-display', inlineDisplay);
+            return;
+        }
+
+        // No inline style — we'd need getComputedStyle, but calling it before a style write
+        // forces a synchronous layout recalculation. Defer to rAF so the read happens after
+        // the current paint cycle. Store an empty sentinel now so we don't repeat this.
+        if (!inlineDisplay) {
+            element.setAttribute('data-pac-orig-display', '');
+
+            requestAnimationFrame(() => {
+                const computed = getComputedStyle(element).display;
+
+                if (computed && computed !== 'none') {
+                    element.setAttribute('data-pac-orig-display', computed);
+                }
+            });
+        }
+    }
+
+    /**
      * Visible binding - Shows/hides elements by managing display CSS
      * @param {Context} context - The PAC component context
      * @param {Element} element - The container element
@@ -5010,10 +5042,8 @@
             }
         } else {
             if (!element.hasAttribute('data-pac-hidden')) {
-                const currentDisplay = getComputedStyle(element).display;
-
-                if (currentDisplay !== 'none') {
-                    element.setAttribute('data-pac-orig-display', currentDisplay);
+                if (!element.hasAttribute('data-pac-orig-display')) {
+                    captureOriginalDisplay(element);
                 }
 
                 element.style.display = 'none';
@@ -5159,7 +5189,7 @@
      * @param {string} template - Template string containing interpolation expressions (e.g., "Hello {{name}}")
      * @returns {void}
      */
-    DomUpdater.prototype.updateTextNode = function (element, template) {
+    DomUpdater.prototype.updateTextNode = function(element, template) {
         const self = this;
 
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
@@ -5197,7 +5227,7 @@
      * @param {*} [value] - Pre-evaluated value to skip redundant expression evaluation
      * @returns {void}
      */
-    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, value) {
+    DomUpdater.prototype.updateAttributeBinding = function(element, bindingType, bindingData, value) {
         try {
             // Use registered handler if available
             const handler = BindingHandlers[bindingType];
@@ -5764,7 +5794,7 @@
      * @returns {Map<string, Set<string>>} Keys are accessed property names; values are
      *   the set of computed properties that ultimately depend on them.
      */
-    Context.prototype.getDependencies = function () {
+    Context.prototype.getDependencies = function() {
         const computed = this.originalAbstraction.computed ?? {};
         const computedNames = new Set(Object.keys(computed));
 
@@ -5987,7 +6017,7 @@
     Context.prototype.handleEvent = function(event) {
         // Route events to specialized handlers based on type
         // Each event type corresponds to a different aspect of the PAC (Presentation-Abstraction-Control) architecture
-        switch(event.type) {
+        switch (event.type) {
             // Handle general PAC events (likely business logic or component interactions)
             case 'pac:event':
                 this.handlePacEvent(event);
@@ -6051,7 +6081,7 @@
         }
 
         // Call built in event handlers
-        switch(event.message) {
+        switch (event.message) {
             case MSG_SETFOCUS:
                 this.updateFocusProperties();
                 break;
@@ -6099,7 +6129,7 @@
      * @param {Element} event.target - The DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
-    Context.prototype.handleDomClicks = function (event) {
+    Context.prototype.handleDomClicks = function(event) {
         // Get interpolation data for the clicked element
         const mappingData = this.interpolationMap.get(event.target);
         if (!mappingData?.bindings?.click) {
@@ -6356,7 +6386,7 @@
      * @param {HTMLElement} event.target - The DOM element that lost focus
      * @returns {void}
      */
-    Context.prototype.handleDomBlur = function (event) {
+    Context.prototype.handleDomBlur = function(event) {
         const targetElement = event.target;
 
         // Get the mapping data for this element
@@ -6403,7 +6433,7 @@
      * @param {*} event.detail.oldValue - The previous value before the change
      * @param {*} event.detail.newValue - The new value after the change
      */
-    Context.prototype.handleReactiveChange = function (event) {
+    Context.prototype.handleReactiveChange = function(event) {
         this.updateElementBindings();
         this.updateTextInterpolations();
         this.updateCommentConditionals();
@@ -6691,7 +6721,7 @@
     Context.prototype.handleBrowserStateEvent = function(event) {
         const { stateType, stateData } = event.detail;
 
-        switch(stateType) {
+        switch (stateType) {
             case 'visibility':
                 // Update browser visibility state
                 this.abstraction.browserVisible = stateData.visible;
@@ -6825,7 +6855,7 @@
      * @param {string|number} forEachId - Identifier used to look up the element.
      * @returns {*} The matching element, or null if no match is found.
      */
-    Context.prototype.findElementByForEachId = function (forEachId) {
+    Context.prototype.findElementByForEachId = function(forEachId) {
         // Loop over all element → mappingData pairs in the interpolation map
         for (const [element, mappingData] of this.interpolationMap) {
             // Check whether this entry belongs to the requested forEachId
@@ -7002,7 +7032,7 @@
 
         PARTIAL_INJECT_REGEX.lastIndex = 0;
 
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name, root) {
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name, root) {
             if (!_partials.has(name)) {
                 console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
                 return match;
@@ -7056,7 +7086,7 @@
             return;
         }
 
-        hits.forEach(function (textNode) {
+        hits.forEach(function(textNode) {
             const expanded = expandPartialsInString(textNode.textContent, 0);
 
             if (expanded === textNode.textContent) {
@@ -7282,7 +7312,7 @@
                 set(v) {
                     Utils.setNestedProperty(targetPath, v, this);
                 },
-                enumerable:   true,
+                enumerable: true,
                 configurable: true
             });
         });
@@ -7311,7 +7341,7 @@
         // context to point to the reactive proxy instead of the original object.
         // This ensures that when methods access properties via 'this.propertyName', they interact
         // with the reactive proxy (triggering DOM updates) rather than the non-reactive original.
-        Object.keys(this.originalAbstraction).forEach(function (key) {
+        Object.keys(this.originalAbstraction).forEach(function(key) {
             if (typeof self.originalAbstraction[key] === 'function' && key !== 'computed') {
                 proxiedReactive[key] = self.originalAbstraction[key].bind(proxiedReactive);
             }
@@ -7319,9 +7349,9 @@
 
         // Add computed properties as getters
         const computed = this.originalAbstraction.computed || {};
-        Object.keys(computed).forEach(function (computedName) {
+        Object.keys(computed).forEach(function(computedName) {
             Object.defineProperty(proxiedReactive, computedName, {
-                get: function () {
+                get: function() {
                     return computed[computedName].call(proxiedReactive);
                 },
                 enumerable: true,
@@ -7461,7 +7491,7 @@
         abstraction.browserVisible = !document.hidden;
 
         // Initialize current horizontal/vertical scroll position in pixels from left/top of document
-        abstraction.browserScrollX  = window.scrollX;
+        abstraction.browserScrollX = window.scrollX;
         abstraction.browserScrollY = window.scrollY;
 
         // Initialize current viewport width & height - the visible area of the browser window
@@ -7499,7 +7529,7 @@
         // Per-container viewport visibility properties
         abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
         abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
-        abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
+        abstraction.containerClientRect = { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
         abstraction.containerWidth = this.container.clientWidth;
         abstraction.containerHeight = this.container.clientHeight;
 
@@ -7542,7 +7572,7 @@
      * @returns {Map<number, number>} A Map where each key is a render index (position in filteredArray)
      *                                and each value is the corresponding source index (position in sourceArray).
      */
-    Context.prototype.buildIndexMap = function (sourceArray, filteredArray) {
+    Context.prototype.buildIndexMap = function(sourceArray, filteredArray) {
         const claimed = new Set();
         const result = new Map(); // keyed by renderIndex
 
@@ -7818,7 +7848,7 @@
      * @param {Array<Object>} frames - Effective foreach frames (outer → inner).
      * @returns {Map<string, string|number>} Scoped variable map.
      */
-    Context.prototype.buildForeachScope = function (frames) {
+    Context.prototype.buildForeachScope = function(frames) {
         // Stores scoped variable → resolved path/index mappings
         const scope = new Map();
 
@@ -7982,7 +8012,7 @@
      * @param {string} arrayPath - Fully-qualified data array path to match.
      * @returns {HTMLElement[]} Elements whose foreach bindings depend on the array.
      */
-    Context.prototype.findForeachElementsByArrayPath = function (arrayPath) {
+    Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
         const elementsToUpdate = [];
 
         for (const [element, mappingData] of this.interpolationMap) {
@@ -8628,7 +8658,9 @@
                 const dy = curr.y - this.gesturePoints[i - 1].y;
                 const direction = this.getDirection(dx, dy);
 
-                if (!direction) continue;
+                if (!direction) {
+                    continue;
+                }
 
                 if (direction === currentDir) {
                     segmentEnd = curr;
@@ -9418,7 +9450,7 @@
                             }
 
                             const oscillator = _audioCtx.createOscillator();
-                            const gain       = _audioCtx.createGain();
+                            const gain = _audioCtx.createGain();
 
                             oscillator.connect(gain);
                             gain.connect(_audioCtx.destination);
@@ -9690,7 +9722,7 @@
 
                 // Setup renderloop for webgl if renderLoop is set to true
                 if (contextType !== '2d' && config.renderLoop === true) {
-                    const loop = function () {
+                    const loop = function() {
                         if (!_renderLoops.has(pacId)) {
                             return; // Loop was canceled — component destroyed
                         }
@@ -9717,7 +9749,7 @@
                 // Attach WebGL context loss/restore handlers for all WebGL canvases,
                 // regardless of whether renderLoop is active.
                 if (contextType !== '2d') {
-                    container.addEventListener('webglcontextlost', function (e) {
+                    container.addEventListener('webglcontextlost', function(e) {
                         // Calling preventDefault() is required — without it the browser
                         // will not attempt to restore the context after it is lost.
                         e.preventDefault();
@@ -9744,7 +9776,7 @@
                         ));
                     });
 
-                    container.addEventListener('webglcontextrestored', function (e) {
+                    container.addEventListener('webglcontextrestored', function(e) {
                         // The context has been recreated by the browser — all GL resources
                         // must be rebuilt from scratch (shaders, buffers, textures, etc.).
                         // Provide the fresh context on event.glContext, mirroring MSG_WEBGL_READY.
@@ -9760,7 +9792,7 @@
 
                         // Resume the render loop if it was running before context loss.
                         if (_renderLoops.has(pacId) && _renderLoops.get(pacId) === null) {
-                            const loop = function () {
+                            const loop = function() {
                                 if (!_renderLoops.has(pacId)) {
                                     return;
                                 }
@@ -9813,7 +9845,7 @@
      * @param {Object} extended
      * @returns {CustomEvent}
      */
-    wakaPAC.createPacMessage = function (messageId, wParam, lParam, extended = {}) {
+    wakaPAC.createPacMessage = function(messageId, wParam, lParam, extended = {}) {
         // Throw error when extended is not an object
         if (extended !== null && !Utils.isPlainObject(extended)) {
             throw new TypeError(`wakaPAC.createPacMessage(): extended must be a plain object, got ${typeof extended}`);
@@ -9845,7 +9877,7 @@
      * @param {string} pacId Identifier of the target container
      * @returns {HTMLElement|null} The resolved container element, or null
      */
-    wakaPAC.getContextByPacId = function (pacId) {
+    wakaPAC.getContextByPacId = function(pacId) {
         return window.PACRegistry.get(pacId);
     };
 
@@ -9855,7 +9887,7 @@
      * @param {string} pacId Identifier of the target container
      * @returns {HTMLElement|null} The resolved container element, or null
      */
-    wakaPAC.getContainerByPacId = function (pacId) {
+    wakaPAC.getContainerByPacId = function(pacId) {
         const context = window.PACRegistry.get(pacId);
 
         if (!context) {
@@ -9926,7 +9958,7 @@
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.postMessage = function (pacId, messageId, wParam, lParam, extended = {}) {
+    wakaPAC.postMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
         // Resolve the target container from the registry.
         // If the container does not exist, the message is dropped.
         const container = this.getContainerByPacId(pacId);
@@ -9958,7 +9990,7 @@
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.sendMessage = function (pacId, messageId, wParam, lParam, extended = {}) {
+    wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
         // Resolve the target container. If it does not exist, the message is dropped.
         const container = this.getContainerByPacId(pacId);
 
@@ -10160,7 +10192,7 @@
      * @param {string} pacId - Target container's data-pac-id
      * @returns {*|number}
      */
-    wakaPAC.killAllTimers = function (pacId) {
+    wakaPAC.killAllTimers = function(pacId) {
         // Look up the PAC execution context from the global registry
         const context = window.PACRegistry.get(pacId);
 
@@ -10413,7 +10445,7 @@
      * @param {string|Object} name - Unit name (e.g. 'CollectionUtils') or library reference (e.g. CollectionUtils)
      * @returns {Object|null} The unit's function set, or null if not found
      */
-    wakaPAC.unit = function (name) {
+    wakaPAC.unit = function(name) {
         if (typeof name === 'object') {
             name = _unitNames.get(name) ?? null;
 
@@ -10550,9 +10582,9 @@
         'setLineDashOffset', 'setMiterLimit', 'setGlobalAlpha', 'setGlobalComposite',
         'setFont', 'setTextAlign', 'setTextBaseline', 'setTextRendering',
         'setLetterSpacing', 'setWordSpacing', 'setLineDash',
-    ].forEach(function (name) {
-        MetaFile.prototype[name] = function (value) {
-            this._ops.push({op: name, value});
+    ].forEach(function(name) {
+        MetaFile.prototype[name] = function(value) {
+            this._ops.push({ op: name, value });
             return this;
         };
     });
@@ -10560,9 +10592,9 @@
     // No-argument state ops: method() → push {op}
     [
         'save', 'restore', 'beginPath', 'closePath', 'stroke', 'resetTransform', 'clearShadow',
-    ].forEach(function (name) {
-        MetaFile.prototype[name] = function () {
-            this._ops.push({op: name});
+    ].forEach(function(name) {
+        MetaFile.prototype[name] = function() {
+            this._ops.push({ op: name });
             return this;
         };
     });
@@ -10633,7 +10665,7 @@
      * @param {string} pacId
      * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
      */
-    wakaPAC.getDC = function (pacId) {
+    wakaPAC.getDC = function(pacId) {
         const container = this.getContainerByPacId(pacId);
 
         if (!container || !(container instanceof HTMLCanvasElement)) {
@@ -10684,7 +10716,7 @@
      * the dirty-rect clip mechanism.
      * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} ctx - the context returned by getDC()
      */
-    wakaPAC.releaseDC = function (ctx) {
+    wakaPAC.releaseDC = function(ctx) {
         // Bail if no ctx passed
         if (!ctx) {
             return;
@@ -10750,7 +10782,7 @@
         const offscreen = dc.canvas;
 
         if (offscreen instanceof OffscreenCanvas) {
-            offscreen.width  = 0;
+            offscreen.width = 0;
             offscreen.height = 0;
         }
     };
@@ -10841,7 +10873,7 @@
      * @param {string} pacId - data-pac-id of the target canvas container
      * @returns {{x:number, y:number, width:number, height:number}|null}
      */
-    wakaPAC.getInvalidatedRect = function (pacId) {
+    wakaPAC.getInvalidatedRect = function(pacId) {
         const entry = _dirtyCanvases.get(pacId);
 
         if (!entry) {
@@ -10857,14 +10889,14 @@
      * @param {string} pacId - data-pac-id of the target canvas container
      * @returns {Array<{x:number, y:number, width:number, height:number}>|null}
      */
-    wakaPAC.getUpdateRgn = function (pacId) {
+    wakaPAC.getUpdateRgn = function(pacId) {
         const entry = _dirtyCanvases.get(pacId);
 
         if (!entry) {
             return null;
         }
 
-        return entry.rects.map(r => ({...r}));
+        return entry.rects.map(r => ({ ...r }));
     };
 
     /**
@@ -10957,7 +10989,7 @@
      * @param {number} width  - New backing store width in pixels
      * @param {number} height - New backing store height in pixels
      */
-    wakaPAC.resizeCanvas = function (pacId, width, height) {
+    wakaPAC.resizeCanvas = function(pacId, width, height) {
         // Fetch the container
         const container = this.getContainerByPacId(pacId);
 
@@ -11047,8 +11079,8 @@
                 // in most engines, so there is no meaningful performance cost.
                 bitmap = await createImageBitmap(source);
             } else if (
-                source instanceof ImageData        ||
-                source instanceof Blob             ||
+                source instanceof ImageData ||
+                source instanceof Blob ||
                 source instanceof HTMLCanvasElement ||
                 source instanceof OffscreenCanvas
             ) {
@@ -11088,7 +11120,7 @@
         }
 
         // Derive MIME type from filename extension; fall back to PNG
-        const ext  = filename.split('.').pop().toLowerCase();
+        const ext = filename.split('.').pop().toLowerCase();
         const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }[ext] ?? 'image/png';
 
         try {
@@ -11109,7 +11141,7 @@
             // already queued by the time revokeObjectURL is called so it is safe to
             // revoke immediately.
             const url = URL.createObjectURL(blob);
-            const a   = Object.assign(document.createElement('a'), { href: url, download: filename });
+            const a = Object.assign(document.createElement('a'), { href: url, download: filename });
 
             a.click();
             URL.revokeObjectURL(url);
@@ -11143,7 +11175,7 @@
         }
 
         return {
-            width:  hBitmap.canvas.width,
+            width: hBitmap.canvas.width,
             height: hBitmap.canvas.height
         };
     };
@@ -11338,7 +11370,7 @@
      * @param {number}        [offsetY=0] - Y offset passed to playMetaFile
      * @returns {*|null} The matching hitArea's data payload, or null
      */
-    wakaPAC.metaFileHitTest = function (dl, x, y, offsetX = 0, offsetY = 0) {
+    wakaPAC.metaFileHitTest = function(dl, x, y, offsetX = 0, offsetY = 0) {
         if (!Array.isArray(dl)) {
             return null;
         }
