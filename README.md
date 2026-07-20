@@ -54,6 +54,8 @@ Stdlib (built-in), Math, StringUtils, DateUtils, NumberUtils, TypeUtils, Collect
 
 **WakaForm** — reactive form state and field-level validation with composable rules.
 
+**WakaMask** — live input masking (phone numbers, dates, custom codes) driven by a token pattern (`data-pac-mask="999-999-9999"`). Runs entirely on WakaPAC's existing message pipeline — no parallel DOM listeners — intercepting keystrokes, deletions, and paste via `MSG_KEYDOWN`/`MSG_CHAR`/`MSG_PASTE`. Reports `MSG_MASK_COMPLETE` when every slot is filled and `MSG_MASK_REJECT` when a typed character doesn't fit its slot.
+
 **WakaRoute** — client-side router delivering navigation events through `msgProc`.
 
 **WakaMotion** — device motion and orientation sensors as reactive properties.
