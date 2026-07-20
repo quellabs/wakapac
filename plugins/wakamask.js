@@ -70,7 +70,7 @@
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
-(function () {
+(function() {
     "use strict";
 
     // =========================================================================
@@ -376,6 +376,214 @@
     }
 
     // =========================================================================
+    // Message hook handlers
+    // =========================================================================
+
+    /**
+     * True if Ctrl/Cmd/Alt is held — these are browser/OS shortcuts (select-all,
+     * copy, undo, AltGr composition), not mask-relevant keystrokes, and are left
+     * alone. Shift is allowed through normally.
+     * @param {Object} pac
+     * @param {CustomEvent} event
+     * @returns {boolean}
+     */
+    function isBlockingModifier(pac, event) {
+        return (event.lParam & pac.KM_CONTROL) !== 0 ||
+            (event.lParam & pac.KM_META) !== 0 ||
+            (event.lParam & pac.KM_ALT) !== 0;
+    }
+
+    /**
+     * Walks the token list to find the fillable slot a new character would land
+     * on, given how many fillable slots are already consumed before the caret.
+     * Returns undefined if there's no slot left — the mask is already full.
+     * @param {MaskToken[]} tokens
+     * @param {number} filledCount - Fillable slots already consumed before the caret
+     * @returns {MaskToken|undefined}
+     */
+    function findTargetToken(tokens, filledCount) {
+        let ti = 0;
+        let filled = 0;
+
+        while (ti < tokens.length && filled < filledCount) {
+            if (tokens[ti].literal === undefined) {
+                filled++;
+            }
+
+            ti++;
+        }
+
+        while (ti < tokens.length && tokens[ti].literal !== undefined) {
+            ti++;
+        }
+
+        return tokens[ti];
+    }
+
+    /**
+     * Handles MSG_KEYDOWN for a registered masked input — Backspace and forward
+     * Delete, including range-selection deletes. Everything else (navigation,
+     * modifier combos) passes through untouched.
+     * @param {Object} pac
+     * @param {CustomEvent} event
+     * @param {Function} next
+     * @param {HTMLInputElement} input
+     * @param {{tokens: MaskToken[], pacId: string}} entry
+     */
+    function handleKeydownMessage(pac, event, next, input, entry) {
+        if (isBlockingModifier(pac, event) ||
+            (event.wParam !== pac.VK_BACK && event.wParam !== pac.VK_DELETE)) {
+            next();
+            return;
+        }
+
+        const { tokens } = entry;
+        const pos = input.selectionStart;
+        const selEnd = input.selectionEnd;
+        const raw = extractRaw(tokens, input.value);
+
+        let rawArray, deleteIndex;
+
+        if (pos !== selEnd) {
+            // A range is selected — delete the whole selection regardless of
+            // which key (Backspace or Delete) triggered it.
+            const startIdx = extractRaw(tokens, input.value.slice(0, pos)).length;
+            const endIdx = extractRaw(tokens, input.value.slice(0, selEnd)).length;
+            rawArray = raw.slice(0, startIdx) + raw.slice(endIdx);
+            deleteIndex = startIdx;
+        } else if (event.wParam === pac.VK_BACK) {
+            deleteIndex = extractRaw(tokens, input.value.slice(0, pos)).length - 1;
+
+            if (deleteIndex < 0) {
+                next();
+                return;
+            }
+
+            rawArray = raw.slice(0, deleteIndex) + raw.slice(deleteIndex + 1);
+        } else {
+            // VK_DELETE — forward delete
+            deleteIndex = extractRaw(tokens, input.value.slice(0, pos)).length;
+
+            if (deleteIndex >= raw.length) {
+                next();
+                return;
+            }
+
+            rawArray = raw.slice(0, deleteIndex) + raw.slice(deleteIndex + 1);
+        }
+
+        event.preventDefault();
+
+        const formatted = formatValue(tokens, rawArray);
+        const caret = formatValue(tokens, rawArray.slice(0, deleteIndex)).length;
+
+        applyValue(input, formatted, caret);
+        next();
+    }
+
+    /**
+     * Handles MSG_CHAR for a registered masked input — validates the typed
+     * character against the slot it would land on, then either inserts it,
+     * rejects it (MSG_MASK_REJECT), or silently drops it if the mask is
+     * already full.
+     * @param {Object} pac
+     * @param {CustomEvent} event
+     * @param {Function} next
+     * @param {HTMLInputElement} input
+     * @param {{tokens: MaskToken[], pacId: string}} entry
+     * @param {{MSG_MASK_COMPLETE: number, MSG_MASK_REJECT: number}} msgConstants
+     */
+    function handleCharMessage(pac, event, next, input, entry, msgConstants) {
+        if (isBlockingModifier(pac, event)) {
+            next();
+            return;
+        }
+
+        const { tokens, pacId } = entry;
+        const typedChar = event.originalEvent.key;
+        const pos = input.selectionStart;
+        const selEnd = input.selectionEnd;
+        const raw = extractRaw(tokens, input.value);
+
+        const startIdx = extractRaw(tokens, input.value.slice(0, pos)).length;
+        const endIdx = pos !== selEnd
+            ? extractRaw(tokens, input.value.slice(0, selEnd)).length
+            : startIdx;
+
+        // Locate the token this character would land on and check it fits
+        // before doing anything — this is also how we detect + report
+        // MSG_MASK_REJECT without mutating anything on a bad keystroke.
+        const targetToken = findTargetToken(tokens, startIdx);
+
+        event.preventDefault();
+
+        if (!targetToken) {
+            // No slot left at all — the mask is already full. This is
+            // expected, not an error (same as hitting maxlength on a
+            // plain input), so no MSG_MASK_REJECT fires for it.
+            next();
+            return;
+        }
+
+        if (!matchesToken(typedChar, targetToken.type)) {
+            // There IS a slot, but this character is the wrong type for
+            // it (e.g. a letter typed into a digit slot) — this is the
+            // one genuine rejection case.
+            pac.sendMessage(pacId, msgConstants.MSG_MASK_REJECT, typedChar.charCodeAt(0), 0, { target: input });
+            next();
+            return;
+        }
+
+        const rawArray = raw.slice(0, startIdx) + typedChar + raw.slice(endIdx);
+        const formatted = formatValue(tokens, rawArray);
+        const caret = formatValue(tokens, rawArray.slice(0, startIdx + 1)).length;
+
+        applyValue(input, formatted, caret);
+        maybeReportComplete(pac, pacId, input, tokens, extractRaw(tokens, formatted), formatted, msgConstants.MSG_MASK_COMPLETE);
+        next();
+    }
+
+    /**
+     * Handles MSG_PASTE for a registered masked input. Pasted text is stripped
+     * to alphanumeric candidates and reformatted from the current caret/selection
+     * position — already-formatted pasted numbers (e.g. "555-123-4567") have
+     * their literals discarded and rebuilt rather than matched positionally.
+     * @param {Object} pac
+     * @param {CustomEvent} event
+     * @param {Function} next
+     * @param {HTMLInputElement} input
+     * @param {{tokens: MaskToken[], pacId: string}} entry
+     * @param {{MSG_MASK_COMPLETE: number, MSG_MASK_REJECT: number}} msgConstants
+     */
+    function handlePasteMessage(pac, event, next, input, entry, msgConstants) {
+        event.preventDefault();
+
+        const { tokens, pacId } = entry;
+        const pastedText = event.detail['text/plain'] ?? '';
+        const candidates = pastedText.replace(/[^A-Za-z0-9]/g, '');
+        const pos = input.selectionStart;
+        const selEnd = input.selectionEnd;
+        const raw = extractRaw(tokens, input.value);
+
+        const startIdx = extractRaw(tokens, input.value.slice(0, pos)).length;
+        const endIdx = pos !== selEnd
+            ? extractRaw(tokens, input.value.slice(0, selEnd)).length
+            : startIdx;
+
+        const rawArray = raw.slice(0, startIdx) + candidates + raw.slice(endIdx);
+        const formatted = formatValue(tokens, rawArray);
+
+        // Caret goes right after the pasted content: format just the prefix
+        // up to (and including) the pasted characters, same technique as the
+        // single-character insert case above.
+        const caret = formatValue(tokens, rawArray.slice(0, startIdx + candidates.length)).length;
+
+        applyValue(input, formatted, caret);
+        maybeReportComplete(pac, pacId, input, tokens, extractRaw(tokens, formatted), formatted, msgConstants.MSG_MASK_COMPLETE);
+        next();
+    }
+
+    // =========================================================================
     // Plugin definition
     // =========================================================================
 
@@ -390,9 +598,13 @@
             this.MSG_MASK_COMPLETE = MSG_MASK_COMPLETE;
             this.MSG_MASK_REJECT = MSG_MASK_REJECT;
 
+            const msgConstants = { MSG_MASK_COMPLETE, MSG_MASK_REJECT };
+
             // Installed once, for the lifetime of the page — intercepts MSG_KEYDOWN,
             // MSG_CHAR, and MSG_PASTE for every masked input on every container,
             // regardless of which component the message would otherwise target.
+            // Each message type's logic lives in its own handler function above;
+            // this is just the dispatch.
             pac.installMessageHook((event, next) => {
                 const entry = _registry.get(event.target);
 
@@ -404,155 +616,18 @@
                 }
 
                 const input = event.target;
-                const { tokens, pacId } = entry;
 
-                // Modifier combinations (Ctrl/Cmd/Alt) are left alone — they're
-                // browser/OS shortcuts (select-all, copy, undo, AltGr composition),
-                // not mask-relevant keystrokes. Shift is allowed through normally.
-                const hasBlockingModifier =
-                    (event.lParam & pac.KM_CONTROL) !== 0 ||
-                    (event.lParam & pac.KM_META) !== 0 ||
-                    (event.lParam & pac.KM_ALT) !== 0;
-
-                if (event.message === pac.MSG_KEYDOWN) {
-                    if (hasBlockingModifier || (event.wParam !== pac.VK_BACK && event.wParam !== pac.VK_DELETE)) {
-                        next();
-                        return;
-                    }
-
-                    const pos = input.selectionStart;
-                    const selEnd = input.selectionEnd;
-                    const raw = extractRaw(tokens, input.value);
-
-                    let rawArray, deleteIndex;
-
-                    if (pos !== selEnd) {
-                        // A range is selected — delete the whole selection regardless
-                        // of which key (Backspace or Delete) triggered it.
-                        const startIdx = extractRaw(tokens, input.value.slice(0, pos)).length;
-                        const endIdx = extractRaw(tokens, input.value.slice(0, selEnd)).length;
-                        rawArray = raw.slice(0, startIdx) + raw.slice(endIdx);
-                        deleteIndex = startIdx;
-                    } else if (event.wParam === pac.VK_BACK) {
-                        deleteIndex = extractRaw(tokens, input.value.slice(0, pos)).length - 1;
-
-                        if (deleteIndex < 0) {
-                            next();
-                            return;
-                        }
-
-                        rawArray = raw.slice(0, deleteIndex) + raw.slice(deleteIndex + 1);
-                    } else {
-                        // VK_DELETE — forward delete
-                        deleteIndex = extractRaw(tokens, input.value.slice(0, pos)).length;
-
-                        if (deleteIndex >= raw.length) {
-                            next();
-                            return;
-                        }
-
-                        rawArray = raw.slice(0, deleteIndex) + raw.slice(deleteIndex + 1);
-                    }
-
-                    event.preventDefault();
-
-                    const formatted = formatValue(tokens, rawArray);
-                    const caret = formatValue(tokens, rawArray.slice(0, deleteIndex)).length;
-
-                    applyValue(input, formatted, caret);
-                    next();
-                    return;
+                switch (event.message) {
+                    case pac.MSG_KEYDOWN:
+                        handleKeydownMessage(pac, event, next, input, entry);
+                        break;
+                    case pac.MSG_CHAR:
+                        handleCharMessage(pac, event, next, input, entry, msgConstants);
+                        break;
+                    case pac.MSG_PASTE:
+                        handlePasteMessage(pac, event, next, input, entry, msgConstants);
+                        break;
                 }
-
-                if (event.message === pac.MSG_CHAR) {
-                    if (hasBlockingModifier) {
-                        next();
-                        return;
-                    }
-
-                    const typedChar = event.originalEvent.key;
-                    const pos = input.selectionStart;
-                    const selEnd = input.selectionEnd;
-                    const raw = extractRaw(tokens, input.value);
-
-                    const startIdx = extractRaw(tokens, input.value.slice(0, pos)).length;
-                    const endIdx = pos !== selEnd
-                        ? extractRaw(tokens, input.value.slice(0, selEnd)).length
-                        : startIdx;
-
-                    // Locate the token this character would land on and check it fits
-                    // before doing anything — this is also how we detect + report
-                    // MSG_MASK_REJECT without mutating anything on a bad keystroke.
-                    let ti = 0, filled = 0;
-
-                    while (ti < tokens.length && filled < startIdx) {
-                        if (tokens[ti].literal === undefined) {
-                            filled++;
-                        }
-
-                        ti++;
-                    }
-
-                    while (ti < tokens.length && tokens[ti].literal !== undefined) {
-                        ti++;
-                    }
-
-                    const targetToken = tokens[ti];
-
-                    event.preventDefault();
-
-                    if (!targetToken) {
-                        // No slot left at all — the mask is already full. This is
-                        // expected, not an error (same as hitting maxlength on a
-                        // plain input), so no MSG_MASK_REJECT fires for it.
-                        next();
-                        return;
-                    }
-
-                    if (!matchesToken(typedChar, targetToken.type)) {
-                        // There IS a slot, but this character is the wrong type for
-                        // it (e.g. a letter typed into a digit slot) — this is the
-                        // one genuine rejection case.
-                        pac.sendMessage(pacId, MSG_MASK_REJECT, typedChar.charCodeAt(0), 0, { target: input });
-                        next();
-                        return;
-                    }
-
-                    const rawArray = raw.slice(0, startIdx) + typedChar + raw.slice(endIdx);
-                    const formatted = formatValue(tokens, rawArray);
-                    const caret = formatValue(tokens, rawArray.slice(0, startIdx + 1)).length;
-
-                    applyValue(input, formatted, caret);
-                    maybeReportComplete(pac, pacId, input, tokens, extractRaw(tokens, formatted), formatted, MSG_MASK_COMPLETE);
-                    next();
-                    return;
-                }
-
-                // MSG_PASTE
-                event.preventDefault();
-
-                const pastedText = event.detail['text/plain'] ?? '';
-                const candidates = pastedText.replace(/[^A-Za-z0-9]/g, '');
-                const pos = input.selectionStart;
-                const selEnd = input.selectionEnd;
-                const raw = extractRaw(tokens, input.value);
-
-                const startIdx = extractRaw(tokens, input.value.slice(0, pos)).length;
-                const endIdx = pos !== selEnd
-                    ? extractRaw(tokens, input.value.slice(0, selEnd)).length
-                    : startIdx;
-
-                const rawArray = raw.slice(0, startIdx) + candidates + raw.slice(endIdx);
-                const formatted = formatValue(tokens, rawArray);
-
-                // Caret goes right after the pasted content: format just the prefix
-                // up to (and including) the pasted characters, same technique as the
-                // single-character insert case above.
-                const caret = formatValue(tokens, rawArray.slice(0, startIdx + candidates.length)).length;
-
-                applyValue(input, formatted, caret);
-                maybeReportComplete(pac, pacId, input, tokens, extractRaw(tokens, formatted), formatted, MSG_MASK_COMPLETE);
-                next();
             });
 
             return {
