@@ -6220,6 +6220,9 @@
             return;
         }
 
+        // Prevent the default. We don't want the browser to handle submit
+        event.preventDefault();
+
         // Get the method reference from the abstraction object using the binding target
         const method = this.abstraction[mappingData.bindings.submit.target];
 
