@@ -6123,6 +6123,31 @@
     }
 
     /**
+     * Evaluates a handler binding expression (used by click/submit bindings) and invokes the
+     * result if it resolves to a bare function reference, e.g. `data-click="save"`. Expressions
+     * that already contain an explicit call, e.g. `data-click="save(item.id, $event)"`, are
+     * executed directly by ExpressionParser.evaluate, so this fallback call is skipped for them.
+     * @param {string} bindingTarget - The binding expression to evaluate
+     * @param {Object} scopedAbstraction - The abstraction, extended with $event/$item/$index as applicable
+     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolver()
+     * @param {Array} fallbackArgs - Arguments to invoke the result with when it's a bare function reference
+     * @returns {*} The evaluated result
+     */
+    Context.prototype.evaluateHandlerExpression = function(bindingTarget, scopedAbstraction, scopeResolver, fallbackArgs) {
+        const result = ExpressionParser.evaluate(
+            ExpressionCache.parseExpression(bindingTarget),
+            scopedAbstraction,
+            scopeResolver
+        );
+
+        if (typeof result === 'function') {
+            result.call(this.abstraction, ...fallbackArgs);
+        }
+
+        return result;
+    };
+
+    /**
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
@@ -6170,16 +6195,13 @@
                         $event: event
                     });
 
-                    const foreachResult = ExpressionParser.evaluate(
-                        ExpressionCache.parseExpression(bindingTarget),
+                    // Fallback (if bindingTarget is a bare method name): call with (item, index, event)
+                    this.evaluateHandlerExpression(
+                        bindingTarget,
                         scopedAbstraction,
-                        scopeResolver
+                        scopeResolver,
+                        [array[contextInfo.index], contextInfo.index, event]
                     );
-
-                    // Fallback: bare method name — call with (item, index, event)
-                    if (typeof foreachResult === 'function') {
-                        foreachResult.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
-                    }
 
                     return;
                 }
@@ -6190,16 +6212,8 @@
                 $event: event
             });
 
-            const result = ExpressionParser.evaluate(
-                ExpressionCache.parseExpression(bindingTarget),
-                scopedAbstraction,
-                scopeResolver
-            );
-
-            // Fallback: bare method name — call with (event)
-            if (typeof result === 'function') {
-                result.call(this.abstraction, event);
-            }
+            // Fallback (if bindingTarget is a bare method name): call with (event)
+            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
         } catch (error) {
             console.warn(`Error executing click binding '${bindingTarget}':`, error);
         }
@@ -6223,20 +6237,26 @@
         // Prevent the default. We don't want the browser to handle submit
         event.preventDefault();
 
-        // Get the method reference from the abstraction object using the binding target
-        const method = this.abstraction[mappingData.bindings.submit.target];
-
-        // Verify the target is actually a callable function
-        if (typeof method !== 'function') {
-            return;
-        }
+        // Fetch binding target
+        const bindingTarget = mappingData.bindings.submit.target;
 
         try {
-            // Execute the bound method with the abstraction as context and pass the event
-            method.call(this.abstraction, event);
+            // Build scope resolver, shared across the evaluation below
+            const scopeResolver = makeScopeResolver(
+                this.normalizePath.bind(this),
+                event.target,
+                this.importedUnits
+            );
+
+            // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
+            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                $event: event
+            });
+
+            // Fallback (if bindingTarget is a bare method name): call with (event)
+            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
         } catch (error) {
-            // Log execution errors with context for debugging
-            console.warn(`Error executing submit binding '${mappingData.bindings.submit.target}':`, error);
+            console.warn(`Error executing submit binding '${bindingTarget}':`, error);
         }
     };
 
@@ -6303,16 +6323,25 @@
 
         // Handle change binding (method execution)
         if (mappingData.bindings.change) {
-            // Resolve the target method from the abstraction object
-            const method = this.abstraction[mappingData.bindings.change.target];
+            const bindingTarget = mappingData.bindings.change.target;
 
-            if (typeof method === 'function') {
-                try {
-                    // Execute the bound method with the abstraction as context
-                    method.call(this.abstraction, event);
-                } catch (error) {
-                    console.warn(`Error executing change binding '${mappingData.bindings.change.target}':`, error);
-                }
+            try {
+                // Build scope resolver and evaluate expression with $event in scope
+                // (supports explicit arguments via parentheses)
+                const scopeResolver = makeScopeResolver(
+                    this.normalizePath.bind(this),
+                    targetElement,
+                    this.importedUnits
+                );
+
+                const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                    $event: event
+                });
+
+                // Fallback (if bindingTarget is a bare method name): call with (event)
+                this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
+            } catch (error) {
+                console.warn(`Error executing change binding '${bindingTarget}':`, error);
             }
         }
     };
