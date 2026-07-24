@@ -923,9 +923,20 @@
 
                     const useColorKey = sprite._surface.colorKey !== null;
 
+                    // Clip to the intersection of the dirty rect and this sprite's own
+                    // bounds, not the dirty rect alone. 'copy' compositing (used below for
+                    // colorKey:null sprites) replaces every pixel within the clip that the
+                    // new image does not cover with fully transparent — clipping to the
+                    // whole dirty rect would let a sprite smaller than that rect erase the
+                    // background fill and any other sprite already painted beneath it.
+                    const clipX = Math.max(b.x, x);
+                    const clipY = Math.max(b.y, y);
+                    const clipW = Math.min(b.x + b.w, x + w) - clipX;
+                    const clipH = Math.min(b.y + b.h, y + h) - clipY;
+
                     ctx.save();
                     ctx.beginPath();
-                    ctx.rect(x, y, w, h);
+                    ctx.rect(clipX, clipY, clipW, clipH);
                     ctx.clip();
                     ctx.globalCompositeOperation = useColorKey ? 'source-over' : 'copy';
                     ctx.drawImage(sprite._surface._ctx.canvas, sx, sy, sw, sh, sprite.x, sprite.y, sw, sh);

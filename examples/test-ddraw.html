@@ -119,7 +119,7 @@
     // =============================================================================
 
     function _drawHero() {
-        const surface = wakaDDraw.createSurface(16, 16);
+        const surface = wakaDDraw.createSurface(16, 16, { colorKey: '#ff00ff' });
         const ctx = wakaDDraw.getContext(surface);
 
         ctx.fillStyle = '#ff00ff';
