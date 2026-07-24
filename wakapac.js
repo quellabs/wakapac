@@ -10864,10 +10864,10 @@
      *   'webgl2' — returns WebGL2RenderingContext
      *
      * @param {HTMLCanvasElement} canvasElement
-     * @param {Object} [attributes] - Context attributes passed to getContext()
+     * @param {Object} [attributes={}] - Context attributes passed to getContext()
      * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
      */
-    wakaPAC.getDCFromElement = function(canvasElement, attributes) {
+    wakaPAC.getDCFromElement = function(canvasElement, attributes = {}) {
         if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
             return null;
         }
@@ -11298,6 +11298,15 @@
                 for (let j = 0; j < params.length; j++) {
                     const value = op[params[j]];
                     args.push((defaults && params[j] in defaults) ? (value ?? defaults[params[j]]) : value);
+                }
+
+                // drawImage is overloaded on argument count rather than taking optional
+                // arguments, and an explicit undefined still counts towards that count.
+                // Passing (image, dx, dy, undefined, undefined) therefore selects the
+                // five-argument form, where the undefined sizes become NaN and nothing is
+                // drawn, so drop the pair when neither was supplied.
+                if (op.op === 'drawImage' && args[3] === undefined && args[4] === undefined) {
+                    args.length = 3;
                 }
 
                 ctx[op.op](...args);
