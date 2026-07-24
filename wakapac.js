@@ -27,14 +27,13 @@
      * Creates a canvas context of the given dimensions and type.
      * Uses OffscreenCanvas where available, falling back to HTMLCanvasElement
      * for environments that do not support it (notably older Safari versions).
-     *
      * @param {number} width
      * @param {number} height
      * @param {string} [contextType='2d']
-     * @param {Object} [attributes]
+     * @param {Object} [attributes={}]
      * @returns {RenderingContext}
      */
-    function _createCanvas(width, height, contextType = '2d', attributes) {
+    function _createCanvas(width, height, contextType = '2d', attributes = {}) {
         if (typeof OffscreenCanvas !== 'undefined') {
             return new OffscreenCanvas(width, height).getContext(contextType, attributes);
         }
@@ -1516,6 +1515,59 @@
     // Send PAC-events for changed DOM elements
     // ============================================================================
 
+    /**
+     * Map DOM button codes to internal message identifiers.
+     * Defined at module level to avoid per-event object allocation in the mousedown handler.
+     * @type {Object<number, number>}
+     */
+    const MOUSE_DOWN_MESSAGES = {
+        0: MSG_LBUTTONDOWN,
+        1: MSG_MBUTTONDOWN,
+        2: MSG_RBUTTONDOWN,
+    };
+
+    /**
+     * Map DOM button codes to internal release messages.
+     * Defined at module level to avoid per-event object allocation in the mouseup handler.
+     * @type {Object<number, number>}
+     */
+    const MOUSE_UP_MESSAGES = {
+        0: MSG_LBUTTONUP,
+        1: MSG_MBUTTONUP,
+        2: MSG_RBUTTONUP,
+    };
+
+    /**
+     * Mouse events that need no handling beyond resolving the target container
+     * and dispatching a single message. Entries are
+     * [DOM event name, message type, predicate], where a null predicate always dispatches.
+     * Consumed by DomUpdateTracker._registerSimpleEvents().
+     * @type {Array<[string, number, ((Event) => boolean)|null]>}
+     */
+    const SIMPLE_MOUSE_EVENTS = [
+        // Left click
+        ['click', MSG_LCLICK, null],
+
+        // Middle click
+        ['auxclick', MSG_MCLICK, event => event.button === 1],
+
+        // Double click (left button only)
+        // Capture rapid primary-button activation
+        ['dblclick', MSG_LBUTTONDBLCLK, event => event.button === 0],
+    ];
+
+    /**
+     * Touch button events.
+     * Map touch lifecycle events onto mouse-style button semantics.
+     * Same entry shape as SIMPLE_MOUSE_EVENTS.
+     * @type {Array<[string, number, ((Event) => boolean)|null]>}
+     */
+    const SIMPLE_TOUCH_EVENTS = [
+        ['touchstart', MSG_LBUTTONDOWN, null],   // Finger contact behaves like left button press
+        ['touchend', MSG_LBUTTONUP, null],       // Finger release behaves like left button release
+        ['touchcancel', MSG_LBUTTONUP, null]     // Cancellation is treated as a release for consistency
+    ];
+
     const DomUpdateTracker = {
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
@@ -1573,6 +1625,32 @@
             this._setupFormEvents();         // Form interaction tracking
             this._setupWindowEvents();       // Scroll/resize state updates
             this._setupObservers();          // Intersection/resize observers
+        },
+
+        /**
+         * Registers listeners for events that require no handling beyond resolving
+         * the target container and dispatching one mouse message. Entries whose
+         * predicate returns false are ignored; a null predicate always dispatches.
+         * @private
+         * @param {Array<[string, number, ((Event) => boolean)|null]>} table
+         * @returns {void}
+         */
+        _registerSimpleEvents(table) {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            table.forEach(function([eventName, messageType, predicate]) {
+                document.addEventListener(eventName, function(event) {
+                    // Skip events the entry's predicate rejects
+                    if (predicate && !predicate(event)) {
+                        return;
+                    }
+
+                    // Resolve container and dispatch normalized message
+                    const container = self.getContainerForEvent(messageType, event);
+                    self.dispatchMouseMessage(messageType, event, container);
+                });
+            });
         },
 
         /**
@@ -1757,15 +1835,8 @@
             // Mouse down
             // Capture button press and normalize into message format
             document.addEventListener('mousedown', function(event) {
-                // Map DOM button codes to internal message identifiers
-                const buttonMap = {
-                    0: MSG_LBUTTONDOWN,
-                    1: MSG_MBUTTONDOWN,
-                    2: MSG_RBUTTONDOWN,
-                };
-
                 // Ignore unsupported buttons
-                const messageType = buttonMap[event.button];
+                const messageType = MOUSE_DOWN_MESSAGES[event.button];
 
                 if (!messageType) {
                     return;
@@ -1786,15 +1857,8 @@
             // Mouse up
             // Capture button release and optionally finalize gesture recording
             window.addEventListener('mouseup', function(event) {
-                // Map DOM button codes to internal release messages
-                const buttonMap = {
-                    0: MSG_LBUTTONUP,
-                    1: MSG_MBUTTONUP,
-                    2: MSG_RBUTTONUP,
-                };
-
                 // Ignore unsupported buttons
-                const messageType = buttonMap[event.button];
+                const messageType = MOUSE_UP_MESSAGES[event.button];
 
                 if (!messageType) {
                     return;
@@ -1818,19 +1882,9 @@
                 }
             });
 
-            // Left click
-            document.addEventListener('click', function(event) {
-                const container = self.getContainerForEvent(MSG_LCLICK, event);
-                self.dispatchMouseMessage(MSG_LCLICK, event, container);
-            });
-
-            // Middle click
-            document.addEventListener('auxclick', function(event) {
-                if (event.button === 1) {
-                    const container = self.getContainerForEvent(MSG_MCLICK, event);
-                    self.dispatchMouseMessage(MSG_MCLICK, event, container);
-                }
-            });
+            // Click, middle click and double click need no extra handling —
+            // register them from SIMPLE_MOUSE_EVENTS
+            this._registerSimpleEvents(SIMPLE_MOUSE_EVENTS);
 
             // Context menu
             // Fires on right-click AND the keyboard context menu key.
@@ -1848,15 +1902,6 @@
                 // msgProc will suppress the native browser context menu
                 const container = self.getContainerForEvent(MSG_CONTEXTMENU, event);
                 self.dispatchMouseMessage(MSG_CONTEXTMENU, event, container);
-            });
-
-            // Double click (left button only)
-            // Capture rapid primary-button activation
-            document.addEventListener('dblclick', function(event) {
-                if (event.button === 0) {
-                    const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    self.dispatchMouseMessage(MSG_LBUTTONDBLCLK, event, container);
-                }
             });
         },
 
@@ -2336,21 +2381,8 @@
             // Preserve instance reference for use inside event callbacks
             const self = this;
 
-            // Touch button events
-            // Map touch lifecycle events onto mouse-style button semantics
-            const touchMap = {
-                'touchstart': MSG_LBUTTONDOWN,  // Finger contact behaves like left button press
-                'touchend': MSG_LBUTTONUP,      // Finger release behaves like left button release
-                'touchcancel': MSG_LBUTTONUP    // Cancellation is treated as a release for consistency
-            };
-
             // Register touch handlers that normalize events into the message system
-            Object.entries(touchMap).forEach(([eventName, msgType]) => {
-                document.addEventListener(eventName, function(event) {
-                    const container = self.getContainerForEvent(msgType, event);
-                    self.dispatchMouseMessage(msgType, event, container);
-                });
-            });
+            this._registerSimpleEvents(SIMPLE_TOUCH_EVENTS);
 
             // Touch move (throttled)
             // Coalesce high-frequency movement to match mouse move dispatch behavior
