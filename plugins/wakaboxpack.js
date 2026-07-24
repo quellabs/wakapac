@@ -131,10 +131,13 @@
      * Using far-corner faces avoids coplanar z-fighting: correctly-packed
      * non-overlapping items can never share a high-X or high-Y plane.
      *
-     * PAINTER SORT — sort key is the far corner (z+depth, y+length, x+width),
-     * all ascending. Lower tops draw first so floor items are always painted
-     * before items stacked on them; within the same top level, items further
-     * from the viewer (low y+length) draw first.
+     * PAINTER SORT — back-to-front along the (1,1,1) iso view direction. For
+     * non-overlapping items the near corner's coordinate sum (x + y + z)
+     * increases monotonically toward the viewer, so ascending sum draws far
+     * items first. (Sorting by the item top, z+depth, is wrong: a tall item
+     * behind a short one has the larger top and would paint over the nearer
+     * short item.) Correct for physical packer output — axis-aligned,
+     * non-overlapping items resting on supports.
      *
      * Items must carry a `color` property ({ top, left, right }) in addition
      * to the standard packer fields. Attach it before calling — see packedBox().
@@ -147,9 +150,7 @@
     function renderCuboids(items, proj, emitQuad) {
 
         const sorted = [...items].sort((a, b) =>
-            (a.z + a.depth)  - (b.z + b.depth)  ||   // lower top draws first
-            (a.y + a.length) - (b.y + b.length) ||    // further back draws first
-            (a.x + a.width)  - (b.x + b.width)        // tiebreak
+            (a.x + a.y + a.z) - (b.x + b.y + b.z)     // near-corner depth, far first
         );
 
         for (const item of sorted) {
