@@ -1,0 +1,35 @@
+<script src="../wakapac.js"></script>
+<script src="../plugins/wakamask.js"></script>
+
+<div id="contact">
+    <input
+            type="text"
+            data-pac-mask="999-999-9999"
+            data-pac-bind="value: phone"
+            placeholder="555-123-4567"
+    >
+
+    <div>{{ phone }}</div>
+    <div>{{ phoneStatus }}</div>
+</div>
+
+<script>
+    wakaPAC.use(WakaMask);
+
+    wakaPAC('#contact', {
+        phone: '',
+        phoneStatus: '',
+
+        msgProc(event) {
+            switch (event.message) {
+                case WakaMask.MSG_MASK_COMPLETE:
+                    this.phoneStatus = 'Looks good';
+                    break;
+
+                case WakaMask.MSG_MASK_REJECT:
+                    this.phoneStatus = `"${String.fromCharCode(event.wParam)}" isn't a digit`;
+                    break;
+            }
+        }
+    });
+</script>

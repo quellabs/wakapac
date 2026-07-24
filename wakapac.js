@@ -16,7 +16,7 @@
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
-(function () {
+(function() {
     "use strict";
 
     // =============================================================================
@@ -27,14 +27,13 @@
      * Creates a canvas context of the given dimensions and type.
      * Uses OffscreenCanvas where available, falling back to HTMLCanvasElement
      * for environments that do not support it (notably older Safari versions).
-     *
      * @param {number} width
      * @param {number} height
      * @param {string} [contextType='2d']
-     * @param {Object} [attributes]
+     * @param {Object} [attributes={}]
      * @returns {RenderingContext}
      */
-    function _createCanvas(width, height, contextType = '2d', attributes) {
+    function _createCanvas(width, height, contextType = '2d', attributes = {}) {
         if (typeof OffscreenCanvas !== 'undefined') {
             return new OffscreenCanvas(width, height).getContext(contextType, attributes);
         }
@@ -107,6 +106,14 @@
      * @type {number}
      */
     let _nextHookHandle = 1;
+
+    /**
+     * The shared BroadcastChannel instance used for cross-tab messaging.
+     * Created eagerly at framework startup so every tab can receive cross-tab
+     * broadcasts even if it never calls broadcastMessageGlobal() itself.
+     * @type {BroadcastChannel|null}
+     */
+    let _broadcastChannel = null;
 
     /**
      * Matches handlebars-style interpolation: {{variable}}
@@ -240,9 +247,9 @@
     const MSG_CONTEXTMENU = 0x007B;
     const MSG_CAPTURECHANGED = 0x0215;
     const MSG_DRAGENTER = 0x0231;
-    const MSG_DRAGOVER  = 0x0232;
+    const MSG_DRAGOVER = 0x0232;
     const MSG_DRAGLEAVE = 0x0233;
-    const MSG_DROP      = 0x0234;
+    const MSG_DROP = 0x0234;
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
@@ -598,6 +605,51 @@
         closePath:      'closePath',
         stroke:         'stroke',
         resetTransform: 'resetTransform'
+    };
+
+    /**
+     * Maps metafile op names to their CanvasRenderingContext2D argument order.
+     * Every op here calls a same-named ctx method with its fields spread in the
+     * listed order. Single source of truth: the MetaFile builder generates one
+     * recording method per entry, and playMetaFile replays them from the same list.
+     * @type {Object<string, string[]>}
+     */
+    const _metaFileOps = {
+        moveTo:           ['x', 'y'],
+        lineTo:           ['x', 'y'],
+        arc:              ['cx', 'cy', 'r', 'startAngle', 'endAngle', 'ccw'],
+        arcTo:            ['x1', 'y1', 'x2', 'y2', 'r'],
+        ellipse:          ['cx', 'cy', 'rx', 'ry', 'rotation', 'startAngle', 'endAngle', 'ccw'],
+        rect:             ['x', 'y', 'w', 'h'],
+        roundRect:        ['x', 'y', 'w', 'h', 'r'],
+        bezierCurveTo:    ['cp1x', 'cp1y', 'cp2x', 'cp2y', 'x', 'y'],
+        quadraticCurveTo: ['cpx', 'cpy', 'x', 'y'],
+        fill:             ['rule'],
+        clip:             ['rule'],
+        fillRect:         ['x', 'y', 'w', 'h'],
+        strokeRect:       ['x', 'y', 'w', 'h'],
+        clearRect:        ['x', 'y', 'w', 'h'],
+        fillText:         ['text', 'x', 'y', 'maxWidth'],
+        strokeText:       ['text', 'x', 'y', 'maxWidth'],
+        drawImage:        ['image', 'dx', 'dy', 'dw', 'dh'],
+        translate:        ['x', 'y'],
+        rotate:           ['angle'],
+        scale:            ['x', 'y'],
+        transform:        ['a', 'b', 'c', 'd', 'e', 'f'],
+        setTransform:     ['a', 'b', 'c', 'd', 'e', 'f']
+    };
+
+    /**
+     * Default values for optional _metaFileOps fields. Applied when recording
+     * (the argument was omitted) and again when replaying, so hand-written
+     * display lists that leave the field out behave the same as recorded ones.
+     * @type {Object<string, Object>}
+     */
+    const _metaFileOpDefaults = {
+        arc:     { ccw: false },
+        ellipse: { ccw: false },
+        fill:    { rule: 'nonzero' },
+        clip:    { rule: 'nonzero' }
     };
 
     // =============================================================================
@@ -1124,7 +1176,7 @@
         unionRect(a, b) {
             const x = Math.min(a.x, b.x);
             const y = Math.min(a.y, b.y);
-            const right  = Math.max(a.x + a.width,  b.x + b.width);
+            const right = Math.max(a.x + a.width, b.x + b.width);
             const bottom = Math.max(a.y + a.height, b.y + b.height);
             return { x, y, width: right - x, height: bottom - y };
         },
@@ -1196,7 +1248,6 @@
         }
     }
 
-
     // ========================================================================
     // REACTIVE PROXY
     // ========================================================================
@@ -1228,7 +1279,7 @@
          * @returns {Function} Wrapped array method
          */
         function createReactiveArrayMethod(target, methodName, currentPath) {
-            return function () {
+            return function() {
                 // Store the old array state before modification
                 const oldArray = Array.prototype.slice.call(target);
 
@@ -1484,15 +1535,15 @@
             currentPath = currentPath || [];
 
             return new Proxy(obj, {
-                get: function (target, prop) {
+                get: function(target, prop) {
                     return proxyGetHandler(target, prop, currentPath);
                 },
 
-                set: function (target, prop, newValue) {
+                set: function(target, prop, newValue) {
                     return proxySetHandler(target, prop, newValue, currentPath);
                 },
 
-                deleteProperty: function (target, prop) {
+                deleteProperty: function(target, prop) {
                     return proxyDeleteHandler(target, prop, currentPath);
                 }
             });
@@ -1513,7 +1564,6 @@
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
-
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
 
@@ -1533,7 +1583,7 @@
         _resizeObserver: null,
 
         // Keep track of key repeat count
-        _repeatCounts : new Map(),
+        _repeatCounts: new Map(),
 
         /** @type {string[]} List of valid drop effects for drag/drop */
         validDropEffects: ['none', 'copy', 'link', 'move'],
@@ -1566,6 +1616,32 @@
             this._setupFormEvents();         // Form interaction tracking
             this._setupWindowEvents();       // Scroll/resize state updates
             this._setupObservers();          // Intersection/resize observers
+        },
+
+        /**
+         * Registers a listener for an event that requires no handling beyond
+         * resolving the target container and dispatching one mouse message.
+         * Events the predicate rejects are ignored; omit it to always dispatch.
+         * @private
+         * @param {string} eventName - DOM event name to listen for
+         * @param {number} messageType - Message dispatched for each accepted event
+         * @param {((Event) => boolean)} [predicate] - Optional filter
+         * @returns {void}
+         */
+        _registerMessageEvent(eventName, messageType, predicate) {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            document.addEventListener(eventName, function(event) {
+                // Skip events the predicate rejects
+                if (predicate && !predicate(event)) {
+                    return;
+                }
+
+                // Resolve container and dispatch normalized message
+                const container = self.getContainerForEvent(messageType, event);
+                self.dispatchMouseMessage(messageType, event, container);
+            });
         },
 
         /**
@@ -1751,15 +1827,13 @@
             // Capture button press and normalize into message format
             document.addEventListener('mousedown', function(event) {
                 // Map DOM button codes to internal message identifiers
-                const buttonMap = {
-                    0: MSG_LBUTTONDOWN,
-                    1: MSG_MBUTTONDOWN,
-                    2: MSG_RBUTTONDOWN,
-                };
+                const messageType =
+                    event.button === 0 ? MSG_LBUTTONDOWN :
+                    event.button === 1 ? MSG_MBUTTONDOWN :
+                    event.button === 2 ? MSG_RBUTTONDOWN :
+                    undefined;
 
                 // Ignore unsupported buttons
-                const messageType = buttonMap[event.button];
-
                 if (!messageType) {
                     return;
                 }
@@ -1780,15 +1854,13 @@
             // Capture button release and optionally finalize gesture recording
             window.addEventListener('mouseup', function(event) {
                 // Map DOM button codes to internal release messages
-                const buttonMap = {
-                    0: MSG_LBUTTONUP,
-                    1: MSG_MBUTTONUP,
-                    2: MSG_RBUTTONUP,
-                };
+                const messageType =
+                    event.button === 0 ? MSG_LBUTTONUP :
+                    event.button === 1 ? MSG_MBUTTONUP :
+                    event.button === 2 ? MSG_RBUTTONUP :
+                    undefined;
 
                 // Ignore unsupported buttons
-                const messageType = buttonMap[event.button];
-
                 if (!messageType) {
                     return;
                 }
@@ -1812,18 +1884,14 @@
             });
 
             // Left click
-            document.addEventListener('click', function(event) {
-                const container = self.getContainerForEvent(MSG_LCLICK, event);
-                self.dispatchMouseMessage(MSG_LCLICK, event, container);
-            });
+            this._registerMessageEvent('click', MSG_LCLICK);
 
             // Middle click
-            document.addEventListener('auxclick', function(event) {
-                if (event.button === 1) {
-                    const container = self.getContainerForEvent(MSG_MCLICK, event);
-                    self.dispatchMouseMessage(MSG_MCLICK, event, container);
-                }
-            });
+            this._registerMessageEvent('auxclick', MSG_MCLICK, event => event.button === 1);
+
+            // Double click (left button only)
+            // Capture rapid primary-button activation
+            this._registerMessageEvent('dblclick', MSG_LBUTTONDBLCLK, event => event.button === 0);
 
             // Context menu
             // Fires on right-click AND the keyboard context menu key.
@@ -1842,15 +1910,6 @@
                 const container = self.getContainerForEvent(MSG_CONTEXTMENU, event);
                 self.dispatchMouseMessage(MSG_CONTEXTMENU, event, container);
             });
-
-            // Double click (left button only)
-            // Capture rapid primary-button activation
-            document.addEventListener('dblclick', function(event) {
-                if (event.button === 0) {
-                    const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    self.dispatchMouseMessage(MSG_LBUTTONDBLCLK, event, container);
-                }
-            });
         },
 
         /**
@@ -1863,7 +1922,7 @@
             this.setupMoveCoalescer(
                 'mousemove',
                 wakaPAC.mouseMoveThrottleFps,
-                function (event) {
+                function(event) {
                     // Feed the gesture recognizer before anything else
                     if (MouseGestureRecognizer.isRecording) {
                         MouseGestureRecognizer.recordPoint(event);
@@ -2079,7 +2138,7 @@
         _onDragEnter() {
             const self = this;
 
-            document.addEventListener('dragenter', function (event) {
+            document.addEventListener('dragenter', function(event) {
                 // Find container
                 const container = self.getContainerForEvent(MSG_DRAGENTER, event);
 
@@ -2121,7 +2180,7 @@
         _onDragLeave() {
             const self = this;
 
-            document.addEventListener('dragleave', function (event) {
+            document.addEventListener('dragleave', function(event) {
                 // Find container
                 const container = self.getContainerForEvent(MSG_DRAGLEAVE, event);
 
@@ -2164,7 +2223,7 @@
         _onDragOver() {
             const self = this;
 
-            document.addEventListener('dragover', function (event) {
+            document.addEventListener('dragover', function(event) {
                 // Fetch the container
                 const container = self.getContainerForEvent(MSG_DRAGOVER, event);
 
@@ -2226,7 +2285,7 @@
         _onDrop() {
             const self = this;
 
-            document.addEventListener('drop', function (event) {
+            document.addEventListener('drop', function(event) {
                 // Fetch container
                 const container = self.getContainerForEvent(MSG_DROP, event);
 
@@ -2276,7 +2335,7 @@
          * @returns {Array<{name: string, size: number, type: string}>}
          */
         _extractFileMetadata(fileList) {
-            return Array.from(fileList).map(function (f) {
+            return Array.from(fileList).map(function(f) {
                 return { name: f.name, size: f.size, type: f.type };
             });
         },
@@ -2331,19 +2390,10 @@
 
             // Touch button events
             // Map touch lifecycle events onto mouse-style button semantics
-            const touchMap = {
-                'touchstart': MSG_LBUTTONDOWN,  // Finger contact behaves like left button press
-                'touchend': MSG_LBUTTONUP,      // Finger release behaves like left button release
-                'touchcancel': MSG_LBUTTONUP    // Cancellation is treated as a release for consistency
-            };
-
             // Register touch handlers that normalize events into the message system
-            Object.entries(touchMap).forEach(([eventName, msgType]) => {
-                document.addEventListener(eventName, function(event) {
-                    const container = self.getContainerForEvent(msgType, event);
-                    self.dispatchMouseMessage(msgType, event, container);
-                });
-            });
+            this._registerMessageEvent('touchstart', MSG_LBUTTONDOWN);   // Finger contact behaves like left button press
+            this._registerMessageEvent('touchend', MSG_LBUTTONUP);       // Finger release behaves like left button release
+            this._registerMessageEvent('touchcancel', MSG_LBUTTONUP);    // Cancellation is treated as a release for consistency
 
             // Touch move (throttled)
             // Coalesce high-frequency movement to match mouse move dispatch behavior
@@ -3003,7 +3053,7 @@
                     const originalCustomMethod = customEvent[methodName];
 
                     // Override the method to call both the custom event method and original event method
-                    customEvent[methodName] = function () {
+                    customEvent[methodName] = function() {
                         // Call the custom event's method first (if it exists)
                         if (originalCustomMethod) {
                             originalCustomMethod.call(this);
@@ -3136,7 +3186,7 @@
 
                     try {
                         fn(event, callNextHookEx);
-                    } catch(e) {
+                    } catch (e) {
                         // A throwing hook must not break message delivery for the container.
                         // Log the error and continue the chain as if the hook called
                         // callNextHookEx() itself — fault isolation over silent failure.
@@ -3164,7 +3214,7 @@
          * @param {HTMLElement} container
          * @param {Object} extended
          */
-        dispatchMouseMessage(msgType, domEvent, container, extended={}) {
+        dispatchMouseMessage(msgType, domEvent, container, extended = {}) {
             const wParam = this.getModifierState(domEvent);
             const lParam = this.buildMouseLParam(domEvent, container);
             const targetOverride = (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) ? container : null;
@@ -3768,7 +3818,7 @@
 
                 if (multiChar) {
                     const op = multiChar[1];
-                    tokens.push({type: 'OPERATOR', value: op, precedence: this.getOperatorPrecedence(op)});
+                    tokens.push({ type: 'OPERATOR', value: op, precedence: this.getOperatorPrecedence(op) });
                     i += op.length;
                     continue;
                 }
@@ -3777,7 +3827,7 @@
                 const singleCharTokens = this.SINGLE_CHAR_TOKENS;
 
                 if (singleCharTokens[char]) {
-                    tokens.push({type: singleCharTokens[char], value: char});
+                    tokens.push({ type: singleCharTokens[char], value: char });
                     i++;
                     continue;
                 }
@@ -3801,7 +3851,7 @@
                             break;
                     }
 
-                    tokens.push({type, value: char, precedence});
+                    tokens.push({ type, value: char, precedence });
                     i++;
                     continue;
                 }
@@ -3849,7 +3899,7 @@
                 } else if (char === quote) {
                     // End of string
                     return {
-                        token: {type: 'STRING', value},
+                        token: { type: 'STRING', value },
                         nextIndex: i + 1
                     };
                 } else {
@@ -3873,7 +3923,7 @@
 
             if (numberMatch) {
                 return {
-                    token: {type: 'NUMBER', value: parseFloat(numberMatch[1])},
+                    token: { type: 'NUMBER', value: parseFloat(numberMatch[1]) },
                     nextIndex: start + numberMatch[1].length
                 };
             }
@@ -3893,7 +3943,7 @@
                 const type = ['true', 'false', 'null', 'undefined'].includes(value) ? 'KEYWORD' : 'IDENTIFIER';
 
                 return {
-                    token: {type, value},
+                    token: { type, value },
                     nextIndex: start + value.length
                 };
             }
@@ -3966,7 +4016,7 @@
 
                 // Create a new binary expression node with the parsed components
                 // This becomes the new left operand for potential further parsing
-                left = {type, left, operator: op, right};
+                left = { type, left, operator: op, right };
             }
 
             // Return the final parsed expression (could be the original left operand
@@ -4209,7 +4259,7 @@
                     // Parse value
                     const value = this.parseTernary();
 
-                    pairs.push({key, value});
+                    pairs.push({ key, value });
 
                 } while (this.match('COMMA') && !this.check('RBRACE'));
             }
@@ -4342,7 +4392,7 @@
          * @returns {Object} Current token
          */
         peek() {
-            return this.tokens[this.currentToken] || {type: 'EOF', value: null};
+            return this.tokens[this.currentToken] || { type: 'EOF', value: null };
         },
 
         /**
@@ -4670,7 +4720,7 @@
             const result = {};
 
             if (node.pairs) {
-                node.pairs.forEach(function({key, value}) {
+                node.pairs.forEach(function({ key, value }) {
                     result[key] = self.evaluate(value, context, scope);
                 });
             }
@@ -4987,6 +5037,38 @@
     };
 
     /**
+     * Captures an element's current display value into data-pac-orig-display before hiding.
+     * Reads the inline style first to avoid a forced synchronous layout recalculation.
+     * Falls back to getComputedStyle deferred via requestAnimationFrame when no inline
+     * style is set, so the read never blocks a style write.
+     * @param {Element} element
+     */
+    function captureOriginalDisplay(element) {
+        const inlineDisplay = element.style.display;
+
+        // Inline style is set and visible — capture it directly without touching the layout engine
+        if (inlineDisplay && inlineDisplay !== 'none') {
+            element.setAttribute('data-pac-orig-display', inlineDisplay);
+            return;
+        }
+
+        // No inline style — we'd need getComputedStyle, but calling it before a style write
+        // forces a synchronous layout recalculation. Defer to rAF so the read happens after
+        // the current paint cycle. Store an empty sentinel now so we don't repeat this.
+        if (!inlineDisplay) {
+            element.setAttribute('data-pac-orig-display', '');
+
+            requestAnimationFrame(() => {
+                const computed = getComputedStyle(element).display;
+
+                if (computed && computed !== 'none') {
+                    element.setAttribute('data-pac-orig-display', computed);
+                }
+            });
+        }
+    }
+
+    /**
      * Visible binding - Shows/hides elements by managing display CSS
      * @param {Context} context - The PAC component context
      * @param {Element} element - The container element
@@ -5003,10 +5085,8 @@
             }
         } else {
             if (!element.hasAttribute('data-pac-hidden')) {
-                const currentDisplay = getComputedStyle(element).display;
-
-                if (currentDisplay !== 'none') {
-                    element.setAttribute('data-pac-orig-display', currentDisplay);
+                if (!element.hasAttribute('data-pac-orig-display')) {
+                    captureOriginalDisplay(element);
                 }
 
                 element.style.display = 'none';
@@ -5152,7 +5232,7 @@
      * @param {string} template - Template string containing interpolation expressions (e.g., "Hello {{name}}")
      * @returns {void}
      */
-    DomUpdater.prototype.updateTextNode = function (element, template) {
+    DomUpdater.prototype.updateTextNode = function(element, template) {
         const self = this;
 
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
@@ -5190,7 +5270,7 @@
      * @param {*} [value] - Pre-evaluated value to skip redundant expression evaluation
      * @returns {void}
      */
-    DomUpdater.prototype.updateAttributeBinding = function (element, bindingType, bindingData, value) {
+    DomUpdater.prototype.updateAttributeBinding = function(element, bindingType, bindingData, value) {
         try {
             // Use registered handler if available
             const handler = BindingHandlers[bindingType];
@@ -5757,7 +5837,7 @@
      * @returns {Map<string, Set<string>>} Keys are accessed property names; values are
      *   the set of computed properties that ultimately depend on them.
      */
-    Context.prototype.getDependencies = function () {
+    Context.prototype.getDependencies = function() {
         const computed = this.originalAbstraction.computed ?? {};
         const computedNames = new Set(Object.keys(computed));
 
@@ -5980,7 +6060,7 @@
     Context.prototype.handleEvent = function(event) {
         // Route events to specialized handlers based on type
         // Each event type corresponds to a different aspect of the PAC (Presentation-Abstraction-Control) architecture
-        switch(event.type) {
+        switch (event.type) {
             // Handle general PAC events (likely business logic or component interactions)
             case 'pac:event':
                 this.handlePacEvent(event);
@@ -6044,7 +6124,7 @@
         }
 
         // Call built in event handlers
-        switch(event.message) {
+        switch (event.message) {
             case MSG_SETFOCUS:
                 this.updateFocusProperties();
                 break;
@@ -6086,13 +6166,68 @@
     }
 
     /**
+     * Evaluates a handler binding expression (used by click/submit bindings) and invokes the
+     * result if it resolves to a bare function reference, e.g. `data-click="save"`. Expressions
+     * that already contain an explicit call, e.g. `data-click="save(item.id, $event)"`, are
+     * executed directly by ExpressionParser.evaluate, so this fallback call is skipped for them.
+     * @param {string} bindingTarget - The binding expression to evaluate
+     * @param {Object} scopedAbstraction - The abstraction, extended with $event/$item/$index as applicable
+     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolver()
+     * @param {Array} fallbackArgs - Arguments to invoke the result with when it's a bare function reference
+     * @returns {*} The evaluated result
+     */
+    Context.prototype.evaluateHandlerExpression = function(bindingTarget, scopedAbstraction, scopeResolver, fallbackArgs) {
+        const result = ExpressionParser.evaluate(
+            ExpressionCache.parseExpression(bindingTarget),
+            scopedAbstraction,
+            scopeResolver
+        );
+
+        if (typeof result === 'function') {
+            result.call(this.abstraction, ...fallbackArgs);
+        }
+
+        return result;
+    };
+
+    /**
+     * Evaluates a handler binding with $event in scope, resolving paths against the
+     * event target, and reports failures instead of propagating them. Shared by the
+     * click, submit and change bindings, which differ only in the name reported on error.
+     * @param {string} kind - Binding name used in the failure message, e.g. 'click'
+     * @param {string} bindingTarget - The binding expression to evaluate
+     * @param {CustomEvent} event - The event being handled; its target anchors path resolution
+     * @returns {void}
+     */
+    Context.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
+        try {
+            // Build scope resolver, shared across the evaluation below
+            const scopeResolver = makeScopeResolver(
+                this.normalizePath.bind(this),
+                event.target,
+                this.importedUnits
+            );
+
+            // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
+            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                $event: event
+            });
+
+            // Fallback (if bindingTarget is a bare method name): call with (event)
+            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
+        } catch (error) {
+            console.warn(`Error executing ${kind} binding '${bindingTarget}':`, error);
+        }
+    };
+
+    /**
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
      * @param {Element} event.target - The DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
-    Context.prototype.handleDomClicks = function (event) {
+    Context.prototype.handleDomClicks = function(event) {
         // Get interpolation data for the clicked element
         const mappingData = this.interpolationMap.get(event.target);
         if (!mappingData?.bindings?.click) {
@@ -6105,19 +6240,19 @@
             // Check if click occurred within a foreach loop context
             const contextInfo = this.extractClosestForeachContext(event.target);
 
-            // Build scope resolver once, shared across all evaluations below
-            const scopeResolver = makeScopeResolver(
-                this.normalizePath.bind(this),
-                event.target,
-                this.importedUnits
-            );
-
             if (contextInfo) {
                 // Find the foreach element that contains this click target
                 const foreachElement = Array.from(this.interpolationMap.entries())
                     .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
 
                 if (foreachElement) {
+                    // Build scope resolver once, shared across all evaluations below
+                    const scopeResolver = makeScopeResolver(
+                        this.normalizePath.bind(this),
+                        event.target,
+                        this.importedUnits
+                    );
+
                     // Evaluate the foreach expression to get the source array
                     const foreachData = this.interpolationMap.get(foreachElement);
                     const array = ExpressionParser.evaluate(
@@ -6133,39 +6268,27 @@
                         $event: event
                     });
 
-                    const foreachResult = ExpressionParser.evaluate(
-                        ExpressionCache.parseExpression(bindingTarget),
+                    // Fallback (if bindingTarget is a bare method name): call with (item, index, event)
+                    this.evaluateHandlerExpression(
+                        bindingTarget,
                         scopedAbstraction,
-                        scopeResolver
+                        scopeResolver,
+                        [array[contextInfo.index], contextInfo.index, event]
                     );
-
-                    // Fallback: bare method name — call with (item, index, event)
-                    if (typeof foreachResult === 'function') {
-                        foreachResult.call(this.abstraction, array[contextInfo.index], contextInfo.index, event);
-                    }
 
                     return;
                 }
             }
-
-            // Simple case: evaluate expression with $event in scope
-            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                $event: event
-            });
-
-            const result = ExpressionParser.evaluate(
-                ExpressionCache.parseExpression(bindingTarget),
-                scopedAbstraction,
-                scopeResolver
-            );
-
-            // Fallback: bare method name — call with (event)
-            if (typeof result === 'function') {
-                result.call(this.abstraction, event);
-            }
         } catch (error) {
             console.warn(`Error executing click binding '${bindingTarget}':`, error);
+
+            // A failure while resolving foreach context aborts the handler — it does
+            // not fall through to the simple case, matching the original behaviour
+            return;
         }
+
+        // Simple case: evaluate expression with $event in scope
+        this.invokeEventBinding('click', bindingTarget, event);
     }
 
     /**
@@ -6183,21 +6306,13 @@
             return;
         }
 
-        // Get the method reference from the abstraction object using the binding target
-        const method = this.abstraction[mappingData.bindings.submit.target];
+        // Prevent the default. We don't want the browser to handle submit
+        event.preventDefault();
 
-        // Verify the target is actually a callable function
-        if (typeof method !== 'function') {
-            return;
-        }
+        // Fetch binding target
+        const bindingTarget = mappingData.bindings.submit.target;
 
-        try {
-            // Execute the bound method with the abstraction as context and pass the event
-            method.call(this.abstraction, event);
-        } catch (error) {
-            // Log execution errors with context for debugging
-            console.warn(`Error executing submit binding '${mappingData.bindings.submit.target}':`, error);
-        }
+        this.invokeEventBinding('submit', bindingTarget, event);
     };
 
     /**
@@ -6263,17 +6378,8 @@
 
         // Handle change binding (method execution)
         if (mappingData.bindings.change) {
-            // Resolve the target method from the abstraction object
-            const method = this.abstraction[mappingData.bindings.change.target];
-
-            if (typeof method === 'function') {
-                try {
-                    // Execute the bound method with the abstraction as context
-                    method.call(this.abstraction, event);
-                } catch (error) {
-                    console.warn(`Error executing change binding '${mappingData.bindings.change.target}':`, error);
-                }
-            }
+            const bindingTarget = mappingData.bindings.change.target;
+            this.invokeEventBinding('change', bindingTarget, event);
         }
     };
 
@@ -6349,7 +6455,7 @@
      * @param {HTMLElement} event.target - The DOM element that lost focus
      * @returns {void}
      */
-    Context.prototype.handleDomBlur = function (event) {
+    Context.prototype.handleDomBlur = function(event) {
         const targetElement = event.target;
 
         // Get the mapping data for this element
@@ -6396,7 +6502,7 @@
      * @param {*} event.detail.oldValue - The previous value before the change
      * @param {*} event.detail.newValue - The new value after the change
      */
-    Context.prototype.handleReactiveChange = function (event) {
+    Context.prototype.handleReactiveChange = function(event) {
         this.updateElementBindings();
         this.updateTextInterpolations();
         this.updateCommentConditionals();
@@ -6684,7 +6790,7 @@
     Context.prototype.handleBrowserStateEvent = function(event) {
         const { stateType, stateData } = event.detail;
 
-        switch(stateType) {
+        switch (stateType) {
             case 'visibility':
                 // Update browser visibility state
                 this.abstraction.browserVisible = stateData.visible;
@@ -6818,7 +6924,7 @@
      * @param {string|number} forEachId - Identifier used to look up the element.
      * @returns {*} The matching element, or null if no match is found.
      */
-    Context.prototype.findElementByForEachId = function (forEachId) {
+    Context.prototype.findElementByForEachId = function(forEachId) {
         // Loop over all element → mappingData pairs in the interpolation map
         for (const [element, mappingData] of this.interpolationMap) {
             // Check whether this entry belongs to the requested forEachId
@@ -6995,7 +7101,7 @@
 
         PARTIAL_INJECT_REGEX.lastIndex = 0;
 
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function (match, name, root) {
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name, root) {
             if (!_partials.has(name)) {
                 console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
                 return match;
@@ -7049,7 +7155,7 @@
             return;
         }
 
-        hits.forEach(function (textNode) {
+        hits.forEach(function(textNode) {
             const expanded = expandPartialsInString(textNode.textContent, 0);
 
             if (expanded === textNode.textContent) {
@@ -7275,7 +7381,7 @@
                 set(v) {
                     Utils.setNestedProperty(targetPath, v, this);
                 },
-                enumerable:   true,
+                enumerable: true,
                 configurable: true
             });
         });
@@ -7304,7 +7410,7 @@
         // context to point to the reactive proxy instead of the original object.
         // This ensures that when methods access properties via 'this.propertyName', they interact
         // with the reactive proxy (triggering DOM updates) rather than the non-reactive original.
-        Object.keys(this.originalAbstraction).forEach(function (key) {
+        Object.keys(this.originalAbstraction).forEach(function(key) {
             if (typeof self.originalAbstraction[key] === 'function' && key !== 'computed') {
                 proxiedReactive[key] = self.originalAbstraction[key].bind(proxiedReactive);
             }
@@ -7312,9 +7418,9 @@
 
         // Add computed properties as getters
         const computed = this.originalAbstraction.computed || {};
-        Object.keys(computed).forEach(function (computedName) {
+        Object.keys(computed).forEach(function(computedName) {
             Object.defineProperty(proxiedReactive, computedName, {
-                get: function () {
+                get: function() {
                     return computed[computedName].call(proxiedReactive);
                 },
                 enumerable: true,
@@ -7454,7 +7560,7 @@
         abstraction.browserVisible = !document.hidden;
 
         // Initialize current horizontal/vertical scroll position in pixels from left/top of document
-        abstraction.browserScrollX  = window.scrollX;
+        abstraction.browserScrollX = window.scrollX;
         abstraction.browserScrollY = window.scrollY;
 
         // Initialize current viewport width & height - the visible area of the browser window
@@ -7492,7 +7598,7 @@
         // Per-container viewport visibility properties
         abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
         abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
-        abstraction.containerClientRect = {top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0};
+        abstraction.containerClientRect = { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
         abstraction.containerWidth = this.container.clientWidth;
         abstraction.containerHeight = this.container.clientHeight;
 
@@ -7535,7 +7641,7 @@
      * @returns {Map<number, number>} A Map where each key is a render index (position in filteredArray)
      *                                and each value is the corresponding source index (position in sourceArray).
      */
-    Context.prototype.buildIndexMap = function (sourceArray, filteredArray) {
+    Context.prototype.buildIndexMap = function(sourceArray, filteredArray) {
         const claimed = new Set();
         const result = new Map(); // keyed by renderIndex
 
@@ -7811,7 +7917,7 @@
      * @param {Array<Object>} frames - Effective foreach frames (outer → inner).
      * @returns {Map<string, string|number>} Scoped variable map.
      */
-    Context.prototype.buildForeachScope = function (frames) {
+    Context.prototype.buildForeachScope = function(frames) {
         // Stores scoped variable → resolved path/index mappings
         const scope = new Map();
 
@@ -7975,7 +8081,7 @@
      * @param {string} arrayPath - Fully-qualified data array path to match.
      * @returns {HTMLElement[]} Elements whose foreach bindings depend on the array.
      */
-    Context.prototype.findForeachElementsByArrayPath = function (arrayPath) {
+    Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
         const elementsToUpdate = [];
 
         for (const [element, mappingData] of this.interpolationMap) {
@@ -8328,6 +8434,50 @@
     };
 
     // =============================================================================
+    // CHANNEL BRIDGE
+    // =============================================================================
+
+    /**
+     * Manages the BroadcastChannel used by broadcastMessageGlobal() to deliver
+     * messages across tabs. Activated only when a <meta name="wakapac-channel">
+     * tag is present before the WakaPAC script tag.
+     */
+    const ChannelBridge = {
+        /** @private {boolean} Flag to prevent multiple initializations */
+        _initialized: false,
+
+        /**
+         * Creates the BroadcastChannel and registers the onmessage handler.
+         * Should be called once during framework initialization.
+         */
+        initialize() {
+            if (this._initialized) {
+                return;
+            }
+
+            this._initialized = true;
+
+            // Cross-tab broadcast requires an explicit channel name via meta tag.
+            // If the tag is absent, broadcastMessageGlobal() falls back to local-only dispatch.
+            const meta = document.querySelector('meta[name="wakapac-channel"]');
+
+            if (meta && typeof BroadcastChannel !== 'undefined') {
+                // All tabs sharing the same origin and channel name form one broadcast
+                // group. The meta tag content sets the name, scoping it to this app.
+                _broadcastChannel = new BroadcastChannel(meta.content);
+
+                // Handle messages arriving from other tabs.
+                // BroadcastChannel never delivers a message back to the tab that posted
+                // it, so there is no risk of an infinite loop here.
+                _broadcastChannel.onmessage = function(e) {
+                    const { messageId, wParam, lParam, extended } = e.data;
+                    wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
+                };
+            }
+        }
+    };
+
+    // =============================================================================
     // MOUSE GESTURE RECOGNIZER
     // =============================================================================
 
@@ -8577,7 +8727,9 @@
                 const dy = curr.y - this.gesturePoints[i - 1].y;
                 const direction = this.getDirection(dx, dy);
 
-                if (!direction) continue;
+                if (!direction) {
+                    continue;
+                }
 
                 if (direction === currentDir) {
                     segmentEnd = curr;
@@ -9367,7 +9519,7 @@
                             }
 
                             const oscillator = _audioCtx.createOscillator();
-                            const gain       = _audioCtx.createGain();
+                            const gain = _audioCtx.createGain();
 
                             oscillator.connect(gain);
                             gain.connect(_audioCtx.destination);
@@ -9461,6 +9613,9 @@
         // Initialize automatic cleanup observer
         CleanupObserver.initialize();
 
+        // Initialize cross-tab broadcast channel
+        ChannelBridge.initialize();
+
         // Allow passing a pac-id directly instead of a CSS selector
         const originalSelector = selector;
         let isPacId = false;
@@ -9528,7 +9683,7 @@
 
                 if (pacState) {
                     try {
-                        Object.assign(abstraction, JSON.parse(pacState));
+                        Object.assign(containerAbstraction, JSON.parse(pacState));
                     } catch (e) {
                         console.warn('WakaPAC: Failed to parse data-pac-state:', e);
                     }
@@ -9555,31 +9710,31 @@
                     const sameAs = el.getAttribute('data-pac-same-as');
 
                     if (sameAs) {
-                        abstraction[name] = wakaPAC.sameAs(sameAs);
+                        containerAbstraction[name] = wakaPAC.sameAs(sameAs);
                         return;
                     }
 
                     switch (el.type) {
                         case 'checkbox':
                             // Read checked state as boolean
-                            Utils.setNestedProperty(name, el.checked, abstraction);
+                            Utils.setNestedProperty(name, el.checked, containerAbstraction);
                             break;
 
                         case 'number':
                         case 'range':
                             // Convert numeric input values to actual numbers
-                            Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', abstraction);
+                            Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', containerAbstraction);
                             break;
 
                         case 'radio':
                             // Initialize the group property with an empty string on first encounter
-                            if (Utils.getNestedValue(abstraction, name) === undefined) {
-                                Utils.setNestedProperty(name, '', abstraction);
+                            if (Utils.getNestedValue(containerAbstraction, name) === undefined) {
+                                Utils.setNestedProperty(name, '', containerAbstraction);
                             }
 
                             // Only overwrite if this radio button is the selected one
                             if (el.checked) {
-                                Utils.setNestedProperty(name, el.value, abstraction);
+                                Utils.setNestedProperty(name, el.value, containerAbstraction);
                             }
 
                             break;
@@ -9590,7 +9745,7 @@
 
                         default:
                             // For all other field types, read the current value or fall back to the HTML attribute
-                            Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), abstraction);
+                            Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), containerAbstraction);
                             break;
                     }
                 });
@@ -9636,7 +9791,7 @@
 
                 // Setup renderloop for webgl if renderLoop is set to true
                 if (contextType !== '2d' && config.renderLoop === true) {
-                    const loop = function () {
+                    const loop = function() {
                         if (!_renderLoops.has(pacId)) {
                             return; // Loop was canceled — component destroyed
                         }
@@ -9663,7 +9818,7 @@
                 // Attach WebGL context loss/restore handlers for all WebGL canvases,
                 // regardless of whether renderLoop is active.
                 if (contextType !== '2d') {
-                    container.addEventListener('webglcontextlost', function (e) {
+                    container.addEventListener('webglcontextlost', function(e) {
                         // Calling preventDefault() is required — without it the browser
                         // will not attempt to restore the context after it is lost.
                         e.preventDefault();
@@ -9690,7 +9845,7 @@
                         ));
                     });
 
-                    container.addEventListener('webglcontextrestored', function (e) {
+                    container.addEventListener('webglcontextrestored', function(e) {
                         // The context has been recreated by the browser — all GL resources
                         // must be rebuilt from scratch (shaders, buffers, textures, etc.).
                         // Provide the fresh context on event.glContext, mirroring MSG_WEBGL_READY.
@@ -9706,7 +9861,7 @@
 
                         // Resume the render loop if it was running before context loss.
                         if (_renderLoops.has(pacId) && _renderLoops.get(pacId) === null) {
-                            const loop = function () {
+                            const loop = function() {
                                 if (!_renderLoops.has(pacId)) {
                                     return;
                                 }
@@ -9759,7 +9914,7 @@
      * @param {Object} extended
      * @returns {CustomEvent}
      */
-    wakaPAC.createPacMessage = function (messageId, wParam, lParam, extended = {}) {
+    wakaPAC.createPacMessage = function(messageId, wParam, lParam, extended = {}) {
         // Throw error when extended is not an object
         if (extended !== null && !Utils.isPlainObject(extended)) {
             throw new TypeError(`wakaPAC.createPacMessage(): extended must be a plain object, got ${typeof extended}`);
@@ -9791,7 +9946,7 @@
      * @param {string} pacId Identifier of the target container
      * @returns {HTMLElement|null} The resolved container element, or null
      */
-    wakaPAC.getContextByPacId = function (pacId) {
+    wakaPAC.getContextByPacId = function(pacId) {
         return window.PACRegistry.get(pacId);
     };
 
@@ -9801,7 +9956,7 @@
      * @param {string} pacId Identifier of the target container
      * @returns {HTMLElement|null} The resolved container element, or null
      */
-    wakaPAC.getContainerByPacId = function (pacId) {
+    wakaPAC.getContainerByPacId = function(pacId) {
         const context = window.PACRegistry.get(pacId);
 
         if (!context) {
@@ -9872,7 +10027,7 @@
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.postMessage = function (pacId, messageId, wParam, lParam, extended = {}) {
+    wakaPAC.postMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
         // Resolve the target container from the registry.
         // If the container does not exist, the message is dropped.
         const container = this.getContainerByPacId(pacId);
@@ -9904,7 +10059,7 @@
      * @param {number} lParam - Second message parameter (integer)
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
-    wakaPAC.sendMessage = function (pacId, messageId, wParam, lParam, extended = {}) {
+    wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
         // Resolve the target container. If it does not exist, the message is dropped.
         const container = this.getContainerByPacId(pacId);
 
@@ -10009,6 +10164,32 @@
     };
 
     /**
+     * Broadcasts a message to all WakaPAC containers in every tab/window sharing
+     * the same origin. The message is also dispatched locally via broadcastMessage().
+     *
+     * Only primitives and plain objects survive the structured-clone serialization
+     * used by BroadcastChannel. Do not put DOM nodes or component references in
+     * the extended payload.
+     *
+     * Falls back to a local broadcastMessage() if BroadcastChannel is not supported.
+     *
+     * @param {number} messageId - Message identifier (integer constant, e.g., wakaPAC.MSG_USER + 1)
+     * @param {number} [wParam=0] - First message parameter (integer)
+     * @param {number} [lParam=0] - Second message parameter (integer)
+     * @param {Object} [extended={}] - Additional plain-object data; must be structured-clone safe
+     */
+    wakaPAC.broadcastMessageGlobal = function(messageId, wParam = 0, lParam = 0, extended = {}) {
+        // Always dispatch locally first
+        wakaPAC.broadcastMessage(messageId, wParam, lParam, extended);
+
+        // Post to other tabs. Receiving tabs call broadcastMessage (not
+        // broadcastMessageGlobal), so the message is never re-posted to the channel.
+        if (_broadcastChannel) {
+            _broadcastChannel.postMessage({ messageId, wParam, lParam, extended });
+        }
+    };
+
+    /**
      * Installs a message hook that intercepts all PAC messages before they reach
      * their target container's msgProc. Hooks are called in registration order.
      * @param {Function} fn - Hook function with signature (event, callNextHook) => void
@@ -10080,7 +10261,7 @@
      * @param {string} pacId - Target container's data-pac-id
      * @returns {*|number}
      */
-    wakaPAC.killAllTimers = function (pacId) {
+    wakaPAC.killAllTimers = function(pacId) {
         // Look up the PAC execution context from the global registry
         const context = window.PACRegistry.get(pacId);
 
@@ -10333,7 +10514,7 @@
      * @param {string|Object} name - Unit name (e.g. 'CollectionUtils') or library reference (e.g. CollectionUtils)
      * @returns {Object|null} The unit's function set, or null if not found
      */
-    wakaPAC.unit = function (name) {
+    wakaPAC.unit = function(name) {
         if (typeof name === 'object') {
             name = _unitNames.get(name) ?? null;
 
@@ -10465,51 +10646,47 @@
     }
 
     // Single-value setters: method(value) → push {op, value}
-    [
-        'setFillStyle', 'setStrokeStyle', 'setLineWidth', 'setLineCap', 'setLineJoin',
-        'setLineDashOffset', 'setMiterLimit', 'setGlobalAlpha', 'setGlobalComposite',
-        'setFont', 'setTextAlign', 'setTextBaseline', 'setTextRendering',
-        'setLetterSpacing', 'setWordSpacing', 'setLineDash',
-    ].forEach(function (name) {
-        MetaFile.prototype[name] = function (value) {
-            this._ops.push({op: name, value});
+    // setLineDash is a ctx method rather than a property, so it is not in
+    // _metaFileProps, but it records identically.
+    Object.keys(_metaFileProps).concat('setLineDash').forEach(function(name) {
+        MetaFile.prototype[name] = function(value) {
+            this._ops.push({ op: name, value });
             return this;
         };
     });
 
     // No-argument state ops: method() → push {op}
-    [
-        'save', 'restore', 'beginPath', 'closePath', 'stroke', 'resetTransform', 'clearShadow',
-    ].forEach(function (name) {
-        MetaFile.prototype[name] = function () {
-            this._ops.push({op: name});
+    // clearShadow resets four ctx properties rather than calling one method, so
+    // it is not in _metaFileMethods, but it records identically.
+    Object.keys(_metaFileMethods).concat('clearShadow').forEach(function(name) {
+        MetaFile.prototype[name] = function() {
+            this._ops.push({ op: name });
             return this;
         };
     });
 
-    // Other ops
-    MetaFile.prototype.moveTo = function(x, y) { this._ops.push({op: 'moveTo', x, y}); return this; };
-    MetaFile.prototype.lineTo = function(x, y) { this._ops.push({op: 'lineTo', x, y}); return this; };
-    MetaFile.prototype.arc = function(cx, cy, r, startAngle, endAngle, ccw = false) { this._ops.push({op: 'arc', cx, cy, r, startAngle, endAngle, ccw}); return this; };
-    MetaFile.prototype.arcTo = function(x1, y1, x2, y2, r) { this._ops.push({op: 'arcTo', x1, y1, x2, y2, r}); return this; };
-    MetaFile.prototype.ellipse = function(cx, cy, rx, ry, rotation, startAngle, endAngle, ccw = false) { this._ops.push({op: 'ellipse', cx, cy, rx, ry, rotation, startAngle, endAngle, ccw}); return this; };
-    MetaFile.prototype.rect = function(x, y, w, h) { this._ops.push({op: 'rect', x, y, w, h}); return this; };
-    MetaFile.prototype.roundRect = function(x, y, w, h, r) { this._ops.push({op: 'roundRect', x, y, w, h, r}); return this; };
-    MetaFile.prototype.fill = function(rule = 'nonzero') { this._ops.push({op: 'fill', rule}); return this; };
-    MetaFile.prototype.clip = function(rule = 'nonzero') { this._ops.push({op: 'clip', rule}); return this; };
-    MetaFile.prototype.fillRect = function(x, y, w, h) { this._ops.push({op: 'fillRect', x, y, w, h}); return this; };
-    MetaFile.prototype.strokeRect = function(x, y, w, h) { this._ops.push({op: 'strokeRect', x, y, w, h}); return this; };
-    MetaFile.prototype.clearRect = function(x, y, w, h) { this._ops.push({op: 'clearRect', x, y, w, h}); return this; };
-    MetaFile.prototype.fillText = function(text, x, y, maxWidth) { this._ops.push({op: 'fillText', text, x, y, maxWidth}); return this; };
-    MetaFile.prototype.strokeText = function(text, x, y, maxWidth) { this._ops.push({op: 'strokeText', text, x, y, maxWidth}); return this; };
-    MetaFile.prototype.bezierCurveTo = function(cp1x, cp1y, cp2x, cp2y, x, y) { this._ops.push({op: 'bezierCurveTo', cp1x, cp1y, cp2x, cp2y, x, y}); return this; };
-    MetaFile.prototype.quadraticCurveTo = function(cpx, cpy, x, y) { this._ops.push({op: 'quadraticCurveTo', cpx, cpy, x, y}); return this; };
-    MetaFile.prototype.drawImage = function(image, dx, dy, dw, dh) { this._ops.push({op: 'drawImage', image, dx, dy, dw, dh}); return this; };
-    MetaFile.prototype.translate = function(x, y) { this._ops.push({op: 'translate', x, y}); return this; };
-    MetaFile.prototype.rotate = function(angle) { this._ops.push({op: 'rotate', angle}); return this; };
-    MetaFile.prototype.scale = function(x, y) { this._ops.push({op: 'scale', x, y}); return this; };
-    MetaFile.prototype.transform = function(a, b, c, d, e, f) { this._ops.push({op: 'transform', a, b, c, d, e, f}); return this; };
-    MetaFile.prototype.setTransform = function(a, b, c, d, e, f) { this._ops.push({op: 'setTransform', a, b, c, d, e, f}); return this; };
+    // Ops that map onto a same-named ctx method: arguments are recorded under the
+    // field names listed in _metaFileOps, with omitted values falling back to
+    // _metaFileOpDefaults.
+    Object.entries(_metaFileOps).forEach(function([name, params]) {
+        const defaults = _metaFileOpDefaults[name];
+
+        MetaFile.prototype[name] = function(...args) {
+            const op = { op: name };
+
+            for (let i = 0; i < params.length; i++) {
+                const value = args[i];
+                op[params[i]] = (value === undefined && defaults && params[i] in defaults)
+                    ? defaults[params[i]]
+                    : value;
+            }
+
+            this._ops.push(op);
+            return this;
+        };
+    });
+
+    // Ops with no single ctx method behind them — recorded by hand
     MetaFile.prototype.setShadow = function(color, blur, offsetX = 0, offsetY = 0) { this._ops.push({op: 'setShadow', color, blur, offsetX, offsetY}); return this; };
     MetaFile.prototype.setImageSmoothing = function(enabled, quality) { this._ops.push({op: 'setImageSmoothing', enabled, quality}); return this; };
 
@@ -10553,7 +10730,7 @@
      * @param {string} pacId
      * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
      */
-    wakaPAC.getDC = function (pacId) {
+    wakaPAC.getDC = function(pacId) {
         const container = this.getContainerByPacId(pacId);
 
         if (!container || !(container instanceof HTMLCanvasElement)) {
@@ -10604,7 +10781,7 @@
      * the dirty-rect clip mechanism.
      * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} ctx - the context returned by getDC()
      */
-    wakaPAC.releaseDC = function (ctx) {
+    wakaPAC.releaseDC = function(ctx) {
         // Bail if no ctx passed
         if (!ctx) {
             return;
@@ -10670,7 +10847,7 @@
         const offscreen = dc.canvas;
 
         if (offscreen instanceof OffscreenCanvas) {
-            offscreen.width  = 0;
+            offscreen.width = 0;
             offscreen.height = 0;
         }
     };
@@ -10687,10 +10864,10 @@
      *   'webgl2' — returns WebGL2RenderingContext
      *
      * @param {HTMLCanvasElement} canvasElement
-     * @param {Object} [attributes] - Context attributes passed to getContext()
+     * @param {Object} [attributes={}] - Context attributes passed to getContext()
      * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
      */
-    wakaPAC.getDCFromElement = function(canvasElement, attributes) {
+    wakaPAC.getDCFromElement = function(canvasElement, attributes = {}) {
         if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
             return null;
         }
@@ -10761,7 +10938,7 @@
      * @param {string} pacId - data-pac-id of the target canvas container
      * @returns {{x:number, y:number, width:number, height:number}|null}
      */
-    wakaPAC.getInvalidatedRect = function (pacId) {
+    wakaPAC.getInvalidatedRect = function(pacId) {
         const entry = _dirtyCanvases.get(pacId);
 
         if (!entry) {
@@ -10777,14 +10954,14 @@
      * @param {string} pacId - data-pac-id of the target canvas container
      * @returns {Array<{x:number, y:number, width:number, height:number}>|null}
      */
-    wakaPAC.getUpdateRgn = function (pacId) {
+    wakaPAC.getUpdateRgn = function(pacId) {
         const entry = _dirtyCanvases.get(pacId);
 
         if (!entry) {
             return null;
         }
 
-        return entry.rects.map(r => ({...r}));
+        return entry.rects.map(r => ({ ...r }));
     };
 
     /**
@@ -10877,7 +11054,7 @@
      * @param {number} width  - New backing store width in pixels
      * @param {number} height - New backing store height in pixels
      */
-    wakaPAC.resizeCanvas = function (pacId, width, height) {
+    wakaPAC.resizeCanvas = function(pacId, width, height) {
         // Fetch the container
         const container = this.getContainerByPacId(pacId);
 
@@ -10935,7 +11112,7 @@
      * Accepted sources:
      *   - string               URL or data URI; fetched and decoded via createImageBitmap()
      *   - HTMLImageElement     Must be fully loaded (complete && naturalWidth > 0)
-     *   - ImageBitmap          Used directly; caller retains ownership and must close it themselves
+     *   - ImageBitmap          Snapshotted into a new handle; caller retains ownership of the source
      *   - ImageData            Raw RGBA pixel buffer; drawn at its own dimensions
      *   - Blob                 Decoded via createImageBitmap()
      *   - HTMLCanvasElement    Snapshot of the canvas at call time
@@ -10960,14 +11137,15 @@
 
                 bitmap = await createImageBitmap(source);
             } else if (source instanceof ImageBitmap) {
-                // Already an ImageBitmap — use directly; caller retains ownership
-                // and is responsible for closing it
-                const dc = _createCanvas(source.width, source.height);
-                dc.drawImage(source, 0, 0);
-                return /** @type {CanvasRenderingContext2D} */ (dc);
+                // Already an ImageBitmap — snapshot it into a new canvas so the
+                // returned handle is fully self-contained and the caller can close
+                // their original ImageBitmap independently without affecting ours.
+                // createImageBitmap() from an ImageBitmap is a zero-copy operation
+                // in most engines, so there is no meaningful performance cost.
+                bitmap = await createImageBitmap(source);
             } else if (
-                source instanceof ImageData        ||
-                source instanceof Blob             ||
+                source instanceof ImageData ||
+                source instanceof Blob ||
                 source instanceof HTMLCanvasElement ||
                 source instanceof OffscreenCanvas
             ) {
@@ -10986,7 +11164,8 @@
             bitmap.close();
 
             return /** @type {CanvasRenderingContext2D} */ (dc);
-        } catch {
+        } catch (err) {
+            console.error('wakaPAC.loadBitmap: failed to load bitmap', err);
             return null;
         }
     };
@@ -11006,7 +11185,7 @@
         }
 
         // Derive MIME type from filename extension; fall back to PNG
-        const ext  = filename.split('.').pop().toLowerCase();
+        const ext = filename.split('.').pop().toLowerCase();
         const mime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }[ext] ?? 'image/png';
 
         try {
@@ -11027,12 +11206,13 @@
             // already queued by the time revokeObjectURL is called so it is safe to
             // revoke immediately.
             const url = URL.createObjectURL(blob);
-            const a   = Object.assign(document.createElement('a'), { href: url, download: filename });
+            const a = Object.assign(document.createElement('a'), { href: url, download: filename });
 
             a.click();
             URL.revokeObjectURL(url);
             return true;
-        } catch {
+        } catch (err) {
+            console.error('wakaPAC.saveBitmap: failed to save bitmap', err);
             return false;
         }
     };
@@ -11060,7 +11240,7 @@
         }
 
         return {
-            width:  hBitmap.canvas.width,
+            width: hBitmap.canvas.width,
             height: hBitmap.canvas.height
         };
     };
@@ -11107,96 +11287,34 @@
                 continue;
             }
 
+            // Ops that map onto a same-named ctx method — arguments spread from
+            // the field order declared in _metaFileOps
+            const params = _metaFileOps[op.op];
+
+            if (params) {
+                const defaults = _metaFileOpDefaults[op.op];
+                const args = [];
+
+                for (let j = 0; j < params.length; j++) {
+                    const value = op[params[j]];
+                    args.push((defaults && params[j] in defaults) ? (value ?? defaults[params[j]]) : value);
+                }
+
+                // drawImage is overloaded on argument count rather than taking optional
+                // arguments, and an explicit undefined still counts towards that count.
+                // Passing (image, dx, dy, undefined, undefined) therefore selects the
+                // five-argument form, where the undefined sizes become NaN and nothing is
+                // drawn, so drop the pair when neither was supplied.
+                if (op.op === 'drawImage' && args[3] === undefined && args[4] === undefined) {
+                    args.length = 3;
+                }
+
+                ctx[op.op](...args);
+                continue;
+            }
+
             // Ops requiring custom argument mapping
             switch (op.op) {
-                case 'moveTo':
-                    ctx.moveTo(op.x, op.y);
-                    break;
-
-                case 'lineTo':
-                    ctx.lineTo(op.x, op.y);
-                    break;
-
-                case 'arc':
-                    ctx.arc(op.cx, op.cy, op.r, op.startAngle, op.endAngle, op.ccw ?? false);
-                    break;
-
-                case 'arcTo':
-                    ctx.arcTo(op.x1, op.y1, op.x2, op.y2, op.r);
-                    break;
-
-                case 'ellipse':
-                    ctx.ellipse(op.cx, op.cy, op.rx, op.ry, op.rotation, op.startAngle, op.endAngle, op.ccw ?? false);
-                    break;
-
-                case 'rect':
-                    ctx.rect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'roundRect':
-                    ctx.roundRect(op.x, op.y, op.w, op.h, op.r);
-                    break;
-
-                case 'bezierCurveTo':
-                    ctx.bezierCurveTo(op.cp1x, op.cp1y, op.cp2x, op.cp2y, op.x, op.y);
-                    break;
-
-                case 'quadraticCurveTo':
-                    ctx.quadraticCurveTo(op.cpx, op.cpy, op.x, op.y);
-                    break;
-
-                case 'fill':
-                    ctx.fill(op.rule ?? 'nonzero');
-                    break;
-
-                case 'clip':
-                    ctx.clip(op.rule ?? 'nonzero');
-                    break;
-
-                case 'fillRect':
-                    ctx.fillRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'strokeRect':
-                    ctx.strokeRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'clearRect':
-                    ctx.clearRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'fillText':
-                    ctx.fillText(op.text, op.x, op.y, op.maxWidth);
-                    break;
-
-                case 'strokeText':
-                    ctx.strokeText(op.text, op.x, op.y, op.maxWidth);
-                    break;
-
-                case 'drawImage':
-                    ctx.drawImage(op.image, op.dx, op.dy, op.dw, op.dh);
-                    break;
-
-                case 'translate':
-                    ctx.translate(op.x, op.y);
-                    break;
-
-                case 'rotate':
-                    ctx.rotate(op.angle);
-                    break;
-
-                case 'scale':
-                    ctx.scale(op.x, op.y);
-                    break;
-
-                case 'transform':
-                    ctx.transform(op.a, op.b, op.c, op.d, op.e, op.f);
-                    break;
-
-                case 'setTransform':
-                    ctx.setTransform(op.a, op.b, op.c, op.d, op.e, op.f);
-                    break;
-
                 case 'setLineDash':
                     ctx.setLineDash(op.value);
                     break;
@@ -11255,7 +11373,7 @@
      * @param {number}        [offsetY=0] - Y offset passed to playMetaFile
      * @returns {*|null} The matching hitArea's data payload, or null
      */
-    wakaPAC.metaFileHitTest = function (dl, x, y, offsetX = 0, offsetY = 0) {
+    wakaPAC.metaFileHitTest = function(dl, x, y, offsetX = 0, offsetY = 0) {
         if (!Array.isArray(dl)) {
             return null;
         }
@@ -11290,21 +11408,21 @@
 
                     let inside = false;
 
-                    for (let i = 0, j = pts.length - 2; i < pts.length; i += 2) {
-                        const xi = pts[i];
-                        const yi = pts[i + 1];
-                        const xj = pts[j];
-                        const yj = pts[j + 1];
+                    for (let p = 0, q = pts.length - 2; p < pts.length; p += 2) {
+                        const xp = pts[p];
+                        const yp = pts[p + 1];
+                        const xq = pts[q];
+                        const yq = pts[q + 1];
 
                         const intersect =
-                            ((yi > ly) !== (yj > ly)) &&
-                            (lx < (xj - xi) * (ly - yi) / (yj - yi) + xi);
+                            ((yp > ly) !== (yq > ly)) &&
+                            (lx < (xq - xp) * (ly - yp) / (yq - yp) + xp);
 
                         if (intersect) {
                             inside = !inside;
                         }
 
-                        j = i;
+                        q = p;
                     }
 
                     if (inside) {
