@@ -607,6 +607,51 @@
         resetTransform: 'resetTransform'
     };
 
+    /**
+     * Maps metafile op names to their CanvasRenderingContext2D argument order.
+     * Every op here calls a same-named ctx method with its fields spread in the
+     * listed order. Single source of truth: the MetaFile builder generates one
+     * recording method per entry, and playMetaFile replays them from the same list.
+     * @type {Object<string, string[]>}
+     */
+    const _metaFileOps = {
+        moveTo:           ['x', 'y'],
+        lineTo:           ['x', 'y'],
+        arc:              ['cx', 'cy', 'r', 'startAngle', 'endAngle', 'ccw'],
+        arcTo:            ['x1', 'y1', 'x2', 'y2', 'r'],
+        ellipse:          ['cx', 'cy', 'rx', 'ry', 'rotation', 'startAngle', 'endAngle', 'ccw'],
+        rect:             ['x', 'y', 'w', 'h'],
+        roundRect:        ['x', 'y', 'w', 'h', 'r'],
+        bezierCurveTo:    ['cp1x', 'cp1y', 'cp2x', 'cp2y', 'x', 'y'],
+        quadraticCurveTo: ['cpx', 'cpy', 'x', 'y'],
+        fill:             ['rule'],
+        clip:             ['rule'],
+        fillRect:         ['x', 'y', 'w', 'h'],
+        strokeRect:       ['x', 'y', 'w', 'h'],
+        clearRect:        ['x', 'y', 'w', 'h'],
+        fillText:         ['text', 'x', 'y', 'maxWidth'],
+        strokeText:       ['text', 'x', 'y', 'maxWidth'],
+        drawImage:        ['image', 'dx', 'dy', 'dw', 'dh'],
+        translate:        ['x', 'y'],
+        rotate:           ['angle'],
+        scale:            ['x', 'y'],
+        transform:        ['a', 'b', 'c', 'd', 'e', 'f'],
+        setTransform:     ['a', 'b', 'c', 'd', 'e', 'f']
+    };
+
+    /**
+     * Default values for optional _metaFileOps fields. Applied when recording
+     * (the argument was omitted) and again when replaying, so hand-written
+     * display lists that leave the field out behave the same as recorded ones.
+     * @type {Object<string, Object>}
+     */
+    const _metaFileOpDefaults = {
+        arc:     { ccw: false },
+        ellipse: { ccw: false },
+        fill:    { rule: 'nonzero' },
+        clip:    { rule: 'nonzero' }
+    };
+
     // =============================================================================
     // UTILITY FUNCTIONS
     // =============================================================================
@@ -10601,12 +10646,9 @@
     }
 
     // Single-value setters: method(value) → push {op, value}
-    [
-        'setFillStyle', 'setStrokeStyle', 'setLineWidth', 'setLineCap', 'setLineJoin',
-        'setLineDashOffset', 'setMiterLimit', 'setGlobalAlpha', 'setGlobalComposite',
-        'setFont', 'setTextAlign', 'setTextBaseline', 'setTextRendering',
-        'setLetterSpacing', 'setWordSpacing', 'setLineDash',
-    ].forEach(function(name) {
+    // setLineDash is a ctx method rather than a property, so it is not in
+    // _metaFileProps, but it records identically.
+    Object.keys(_metaFileProps).concat('setLineDash').forEach(function(name) {
         MetaFile.prototype[name] = function(value) {
             this._ops.push({ op: name, value });
             return this;
@@ -10614,38 +10656,37 @@
     });
 
     // No-argument state ops: method() → push {op}
-    [
-        'save', 'restore', 'beginPath', 'closePath', 'stroke', 'resetTransform', 'clearShadow',
-    ].forEach(function(name) {
+    // clearShadow resets four ctx properties rather than calling one method, so
+    // it is not in _metaFileMethods, but it records identically.
+    Object.keys(_metaFileMethods).concat('clearShadow').forEach(function(name) {
         MetaFile.prototype[name] = function() {
             this._ops.push({ op: name });
             return this;
         };
     });
 
-    // Other ops
-    MetaFile.prototype.moveTo = function(x, y) { this._ops.push({op: 'moveTo', x, y}); return this; };
-    MetaFile.prototype.lineTo = function(x, y) { this._ops.push({op: 'lineTo', x, y}); return this; };
-    MetaFile.prototype.arc = function(cx, cy, r, startAngle, endAngle, ccw = false) { this._ops.push({op: 'arc', cx, cy, r, startAngle, endAngle, ccw}); return this; };
-    MetaFile.prototype.arcTo = function(x1, y1, x2, y2, r) { this._ops.push({op: 'arcTo', x1, y1, x2, y2, r}); return this; };
-    MetaFile.prototype.ellipse = function(cx, cy, rx, ry, rotation, startAngle, endAngle, ccw = false) { this._ops.push({op: 'ellipse', cx, cy, rx, ry, rotation, startAngle, endAngle, ccw}); return this; };
-    MetaFile.prototype.rect = function(x, y, w, h) { this._ops.push({op: 'rect', x, y, w, h}); return this; };
-    MetaFile.prototype.roundRect = function(x, y, w, h, r) { this._ops.push({op: 'roundRect', x, y, w, h, r}); return this; };
-    MetaFile.prototype.fill = function(rule = 'nonzero') { this._ops.push({op: 'fill', rule}); return this; };
-    MetaFile.prototype.clip = function(rule = 'nonzero') { this._ops.push({op: 'clip', rule}); return this; };
-    MetaFile.prototype.fillRect = function(x, y, w, h) { this._ops.push({op: 'fillRect', x, y, w, h}); return this; };
-    MetaFile.prototype.strokeRect = function(x, y, w, h) { this._ops.push({op: 'strokeRect', x, y, w, h}); return this; };
-    MetaFile.prototype.clearRect = function(x, y, w, h) { this._ops.push({op: 'clearRect', x, y, w, h}); return this; };
-    MetaFile.prototype.fillText = function(text, x, y, maxWidth) { this._ops.push({op: 'fillText', text, x, y, maxWidth}); return this; };
-    MetaFile.prototype.strokeText = function(text, x, y, maxWidth) { this._ops.push({op: 'strokeText', text, x, y, maxWidth}); return this; };
-    MetaFile.prototype.bezierCurveTo = function(cp1x, cp1y, cp2x, cp2y, x, y) { this._ops.push({op: 'bezierCurveTo', cp1x, cp1y, cp2x, cp2y, x, y}); return this; };
-    MetaFile.prototype.quadraticCurveTo = function(cpx, cpy, x, y) { this._ops.push({op: 'quadraticCurveTo', cpx, cpy, x, y}); return this; };
-    MetaFile.prototype.drawImage = function(image, dx, dy, dw, dh) { this._ops.push({op: 'drawImage', image, dx, dy, dw, dh}); return this; };
-    MetaFile.prototype.translate = function(x, y) { this._ops.push({op: 'translate', x, y}); return this; };
-    MetaFile.prototype.rotate = function(angle) { this._ops.push({op: 'rotate', angle}); return this; };
-    MetaFile.prototype.scale = function(x, y) { this._ops.push({op: 'scale', x, y}); return this; };
-    MetaFile.prototype.transform = function(a, b, c, d, e, f) { this._ops.push({op: 'transform', a, b, c, d, e, f}); return this; };
-    MetaFile.prototype.setTransform = function(a, b, c, d, e, f) { this._ops.push({op: 'setTransform', a, b, c, d, e, f}); return this; };
+    // Ops that map onto a same-named ctx method: arguments are recorded under the
+    // field names listed in _metaFileOps, with omitted values falling back to
+    // _metaFileOpDefaults.
+    Object.entries(_metaFileOps).forEach(function([name, params]) {
+        const defaults = _metaFileOpDefaults[name];
+
+        MetaFile.prototype[name] = function(...args) {
+            const op = { op: name };
+
+            for (let i = 0; i < params.length; i++) {
+                const value = args[i];
+                op[params[i]] = (value === undefined && defaults && params[i] in defaults)
+                    ? defaults[params[i]]
+                    : value;
+            }
+
+            this._ops.push(op);
+            return this;
+        };
+    });
+
+    // Ops with no single ctx method behind them — recorded by hand
     MetaFile.prototype.setShadow = function(color, blur, offsetX = 0, offsetY = 0) { this._ops.push({op: 'setShadow', color, blur, offsetX, offsetY}); return this; };
     MetaFile.prototype.setImageSmoothing = function(enabled, quality) { this._ops.push({op: 'setImageSmoothing', enabled, quality}); return this; };
 
@@ -11246,96 +11287,25 @@
                 continue;
             }
 
+            // Ops that map onto a same-named ctx method — arguments spread from
+            // the field order declared in _metaFileOps
+            const params = _metaFileOps[op.op];
+
+            if (params) {
+                const defaults = _metaFileOpDefaults[op.op];
+                const args = [];
+
+                for (let j = 0; j < params.length; j++) {
+                    const value = op[params[j]];
+                    args.push((defaults && params[j] in defaults) ? (value ?? defaults[params[j]]) : value);
+                }
+
+                ctx[op.op](...args);
+                continue;
+            }
+
             // Ops requiring custom argument mapping
             switch (op.op) {
-                case 'moveTo':
-                    ctx.moveTo(op.x, op.y);
-                    break;
-
-                case 'lineTo':
-                    ctx.lineTo(op.x, op.y);
-                    break;
-
-                case 'arc':
-                    ctx.arc(op.cx, op.cy, op.r, op.startAngle, op.endAngle, op.ccw ?? false);
-                    break;
-
-                case 'arcTo':
-                    ctx.arcTo(op.x1, op.y1, op.x2, op.y2, op.r);
-                    break;
-
-                case 'ellipse':
-                    ctx.ellipse(op.cx, op.cy, op.rx, op.ry, op.rotation, op.startAngle, op.endAngle, op.ccw ?? false);
-                    break;
-
-                case 'rect':
-                    ctx.rect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'roundRect':
-                    ctx.roundRect(op.x, op.y, op.w, op.h, op.r);
-                    break;
-
-                case 'bezierCurveTo':
-                    ctx.bezierCurveTo(op.cp1x, op.cp1y, op.cp2x, op.cp2y, op.x, op.y);
-                    break;
-
-                case 'quadraticCurveTo':
-                    ctx.quadraticCurveTo(op.cpx, op.cpy, op.x, op.y);
-                    break;
-
-                case 'fill':
-                    ctx.fill(op.rule ?? 'nonzero');
-                    break;
-
-                case 'clip':
-                    ctx.clip(op.rule ?? 'nonzero');
-                    break;
-
-                case 'fillRect':
-                    ctx.fillRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'strokeRect':
-                    ctx.strokeRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'clearRect':
-                    ctx.clearRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'fillText':
-                    ctx.fillText(op.text, op.x, op.y, op.maxWidth);
-                    break;
-
-                case 'strokeText':
-                    ctx.strokeText(op.text, op.x, op.y, op.maxWidth);
-                    break;
-
-                case 'drawImage':
-                    ctx.drawImage(op.image, op.dx, op.dy, op.dw, op.dh);
-                    break;
-
-                case 'translate':
-                    ctx.translate(op.x, op.y);
-                    break;
-
-                case 'rotate':
-                    ctx.rotate(op.angle);
-                    break;
-
-                case 'scale':
-                    ctx.scale(op.x, op.y);
-                    break;
-
-                case 'transform':
-                    ctx.transform(op.a, op.b, op.c, op.d, op.e, op.f);
-                    break;
-
-                case 'setTransform':
-                    ctx.setTransform(op.a, op.b, op.c, op.d, op.e, op.f);
-                    break;
-
                 case 'setLineDash':
                     ctx.setLineDash(op.value);
                     break;
