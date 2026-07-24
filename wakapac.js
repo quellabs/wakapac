@@ -607,6 +607,51 @@
         resetTransform: 'resetTransform'
     };
 
+    /**
+     * Maps metafile op names to their CanvasRenderingContext2D argument order.
+     * Every op here calls a same-named ctx method with its fields spread in the
+     * listed order. Single source of truth: the MetaFile builder generates one
+     * recording method per entry, and playMetaFile replays them from the same list.
+     * @type {Object<string, string[]>}
+     */
+    const _metaFileOps = {
+        moveTo:           ['x', 'y'],
+        lineTo:           ['x', 'y'],
+        arc:              ['cx', 'cy', 'r', 'startAngle', 'endAngle', 'ccw'],
+        arcTo:            ['x1', 'y1', 'x2', 'y2', 'r'],
+        ellipse:          ['cx', 'cy', 'rx', 'ry', 'rotation', 'startAngle', 'endAngle', 'ccw'],
+        rect:             ['x', 'y', 'w', 'h'],
+        roundRect:        ['x', 'y', 'w', 'h', 'r'],
+        bezierCurveTo:    ['cp1x', 'cp1y', 'cp2x', 'cp2y', 'x', 'y'],
+        quadraticCurveTo: ['cpx', 'cpy', 'x', 'y'],
+        fill:             ['rule'],
+        clip:             ['rule'],
+        fillRect:         ['x', 'y', 'w', 'h'],
+        strokeRect:       ['x', 'y', 'w', 'h'],
+        clearRect:        ['x', 'y', 'w', 'h'],
+        fillText:         ['text', 'x', 'y', 'maxWidth'],
+        strokeText:       ['text', 'x', 'y', 'maxWidth'],
+        drawImage:        ['image', 'dx', 'dy', 'dw', 'dh'],
+        translate:        ['x', 'y'],
+        rotate:           ['angle'],
+        scale:            ['x', 'y'],
+        transform:        ['a', 'b', 'c', 'd', 'e', 'f'],
+        setTransform:     ['a', 'b', 'c', 'd', 'e', 'f']
+    };
+
+    /**
+     * Default values for optional _metaFileOps fields. Applied when recording
+     * (the argument was omitted) and again when replaying, so hand-written
+     * display lists that leave the field out behave the same as recorded ones.
+     * @type {Object<string, Object>}
+     */
+    const _metaFileOpDefaults = {
+        arc:     { ccw: false },
+        ellipse: { ccw: false },
+        fill:    { rule: 'nonzero' },
+        clip:    { rule: 'nonzero' }
+    };
+
     // =============================================================================
     // UTILITY FUNCTIONS
     // =============================================================================
@@ -1519,7 +1564,6 @@
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
 
-
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
 
@@ -1572,6 +1616,32 @@
             this._setupFormEvents();         // Form interaction tracking
             this._setupWindowEvents();       // Scroll/resize state updates
             this._setupObservers();          // Intersection/resize observers
+        },
+
+        /**
+         * Registers a listener for an event that requires no handling beyond
+         * resolving the target container and dispatching one mouse message.
+         * Events the predicate rejects are ignored; omit it to always dispatch.
+         * @private
+         * @param {string} eventName - DOM event name to listen for
+         * @param {number} messageType - Message dispatched for each accepted event
+         * @param {((Event) => boolean)} [predicate] - Optional filter
+         * @returns {void}
+         */
+        _registerMessageEvent(eventName, messageType, predicate) {
+            // Preserve instance reference for use inside DOM callbacks
+            const self = this;
+
+            document.addEventListener(eventName, function(event) {
+                // Skip events the predicate rejects
+                if (predicate && !predicate(event)) {
+                    return;
+                }
+
+                // Resolve container and dispatch normalized message
+                const container = self.getContainerForEvent(messageType, event);
+                self.dispatchMouseMessage(messageType, event, container);
+            });
         },
 
         /**
@@ -1757,15 +1827,13 @@
             // Capture button press and normalize into message format
             document.addEventListener('mousedown', function(event) {
                 // Map DOM button codes to internal message identifiers
-                const buttonMap = {
-                    0: MSG_LBUTTONDOWN,
-                    1: MSG_MBUTTONDOWN,
-                    2: MSG_RBUTTONDOWN,
-                };
+                const messageType =
+                    event.button === 0 ? MSG_LBUTTONDOWN :
+                    event.button === 1 ? MSG_MBUTTONDOWN :
+                    event.button === 2 ? MSG_RBUTTONDOWN :
+                    undefined;
 
                 // Ignore unsupported buttons
-                const messageType = buttonMap[event.button];
-
                 if (!messageType) {
                     return;
                 }
@@ -1786,15 +1854,13 @@
             // Capture button release and optionally finalize gesture recording
             window.addEventListener('mouseup', function(event) {
                 // Map DOM button codes to internal release messages
-                const buttonMap = {
-                    0: MSG_LBUTTONUP,
-                    1: MSG_MBUTTONUP,
-                    2: MSG_RBUTTONUP,
-                };
+                const messageType =
+                    event.button === 0 ? MSG_LBUTTONUP :
+                    event.button === 1 ? MSG_MBUTTONUP :
+                    event.button === 2 ? MSG_RBUTTONUP :
+                    undefined;
 
                 // Ignore unsupported buttons
-                const messageType = buttonMap[event.button];
-
                 if (!messageType) {
                     return;
                 }
@@ -1818,18 +1884,14 @@
             });
 
             // Left click
-            document.addEventListener('click', function(event) {
-                const container = self.getContainerForEvent(MSG_LCLICK, event);
-                self.dispatchMouseMessage(MSG_LCLICK, event, container);
-            });
+            this._registerMessageEvent('click', MSG_LCLICK);
 
             // Middle click
-            document.addEventListener('auxclick', function(event) {
-                if (event.button === 1) {
-                    const container = self.getContainerForEvent(MSG_MCLICK, event);
-                    self.dispatchMouseMessage(MSG_MCLICK, event, container);
-                }
-            });
+            this._registerMessageEvent('auxclick', MSG_MCLICK, event => event.button === 1);
+
+            // Double click (left button only)
+            // Capture rapid primary-button activation
+            this._registerMessageEvent('dblclick', MSG_LBUTTONDBLCLK, event => event.button === 0);
 
             // Context menu
             // Fires on right-click AND the keyboard context menu key.
@@ -1847,15 +1909,6 @@
                 // msgProc will suppress the native browser context menu
                 const container = self.getContainerForEvent(MSG_CONTEXTMENU, event);
                 self.dispatchMouseMessage(MSG_CONTEXTMENU, event, container);
-            });
-
-            // Double click (left button only)
-            // Capture rapid primary-button activation
-            document.addEventListener('dblclick', function(event) {
-                if (event.button === 0) {
-                    const container = self.getContainerForEvent(MSG_LBUTTONDBLCLK, event);
-                    self.dispatchMouseMessage(MSG_LBUTTONDBLCLK, event, container);
-                }
             });
         },
 
@@ -2337,19 +2390,10 @@
 
             // Touch button events
             // Map touch lifecycle events onto mouse-style button semantics
-            const touchMap = {
-                'touchstart': MSG_LBUTTONDOWN,  // Finger contact behaves like left button press
-                'touchend': MSG_LBUTTONUP,      // Finger release behaves like left button release
-                'touchcancel': MSG_LBUTTONUP    // Cancellation is treated as a release for consistency
-            };
-
             // Register touch handlers that normalize events into the message system
-            Object.entries(touchMap).forEach(([eventName, msgType]) => {
-                document.addEventListener(eventName, function(event) {
-                    const container = self.getContainerForEvent(msgType, event);
-                    self.dispatchMouseMessage(msgType, event, container);
-                });
-            });
+            this._registerMessageEvent('touchstart', MSG_LBUTTONDOWN);   // Finger contact behaves like left button press
+            this._registerMessageEvent('touchend', MSG_LBUTTONUP);       // Finger release behaves like left button release
+            this._registerMessageEvent('touchcancel', MSG_LBUTTONUP);    // Cancellation is treated as a release for consistency
 
             // Touch move (throttled)
             // Coalesce high-frequency movement to match mouse move dispatch behavior
@@ -6147,6 +6191,36 @@
     };
 
     /**
+     * Evaluates a handler binding with $event in scope, resolving paths against the
+     * event target, and reports failures instead of propagating them. Shared by the
+     * click, submit and change bindings, which differ only in the name reported on error.
+     * @param {string} kind - Binding name used in the failure message, e.g. 'click'
+     * @param {string} bindingTarget - The binding expression to evaluate
+     * @param {CustomEvent} event - The event being handled; its target anchors path resolution
+     * @returns {void}
+     */
+    Context.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
+        try {
+            // Build scope resolver, shared across the evaluation below
+            const scopeResolver = makeScopeResolver(
+                this.normalizePath.bind(this),
+                event.target,
+                this.importedUnits
+            );
+
+            // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
+            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                $event: event
+            });
+
+            // Fallback (if bindingTarget is a bare method name): call with (event)
+            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
+        } catch (error) {
+            console.warn(`Error executing ${kind} binding '${bindingTarget}':`, error);
+        }
+    };
+
+    /**
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
@@ -6166,19 +6240,19 @@
             // Check if click occurred within a foreach loop context
             const contextInfo = this.extractClosestForeachContext(event.target);
 
-            // Build scope resolver once, shared across all evaluations below
-            const scopeResolver = makeScopeResolver(
-                this.normalizePath.bind(this),
-                event.target,
-                this.importedUnits
-            );
-
             if (contextInfo) {
                 // Find the foreach element that contains this click target
                 const foreachElement = Array.from(this.interpolationMap.entries())
                     .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
 
                 if (foreachElement) {
+                    // Build scope resolver once, shared across all evaluations below
+                    const scopeResolver = makeScopeResolver(
+                        this.normalizePath.bind(this),
+                        event.target,
+                        this.importedUnits
+                    );
+
                     // Evaluate the foreach expression to get the source array
                     const foreachData = this.interpolationMap.get(foreachElement);
                     const array = ExpressionParser.evaluate(
@@ -6205,17 +6279,16 @@
                     return;
                 }
             }
-
-            // Simple case: evaluate expression with $event in scope
-            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                $event: event
-            });
-
-            // Fallback (if bindingTarget is a bare method name): call with (event)
-            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
         } catch (error) {
             console.warn(`Error executing click binding '${bindingTarget}':`, error);
+
+            // A failure while resolving foreach context aborts the handler — it does
+            // not fall through to the simple case, matching the original behaviour
+            return;
         }
+
+        // Simple case: evaluate expression with $event in scope
+        this.invokeEventBinding('click', bindingTarget, event);
     }
 
     /**
@@ -6239,24 +6312,7 @@
         // Fetch binding target
         const bindingTarget = mappingData.bindings.submit.target;
 
-        try {
-            // Build scope resolver, shared across the evaluation below
-            const scopeResolver = makeScopeResolver(
-                this.normalizePath.bind(this),
-                event.target,
-                this.importedUnits
-            );
-
-            // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
-            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                $event: event
-            });
-
-            // Fallback (if bindingTarget is a bare method name): call with (event)
-            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
-        } catch (error) {
-            console.warn(`Error executing submit binding '${bindingTarget}':`, error);
-        }
+        this.invokeEventBinding('submit', bindingTarget, event);
     };
 
     /**
@@ -6323,25 +6379,7 @@
         // Handle change binding (method execution)
         if (mappingData.bindings.change) {
             const bindingTarget = mappingData.bindings.change.target;
-
-            try {
-                // Build scope resolver and evaluate expression with $event in scope
-                // (supports explicit arguments via parentheses)
-                const scopeResolver = makeScopeResolver(
-                    this.normalizePath.bind(this),
-                    targetElement,
-                    this.importedUnits
-                );
-
-                const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                    $event: event
-                });
-
-                // Fallback (if bindingTarget is a bare method name): call with (event)
-                this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
-            } catch (error) {
-                console.warn(`Error executing change binding '${bindingTarget}':`, error);
-            }
+            this.invokeEventBinding('change', bindingTarget, event);
         }
     };
 
@@ -10608,12 +10646,9 @@
     }
 
     // Single-value setters: method(value) → push {op, value}
-    [
-        'setFillStyle', 'setStrokeStyle', 'setLineWidth', 'setLineCap', 'setLineJoin',
-        'setLineDashOffset', 'setMiterLimit', 'setGlobalAlpha', 'setGlobalComposite',
-        'setFont', 'setTextAlign', 'setTextBaseline', 'setTextRendering',
-        'setLetterSpacing', 'setWordSpacing', 'setLineDash',
-    ].forEach(function(name) {
+    // setLineDash is a ctx method rather than a property, so it is not in
+    // _metaFileProps, but it records identically.
+    Object.keys(_metaFileProps).concat('setLineDash').forEach(function(name) {
         MetaFile.prototype[name] = function(value) {
             this._ops.push({ op: name, value });
             return this;
@@ -10621,38 +10656,37 @@
     });
 
     // No-argument state ops: method() → push {op}
-    [
-        'save', 'restore', 'beginPath', 'closePath', 'stroke', 'resetTransform', 'clearShadow',
-    ].forEach(function(name) {
+    // clearShadow resets four ctx properties rather than calling one method, so
+    // it is not in _metaFileMethods, but it records identically.
+    Object.keys(_metaFileMethods).concat('clearShadow').forEach(function(name) {
         MetaFile.prototype[name] = function() {
             this._ops.push({ op: name });
             return this;
         };
     });
 
-    // Other ops
-    MetaFile.prototype.moveTo = function(x, y) { this._ops.push({op: 'moveTo', x, y}); return this; };
-    MetaFile.prototype.lineTo = function(x, y) { this._ops.push({op: 'lineTo', x, y}); return this; };
-    MetaFile.prototype.arc = function(cx, cy, r, startAngle, endAngle, ccw = false) { this._ops.push({op: 'arc', cx, cy, r, startAngle, endAngle, ccw}); return this; };
-    MetaFile.prototype.arcTo = function(x1, y1, x2, y2, r) { this._ops.push({op: 'arcTo', x1, y1, x2, y2, r}); return this; };
-    MetaFile.prototype.ellipse = function(cx, cy, rx, ry, rotation, startAngle, endAngle, ccw = false) { this._ops.push({op: 'ellipse', cx, cy, rx, ry, rotation, startAngle, endAngle, ccw}); return this; };
-    MetaFile.prototype.rect = function(x, y, w, h) { this._ops.push({op: 'rect', x, y, w, h}); return this; };
-    MetaFile.prototype.roundRect = function(x, y, w, h, r) { this._ops.push({op: 'roundRect', x, y, w, h, r}); return this; };
-    MetaFile.prototype.fill = function(rule = 'nonzero') { this._ops.push({op: 'fill', rule}); return this; };
-    MetaFile.prototype.clip = function(rule = 'nonzero') { this._ops.push({op: 'clip', rule}); return this; };
-    MetaFile.prototype.fillRect = function(x, y, w, h) { this._ops.push({op: 'fillRect', x, y, w, h}); return this; };
-    MetaFile.prototype.strokeRect = function(x, y, w, h) { this._ops.push({op: 'strokeRect', x, y, w, h}); return this; };
-    MetaFile.prototype.clearRect = function(x, y, w, h) { this._ops.push({op: 'clearRect', x, y, w, h}); return this; };
-    MetaFile.prototype.fillText = function(text, x, y, maxWidth) { this._ops.push({op: 'fillText', text, x, y, maxWidth}); return this; };
-    MetaFile.prototype.strokeText = function(text, x, y, maxWidth) { this._ops.push({op: 'strokeText', text, x, y, maxWidth}); return this; };
-    MetaFile.prototype.bezierCurveTo = function(cp1x, cp1y, cp2x, cp2y, x, y) { this._ops.push({op: 'bezierCurveTo', cp1x, cp1y, cp2x, cp2y, x, y}); return this; };
-    MetaFile.prototype.quadraticCurveTo = function(cpx, cpy, x, y) { this._ops.push({op: 'quadraticCurveTo', cpx, cpy, x, y}); return this; };
-    MetaFile.prototype.drawImage = function(image, dx, dy, dw, dh) { this._ops.push({op: 'drawImage', image, dx, dy, dw, dh}); return this; };
-    MetaFile.prototype.translate = function(x, y) { this._ops.push({op: 'translate', x, y}); return this; };
-    MetaFile.prototype.rotate = function(angle) { this._ops.push({op: 'rotate', angle}); return this; };
-    MetaFile.prototype.scale = function(x, y) { this._ops.push({op: 'scale', x, y}); return this; };
-    MetaFile.prototype.transform = function(a, b, c, d, e, f) { this._ops.push({op: 'transform', a, b, c, d, e, f}); return this; };
-    MetaFile.prototype.setTransform = function(a, b, c, d, e, f) { this._ops.push({op: 'setTransform', a, b, c, d, e, f}); return this; };
+    // Ops that map onto a same-named ctx method: arguments are recorded under the
+    // field names listed in _metaFileOps, with omitted values falling back to
+    // _metaFileOpDefaults.
+    Object.entries(_metaFileOps).forEach(function([name, params]) {
+        const defaults = _metaFileOpDefaults[name];
+
+        MetaFile.prototype[name] = function(...args) {
+            const op = { op: name };
+
+            for (let i = 0; i < params.length; i++) {
+                const value = args[i];
+                op[params[i]] = (value === undefined && defaults && params[i] in defaults)
+                    ? defaults[params[i]]
+                    : value;
+            }
+
+            this._ops.push(op);
+            return this;
+        };
+    });
+
+    // Ops with no single ctx method behind them — recorded by hand
     MetaFile.prototype.setShadow = function(color, blur, offsetX = 0, offsetY = 0) { this._ops.push({op: 'setShadow', color, blur, offsetX, offsetY}); return this; };
     MetaFile.prototype.setImageSmoothing = function(enabled, quality) { this._ops.push({op: 'setImageSmoothing', enabled, quality}); return this; };
 
@@ -10830,10 +10864,10 @@
      *   'webgl2' — returns WebGL2RenderingContext
      *
      * @param {HTMLCanvasElement} canvasElement
-     * @param {Object} [attributes] - Context attributes passed to getContext()
+     * @param {Object} [attributes={}] - Context attributes passed to getContext()
      * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
      */
-    wakaPAC.getDCFromElement = function(canvasElement, attributes) {
+    wakaPAC.getDCFromElement = function(canvasElement, attributes = {}) {
         if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
             return null;
         }
@@ -11253,96 +11287,34 @@
                 continue;
             }
 
+            // Ops that map onto a same-named ctx method — arguments spread from
+            // the field order declared in _metaFileOps
+            const params = _metaFileOps[op.op];
+
+            if (params) {
+                const defaults = _metaFileOpDefaults[op.op];
+                const args = [];
+
+                for (let j = 0; j < params.length; j++) {
+                    const value = op[params[j]];
+                    args.push((defaults && params[j] in defaults) ? (value ?? defaults[params[j]]) : value);
+                }
+
+                // drawImage is overloaded on argument count rather than taking optional
+                // arguments, and an explicit undefined still counts towards that count.
+                // Passing (image, dx, dy, undefined, undefined) therefore selects the
+                // five-argument form, where the undefined sizes become NaN and nothing is
+                // drawn, so drop the pair when neither was supplied.
+                if (op.op === 'drawImage' && args[3] === undefined && args[4] === undefined) {
+                    args.length = 3;
+                }
+
+                ctx[op.op](...args);
+                continue;
+            }
+
             // Ops requiring custom argument mapping
             switch (op.op) {
-                case 'moveTo':
-                    ctx.moveTo(op.x, op.y);
-                    break;
-
-                case 'lineTo':
-                    ctx.lineTo(op.x, op.y);
-                    break;
-
-                case 'arc':
-                    ctx.arc(op.cx, op.cy, op.r, op.startAngle, op.endAngle, op.ccw ?? false);
-                    break;
-
-                case 'arcTo':
-                    ctx.arcTo(op.x1, op.y1, op.x2, op.y2, op.r);
-                    break;
-
-                case 'ellipse':
-                    ctx.ellipse(op.cx, op.cy, op.rx, op.ry, op.rotation, op.startAngle, op.endAngle, op.ccw ?? false);
-                    break;
-
-                case 'rect':
-                    ctx.rect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'roundRect':
-                    ctx.roundRect(op.x, op.y, op.w, op.h, op.r);
-                    break;
-
-                case 'bezierCurveTo':
-                    ctx.bezierCurveTo(op.cp1x, op.cp1y, op.cp2x, op.cp2y, op.x, op.y);
-                    break;
-
-                case 'quadraticCurveTo':
-                    ctx.quadraticCurveTo(op.cpx, op.cpy, op.x, op.y);
-                    break;
-
-                case 'fill':
-                    ctx.fill(op.rule ?? 'nonzero');
-                    break;
-
-                case 'clip':
-                    ctx.clip(op.rule ?? 'nonzero');
-                    break;
-
-                case 'fillRect':
-                    ctx.fillRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'strokeRect':
-                    ctx.strokeRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'clearRect':
-                    ctx.clearRect(op.x, op.y, op.w, op.h);
-                    break;
-
-                case 'fillText':
-                    ctx.fillText(op.text, op.x, op.y, op.maxWidth);
-                    break;
-
-                case 'strokeText':
-                    ctx.strokeText(op.text, op.x, op.y, op.maxWidth);
-                    break;
-
-                case 'drawImage':
-                    ctx.drawImage(op.image, op.dx, op.dy, op.dw, op.dh);
-                    break;
-
-                case 'translate':
-                    ctx.translate(op.x, op.y);
-                    break;
-
-                case 'rotate':
-                    ctx.rotate(op.angle);
-                    break;
-
-                case 'scale':
-                    ctx.scale(op.x, op.y);
-                    break;
-
-                case 'transform':
-                    ctx.transform(op.a, op.b, op.c, op.d, op.e, op.f);
-                    break;
-
-                case 'setTransform':
-                    ctx.setTransform(op.a, op.b, op.c, op.d, op.e, op.f);
-                    break;
-
                 case 'setLineDash':
                     ctx.setLineDash(op.value);
                     break;
