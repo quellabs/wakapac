@@ -1515,63 +1515,9 @@
     // Send PAC-events for changed DOM elements
     // ============================================================================
 
-    /**
-     * Map DOM button codes to internal message identifiers.
-     * Defined at module level to avoid per-event object allocation in the mousedown handler.
-     * @type {Object<number, number>}
-     */
-    const MOUSE_DOWN_MESSAGES = {
-        0: MSG_LBUTTONDOWN,
-        1: MSG_MBUTTONDOWN,
-        2: MSG_RBUTTONDOWN,
-    };
-
-    /**
-     * Map DOM button codes to internal release messages.
-     * Defined at module level to avoid per-event object allocation in the mouseup handler.
-     * @type {Object<number, number>}
-     */
-    const MOUSE_UP_MESSAGES = {
-        0: MSG_LBUTTONUP,
-        1: MSG_MBUTTONUP,
-        2: MSG_RBUTTONUP,
-    };
-
-    /**
-     * Mouse events that need no handling beyond resolving the target container
-     * and dispatching a single message. Entries are
-     * [DOM event name, message type, predicate], where a null predicate always dispatches.
-     * Consumed by DomUpdateTracker._registerSimpleEvents().
-     * @type {Array<[string, number, ((Event) => boolean)|null]>}
-     */
-    const SIMPLE_MOUSE_EVENTS = [
-        // Left click
-        ['click', MSG_LCLICK, null],
-
-        // Middle click
-        ['auxclick', MSG_MCLICK, event => event.button === 1],
-
-        // Double click (left button only)
-        // Capture rapid primary-button activation
-        ['dblclick', MSG_LBUTTONDBLCLK, event => event.button === 0],
-    ];
-
-    /**
-     * Touch button events.
-     * Map touch lifecycle events onto mouse-style button semantics.
-     * Same entry shape as SIMPLE_MOUSE_EVENTS.
-     * @type {Array<[string, number, ((Event) => boolean)|null]>}
-     */
-    const SIMPLE_TOUCH_EVENTS = [
-        ['touchstart', MSG_LBUTTONDOWN, null],   // Finger contact behaves like left button press
-        ['touchend', MSG_LBUTTONUP, null],       // Finger release behaves like left button release
-        ['touchcancel', MSG_LBUTTONUP, null]     // Cancellation is treated as a release for consistency
-    ];
-
     const DomUpdateTracker = {
         /** @private {boolean} Flag to prevent multiple initializations */
         _initialized: false,
-
 
         /** @private {boolean} Flag indicating if mouse capture is currently active */
         _captureActive: false,
@@ -1628,28 +1574,28 @@
         },
 
         /**
-         * Registers listeners for events that require no handling beyond resolving
-         * the target container and dispatching one mouse message. Entries whose
-         * predicate returns false are ignored; a null predicate always dispatches.
+         * Registers a listener for an event that requires no handling beyond
+         * resolving the target container and dispatching one mouse message.
+         * Events the predicate rejects are ignored; omit it to always dispatch.
          * @private
-         * @param {Array<[string, number, ((Event) => boolean)|null]>} table
+         * @param {string} eventName - DOM event name to listen for
+         * @param {number} messageType - Message dispatched for each accepted event
+         * @param {((Event) => boolean)} [predicate] - Optional filter
          * @returns {void}
          */
-        _registerSimpleEvents(table) {
+        _registerMessageEvent(eventName, messageType, predicate) {
             // Preserve instance reference for use inside DOM callbacks
             const self = this;
 
-            table.forEach(function([eventName, messageType, predicate]) {
-                document.addEventListener(eventName, function(event) {
-                    // Skip events the entry's predicate rejects
-                    if (predicate && !predicate(event)) {
-                        return;
-                    }
+            document.addEventListener(eventName, function(event) {
+                // Skip events the predicate rejects
+                if (predicate && !predicate(event)) {
+                    return;
+                }
 
-                    // Resolve container and dispatch normalized message
-                    const container = self.getContainerForEvent(messageType, event);
-                    self.dispatchMouseMessage(messageType, event, container);
-                });
+                // Resolve container and dispatch normalized message
+                const container = self.getContainerForEvent(messageType, event);
+                self.dispatchMouseMessage(messageType, event, container);
             });
         },
 
@@ -1835,9 +1781,14 @@
             // Mouse down
             // Capture button press and normalize into message format
             document.addEventListener('mousedown', function(event) {
-                // Ignore unsupported buttons
-                const messageType = MOUSE_DOWN_MESSAGES[event.button];
+                // Map DOM button codes to internal message identifiers
+                const messageType =
+                    event.button === 0 ? MSG_LBUTTONDOWN :
+                    event.button === 1 ? MSG_MBUTTONDOWN :
+                    event.button === 2 ? MSG_RBUTTONDOWN :
+                    undefined;
 
+                // Ignore unsupported buttons
                 if (!messageType) {
                     return;
                 }
@@ -1857,9 +1808,14 @@
             // Mouse up
             // Capture button release and optionally finalize gesture recording
             window.addEventListener('mouseup', function(event) {
-                // Ignore unsupported buttons
-                const messageType = MOUSE_UP_MESSAGES[event.button];
+                // Map DOM button codes to internal release messages
+                const messageType =
+                    event.button === 0 ? MSG_LBUTTONUP :
+                    event.button === 1 ? MSG_MBUTTONUP :
+                    event.button === 2 ? MSG_RBUTTONUP :
+                    undefined;
 
+                // Ignore unsupported buttons
                 if (!messageType) {
                     return;
                 }
@@ -1882,9 +1838,15 @@
                 }
             });
 
-            // Click, middle click and double click need no extra handling —
-            // register them from SIMPLE_MOUSE_EVENTS
-            this._registerSimpleEvents(SIMPLE_MOUSE_EVENTS);
+            // Left click
+            this._registerMessageEvent('click', MSG_LCLICK);
+
+            // Middle click
+            this._registerMessageEvent('auxclick', MSG_MCLICK, event => event.button === 1);
+
+            // Double click (left button only)
+            // Capture rapid primary-button activation
+            this._registerMessageEvent('dblclick', MSG_LBUTTONDBLCLK, event => event.button === 0);
 
             // Context menu
             // Fires on right-click AND the keyboard context menu key.
@@ -2381,8 +2343,12 @@
             // Preserve instance reference for use inside event callbacks
             const self = this;
 
+            // Touch button events
+            // Map touch lifecycle events onto mouse-style button semantics
             // Register touch handlers that normalize events into the message system
-            this._registerSimpleEvents(SIMPLE_TOUCH_EVENTS);
+            this._registerMessageEvent('touchstart', MSG_LBUTTONDOWN);   // Finger contact behaves like left button press
+            this._registerMessageEvent('touchend', MSG_LBUTTONUP);       // Finger release behaves like left button release
+            this._registerMessageEvent('touchcancel', MSG_LBUTTONUP);    // Cancellation is treated as a release for consistency
 
             // Touch move (throttled)
             // Coalesce high-frequency movement to match mouse move dispatch behavior
@@ -6180,6 +6146,36 @@
     };
 
     /**
+     * Evaluates a handler binding with $event in scope, resolving paths against the
+     * event target, and reports failures instead of propagating them. Shared by the
+     * click, submit and change bindings, which differ only in the name reported on error.
+     * @param {string} kind - Binding name used in the failure message, e.g. 'click'
+     * @param {string} bindingTarget - The binding expression to evaluate
+     * @param {CustomEvent} event - The event being handled; its target anchors path resolution
+     * @returns {void}
+     */
+    Context.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
+        try {
+            // Build scope resolver, shared across the evaluation below
+            const scopeResolver = makeScopeResolver(
+                this.normalizePath.bind(this),
+                event.target,
+                this.importedUnits
+            );
+
+            // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
+            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                $event: event
+            });
+
+            // Fallback (if bindingTarget is a bare method name): call with (event)
+            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
+        } catch (error) {
+            console.warn(`Error executing ${kind} binding '${bindingTarget}':`, error);
+        }
+    };
+
+    /**
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
@@ -6199,19 +6195,19 @@
             // Check if click occurred within a foreach loop context
             const contextInfo = this.extractClosestForeachContext(event.target);
 
-            // Build scope resolver once, shared across all evaluations below
-            const scopeResolver = makeScopeResolver(
-                this.normalizePath.bind(this),
-                event.target,
-                this.importedUnits
-            );
-
             if (contextInfo) {
                 // Find the foreach element that contains this click target
                 const foreachElement = Array.from(this.interpolationMap.entries())
                     .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
 
                 if (foreachElement) {
+                    // Build scope resolver once, shared across all evaluations below
+                    const scopeResolver = makeScopeResolver(
+                        this.normalizePath.bind(this),
+                        event.target,
+                        this.importedUnits
+                    );
+
                     // Evaluate the foreach expression to get the source array
                     const foreachData = this.interpolationMap.get(foreachElement);
                     const array = ExpressionParser.evaluate(
@@ -6238,17 +6234,16 @@
                     return;
                 }
             }
-
-            // Simple case: evaluate expression with $event in scope
-            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                $event: event
-            });
-
-            // Fallback (if bindingTarget is a bare method name): call with (event)
-            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
         } catch (error) {
             console.warn(`Error executing click binding '${bindingTarget}':`, error);
+
+            // A failure while resolving foreach context aborts the handler — it does
+            // not fall through to the simple case, matching the original behaviour
+            return;
         }
+
+        // Simple case: evaluate expression with $event in scope
+        this.invokeEventBinding('click', bindingTarget, event);
     }
 
     /**
@@ -6272,24 +6267,7 @@
         // Fetch binding target
         const bindingTarget = mappingData.bindings.submit.target;
 
-        try {
-            // Build scope resolver, shared across the evaluation below
-            const scopeResolver = makeScopeResolver(
-                this.normalizePath.bind(this),
-                event.target,
-                this.importedUnits
-            );
-
-            // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
-            const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                $event: event
-            });
-
-            // Fallback (if bindingTarget is a bare method name): call with (event)
-            this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
-        } catch (error) {
-            console.warn(`Error executing submit binding '${bindingTarget}':`, error);
-        }
+        this.invokeEventBinding('submit', bindingTarget, event);
     };
 
     /**
@@ -6356,25 +6334,7 @@
         // Handle change binding (method execution)
         if (mappingData.bindings.change) {
             const bindingTarget = mappingData.bindings.change.target;
-
-            try {
-                // Build scope resolver and evaluate expression with $event in scope
-                // (supports explicit arguments via parentheses)
-                const scopeResolver = makeScopeResolver(
-                    this.normalizePath.bind(this),
-                    targetElement,
-                    this.importedUnits
-                );
-
-                const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                    $event: event
-                });
-
-                // Fallback (if bindingTarget is a bare method name): call with (event)
-                this.evaluateHandlerExpression(bindingTarget, scopedAbstraction, scopeResolver, [event]);
-            } catch (error) {
-                console.warn(`Error executing change binding '${bindingTarget}':`, error);
-            }
+            this.invokeEventBinding('change', bindingTarget, event);
         }
     };
 
