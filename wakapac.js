@@ -9646,7 +9646,7 @@
 
                 if (pacState) {
                     try {
-                        Object.assign(abstraction, JSON.parse(pacState));
+                        Object.assign(containerAbstraction, JSON.parse(pacState));
                     } catch (e) {
                         console.warn('WakaPAC: Failed to parse data-pac-state:', e);
                     }
@@ -9673,31 +9673,31 @@
                     const sameAs = el.getAttribute('data-pac-same-as');
 
                     if (sameAs) {
-                        abstraction[name] = wakaPAC.sameAs(sameAs);
+                        containerAbstraction[name] = wakaPAC.sameAs(sameAs);
                         return;
                     }
 
                     switch (el.type) {
                         case 'checkbox':
                             // Read checked state as boolean
-                            Utils.setNestedProperty(name, el.checked, abstraction);
+                            Utils.setNestedProperty(name, el.checked, containerAbstraction);
                             break;
 
                         case 'number':
                         case 'range':
                             // Convert numeric input values to actual numbers
-                            Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', abstraction);
+                            Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', containerAbstraction);
                             break;
 
                         case 'radio':
                             // Initialize the group property with an empty string on first encounter
-                            if (Utils.getNestedValue(abstraction, name) === undefined) {
-                                Utils.setNestedProperty(name, '', abstraction);
+                            if (Utils.getNestedValue(containerAbstraction, name) === undefined) {
+                                Utils.setNestedProperty(name, '', containerAbstraction);
                             }
 
                             // Only overwrite if this radio button is the selected one
                             if (el.checked) {
-                                Utils.setNestedProperty(name, el.value, abstraction);
+                                Utils.setNestedProperty(name, el.value, containerAbstraction);
                             }
 
                             break;
@@ -9708,7 +9708,7 @@
 
                         default:
                             // For all other field types, read the current value or fall back to the HTML attribute
-                            Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), abstraction);
+                            Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), containerAbstraction);
                             break;
                     }
                 });
@@ -11437,21 +11437,21 @@
 
                     let inside = false;
 
-                    for (let i = 0, j = pts.length - 2; i < pts.length; i += 2) {
-                        const xi = pts[i];
-                        const yi = pts[i + 1];
-                        const xj = pts[j];
-                        const yj = pts[j + 1];
+                    for (let p = 0, q = pts.length - 2; p < pts.length; p += 2) {
+                        const xp = pts[p];
+                        const yp = pts[p + 1];
+                        const xq = pts[q];
+                        const yq = pts[q + 1];
 
                         const intersect =
-                            ((yi > ly) !== (yj > ly)) &&
-                            (lx < (xj - xi) * (ly - yi) / (yj - yi) + xi);
+                            ((yp > ly) !== (yq > ly)) &&
+                            (lx < (xq - xp) * (ly - yp) / (yq - yp) + xp);
 
                         if (intersect) {
                             inside = !inside;
                         }
 
-                        j = i;
+                        q = p;
                     }
 
                     if (inside) {
