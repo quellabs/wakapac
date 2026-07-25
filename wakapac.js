@@ -833,9 +833,20 @@
                 return false;
             }
 
-            // Handle Text nodes and Comment nodes by getting their parent element for containment checking
+            // Handle Text/Comment nodes via parentElement
             const isTextNode = element && (element.nodeType === Node.TEXT_NODE || element.nodeType === Node.COMMENT_NODE);
-            const targetElement = isTextNode ? element.parentElement : element;
+            const isAttrNode = element && element.nodeType === Node.ATTRIBUTE_NODE;
+
+            // Handle Attr nodes via ownerElement
+            let targetElement;
+
+            if (isTextNode) {
+                targetElement = element.parentElement;
+            } else if (isAttrNode) {
+                targetElement = element.ownerElement;
+            } else {
+                targetElement = element;
+            }
 
             // Validate that we have a valid Element to work with
             if (!(targetElement instanceof Element)) {
@@ -7007,19 +7018,46 @@
         const interpolationMap = new Map();
         const container = this.container;
 
-        // Create tree walker to find text nodes with interpolation expressions
         const walker = document.createTreeWalker(
             parentElement,
-            NodeFilter.SHOW_TEXT,
+            NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
             {
                 acceptNode: node => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        // TreeWalker never yields Attr nodes directly (SHOW_ATTRIBUTE only
+                        // applies when the walker's root IS an attribute node), so attribute
+                        // interpolation has to be collected as a side effect here, on the
+                        // element itself, then the element is always skipped from the walk output.
+                        if (Utils.belongsToPacContainer(container, node)) {
+                            const attrs = node.attributes;
+
+                            for (let i = 0, len = attrs.length; i < len; i++) {
+                                // Fetch the attribute
+                                const attr = attrs[i];
+
+                                // Skip the framework's own control attributes (data-pac-bind,
+                                // data-pac-item, etc.) — their values are binding expressions
+                                // or metadata, not literal template text, and must not be
+                                // rewritten by interpolation.
+                                if (attr.name.indexOf('data-pac-') === 0) {
+                                    continue;
+                                }
+
+                                // If the attribute contains an interpolation string, add it to the list
+                                if (INTERPOLATION_TEST_REGEX.test(attr.value)) {
+                                    interpolationMap.set(attr, { template: attr.value });
+                                }
+                            }
+                        }
+                        return NodeFilter.FILTER_SKIP;
+                    }
+
                     // Skip if no interpolation or node doesn't belong to this container
                     if (!INTERPOLATION_TEST_REGEX.test(node.textContent) ||
                         !Utils.belongsToPacContainer(container, node)) {
                         return NodeFilter.FILTER_SKIP;
                     }
 
-                    // Process this node
                     return NodeFilter.FILTER_ACCEPT;
                 }
             }
@@ -7822,6 +7860,14 @@
      * @returns {Array<Object>}
      */
     Context.prototype.getForeachChain = function(element) {
+        // Attr nodes aren't part of the DOM tree (no parentElement, no previousSibling),
+        // so foreach-scope traversal and caching have to happen on the owner element
+        // instead — this also lets multiple interpolated attributes on the same element
+        // share a single cached chain.
+        if (element.nodeType === Node.ATTRIBUTE_NODE) {
+            element = element.ownerElement;
+        }
+
         // Return cached chain if available — avoids repeated DOM traversal
         // and comment parsing for the same element across multiple normalizePath calls.
         // Cache is valid until foreach rebuild (old elements are discarded entirely).
@@ -8238,8 +8284,11 @@
             }
         });
 
+        // Find all text nodes
         this.textInterpolationMap.forEach((mappingData, textNode) => {
-            if (foreachElement.contains(textNode)) {
+            const target = textNode.nodeType === Node.ATTRIBUTE_NODE ? textNode.ownerElement : textNode;
+
+            if (foreachElement.contains(target)) {
                 textNodesToRemove.push(textNode);
             }
         });
