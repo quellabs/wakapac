@@ -7031,6 +7031,14 @@
                         if (Utils.belongsToPacContainer(container, node)) {
                             const attrs = node.attributes;
 
+                            // If this element also has a data-pac-bind, collect the set of
+                            // attribute names it binds so we can detect an attribute being
+                            // driven by both mechanisms at once (see boundAttrNames below).
+                            const bindingString = node.getAttribute('data-pac-bind');
+                            const boundAttrNames = bindingString
+                                ? new Set(ExpressionCache.parseBindingString(bindingString).map(pair => pair.type))
+                                : null;
+
                             for (let i = 0, len = attrs.length; i < len; i++) {
                                 // Fetch the attribute
                                 const attr = attrs[i];
@@ -7045,6 +7053,23 @@
 
                                 // If the attribute contains an interpolation string, add it to the list
                                 if (INTERPOLATION_TEST_REGEX.test(attr.value)) {
+                                    // An attribute can't be driven by both data-pac-bind and {{ }}
+                                    // interpolation at once: updateElementBindings() runs first each
+                                    // cycle and sets the attribute from the pac-bind expression, then
+                                    // updateTextInterpolations() runs immediately after and overwrites
+                                    // it from the template string, silently clobbering the pac-bind
+                                    // value on every reactive change. Warn and skip interpolation for
+                                    // this attribute instead of registering the conflicting binding.
+                                    if (boundAttrNames && boundAttrNames.has(attr.name)) {
+                                        console.warn(
+                                            'wakaPAC: <' + node.tagName.toLowerCase() + '> has both data-pac-bind="' +
+                                            attr.name + ': ..." and ' + attr.name + '="' + attr.value +
+                                            '" — the {{ }} interpolation would overwrite the data-pac-bind value ' +
+                                            'on every update. Use only one binding mechanism for this attribute.'
+                                        );
+                                        continue;
+                                    }
+
                                     interpolationMap.set(attr, { template: attr.value });
                                 }
                             }
