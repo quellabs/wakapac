@@ -7030,8 +7030,20 @@
                         // element itself, then the element is always skipped from the walk output.
                         if (Utils.belongsToPacContainer(container, node)) {
                             const attrs = node.attributes;
+
                             for (let i = 0, len = attrs.length; i < len; i++) {
+                                // Fetch the attribute
                                 const attr = attrs[i];
+
+                                // Skip the framework's own control attributes (data-pac-bind,
+                                // data-pac-item, etc.) — their values are binding expressions
+                                // or metadata, not literal template text, and must not be
+                                // rewritten by interpolation.
+                                if (attr.name.indexOf('data-pac-') === 0) {
+                                    continue;
+                                }
+
+                                // If the attribute contains an interpolation string, add it to the list
                                 if (INTERPOLATION_TEST_REGEX.test(attr.value)) {
                                     interpolationMap.set(attr, { template: attr.value });
                                 }
