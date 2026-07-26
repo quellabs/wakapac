@@ -1202,6 +1202,20 @@
             };
 
             return debounced;
+        },
+
+        /**
+         * Returns the single namespaced cache object stashed on a DOM node (element or
+         * text node), creating it on first use. All per-node PAC caches (previous values,
+         * previous array, dynamic classes, foreach chain, foreach context, previous text)
+         * live inside this one object instead of as separate `_pacXxx` properties, so
+         * teardown only ever needs to delete one property regardless of how many cache
+         * fields end up stored here.
+         * @param {Node} node - The DOM element or text node to get/create a cache on
+         * @returns {Object} The node's PAC cache object
+         */
+        getPacCache(node) {
+            return node._pacCache || (node._pacCache = {});
         }
     }
 
@@ -5074,12 +5088,13 @@
         if (typeof value === 'string') {
             // Parse new classes from the space-separated string
             const newClasses = value.split(/\s+/).filter(Boolean);
+            const cache = Utils.getPacCache(element);
 
             // Remove old dynamic classes that aren't in the new set
-            if (element._pacDynamicClasses) {
-                for (let i = 0; i < element._pacDynamicClasses.length; i++) {
-                    if (newClasses.indexOf(element._pacDynamicClasses[i]) === -1) {
-                        element.classList.remove(element._pacDynamicClasses[i]);
+            if (cache.dynamicClasses) {
+                for (let i = 0; i < cache.dynamicClasses.length; i++) {
+                    if (newClasses.indexOf(cache.dynamicClasses[i]) === -1) {
+                        element.classList.remove(cache.dynamicClasses[i]);
                     }
                 }
             }
@@ -5090,7 +5105,7 @@
             }
 
             // Track current set for next update
-            element._pacDynamicClasses = newClasses;
+            cache.dynamicClasses = newClasses;
         }
     };
 
@@ -5193,6 +5208,11 @@
         );
     };
 
+    /**
+     * Defines DomUpdater class
+     * @param context
+     * @constructor
+     */
     function DomUpdater(context) {
         this.context = context;
     }
@@ -5209,10 +5229,7 @@
 
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
             try {
-                // Evaluate the expression using the scope resolver
                 const result = self.context.evalInScope(expression, element);
-
-                // Return the result. If the result is null, return empty string instead.
                 return result != null ? String(result) : '';
             } catch (error) {
                 console.warn('Error in text interpolation:', expression, error);
@@ -5862,11 +5879,9 @@
                     return;
                 }
 
-                // Evaluate the expression
+                // Evaluate the expression and set the binding
                 const bindingData = mappingData.bindings[bindingType];
                 const value = self.evalInScope(bindingData.target, element);
-
-                // Set the binding
                 self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
             });
         });
@@ -6619,12 +6634,14 @@
             // Initialize the previous values store on first encounter.
             // Cache the reference to avoid repeated DOM element property access
             // inside the binding loop.
-            if (!element._pacPreviousValues) {
-                element._pacPreviousValues = {};
+            const cache = Utils.getPacCache(element);
+
+            if (!cache.previousValues) {
+                cache.previousValues = {};
             }
 
             // Fetch the previousValues list
-            const previousValues = element._pacPreviousValues;
+            const previousValues = cache.previousValues;
 
             // Iterate bindings using a for loop to avoid closure creation per key
             for (let i = 0, len = keys.length; i < len; i++) {
@@ -6671,19 +6688,18 @@
 
         this.textInterpolationMap.forEach((mappingData, textNode) => {
             try {
+                const cache = Utils.getPacCache(textNode);
+
                 // Store previous text content to detect changes
-                if (!textNode._pacPreviousText) {
-                    textNode._pacPreviousText = textNode.textContent;
+                if (!cache.previousText) {
+                    cache.previousText = textNode.textContent;
                 }
 
                 // Build the scope resolver once per text node, not once per expression.
                 // The resolver only depends on the text node for path normalization.
                 const newText = mappingData.template.replace(INTERPOLATION_REGEX, function(match, expression) {
                     try {
-                        // Evaluate the expression
                         const result = self.evalInScope(expression, textNode, abstraction);
-
-                        // Return result. If the result is null, return empty string instead
                         return result != null ? String(result) : '';
                     } catch (error) {
                         console.warn('Error evaluating text interpolation:', expression, error);
@@ -6692,9 +6708,9 @@
                 });
 
                 // Only update DOM if text actually changed
-                if (textNode._pacPreviousText !== newText) {
+                if (cache.previousText !== newText) {
                     textNode.textContent = newText;
-                    textNode._pacPreviousText = newText;
+                    cache.previousText = newText;
                 }
             } catch (error) {
                 console.warn('Error updating text node:', error);
@@ -7999,7 +8015,7 @@
             const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;
 
             // Store array to be able to compare later
-            foreachElement._pacPreviousArray = array;
+            Utils.getPacCache(foreachElement).previousArray = array;
 
             // Build complete HTML string first, then set innerHTML once
             // This prevents DOM corruption caused by repeated innerHTML += operations
@@ -8116,8 +8132,10 @@
         // Return cached chain if available — avoids repeated DOM traversal
         // and comment parsing for the same element across multiple normalizePath calls.
         // Cache is valid until foreach rebuild (old elements are discarded entirely).
-        if (element._pacForeachChain) {
-            return element._pacForeachChain;
+        const cache = Utils.getPacCache(element);
+
+        if (cache.foreachChain) {
+            return cache.foreachChain;
         }
 
         // Accumulates the discovered foreach contexts in traversal order
@@ -8164,7 +8182,7 @@
         }
 
         // Cache the chain on the element for subsequent lookups
-        element._pacForeachChain = chain;
+        cache.foreachChain = chain;
 
         // Return the collected foreach chain
         return chain;
@@ -8333,8 +8351,8 @@
             return false;
         }
 
-        // Get the previously cached array from the element's internal property
-        const previousArray = foreachElement._pacPreviousArray;
+        // Get the previously cached array from the element's cache
+        const previousArray = Utils.getPacCache(foreachElement).previousArray;
 
         if (!previousArray) {
             // First time rendering - rebuild required
@@ -8444,8 +8462,10 @@
 
         while (current && current !== container) {
             // Check cache first — avoids repeated DOM traversal and regex matching
-            if (current._pacForeachContext) {
-                return current._pacForeachContext;
+            const currentCache = Utils.getPacCache(current);
+
+            if (currentCache.foreachContext) {
+                return currentCache.foreachContext;
             }
 
             // Not cached — check previous siblings for comment markers
@@ -8459,7 +8479,7 @@
                     if (context) {
                         // Cache on the starting element so subsequent lookups
                         // from the same element or its descendants are O(1)
-                        startElement._pacForeachContext = context;
+                        Utils.getPacCache(startElement).foreachContext = context;
                         return context;
                     }
                 }
@@ -8501,7 +8521,7 @@
                 }
             } else if (node.nodeType === Node.ELEMENT_NODE && currentContext) {
                 // Cache context on the first element after start comment
-                node._pacForeachContext = currentContext;
+                Utils.getPacCache(node).foreachContext = currentContext;
             }
         }
     };
@@ -8534,20 +8554,18 @@
         elementsToRemove.forEach(element => {
             this.interpolationMap.delete(element);
 
-            // Clean up cached state to prevent memory leaks
-            delete element._pacPreviousValues;
-            delete element._pacPreviousArray;
-            delete element._pacDynamicClasses;
-            delete element._pacForeachChain;
-            delete element._pacForeachContext;
+            // Clean up cached state to prevent memory leaks — all per-node caches
+            // (previous values, previous array, dynamic classes, foreach chain,
+            // foreach context) live under this single property, so any cache
+            // field added in the future is covered here without further changes.
+            delete element._pacCache;
         });
 
         textNodesToRemove.forEach(textNode => {
             this.textInterpolationMap.delete(textNode);
 
-            // Clean up cached text state
-            delete textNode._pacPreviousText;
-            delete textNode._pacForeachChain;
+            // Clean up cached text state (previous text, foreach chain)
+            delete textNode._pacCache;
         });
     };
 
