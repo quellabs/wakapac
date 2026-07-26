@@ -547,25 +547,6 @@
         'IntlBackslash': VK_OEM_102
     };
 
-    /**
-     * Maps data-pac-event modifier names to KeyboardEvent.key values.
-     * Defined at module level to avoid per-call object allocation in processEventModifiers().
-     * @type {Object<string, string>}
-     */
-    const KEY_MODIFIER_MAP = {
-        enter: 'Enter',
-        escape: 'Escape',
-        esc: 'Escape',
-        space: ' ',
-        tab: 'Tab',
-        delete: 'Delete',
-        del: 'Delete',
-        up: 'ArrowUp',
-        down: 'ArrowDown',
-        left: 'ArrowLeft',
-        right: 'ArrowRight'
-    };
-
     // ========================================================================
     // METAFILE — Display list recording and playback
     // ========================================================================
@@ -3164,14 +3145,6 @@
                 return;
             }
 
-            // Apply event modifiers before entering the hook chain.
-            // processEventModifiers handles concerns like mouse capture routing and
-            // drag state filtering. Returning false means the event should be suppressed
-            // entirely — do not enter the hook chain at all.
-            if (!this.processEventModifiers(event.target, event)) {
-                return;
-            }
-
             // Stamp the container onto the event so hooks and handlers always know the pacId.
             // _pacId is cached on the element at registration time to avoid a DOM attribute read here.
             event.pacId = container._pacId || container.getAttribute('data-pac-id');
@@ -3520,69 +3493,6 @@
          */
         getVirtualKeyCode(code) {
             return VK_MAP[code] || null;
-        },
-
-        /**
-         * Processes event modifiers defined on an element via the `data-pac-event` attribute.
-         * @param {Element|null|undefined} element - DOM element that may contain modifier attribute.
-         * @param {Event & { originalEvent?: Event }} event - Event wrapper or native event.
-         * @returns {boolean} True if the event should continue to be dispatched, false if blocked.
-         */
-        processEventModifiers(element, event) {
-            // Guard: invalid element or missing attribute API → allow event
-            if (!element || typeof element.getAttribute !== 'function') {
-                return true;
-            }
-
-            // Read modifier string from attribute
-            const attr = element.getAttribute('data-pac-event');
-
-            if (!attr) {
-                return true;
-            }
-
-            // Support wrapped events
-            const originalEvent = event.originalEvent || event;
-
-            // Split modifiers on whitespace
-            const modifiers = attr.split(/\s+/);
-
-            // Precompute keyboard-event check once
-            const isKeyboard = originalEvent.type === 'keyup' || originalEvent.type === 'keydown';
-
-            // Map modifier names to required KeyboardEvent.key values
-            const keyMap = KEY_MODIFIER_MAP;
-
-            for (const raw of modifiers) {
-                // transform modifier to lowercase
-                const modifier = raw.toLowerCase();
-
-                // Flow-control modifiers with side effects
-                if (modifier === 'prevent') {
-                    originalEvent.preventDefault();
-                    continue;
-                }
-
-                if (modifier === 'stop') {
-                    originalEvent.stopPropagation();
-                    continue;
-                }
-
-                // Key filter modifiers
-                const requiredKey = keyMap[modifier];
-
-                if (!requiredKey) {
-                    continue; // Unknown modifier → ignore
-                }
-
-                // If keyboard event and key does not match → block dispatch
-                if (isKeyboard && originalEvent.key !== requiredKey) {
-                    return false;
-                }
-            }
-
-            // All modifiers satisfied → allow event
-            return true;
         },
 
         /**
