@@ -5226,30 +5226,157 @@
      * Toggles visibility of a set of DOM nodes by swapping them with
      * lightweight placeholder comments. Preserves all node state (event
      * listeners, component instances, form values) across hide/show cycles.
-     * @param {Node[]} nodes - The DOM nodes to show or hide
+     * @param {Array<Node|{__wpGroup: true}>} nodes - The entries to show or hide
      * @param {boolean} show - True to restore nodes, false to replace with placeholders
-     * @returns {void}
+     * @returns {Array} Groups that actually transitioned from hidden to shown
+     *          (see reconcileRevealedGroups) — always empty when show is false
      */
     DomUpdater.prototype.toggleNodeVisibility = function(nodes, show) {
-        if (show) {
-            for (let i = 0; i < nodes.length; i++) {
-                const placeholder = nodes[i]._pacIfPlaceholder;
+        const justRevealedGroups = [];
 
-                if (placeholder && placeholder.parentNode) {
-                    placeholder.parentNode.replaceChild(nodes[i], placeholder);
-                }
-            }
-        } else {
-            for (let i = 0; i < nodes.length; i++) {
-                if (nodes[i].parentNode) {
-                    if (!nodes[i]._pacIfPlaceholder) {
-                        nodes[i]._pacIfPlaceholder = document.createComment('pac-if: hidden');
-                    }
-
-                    nodes[i].parentNode.replaceChild(nodes[i]._pacIfPlaceholder, nodes[i]);
-                }
+        for (let i = 0; i < nodes.length; i++) {
+            if (this.toggleEntry(nodes[i], show)) {
+                justRevealedGroups.push(nodes[i]);
             }
         }
+
+        return justRevealedGroups;
+    };
+
+    /**
+     * Toggles one branch entry — either a nested-wp-if group or a plain
+     * node — dispatching to the matching show/hide handler.
+     * @param {Node|{__wpGroup: true}} entry
+     * @param {boolean} show
+     * @returns {boolean} true only if this call revealed a group (see showGroup)
+     */
+    DomUpdater.prototype.toggleEntry = function(entry, show) {
+        if (entry && entry.__wpGroup) {
+            if (show) {
+                return this.showGroup(entry);
+            } else {
+                return this.hideGroup(entry);
+            }
+        }
+
+        if (show) {
+            this.showNode(entry);
+        } else {
+            this.hideNode(entry);
+        }
+
+        return false;
+    };
+
+    /**
+     * Restores a single node from its placeholder, if it currently has one
+     * attached. A no-op when the node was never hidden, or when its
+     * placeholder is itself still detached (e.g. trapped inside a
+     * currently-hidden ancestor group).
+     * @param {Node} node
+     * @returns {void}
+     */
+    DomUpdater.prototype.showNode = function(node) {
+        const placeholder = node._pacIfPlaceholder;
+
+        if (placeholder && placeholder.parentNode) {
+            placeholder.parentNode.replaceChild(node, placeholder);
+        }
+    };
+
+    /**
+     * Replaces a single node with a placeholder comment, creating one on
+     * first use and reusing it on subsequent hides. A no-op when the node
+     * isn't currently attached to anything.
+     * @param {Node} node
+     * @returns {void}
+     */
+    DomUpdater.prototype.hideNode = function(node) {
+        if (!node.parentNode) {
+            return;
+        }
+
+        if (!node._pacIfPlaceholder) {
+            node._pacIfPlaceholder = document.createComment('pac-if: hidden');
+        }
+
+        node.parentNode.replaceChild(node._pacIfPlaceholder, node);
+    };
+
+    /**
+     * Hides an entire nested-wp-if group (see scanCommentBindings) as one
+     * atomic unit: walks the *live* DOM between the group's stable
+     * open/close markers right now — capturing whatever the nested
+     * binding's own independent toggling has already done to its
+     * interior, rather than trusting a stale scan-time snapshot — then
+     * detaches all of it and leaves a single shared placeholder comment
+     * in its place. The captured contents are remembered on the group
+     * itself so showGroup() can restore exactly what was removed.
+     * @param {{__wpGroup: true, openMarker: Comment, closeMarker: Comment, _pacGroupPlaceholder?: Comment, _pacGroupContents?: Node[]}} group
+     * @returns {boolean} Always false — hiding never reveals a group, this
+     *          exists only so toggleEntry can return this.hideGroup(entry)
+     *          symmetrically with the showGroup case.
+     */
+    DomUpdater.prototype.hideGroup = function(group) {
+        if (group._pacGroupPlaceholder) {
+            return false; // already hidden
+        }
+
+        if (!group.openMarker.parentNode) {
+            return false; // already detached — an ancestor group hid it first
+        }
+
+        const contents = [];
+
+        for (let node = group.openMarker; node; node = node.nextSibling) {
+            contents.push(node);
+
+            if (node === group.closeMarker) {
+                break;
+            }
+        }
+
+        const placeholder = document.createComment('pac-if: hidden group');
+        group.openMarker.parentNode.insertBefore(placeholder, group.openMarker);
+
+        contents.forEach(node => {
+            if (node.parentNode) {
+                node.parentNode.removeChild(node);
+            }
+        });
+
+        group._pacGroupPlaceholder = placeholder;
+        group._pacGroupContents = contents;
+        return false;
+    };
+
+    /**
+     * Reverses hideGroup(): reinserts every node captured at hide time,
+     * in document order, at the position of the shared placeholder, then
+     * removes the placeholder. Restores exactly what was detached,
+     * including whatever state the nested binding's own toggling had
+     * already put it in.
+     * @param {{__wpGroup: true, openMarker: Comment, closeMarker: Comment, _pacGroupPlaceholder?: Comment, _pacGroupContents?: Node[]}} group
+     * @returns {boolean} true if this call actually performed a hidden→shown
+     *          transition; false if it was a no-op (nothing to show)
+     */
+    DomUpdater.prototype.showGroup = function(group) {
+        const placeholder = group._pacGroupPlaceholder;
+
+        if (!placeholder || !placeholder.parentNode) {
+            return false;
+        }
+
+        const parent = placeholder.parentNode;
+
+        (group._pacGroupContents || []).forEach(node => {
+            parent.insertBefore(node, placeholder);
+        });
+
+        parent.removeChild(placeholder);
+        group._pacGroupPlaceholder = null;
+        group._pacGroupContents = null;
+        return true;
     };
 
     // =============================================================================
@@ -7210,7 +7337,33 @@
             const branches = [{ expression, nodes: [], scanned: false }];
             let activeBucket = branches[0].nodes;
 
-            for (let node = openComment.nextSibling; node && node !== commentNode; node = node.nextSibling) {
+            // Walks the direct sibling span between this open comment and its
+            // matching close, building the branch node list(s). Uses a plain
+            // `while` (not a `for`) because the nested-wp-if case below needs
+            // to advance `node` by more than one sibling per iteration.
+            //
+            // A nested, independent <!-- wp-if: ... --> found in this span
+            // (as opposed to a wp-else-if/wp-else continuation of *this*
+            // branch) is captured as a single opaque group — its entire
+            // span, open comment through its own matching close, inclusive —
+            // rather than as flat individual nodes. Previously, individual
+            // nodes belonging to a nested wp-if (e.g. the div it controls)
+            // ended up in *both* this branch's own node list and the nested
+            // binding's node list. Since toggleNodeVisibility's "show" path
+            // restores any node carrying a pending hide-placeholder
+            // regardless of which binding put it there, whichever binding's
+            // update ran second would silently undo whatever the other one
+            // had just done to that same node — the nested wp-if would get
+            // shown again the moment the outer one re-evaluated, or vice
+            // versa. Grouping means this branch only ever toggles the
+            // nested span as one atomic unit (see toggleNodeVisibility's
+            // group handling) and never inspects or touches its interior;
+            // the nested binding — discovered independently by this same
+            // scanCommentBindings walk — remains the only thing that ever
+            // manages its own content.
+            let node = openComment.nextSibling;
+
+            while (node && node !== commentNode) {
                 if (node.nodeType === Node.COMMENT_NODE) {
                     const elseIfMatch = node.nodeValue.match(WP_ELSE_IF_COMMENT_REGEX);
 
@@ -7218,6 +7371,7 @@
                         const branch = { expression: elseIfMatch[1].trim(), nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        node = node.nextSibling;
                         continue;
                     }
 
@@ -7225,11 +7379,49 @@
                         const branch = { expression: null, nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        node = node.nextSibling;
+                        continue;
+                    }
+
+                    if (node.nodeValue.match(WP_IF_COMMENT_REGEX)) {
+                        // Nested wp-if: find its own matching close (tracking
+                        // depth so a further-nested wp-if inside it doesn't
+                        // end this early), and remember only the stable
+                        // open/close comment markers — never a snapshot of
+                        // the content between them. Content nodes can be
+                        // independently swapped for their own placeholder by
+                        // the nested binding's own toggling at any time; the
+                        // open/close comments themselves are never touched
+                        // by anyone, so they're the only safe long-lived
+                        // reference. See hideGroup()/showGroup(), which walk
+                        // the live DOM between these markers at the moment
+                        // they actually run, rather than trusting a snapshot
+                        // that could have gone stale in the meantime.
+                        const openMarker = node;
+                        let closeMarker = node;
+                        let depth = 0;
+
+                        do {
+                            closeMarker = node;
+
+                            if (node.nodeType === Node.COMMENT_NODE) {
+                                if (node.nodeValue.match(WP_IF_COMMENT_REGEX)) {
+                                    depth++;
+                                } else if (node.nodeValue.match(WP_IF_CLOSE_COMMENT_REGEX)) {
+                                    depth--;
+                                }
+                            }
+
+                            node = node.nextSibling;
+                        } while (node && depth > 0);
+
+                        activeBucket.push({ __wpGroup: true, openMarker, closeMarker });
                         continue;
                     }
                 }
 
                 activeBucket.push(node);
+                node = node.nextSibling;
             }
 
             // Build the scopeResolver once at scan time. The comment's parent
@@ -7302,9 +7494,18 @@
                 return;
             }
 
-            // Show the winning branch, hide all others
+            // Show the winning branch, hide all others. toggleNodeVisibility
+            // reports which nested-wp-if groups it actually just revealed
+            // (as opposed to a no-op, e.g. a group that was never hidden) —
+            // see reconcileRevealedGroups() below for why that matters.
+            let revealedGroups = [];
+
             for (let i = 0; i < branches.length; i++) {
-                this.domUpdater.toggleNodeVisibility(branches[i].nodes, i === winningBranch);
+                const result = this.domUpdater.toggleNodeVisibility(branches[i].nodes, i === winningBranch);
+
+                if (result && result.length > 0) {
+                    revealedGroups = revealedGroups.concat(result);
+                }
             }
 
             mappingData.isVisible = winningBranch;
@@ -7315,8 +7516,115 @@
                 scanElementNodes(this, branches[winningBranch].nodes);
                 branches[winningBranch].scanned = true;
             }
+
+            if (revealedGroups.length > 0) {
+                this.reconcileRevealedGroups(revealedGroups);
+            }
         } catch (error) {
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
+        }
+    };
+
+    /**
+     * Reconciles bindings inside wp-if groups that have just become visible.
+     *
+     * Nested bindings may previously have "succeeded" logically while their
+     * ancestor group was still detached, leaving visibility state and
+     * one-time registration flags marked as complete even though no DOM work
+     * actually occurred. That prevents future updates from retrying.
+     *
+     * For each revealed group this:
+     * - resets the group's visibility state to force a real re-evaluation;
+     * - clears branch scan flags so bindings (including foreach) are
+     *   re-registered now that the DOM is attached;
+     * - reconciles nested `data-pac-bind="if: ..."` bindings, which have the
+     *   same failure mode.
+     *
+     * Recursion is automatic: newly revealed nested groups are reconciled by
+     * subsequent updateCommentConditional() calls.
+     *
+     * @param {Array<{__wpGroup: true, openMarker: Comment, closeMarker: Comment}>} groups
+     * @returns {void}
+     */
+    Context.prototype.reconcileRevealedGroups = function(groups) {
+        groups.forEach(group => {
+            const nestedMapping = this.commentBindingMap.get(group.openMarker);
+
+            if (nestedMapping) {
+                nestedMapping.isVisible = null;
+
+                nestedMapping.branches.forEach(branch => {
+                    branch.scanned = false;
+                });
+
+                this.updateCommentConditional(group.openMarker, nestedMapping);
+            }
+
+            this.reconcileIfBindings(group);
+        });
+    };
+
+    /**
+     * Finds any data-pac-bind="if: ..." elements within a just-revealed
+     * group's live content and forces each one to re-run its own
+     * registration step, for the same reason reconcileRevealedGroups
+     * resets a nested wp-if's `scanned` flag: BindingHandlers.if's first
+     * attempt may have happened while this element was still trapped
+     * inside the (then-hidden) ancestor group, in which case its
+     * scanAndRegisterNewElements() call (see BindingHandlers.if) hit the
+     * same belongsToPacContainer rejection a detached wp-if's content
+     * does, and its own `_pacIsVisible` flag was left recording that
+     * attempt as if it had succeeded. Resetting that flag (and the
+     * cached child snapshot alongside it, so BindingHandlers.if treats
+     * this as a first-ever call) makes the very next binding pass
+     * actually re-run the toggle and re-scan, rather than bailing early
+     * on a stale "nothing changed" comparison — mirroring exactly what
+     * isVisible/scanned reset does for wp-if above, just for a different
+     * mechanism that happens to use its own separate bookkeeping.
+     *
+     * Walks the group's live DOM directly (openMarker to closeMarker)
+     * rather than a captured node list — by the time this runs, the
+     * group has already been reattached and its transient
+     * _pacGroupContents snapshot has already been cleared (see
+     * showGroup), so the live DOM is the only thing left to look at,
+     * exactly as hideGroup does when it later needs to capture this same
+     * span again.
+     * @param {{openMarker: Comment, closeMarker: Comment}} group
+     * @returns {void}
+     */
+    Context.prototype.reconcileIfBindings = function(group) {
+        let foundAny = false;
+
+        for (let node = group.openMarker; node; node = node.nextSibling) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                const candidates = [node].concat(Array.from(node.querySelectorAll('[data-pac-bind]')));
+
+                candidates.forEach(el => {
+                    const bindingString = el.getAttribute('data-pac-bind');
+
+                    if (!bindingString) {
+                        return;
+                    }
+
+                    const hasIfBinding = ExpressionCache
+                        .parseBindingString(bindingString)
+                        .some(pair => pair.type === 'if');
+
+                    if (hasIfBinding && el._pacIsVisible !== undefined) {
+                        el._pacIsVisible = undefined;
+                        el._pacIfChildren = undefined;
+                        foundAny = true;
+                    }
+                });
+            }
+
+            if (node === group.closeMarker) {
+                break;
+            }
+        }
+
+        if (foundAny) {
+            this.updateElementBindings();
         }
     };
 
