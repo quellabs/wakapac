@@ -5142,6 +5142,57 @@
         };
     }
 
+    /**
+     * Builds a scopeResolver anchored to a specific element, using this context's
+     * normalizePath and importedUnits. Exposed separately from evalInScope for call
+     * sites that need to evaluate more than one expression against the same resolver
+     * (e.g. a handler expression plus its fallback-args lookup).
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @returns {{ resolveScopedPath: function(string): * }}
+     */
+    Context.prototype.makeScopeResolverFor = function(element) {
+        return makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
+    };
+
+    /**
+     * Parses and evaluates an expression string against a given abstraction and
+     * scopeResolver. Lowest-level entry point to ExpressionParser — used directly
+     * by call sites that already have a scopeResolver (e.g. a cached one, or one
+     * being shared across multiple evaluations), and by evalInScope for the
+     * common case of building that resolver from a single element.
+     * @param {string} exprString - The expression to parse and evaluate
+     * @param {Object} abstraction - The abstraction (or scoped abstraction) to evaluate against
+     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolverFor()
+     * @returns {*} The evaluated result
+     */
+    Context.prototype.evaluateExpression = function(exprString, abstraction, scopeResolver) {
+        return ExpressionParser.evaluate(
+            ExpressionCache.parseExpression(exprString),
+            abstraction,
+            scopeResolver
+        );
+    };
+
+    /**
+     * Convenience wrapper around evaluateExpression for the common case: evaluate
+     * an expression against this context's abstraction (or an explicitly scoped one),
+     * with paths resolved relative to a single element. Builds a fresh scopeResolver
+     * for that element — call sites that need to reuse the same resolver across
+     * multiple evaluations should call makeScopeResolverFor()/evaluateExpression()
+     * directly instead.
+     * @param {string} exprString - The expression to parse and evaluate
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @param {Object} [abstraction] - Abstraction to evaluate against; defaults to this.abstraction
+     * @returns {*} The evaluated result
+     */
+    Context.prototype.evalInScope = function(exprString, element, abstraction) {
+        return this.evaluateExpression(
+            exprString,
+            abstraction || this.abstraction,
+            this.makeScopeResolverFor(element)
+        );
+    };
+
     function DomUpdater(context) {
         this.context = context;
     }
@@ -5159,16 +5210,9 @@
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
             try {
                 // Evaluate the expression using the scope resolver
-                const result = ExpressionParser.evaluate(
-                    ExpressionCache.parseExpression(expression),
-                    self.context.abstraction,
-                    makeScopeResolver(
-                        self.context.normalizePath.bind(self.context),
-                        element,
-                        self.context.importedUnits
-                    )
-                );
+                const result = self.context.evalInScope(expression, element);
 
+                // Return the result. If the result is null, return empty string instead.
                 return result != null ? String(result) : '';
             } catch (error) {
                 console.warn('Error in text interpolation:', expression, error);
@@ -5820,17 +5864,9 @@
 
                 // Evaluate the expression
                 const bindingData = mappingData.bindings[bindingType];
+                const value = self.evalInScope(bindingData.target, element);
 
-                const value = ExpressionParser.evaluate(
-                    ExpressionCache.parseExpression(bindingData.target),
-                    self.abstraction,
-                    makeScopeResolver(
-                        self.normalizePath.bind(self),
-                        element,
-                        self.importedUnits
-                    )
-                );
-
+                // Set the binding
                 self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
             });
         });
@@ -6225,11 +6261,7 @@
      * @returns {*} The evaluated result
      */
     Context.prototype.evaluateHandlerExpression = function(bindingTarget, scopedAbstraction, scopeResolver, fallbackArgs) {
-        const result = ExpressionParser.evaluate(
-            ExpressionCache.parseExpression(bindingTarget),
-            scopedAbstraction,
-            scopeResolver
-        );
+        const result = this.evaluateExpression(bindingTarget, scopedAbstraction, scopeResolver);
 
         if (typeof result === 'function') {
             result.call(this.abstraction, ...fallbackArgs);
@@ -6250,11 +6282,7 @@
     Context.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
         try {
             // Build scope resolver, shared across the evaluation below
-            const scopeResolver = makeScopeResolver(
-                this.normalizePath.bind(this),
-                event.target,
-                this.importedUnits
-            );
+            const scopeResolver = this.makeScopeResolverFor(event.target);
 
             // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
             const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
@@ -6295,19 +6323,10 @@
 
                 if (foreachElement) {
                     // Build scope resolver once, shared across all evaluations below
-                    const scopeResolver = makeScopeResolver(
-                        this.normalizePath.bind(this),
-                        event.target,
-                        this.importedUnits
-                    );
-
-                    // Evaluate the foreach expression to get the source array
+                    // and evaluate the foreach expression to get the source array
+                    const scopeResolver = this.makeScopeResolverFor(event.target);
                     const foreachData = this.interpolationMap.get(foreachElement);
-                    const array = ExpressionParser.evaluate(
-                        ExpressionCache.parseExpression(foreachData.foreachExpr),
-                        this.abstraction,
-                        scopeResolver
-                    );
+                    const array = this.evaluateExpression(foreachData.foreachExpr, this.abstraction, scopeResolver);
 
                     // Inject foreach context into scope so expressions can reference $item, $index, $event
                     const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
@@ -6622,16 +6641,7 @@
                 try {
                     // Parse and evaluate the binding expression
                     const bindingData = bindings[bindingType];
-
-                    const currentValue = ExpressionParser.evaluate(
-                        ExpressionCache.parseExpression(bindingData.target),
-                        abstraction,
-                        makeScopeResolver(
-                            self.normalizePath.bind(self),
-                            element,
-                            self.importedUnits
-                        )
-                    );
+                    const currentValue = self.evalInScope(bindingData.target, element, abstraction);
 
                     // Only touch the DOM if the value actually changed.
                     // DOM writes are expensive, so we diff against the cached
@@ -6670,16 +6680,10 @@
                 // The resolver only depends on the text node for path normalization.
                 const newText = mappingData.template.replace(INTERPOLATION_REGEX, function(match, expression) {
                     try {
-                        const result = ExpressionParser.evaluate(
-                            ExpressionCache.parseExpression(expression),
-                            abstraction,
-                            makeScopeResolver(
-                                self.normalizePath.bind(self),
-                                textNode,
-                                self.importedUnits
-                            )
-                        );
+                        // Evaluate the expression
+                        const result = self.evalInScope(expression, textNode, abstraction);
 
+                        // Return result. If the result is null, return empty string instead
                         return result != null ? String(result) : '';
                     } catch (error) {
                         console.warn('Error evaluating text interpolation:', expression, error);
@@ -7492,11 +7496,7 @@
             for (let i = 0; i < branches.length; i++) {
                 const branch = branches[i];
 
-                if (branch.expression === null || ExpressionParser.evaluate(
-                    ExpressionCache.parseExpression(branch.expression),
-                    abstraction,
-                    scopeResolver
-                )) {
+                if (branch.expression === null || this.evaluateExpression(branch.expression, abstraction, scopeResolver)) {
                     winningBranch = i;
                     break;
                 }
@@ -7972,15 +7972,7 @@
 
         try {
             // Evaluate the foreach expression (e.g., "todos" or "todo.subs")
-            const array = ExpressionParser.evaluate(
-                ExpressionCache.parseExpression(mappingData.foreachExpr),
-                this.abstraction,
-                makeScopeResolver(
-                    this.normalizePath.bind(this),
-                    foreachElement,
-                    this.importedUnits
-                )
-            );
+            const array = this.evalInScope(mappingData.foreachExpr, foreachElement);
 
             // TIMING FIX: Handle the case where parent context doesn't exist yet
             // Strategy: Silently skip rendering now, let natural retry handle it later
@@ -8334,15 +8326,7 @@
         }
 
         // Evaluate the foreach expression to get the current array
-        const newArray = ExpressionParser.evaluate(
-            ExpressionCache.parseExpression(mappingData.foreachExpr),
-            this.abstraction,
-            makeScopeResolver(
-                this.normalizePath.bind(this),
-                foreachElement,
-                this.importedUnits
-            )
-        );
+        const newArray = this.evalInScope(mappingData.foreachExpr, foreachElement);
 
         // If evaluation doesn't result in an array, no rebuild needed
         if (!Array.isArray(newArray)) {
