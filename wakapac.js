@@ -2510,8 +2510,8 @@
             // Preserve instance reference for DOM callback scope
             const self = this;
 
-            // Change events (select, radio, checkbox)
-            // Handles discrete value changes for non-text form controls
+            // Change events (select, radio, checkbox, and — see below — text-like inputs)
+            // Handles discrete value commits for form controls
             document.addEventListener('change', function(event) {
                 // Fetch target element
                 const target = event.target;
@@ -2519,9 +2519,11 @@
                 // Identify supported control types
                 const isSelect = target.tagName === 'SELECT';
                 const isChangeInput = target.tagName === 'INPUT' && CHANGE_INPUT_TYPES.has(target.type);
+                const isTextLikeInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
+                const isTextarea = target.tagName === 'TEXTAREA';
 
                 // Only process relevant control changes
-                if (isSelect || isChangeInput) {
+                if (isSelect || isChangeInput || isTextLikeInput || isTextarea) {
                     // Resolve owning container and build change message payload
                     const container = self.getContainerForEvent(MSG_CHANGE, event);
                     const wParam = self.buildChangeWParam(event);
@@ -2529,7 +2531,7 @@
 
                     // Create wrapper event (MSG_CHANGE)
                     const customEvent = self.wrapDomEventAsMessage(MSG_CHANGE, event, wParam, lParam, {
-                        elementType: isSelect ? 'select' : target.type // Describe control type for consumers
+                        elementType: isSelect ? 'select' : (isTextarea ? 'textarea' : target.type)
                     });
 
                     // Dispatch normalized change event
@@ -6421,6 +6423,17 @@
         // Handle value binding (for inputs, selects, textareas)
         // This covers most form controls that have a "value" property
         this.syncValueBindingFromElement(targetElement, mappingData);
+
+        // A real 'change' event means the browser considers this value committed —
+        // that's authoritative regardless of update-mode, so drop any update-mode
+        // 'delayed' or 'change' entry still sitting in the queue for this path.
+        // Without this, a stale queued entry could re-apply an older value later
+        // (delayed mode's timer) or simply linger unused (change mode, now moot
+        // since the value was just written above).
+        if (mappingData.bindings.value) {
+            const resolvedPath = this.normalizePath(mappingData.bindings.value.target, targetElement);
+            this.updateQueue.delete(resolvedPath);
+        }
 
         // Handle checked binding (for checkboxes and radio buttons)
         // These controls have special behavior different from regular value binding
