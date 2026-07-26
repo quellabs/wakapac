@@ -3609,6 +3609,34 @@
         hasCapture() {
             return this._captureActive;
         },
+
+        /**
+         * Releases capture only if the given container is the one currently
+         * holding it. No-op otherwise (capture inactive, or held by a different
+         * container). Lets callers unconditionally "give up capture on teardown"
+         * without reaching into _captureActive/_capturedContainer themselves.
+         * @param {HTMLElement} container - The container to release capture for
+         * @returns {void}
+         */
+        releaseCaptureIfOwnedBy(container) {
+            if (this._captureActive && this._capturedContainer === container) {
+                this.releaseCapture();
+            }
+        },
+
+        /**
+         * Returns the pac-id of the container that currently has mouse capture.
+         * Equivalent to Win32 GetCapture() returning a window handle.
+         * @returns {string|null} The pac-id of the capturing container, or null if no capture is active
+         */
+        getCapturedPacId() {
+            if (!this._captureActive) {
+                return null;
+            }
+
+            const pacId = this._capturedContainer?._pacId || this._capturedContainer?.getAttribute('data-pac-id');
+            return pacId || null;
+        },
     }
 
     // ============================================================================
@@ -5648,13 +5676,7 @@
      */
     Context.prototype.destroy = function() {
         // Release mouse capture if this container had it
-        if (
-            DomUpdateTracker._captureActive &&
-            DomUpdateTracker._capturedContainer &&
-            this.container === DomUpdateTracker._capturedContainer
-        ) {
-            DomUpdateTracker.releaseCapture();
-        }
+        DomUpdateTracker.releaseCaptureIfOwnedBy(this.container);
 
         // Clean up observers
         DomUpdateTracker.unObserveContainer(this.container);
@@ -5707,9 +5729,8 @@
         this.updateQueue.clear();
 
         // Cancel any active render loop for this component
-        if (this.abstraction?.pacId && _renderLoops.has(this.abstraction.pacId)) {
-            cancelAnimationFrame(_renderLoops.get(this.abstraction.pacId));
-            _renderLoops.delete(this.abstraction.pacId);
+        if (this.abstraction?.pacId) {
+            RenderLoopEngine.stop(this.abstraction.pacId);
         }
 
         // Capture identifiers needed for MSG_DESTROYED before nullification
@@ -9657,15 +9678,6 @@
     const _dirtyCanvases = new Map();
 
     /**
-     * Tracks active render loops for WebGL canvas components registered with renderLoop: true.
-     * Key:   pacId (string)
-     * Value: rAF handle (number) — the return value of the most recent requestAnimationFrame call,
-     *        used to cancel the loop via cancelAnimationFrame() when the component is destroyed.
-     * @type {Map<string, number>}
-     */
-    const _renderLoops = new Map();
-
-    /**
      * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
      * the dirty set. Called once per animation frame by requestAnimationFrame.
      */
@@ -9767,6 +9779,100 @@
             requestAnimationFrame(_flushPaintQueue);
         }
     }
+
+    /**
+     * Starts (or restarts) the WebGL render loop for a canvas container, driving
+     * MSG_PAINT dispatch via requestAnimationFrame. A tick is skipped whenever
+     * RenderLoopEngine.loops no longer has an entry for pacId — this is how
+     * stop() and context-loss pause() signal the in-flight rAF callback to stop
+     * rescheduling itself, without needing to cancel a stale handle.
+     * MSG_PAINT is withheld until the component has flagged _webglReadySent,
+     * since shaders/GL resources are not ready before that point.
+     *
+     * Mirrors RafTimerEngine's shape, but keeps one rAF handle per canvas
+     * rather than a single shared loop, since each canvas paints independently.
+     */
+    const RenderLoopEngine = {
+        /**
+         * Key:   pacId (string)
+         * Value: rAF handle (number) — cancel via cancelAnimationFrame() to stop/pause;
+         *        null — a "paused" sentinel, kept while a WebGL context is lost so
+         *        resume() can tell "was running, now paused" apart from "never started"
+         * @type {Map<string, number|null>}
+         */
+        loops: new Map(),
+
+        /**
+         * @param {string} pacId - data-pac-id of the target canvas container
+         * @param {HTMLCanvasElement} container - The canvas element to paint
+         * @returns {void}
+         */
+        start(pacId, container) {
+            const self = this;
+
+            const loop = function() {
+                if (!self.loops.has(pacId)) {
+                    return; // Loop was canceled — component destroyed, or suspended by context loss
+                }
+
+                const component = window.PACRegistry.getByElement(container);
+
+                if (component && component._webglReadySent) {
+                    DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                        MSG_PAINT,
+                        null,
+                        0,
+                        0
+                    ));
+                }
+
+                self.loops.set(pacId, requestAnimationFrame(loop));
+            };
+
+            this.loops.set(pacId, requestAnimationFrame(loop));
+        },
+
+        /**
+         * Stops a canvas container's render loop entirely and forgets its entry.
+         * Safe to call even if no loop is registered for pacId.
+         * @param {string} pacId - data-pac-id of the target canvas container
+         * @returns {void}
+         */
+        stop(pacId) {
+            if (this.loops.has(pacId)) {
+                cancelAnimationFrame(this.loops.get(pacId));
+                this.loops.delete(pacId);
+            }
+        },
+
+        /**
+         * Pauses a canvas container's render loop without forgetting it, so it
+         * can later be resumed via resume(). Used while a WebGL context is
+         * lost — dispatching MSG_PAINT to a lost context produces GL errors.
+         * @param {string} pacId - data-pac-id of the target canvas container
+         * @returns {void}
+         */
+        pause(pacId) {
+            if (this.loops.has(pacId)) {
+                cancelAnimationFrame(this.loops.get(pacId));
+                this.loops.set(pacId, null);
+            }
+        },
+
+        /**
+         * Resumes a canvas container's render loop if it was paused via
+         * pause(). No-op if the loop was never started or was fully stopped
+         * (component destroyed) rather than merely paused.
+         * @param {string} pacId - data-pac-id of the target canvas container
+         * @param {HTMLCanvasElement} container - The canvas element to paint
+         * @returns {void}
+         */
+        resume(pacId, container) {
+            if (this.loops.has(pacId) && this.loops.get(pacId) === null) {
+                this.start(pacId, container);
+            }
+        }
+    };
 
     // ========================================================================
     // PAINT INTERNAL HELPERS
@@ -10133,28 +10239,7 @@
 
                 // Setup renderloop for webgl if renderLoop is set to true
                 if (contextType !== '2d' && config.renderLoop === true) {
-                    const loop = function() {
-                        if (!_renderLoops.has(pacId)) {
-                            return; // Loop was canceled — component destroyed
-                        }
-
-                        // Do not dispatch MSG_PAINT before MSG_WEBGL_READY has been sent —
-                        // shaders and GL resources are not yet initialized at that point.
-                        const _component = window.PACRegistry.getByElement(container);
-
-                        if (_component && _component._webglReadySent) {
-                            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                                MSG_PAINT,
-                                null,
-                                0,
-                                0
-                            ));
-                        }
-
-                        _renderLoops.set(pacId, requestAnimationFrame(loop));
-                    };
-
-                    _renderLoops.set(pacId, requestAnimationFrame(loop));
+                    RenderLoopEngine.start(pacId, container);
                 }
 
                 // Attach WebGL context loss/restore handlers for all WebGL canvases,
@@ -10168,13 +10253,7 @@
                         // Pause the render loop while the context is unavailable.
                         // Dispatching MSG_PAINT to a lost context produces GL errors and
                         // is meaningless — suspend the loop until the context is restored.
-                        if (_renderLoops.has(pacId)) {
-                            cancelAnimationFrame(_renderLoops.get(pacId));
-                            // Use a sentinel value to indicate suspended (not destroyed).
-                            // The loop check uses _renderLoops.has(), so we must keep the
-                            // key present to allow resumption on restore.
-                            _renderLoops.set(pacId, null);
-                        }
+                        RenderLoopEngine.pause(pacId);
 
                         // Notify the component so it can null out all GL resource handles.
                         // All WebGL objects (buffers, textures, programs, etc.) are invalid
@@ -10202,24 +10281,7 @@
                         ));
 
                         // Resume the render loop if it was running before context loss.
-                        if (_renderLoops.has(pacId) && _renderLoops.get(pacId) === null) {
-                            const loop = function() {
-                                if (!_renderLoops.has(pacId)) {
-                                    return;
-                                }
-
-                                DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                                    MSG_PAINT,
-                                    null,
-                                    0,
-                                    0
-                                ));
-
-                                _renderLoops.set(pacId, requestAnimationFrame(loop));
-                            };
-
-                            _renderLoops.set(pacId, requestAnimationFrame(loop));
-                        }
+                        RenderLoopEngine.resume(pacId, container);
                     });
                 }
             }
@@ -10769,17 +10831,7 @@
      * @returns {string|null} The pac-id of the capturing container, or null if no capture is active
      */
     wakaPAC.getCapture = function() {
-        // Return null if no capture is currently active
-        if (!DomUpdateTracker._captureActive) {
-            return null;
-        }
-
-        // Extract the pac-id from the captured container element
-        // Use optional chaining since container might be removed from DOM
-        const pacId = DomUpdateTracker._capturedContainer?._pacId || DomUpdateTracker._capturedContainer?.getAttribute('data-pac-id');
-
-        // Return pac-id or null if container no longer has the attribute
-        return pacId || null;
+        return DomUpdateTracker.getCapturedPacId();
     };
 
     /**
