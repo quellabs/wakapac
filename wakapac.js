@@ -5904,7 +5904,7 @@
                 return depthB - depthA; // deepest first
             })
             .forEach(([element]) => {
-                this.renderForeach(element);
+                this.renderForeach(element, this.evaluateForeachArray(element));
             });
     };
 
@@ -6499,7 +6499,7 @@
      * @param {Element} event.target - The DOM element whose value changed
      */
     Context.prototype.handleDomInputComplete = function(event) {
-        const self = this;
+        // Get the target element
         const targetElement = event.target;
 
         // Get the mapping data for this specific element from the interpolation map
@@ -6518,7 +6518,7 @@
             const valueBinding = mappingData.bindings.value;
 
             // Resolve the target path considering any scoped context (e.g., loops, nested objects)
-            const resolvedPath = self.normalizePath(valueBinding.target, targetElement);
+            const resolvedPath = this.normalizePath(valueBinding.target, targetElement);
 
             // Get update configuration for this element
             const config = this.getUpdateConfiguration(targetElement);
@@ -6564,6 +6564,7 @@
      * @returns {void}
      */
     Context.prototype.handleDomBlur = function(event) {
+        // Get the target element
         const targetElement = event.target;
 
         // Get the mapping data for this element
@@ -6616,8 +6617,6 @@
         this.updateCommentConditionals();
         this.handleWatchersForChange(event);
         this.handleForeachRebuildForChange(event);
-
-        //wakaPAC.sendMessage(this.abstraction.pacId, MSG_VALUE_CHANGE, 0, 0, event.detail);
     };
 
     // =============================================================================
@@ -6701,6 +6700,7 @@
 
         this.textInterpolationMap.forEach((mappingData, textNode) => {
             try {
+                // Fetch node cache
                 const cache = Utils.getPacCache(textNode);
 
                 // Store previous text content to detect changes
@@ -6829,20 +6829,16 @@
                 continue;
             }
 
+            // Match 1: computed property dependency (e.g., filter → filteredTodos)
+            // Match 2: expression uses changedProp as a dynamic bracket key e.g.
+            //          changing 'region' should rebuild foreach: cities[country][region]
             const expr = mappingData.foreachExpr;
             const source = mappingData.sourceArray;
-
-            // Match 1: computed property dependency (e.g., filter → filteredTodos)
             const computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
-
-            // Match 2: expression uses changedProp as a dynamic bracket key
-            // e.g. changing 'region' should rebuild foreach: cities[country][region]
             const bracketMatch = bracketPattern.test(expr);
 
             if (computedMatch || bracketMatch) {
-                if (this.shouldRebuildForeach(element)) {
-                    this.renderForeach(element);
-                }
+                this.renderForeach(element, this.getChangedForeachArray(element));
             }
         }
     };
@@ -6962,7 +6958,8 @@
         }
 
         for (let i = 0, len = foreachElements.length; i < len; i++) {
-            this.renderForeach(foreachElements[i]);
+            const element = foreachElements[i];
+            this.renderForeach(element, this.evaluateForeachArray(element));
         }
     };
 
@@ -7982,11 +7979,15 @@
     }
 
     /**
-     * Renders a foreach loop by evaluating its array expression and generating DOM content.
+     * Renders a foreach loop's DOM content from an already-evaluated array.
+     * Evaluating and validating the foreach expression is the caller's job (see
+     * evaluateForeachArray / getChangedForeachArray) — this function only renders
+     * whatever array it's handed, or does nothing if not handed one.
      * @param {Element} foreachElement - DOM element with foreach binding
+     * @param {Array} array - The array to render; if falsy, this is a no-op
      * @returns {void}
      */
-    Context.prototype.renderForeach = function(foreachElement) {
+    Context.prototype.renderForeach = function(foreachElement, array) {
         const self = this;
         const mappingData = this.interpolationMap.get(foreachElement);
 
@@ -7999,27 +8000,12 @@
         // This prevents memory leaks when re-rendering dynamic content
         this.cleanupForeachMaps(foreachElement);
 
+        // Nothing to render without an array — see the docstring above
+        if (!array) {
+            return;
+        }
+
         try {
-            // Evaluate the foreach expression (e.g., "todos" or "todo.subs")
-            const array = this.evalInScope(mappingData.foreachExpr, foreachElement);
-
-            // TIMING FIX: Handle the case where parent context doesn't exist yet
-            // Strategy: Silently skip rendering now, let natural retry handle it later
-            // When parent foreach renders and calls scanAndRegisterNewElements(), this
-            // method will be called again with proper context available.
-            if (!array) {
-                // Don't clear innerHTML - preserve template for when context becomes available
-                // Don't log errors - this is expected behavior during initialization
-                return;
-            }
-
-            // Validate that the resolved expression is actually an array
-            if (!Array.isArray(array)) {
-                console.warn(`Foreach expression "${mappingData.foreachExpr}" did not evaluate to an array, got:`, typeof array, array);
-                foreachElement.innerHTML = ''; // Clear invalid content
-                return;
-            }
-
             // Resolve the source array for index mapping.
             // For filtered/sorted expressions the foreach may render a subset of a larger
             // array — fall back to the evaluated array itself when no root can be found.
@@ -8085,7 +8071,7 @@
             );
 
         } catch (error) {
-            console.warn(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
+            console.warn(`Error rendering foreach for expression "${mappingData.foreachExpr}":`, error);
             // Don't clear innerHTML on error during initial scan - preserve template
             // The error might resolve itself when parent context becomes available
         }
@@ -8343,50 +8329,90 @@
     };
 
     /**
-     * Determines whether a foreach element needs to be rebuilt based on array changes
+     * Evaluates and validates a foreach element's array expression. This is the one
+     * place expression-evaluation happens for foreach — renderForeach no longer does
+     * it itself; callers (this function's own callers, and renderForeach's callers)
+     * evaluate first and hand the result to renderForeach, which just renders it.
      * @param {Element} foreachElement - The DOM element with foreach directive
-     * @returns {boolean} True if the foreach should be rebuilt, false otherwise
+     * @returns {Array|null} The evaluated array, or null if: the element isn't a
+     *   foreach binding; the expression's context isn't available yet (a nested
+     *   foreach whose parent hasn't rendered — expected and silent, the natural
+     *   retry handles it later); the expression didn't evaluate to an array (logged,
+     *   and the element's content is cleared); or evaluation threw (logged, content
+     *   preserved in case the error resolves itself once context becomes available).
      */
-    Context.prototype.shouldRebuildForeach = function(foreachElement) {
-        // Get the mapping data for this foreach element from the interpolation map
+    Context.prototype.evaluateForeachArray = function(foreachElement) {
         const mappingData = this.interpolationMap.get(foreachElement);
 
-        // No mapping data means this isn't a valid foreach element
-        if (!mappingData) {
-            return false;
+        if (!mappingData || !mappingData.foreachId) {
+            return null;
         }
 
-        // Evaluate the foreach expression to get the current array
-        const newArray = this.evalInScope(mappingData.foreachExpr, foreachElement);
+        try {
+            const array = this.evalInScope(mappingData.foreachExpr, foreachElement);
 
-        // If evaluation doesn't result in an array, no rebuild needed
-        if (!Array.isArray(newArray)) {
-            return false;
+            // TIMING FIX: Handle the case where parent context doesn't exist yet
+            // Strategy: Silently skip for now, let natural retry handle it later
+            if (!array) {
+                return null;
+            }
+
+            // Validate that the resolved expression is actually an array
+            if (!Array.isArray(array)) {
+                console.warn(`Foreach expression "${mappingData.foreachExpr}" did not evaluate to an array, got:`, typeof array, array);
+                foreachElement.innerHTML = ''; // Clear invalid content
+                return null;
+            }
+
+            return array;
+        } catch (error) {
+            console.warn(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
+            // Don't clear innerHTML on error - preserve template; the error might
+            // resolve itself once parent context becomes available
+            return null;
+        }
+    };
+
+    /**
+     * Determines whether a foreach element needs to be rebuilt based on array changes,
+     * and if so, returns the freshly-evaluated array so the caller can pass it straight
+     * to renderForeach instead of having it re-evaluate the same expression a second time.
+     * @param {Element} foreachElement - The DOM element with foreach directive
+     * @returns {Array|null} The new array if a rebuild is needed, or null if no rebuild
+     *   is needed (including when the element/expression isn't valid).
+     */
+    Context.prototype.getChangedForeachArray = function(foreachElement) {
+        // Evaluate and validate the current array
+        const newArray = this.evaluateForeachArray(foreachElement);
+
+        // If no array, do nothing
+        if (!newArray) {
+            return null;
         }
 
         // Get the previously cached array from the element's cache
         const previousArray = Utils.getPacCache(foreachElement).previousArray;
 
+        // First time rendering - rebuild required
         if (!previousArray) {
-            // First time rendering - rebuild required
-            return true;
+            return newArray;
         }
 
         // Quick length comparison - if lengths differ, rebuild needed
         if (newArray.length !== previousArray.length) {
-            return true;
+            return newArray;
         }
 
         // Check if any array items changed by reference comparison
         // This catches object mutations and item replacements
         for (let i = 0; i < newArray.length; i++) {
             if (newArray[i] !== previousArray[i]) {
-                return true;
+                return newArray;
             }
         }
 
         // Arrays are identical - no rebuild needed
-        return false;
+        return null;
     };
 
     /**
