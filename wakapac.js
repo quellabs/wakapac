@@ -6386,25 +6386,7 @@
 
         // Handle value binding (for inputs, selects, textareas)
         // This covers most form controls that have a "value" property
-        if (mappingData.bindings.value) {
-            // Fetch value binding
-            const valueBinding = mappingData.bindings.value;
-
-            // Resolve the target path considering any scoped context (e.g., loops, nested objects)
-            const resolvedPath = self.normalizePath(valueBinding.target, targetElement);
-
-            // Update the options
-            let selectOption;
-
-            if (targetElement.tagName === 'SELECT' && targetElement.multiple) {
-                selectOption = Array.from(targetElement.selectedOptions).map(opt => opt.value);
-            } else {
-                selectOption = targetElement.value;
-            }
-
-            // Set new option(s)
-            Utils.setNestedProperty(resolvedPath, selectOption, this.abstraction);
-        }
+        this.syncValueBindingFromElement(targetElement, mappingData);
 
         // Handle checked binding (for checkboxes and radio buttons)
         // These controls have special behavior different from regular value binding
@@ -6429,6 +6411,37 @@
             const bindingTarget = mappingData.bindings.change.target;
             this.invokeEventBinding('change', bindingTarget, event);
         }
+    };
+
+    /**
+     * Reads a value-bound element's current DOM value and writes it into
+     * the abstraction at its bound path. The single implementation shared
+     * by handleDomChange (a real 'change' event) and
+     * syncSelectAfterForeach (a <select>'s value settling after its
+     * <option>s are rebuilt by a foreach) — kept as one function
+     * specifically so behavior like the <select multiple> case below
+     * can't drift between the two call sites the way it previously did
+     * (syncSelectAfterForeach used to read element.value unconditionally,
+     * which only ever returns a multi-select's first selected option).
+     * A no-op if $mappingData has no "value" binding at all.
+     * @param {Element} element - The value-bound element to read from
+     * @param {{bindings: {value?: {target: string}}}} mappingData - Its registered binding data
+     * @returns {void}
+     */
+    Context.prototype.syncValueBindingFromElement = function(element, mappingData) {
+        const valueBinding = mappingData.bindings.value;
+
+        if (!valueBinding) {
+            return;
+        }
+
+        const resolvedPath = this.normalizePath(valueBinding.target, element);
+
+        const domValue = (element.tagName === 'SELECT' && element.multiple)
+            ? Array.from(element.selectedOptions).map(opt => opt.value)
+            : element.value;
+
+        Utils.setNestedProperty(resolvedPath, domValue, this.abstraction);
     };
 
     /**
@@ -8058,11 +8071,11 @@
     };
 
     /**
-     * Syncs a <select> element's DOM value back into the model after its
-     * child <option> elements were rebuilt by a foreach. The browser reconciles
-     * the selection against the new option set; this method reads the resulting
-     * .value and writes it into the abstraction so the proxy fires a pac:change
-     * event and dependent bindings stay in sync.
+     * After a foreach rebuilds a <select>'s <option>s, the browser
+     * reconciles the selection against the new option set — this finds
+     * the affected <select> (whether the foreach element itself, or its
+     * immediate parent) and syncs its resulting value back into the
+     * abstraction via syncValueBindingFromElement.
      * @param {Element} foreachElement - The element whose foreach just rebuilt
      */
     Context.prototype.syncSelectAfterForeach = function(foreachElement) {
@@ -8085,15 +8098,11 @@
             return;
         }
 
-        // Read what the browser settled on after the options were replaced
-        const domValue = selectElement.value;
-
-        // Resolve the bound property path and write the DOM value into the abstraction
-        const valueBinding = selectMappingData.bindings.value;
-        const resolvedPath = this.normalizePath(valueBinding.target, selectElement);
-
-        // Write the DOM value into the abstraction — the proxy handles the change event
-        Utils.setNestedProperty(resolvedPath, domValue, this.abstraction);
+        // Read what the browser settled on after the options were replaced,
+        // and write it into the abstraction — see syncValueBindingFromElement,
+        // shared with handleDomChange so the <select multiple> case can't
+        // drift between the two call sites.
+        this.syncValueBindingFromElement(selectElement, selectMappingData);
     };
 
     /**
