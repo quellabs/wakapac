@@ -6813,12 +6813,11 @@
             return;
         }
 
-        const changedProp = path[0];
-        const dependents = this.dependencies.get(changedProp);
-
         // Build a pattern that matches the changed property used as a dynamic bracket
         // key inside a foreach expression, e.g. cities[country][region] contains [region].
         // This covers dependent dropdowns where options depend on a parent scalar value.
+        const changedProp = path[0];
+        const dependents = this.dependencies.get(changedProp);
         const bracketPattern = new RegExp('\\[' + changedProp + '\\]');
 
         // Single-pass scan of interpolationMap instead of calling
