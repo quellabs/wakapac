@@ -8094,6 +8094,7 @@
             selectMappingData = this.interpolationMap.get(selectElement);
         }
 
+        // Do nothing when there's no select element or mapping data.
         if (!selectElement || !selectMappingData || !selectMappingData.bindings.value) {
             return;
         }
