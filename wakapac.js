@@ -706,6 +706,17 @@
         },
 
         /**
+         * Reads the pac-id of a container element, preferring the cached
+         * `_pacId` property (stamped on the element at registration time,
+         * see ComponentRegistry) over a DOM attribute read.
+         * @param {Element|null|undefined} element - The container element
+         * @returns {string|null} The pac-id, or null if element is falsy
+         */
+        getPacId(element) {
+            return element ? (element._pacId || element.getAttribute('data-pac-id')) : null;
+        },
+
+        /**
          * Gets a unique identifier for an element to use in queue tracking
          * @param {HTMLElement} element - The element to identify
          * @returns {string} A unique identifier for the element
@@ -3108,7 +3119,7 @@
 
             // Stamp the container onto the event so hooks and handlers always know the pacId.
             // _pacId is cached on the element at registration time to avoid a DOM attribute read here.
-            event.pacId = container._pacId || container.getAttribute('data-pac-id');
+            event.pacId = Utils.getPacId(container);
 
             // Snapshot the hook array at dispatch time. This prevents mutations to _hooks
             // (installs or uninstalls that happen inside a hook function) from affecting
@@ -3530,7 +3541,7 @@
 
             // Send capture changed message to container losing the capture
             if (this._capturedContainer?.isConnected) {
-                const pacId = this._capturedContainer._pacId || this._capturedContainer.getAttribute('data-pac-id');
+                const pacId = Utils.getPacId(this._capturedContainer);
 
                 if (pacId !== null) {
                     wakaPAC.sendMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
@@ -3579,7 +3590,7 @@
                 return null;
             }
 
-            const pacId = this._capturedContainer?._pacId || this._capturedContainer?.getAttribute('data-pac-id');
+            const pacId = Utils.getPacId(this._capturedContainer);
             return pacId || null;
         },
 
@@ -7945,7 +7956,7 @@
         });
 
         Object.defineProperty(proxiedReactive, 'pacId', {
-            value:        this.container._pacId || this.container.getAttribute('data-pac-id'),
+            value:        Utils.getPacId(this.container),
             writable:     false,
             enumerable:   true,
             configurable: true
@@ -9654,7 +9665,7 @@
         const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
 
         // Fetch the pacId from the container
-        const pacId = container._pacId || container.getAttribute('data-pac-id');
+        const pacId = Utils.getPacId(container);
 
         // Fetch accelerator tables of this container and parent containers
         const tables = _accelTablesForContainer(container);
@@ -10260,7 +10271,7 @@
             return null;
         }
 
-        return context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
+        return Utils.getPacId(context.parent.container);
     };
 
     /**
@@ -10719,7 +10730,7 @@
             return null;
         }
 
-        return hitElement.closest("[data-pac-id]");
+        return hitElement.closest(CONTAINER_SEL);
     };
 
     /**
@@ -11206,7 +11217,6 @@
      * registration order, whenever the destination context is not 2D — this
      * is how a plugin like wakaD3D teaches core to blit into a WebGL canvas
      * without core ever needing to know WebGL exists.
-     *
      * @param {Object} handler
      * @param {function(RenderingContext): boolean} handler.test - Returns true if this handler owns the given destination context
      * @param {function(RenderingContext, HTMLCanvasElement): void} handler.blit - Copies srcCanvas onto destCtx
@@ -11223,19 +11233,6 @@
      * Performs a bit-block transfer from srcDC to destDC.
      * Equivalent to Win32 BitBlt() — copies a rectangle of pixels from the source
      * to the destination at 1:1 scale. No stretching or compression is performed.
-     *
-     * cx/cy define the size of the rectangle copied; the same dimensions apply to
-     * both the source and the destination. sx/sy define the top-left corner of the
-     * source rectangle; omit to copy from (0, 0).
-     *
-     * Supports mixed 2D ↔ non-2D copies:
-     *
-     *   2D   → 2D     drawImage() — straightforward
-     *   non-2D → 2D     drawImage() on the source canvas — for contexts like WebGL
-     *                    this requires preserveDrawingBuffer: true in dcAttributes,
-     *                    otherwise the copy produces a blank result.
-     *   2D     → non-2D delegated to a registered blit handler (see registerBlitHandler())
-     *   non-2D → non-2D delegated the same way
      *
      * If the destination is a non-2D context and no handler has been registered
      * for it (e.g. the relevant plugin was never wakaPAC.use()'d), this is a no-op.
@@ -11279,10 +11276,6 @@
      * Blits srcDC onto destDC at (dx, dy) scaled to (dw, dh).
      * Unlike bitBlt, the source is always stretched to fill the destination rect.
      * Use this when the offscreen DC dimensions differ from the target canvas.
-     *
-     * Supports the same mixed 2D ↔ non-2D copy paths as bitBlt(). See bitBlt()
-     * for preserveDrawingBuffer requirements and the blit-handler fallback.
-     *
      * @param {RenderingContext} destDC
      * @param {RenderingContext} srcDC
      * @param {number} dx - Destination X
