@@ -100,10 +100,15 @@
      * the currently active texture unit. The caller is responsible for binding
      * the target texture before calling bitBlt()/stretchBlt() with a WebGL
      * destination — this function assumes that has already been done.
+     * rect (the requested sub-region/scale, present since core's blit handler
+     * contract now always passes one) is intentionally unused: texImage2D
+     * uploads the whole srcCanvas as a texture, so partial or scaled blits
+     * aren't meaningful here the way they are for a 2D destination.
      * @param {WebGLRenderingContext|WebGL2RenderingContext} destGL
      * @param {HTMLCanvasElement} srcCanvas
+     * @param {{sx:number, sy:number, sw:number, sh:number, dx:number, dy:number, dw:number, dh:number}} rect
      */
-    function _blitToWebGL(destGL, srcCanvas) {
+    function _blitToWebGL(destGL, srcCanvas, rect) {
         destGL.texImage2D(
             destGL.TEXTURE_2D,
             0,                  // mip level
