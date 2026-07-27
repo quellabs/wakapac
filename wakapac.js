@@ -1601,6 +1601,13 @@
         _dropzoneTarget: null,
 
         /**
+         * Tracks canvas containers that have been invalidated and are waiting for
+         * their MSG_PAINT to be dispatched on the next animation frame.
+         * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, width:number, height:number}, rects: Array<{x:number, y:number, width:number, height:number}>}>}
+         */
+        _dirtyCanvases: new Map(),
+
+        /**
          * Performs one-time initialization of the input/event subsystem.
          * @returns {void}
          */
@@ -3637,6 +3644,106 @@
             const pacId = this._capturedContainer?._pacId || this._capturedContainer?.getAttribute('data-pac-id');
             return pacId || null;
         },
+
+        /**
+         * Marks a canvas PAC container as needing repaint and schedules a
+         * requestAnimationFrame flush if one is not already pending.
+         *
+         * Multiple calls with different rects before the next frame are accumulated
+         * into a dirty region: rcPaint tracks the bounding union (used by getDC()
+         * for clipping), while rects collects each distinct incoming rectangle for
+         * getUpdateRgn(). Incoming rects that are fully contained within an
+         * already-queued rect are dropped to keep the list compact.
+         *
+         * @param {string} pacId  - data-pac-id of the target canvas container
+         * @param {{x:number, y:number, width:number, height:number}|null} [rect]
+         *   Rectangle to invalidate in canvas-local coordinates.
+         *   Pass null (or omit) to invalidate the entire canvas.
+         * @returns {void}
+         */
+        invalidateRect(pacId, rect) {
+            // Fetch the container
+            const container = wakaPAC.getContainerByPacId(pacId);
+
+            // If not found, bail
+            if (!container) {
+                return;
+            }
+
+            // Do nothing if the container is not a canvas
+            if (!(container instanceof HTMLCanvasElement)) {
+                return;
+            }
+
+            // Normalize: null rect means the whole canvas
+            const fullRect = {
+                x: 0,
+                y: 0,
+                width: container.width,
+                height: container.height
+            };
+
+            // Fetch the rect or default to the entire canvas if omitted
+            const incoming = rect || fullRect;
+
+            // Queue the repaint
+            if (this._dirtyCanvases.has(pacId)) {
+                const existing = this._dirtyCanvases.get(pacId);
+
+                // If the canvas is already fully invalidated there is nothing more to accumulate
+                if (existing.rcPaint.x === 0 && existing.rcPaint.y === 0 &&
+                    existing.rcPaint.width === container.width &&
+                    existing.rcPaint.height === container.height) {
+                    return;
+                }
+
+                // Drop the incoming rect if it is fully contained within any rect already
+                // in the list — it adds no new dirty area
+                const absorbed = existing.rects.some(r =>
+                    incoming.x >= r.x &&
+                    incoming.y >= r.y &&
+                    incoming.x + incoming.width <= r.x + r.width &&
+                    incoming.y + incoming.height <= r.y + r.height
+                );
+
+                if (!absorbed) {
+                    existing.rects.push(incoming);
+                    existing.rcPaint = Utils.unionRect(existing.rcPaint, incoming);
+                }
+            } else {
+                // First invalidation this frame — schedule the flush
+                this._dirtyCanvases.set(pacId, { container, rcPaint: incoming, rects: [incoming] });
+                requestAnimationFrame(this.flushPaintQueue);
+            }
+        },
+
+        /**
+         * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
+         * the dirty set. Called once per animation frame by requestAnimationFrame.
+         */
+        flushPaintQueue() {
+            DomUpdateTracker._dirtyCanvases.forEach(function(entry) {
+                const { container } = entry;
+
+                // Skip containers that were removed from the DOM before the frame fired
+                if (!container.isConnected) {
+                    return;
+                }
+
+                // Mark as actively painting so getDC() knows to apply the clip
+                entry.painting = true;
+
+                DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                    MSG_PAINT, null, 0, 0
+                ));
+
+                // Clear the painting flag — releaseDC() uses this to decide whether
+                // to restore the context state
+                entry.painting = false;
+            });
+
+            DomUpdateTracker._dirtyCanvases.clear();
+        }
     }
 
     // ============================================================================
@@ -5702,8 +5809,8 @@
 
         // 2D canvases perform an initial synchronous paint and require no further setup.
         if (this.contextType === '2d') {
-            _invalidateRect(this.abstraction.pacId);
-            _flushPaintQueue();
+            DomUpdateTracker.invalidateRect(this.abstraction.pacId);
+            DomUpdateTracker.flushPaintQueue();
             return;
         }
 
@@ -9770,129 +9877,6 @@
     // ========================================================================
 
     /**
-     * Tracks canvas containers that have been invalidated and are waiting for
-     * their MSG_PAINT to be dispatched on the next animation frame.
-     *
-     * Key:   pacId (string)
-     * Value: {
-     *   container: HTMLCanvasElement,
-     *   rcPaint:   {x, y, width, height}  — union of all dirty rects; used by getDC() for clipping
-     *   rects:     [{x, y, width, height}] — list of discrete dirty rects; exposed via getUpdateRgn()
-     * }
-     *
-     * A container is present in this map if and only if a rAF flush is already
-     * scheduled for it. Multiple invalidateRect() calls before the next frame
-     * are accumulated: rcPaint grows as the bounding union, while rects collects
-     * each distinct incoming rectangle (absorbed duplicates are dropped).
-     *
-     * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, width:number, height:number}, rects: Array<{x:number, y:number, width:number, height:number}>}>}
-     */
-    const _dirtyCanvases = new Map();
-
-    /**
-     * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
-     * the dirty set. Called once per animation frame by requestAnimationFrame.
-     */
-    function _flushPaintQueue() {
-        _dirtyCanvases.forEach(function(entry) {
-            const { container } = entry;
-
-            // Skip containers that were removed from the DOM before the frame fired
-            if (!container.isConnected) {
-                return;
-            }
-
-            // Mark as actively painting so getDC() knows to apply the clip
-            entry.painting = true;
-
-            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                MSG_PAINT,
-                null,   // No originating DOM event
-                0,      // wParam unused
-                0       // lParam unused
-            ));
-
-            // Clear the painting flag — releaseDC() uses this to decide whether
-            // to restore the context state
-            entry.painting = false;
-        });
-
-        _dirtyCanvases.clear();
-    }
-
-    /**
-     * Marks a canvas PAC container as needing repaint and schedules a
-     * requestAnimationFrame flush if one is not already pending.
-     *
-     * Multiple calls with different rects before the next frame are accumulated
-     * into a dirty region: rcPaint tracks the bounding union (used by getDC()
-     * for clipping), while rects collects each distinct incoming rectangle for
-     * getUpdateRgn(). Incoming rects that are fully contained within an
-     * already-queued rect are dropped to keep the list compact.
-     *
-     * @param {string} pacId  - data-pac-id of the target canvas container
-     * @param {{x:number, y:number, width:number, height:number}|null} [rect]
-     *   Rectangle to invalidate in canvas-local coordinates.
-     *   Pass null (or omit) to invalidate the entire canvas.
-     * @returns {void}
-     */
-    function _invalidateRect(pacId, rect) {
-        // Fetch the container
-        const container = wakaPAC.getContainerByPacId(pacId);
-
-        // If not found, bail
-        if (!container) {
-            return;
-        }
-
-        // Do nothing if the container is not a canvas
-        if (!(container instanceof HTMLCanvasElement)) {
-            return;
-        }
-
-        // Normalize: null rect means the whole canvas
-        const fullRect = {
-            x: 0,
-            y: 0,
-            width: container.width,
-            height: container.height
-        };
-
-        // Fetch the rect or default to the entire canvas if omitted
-        const incoming = rect || fullRect;
-
-        // Queue the repaint
-        if (_dirtyCanvases.has(pacId)) {
-            const existing = _dirtyCanvases.get(pacId);
-
-            // If the canvas is already fully invalidated there is nothing more to accumulate
-            if (existing.rcPaint.x === 0 && existing.rcPaint.y === 0 &&
-                existing.rcPaint.width === container.width &&
-                existing.rcPaint.height === container.height) {
-                return;
-            }
-
-            // Drop the incoming rect if it is fully contained within any rect already
-            // in the list — it adds no new dirty area
-            const absorbed = existing.rects.some(r =>
-                incoming.x >= r.x &&
-                incoming.y >= r.y &&
-                incoming.x + incoming.width <= r.x + r.width &&
-                incoming.y + incoming.height <= r.y + r.height
-            );
-
-            if (!absorbed) {
-                existing.rects.push(incoming);
-                existing.rcPaint = Utils.unionRect(existing.rcPaint, incoming);
-            }
-        } else {
-            // First invalidation this frame — schedule the flush
-            _dirtyCanvases.set(pacId, { container, rcPaint: incoming, rects: [incoming] });
-            requestAnimationFrame(_flushPaintQueue);
-        }
-    }
-
-    /**
      * Starts (or restarts) the WebGL render loop for a canvas container, driving
      * MSG_PAINT dispatch via requestAnimationFrame. A tick is skipped whenever
      * RenderLoopEngine.loops no longer has an entry for pacId — this is how
@@ -11224,7 +11208,7 @@
         // a matching releaseDC() call so the saved state is properly unwound.
         // WebGL contexts drive their own render loop and do not use this mechanism.
         if (contextType === '2d') {
-            const entry = _dirtyCanvases.get(pacId);
+            const entry = DomUpdateTracker._dirtyCanvases.get(pacId);
 
             if (entry?.painting && entry.rects?.length) {
                 ctx.save();
@@ -11269,7 +11253,7 @@
         }
 
         // Fetch entry from the store
-        const entry = _dirtyCanvases.get(pacId);
+        const entry = DomUpdateTracker._dirtyCanvases.get(pacId);
 
         // Only restore if getDC() pushed a save — it does so only during painting
         if (entry?.painting && entry.rects?.length) {
@@ -11353,7 +11337,7 @@
      *   Omit or pass null to invalidate the entire canvas surface.
      */
     wakaPAC.invalidateRect = function(pacId, rect) {
-        _invalidateRect(pacId, rect || null);
+        DomUpdateTracker.invalidateRect(pacId, rect || null);
     };
 
     /**
@@ -11408,7 +11392,7 @@
      * @returns {{x:number, y:number, width:number, height:number}|null}
      */
     wakaPAC.getInvalidatedRect = function(pacId) {
-        const entry = _dirtyCanvases.get(pacId);
+        const entry = DomUpdateTracker._dirtyCanvases.get(pacId);
 
         if (!entry) {
             return null;
@@ -11424,7 +11408,7 @@
      * @returns {Array<{x:number, y:number, width:number, height:number}>|null}
      */
     wakaPAC.getUpdateRgn = function(pacId) {
-        const entry = _dirtyCanvases.get(pacId);
+        const entry = DomUpdateTracker._dirtyCanvases.get(pacId);
 
         if (!entry) {
             return null;
@@ -11548,7 +11532,7 @@
         const contextType = container.dataset.pacContext || '2d';
 
         if (contextType === '2d') {
-            _invalidateRect(pacId, null);
+            DomUpdateTracker.invalidateRect(pacId, null);
         }
     };
 
