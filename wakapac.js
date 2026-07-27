@@ -4950,7 +4950,7 @@
 
     /**
      * Value binding - Updates form element values
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -4986,7 +4986,7 @@
 
     /**
      * Checked binding - Updates checkbox/radio checked state
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5035,7 +5035,7 @@
 
     /**
      * Visible binding - Shows/hides elements by managing display CSS
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5062,7 +5062,7 @@
 
     /**
      * If binding — conditionally renders an element's child content.
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param {*} value - Truthy = show, falsy = hide
      */
@@ -5096,7 +5096,7 @@
 
     /**
      * Class binding - Manages CSS classes (string or object syntax)
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5141,7 +5141,7 @@
 
     /**
      * Style binding - Applies inline styles (object or string syntax)
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5195,7 +5195,7 @@
      * @param {Element} element - The DOM element to use as path scope anchor
      * @returns {{ resolveScopedPath: function(string): * }}
      */
-    Context.prototype.makeScopeResolverFor = function(element) {
+    Runtime.prototype.makeScopeResolverFor = function(element) {
         return makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
     };
 
@@ -5210,7 +5210,7 @@
      * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolverFor()
      * @returns {*} The evaluated result
      */
-    Context.prototype.evaluateExpression = function(exprString, abstraction, scopeResolver) {
+    Runtime.prototype.evaluateExpression = function(exprString, abstraction, scopeResolver) {
         return ExpressionParser.evaluate(
             ExpressionCache.parseExpression(exprString),
             abstraction,
@@ -5230,7 +5230,7 @@
      * @param {Object} [abstraction] - Abstraction to evaluate against; defaults to this.abstraction
      * @returns {*} The evaluated result
      */
-    Context.prototype.evalInScope = function(exprString, element, abstraction) {
+    Runtime.prototype.evalInScope = function(exprString, element, abstraction) {
         return this.evaluateExpression(
             exprString,
             abstraction || this.abstraction,
@@ -5493,13 +5493,13 @@
         /** @type {number} Global timer ID counter, incremented on each add() call */
         nextTimerId: 1,
 
-        /** @type {Map<number, {context: Context, timerId: number, elapse: number, lastFired: number}>} */
+        /** @type {Map<number, {context: Runtime, timerId: number, elapse: number, lastFired: number}>} */
         timers: new Map(),
 
         /**
          * Registers a new timer entry and returns its globally unique ID.
          * Starts the rAF loop if it wasn't already running.
-         * @param {Context} context - Owning context, used to resolve pacId for sendMessage
+         * @param {Runtime} context - Owning context, used to resolve pacId for sendMessage
          * @param {number} elapse - Desired interval in milliseconds
          * @returns {number} Globally unique timer ID
          */
@@ -5543,7 +5543,7 @@
         /**
          * Removes all timers belonging to a specific context.
          * Called by killAllTimers to clean up when a component is destroyed.
-         * @param {Context} context - The context whose timers should be removed
+         * @param {Runtime} context - The context whose timers should be removed
          */
         removeAllForContext(context) {
             // Match entries by context reference — globally unique IDs make this safe
@@ -5587,12 +5587,10 @@
     };
 
     // ========================================================================
-    // CONTEXT
+    // COMPONENT RUNTIME
     // ========================================================================
 
-    function Context(container, abstraction, config) {
-        const self = this;
-
+    function Runtime(container, abstraction, config) {
         this.originalAbstraction = abstraction;
         this.parent = null;
         this.children = new Set();
@@ -5604,11 +5602,27 @@
         this.readyCalled = false;
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
+        this.dependencies = this.getDependencies();
 
-        // Resolve data-pac-uses into a flat function map for this component.
-        // Functions are merged in declaration order; last entry wins on collision.
+        this.initializeImportedUnits();
+        this.initializeRuntimeServices();
+        this.initializeUpdateQueue();
+        this.initializeEventHandlers();
+
+        DomUpdateTracker.observeContainer(this.container);
+    }
+
+    // =============================================================================
+    // RUNTIME INITIALIZATION METHODS
+    // =============================================================================
+
+    /**
+     * Resolves the component's imported units from the `data-pac-uses` attribute.
+     */
+    Runtime.prototype.initializeImportedUnits = function() {
         this.importedUnits = {};
-        const usesAttr = container.getAttribute('data-pac-uses');
+
+        const usesAttr = this.container.getAttribute('data-pac-uses');
 
         if (usesAttr) {
             usesAttr.split(',').forEach(name => {
@@ -5623,25 +5637,48 @@
                 Object.assign(this.importedUnits, unit);
             });
         }
+    }
 
-        // Setup dependencies
-        this.dependencies = this.getDependencies();
+    /**
+     * Sets up scroll event tracking for the container element with debounced handling.
+     * Creates an optimized scroll listener that updates container scroll state at ~60fps
+     * to prevent performance issues during rapid scroll events.
+     * @memberof {Object} - The parent class/object containing this method
+     * @returns {void}
+     */
+    Runtime.prototype.initializeRuntimeServices = function() {
+        // First time setup
+        requestAnimationFrame(() => this.updateContainerScrollState());
 
-        // Set up container-specific scroll tracking
-        this.setupContainerScrollTracking();
+        // Debounce scroll updates to ~1 frame (16 ms) so rapid scroll events
+        // are coalesced rather than triggering a state update on every pixel.
+        const scrollHandler = Utils.debounce(() => {
+            this.updateContainerScrollState();
+        }, 16);
 
-        // Register container to shared observers
-        DomUpdateTracker.observeContainer(this.container);
+        // Add scroll listener to this container
+        this.container.addEventListener('scroll', scrollHandler, { passive: true });
 
-        // Add interval for checking updateQueue
+        // Store reference for cleanup (scrollHandler.cancel() is called on teardown)
+        this.containerScrollHandler = scrollHandler;
+    }
+
+    /**
+     * Initializes the deferred update queue used to batch reactive DOM updates.
+     */
+    Runtime.prototype.initializeUpdateQueue = function() {
         this.updateQueue = new Map();
         this.updateQueueTimer = null;
         this.updateQueueFireAt = 0;
+    }
 
-        // Handle click events
-        this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
+    /**
+     * Registers DOM event listeners used to receive runtime events for this
+     * context.
+     */
+    Runtime.prototype.initializeEventHandlers = function() {
+        this.boundHandlePacEvent = this.handleEvent.bind(this);
 
-        // Add listeners using the stored references
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
@@ -5674,7 +5711,7 @@
      *
      * @returns {void}
      */
-    Context.prototype.destroy = function() {
+    Runtime.prototype.destroy = function() {
         // Release mouse capture if this container had it
         DomUpdateTracker.releaseCaptureIfOwnedBy(this.container);
 
@@ -5768,7 +5805,7 @@
      * @param {number} elapse - Timer interval in milliseconds
      * @returns {number} The globally unique timer ID (use this to kill the timer later)
      */
-    Context.prototype.setTimer = function(elapse) {
+    Runtime.prototype.setTimer = function(elapse) {
         // Delegate ID generation and registration to the engine
         return RafTimerEngine.add(this, elapse);
     };
@@ -5779,7 +5816,7 @@
      * @param {number} timerId - The timer ID returned from setTimer()
      * @returns {void}
      */
-    Context.prototype.killTimer = function(timerId) {
+    Runtime.prototype.killTimer = function(timerId) {
         // Delegate directly to the engine — timer IDs are globally unique
         return RafTimerEngine.remove(timerId);
     };
@@ -5790,7 +5827,7 @@
      * to a context that no longer exists.
      * @returns {void}
      */
-    Context.prototype.killAllTimers = function() {
+    Runtime.prototype.killAllTimers = function() {
         // Delegate bulk removal to the engine, which matches by context reference
         return RafTimerEngine.removeAllForContext(this);
     };
@@ -5800,32 +5837,9 @@
     // =============================================================================
 
     /**
-     * Sets up scroll event tracking for the container element with debounced handling.
-     * Creates an optimized scroll listener that updates container scroll state at ~60fps
-     * to prevent performance issues during rapid scroll events.
-     * @memberof {Object} - The parent class/object containing this method
-     * @method setupContainerScrollTracking
-     * @returns {void}
+     * Callback to update container scroll state
      */
-    Context.prototype.setupContainerScrollTracking = function() {
-        // First time setup
-        requestAnimationFrame(() => this.updateContainerScrollState());
-
-        // Debounce scroll updates to ~1 frame (16 ms) so rapid scroll events
-        // are coalesced rather than triggering a state update on every pixel.
-        const scrollHandler = Utils.debounce(() => {
-            this.updateContainerScrollState();
-        }, 16);
-
-        // Add scroll listener to this container
-        this.container.addEventListener('scroll', scrollHandler, { passive: true });
-
-        // Store reference for cleanup (scrollHandler.cancel() is called on teardown)
-        this.containerScrollHandler = scrollHandler;
-    }
-
-    // Add new method to update container scroll state
-    Context.prototype.updateContainerScrollState = function() {
+    Runtime.prototype.updateContainerScrollState = function() {
         // Get scroll measurements
         const scrollX = this.container.scrollLeft;
         const scrollY = this.container.scrollTop;
@@ -5865,7 +5879,7 @@
      * Scans and registers newly created content within a foreach container
      * @param {Element} parentElement - The foreach container element
      */
-    Context.prototype.scanAndRegisterNewElements = function(parentElement) {
+    Runtime.prototype.scanAndRegisterNewElements = function(parentElement) {
         const self = this;
 
         // Expand partial templates before scanning so injected markup
@@ -5935,7 +5949,7 @@
      * @param element
      * @returns {number}
      */
-    Context.prototype.getElementDepth = function(element) {
+    Runtime.prototype.getElementDepth = function(element) {
         // Depth counter relative to the container root
         let depth = 0;
 
@@ -5959,7 +5973,7 @@
      * @returns {Map<string, Set<string>>} Keys are accessed property names; values are
      *   the set of computed properties that ultimately depend on them.
      */
-    Context.prototype.getDependencies = function() {
+    Runtime.prototype.getDependencies = function() {
         const computed = this.originalAbstraction.computed ?? {};
         const computedNames = new Set(Object.keys(computed));
 
@@ -6031,7 +6045,7 @@
      * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`).
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
-    Context.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
+    Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
         // Step 1: Try dependency map (cheap and reliable if set up correctly).
         for (const [rootProperty, dependentList] of this.dependencies) {
             const rootValue = this.abstraction[rootProperty];
@@ -6052,14 +6066,14 @@
      * Iterates through queued entries in a single pass, immediately applying any
      * whose scheduled time has elapsed and tracking the earliest future entry
      * for rescheduling. Blur-triggered entries are skipped here since they are
-     * handled synchronously by {@link Context#handleDomBlur}.
+     * handled synchronously by {@link Runtime#handleDomBlur}.
      *
      * Deletion of processed entries is deferred to a separate pass to avoid
      * mutating the Map during iteration.
      *
      * @returns {void}
      */
-    Context.prototype.updateQueueHandler = function() {
+    Runtime.prototype.updateQueueHandler = function() {
         // Clear timer reference — this callback is now executing
         this.updateQueueTimer = null;
         this.updateQueueFireAt = 0;
@@ -6117,7 +6131,7 @@
     /**
      * Schedules a future run of the update queue processor.
      *
-     * Sets a single timeout to fire {@link Context#updateQueueHandler} after
+     * Sets a single timeout to fire {@link Runtime#updateQueueHandler} after
      * the given delay. If a timer is already pending, it is replaced only when
      * the new delay would fire sooner — ensuring the earliest queued entry is
      * always processed on time without creating redundant timers.
@@ -6126,7 +6140,7 @@
      *                         Clamped to a minimum of 1ms to guarantee asynchronous execution.
      * @returns {void}
      */
-    Context.prototype.scheduleQueueProcessing = function(delay) {
+    Runtime.prototype.scheduleQueueProcessing = function(delay) {
         const self = this;
         const clampedDelay = Math.max(delay, 1);
         const fireAt = Date.now() + clampedDelay;
@@ -6156,7 +6170,7 @@
      * @returns {string} returns.updateMode - The update mode ('immediate' or other configured modes)
      * @returns {number} returns.delay - The delay in milliseconds, capped at maximum 3000ms
      */
-    Context.prototype.getUpdateConfiguration = function(element) {
+    Runtime.prototype.getUpdateConfiguration = function(element) {
         // Check element attributes first
         const updateMode = element.getAttribute('data-pac-update-mode') || this.config.updateMode || 'immediate';
         const delay = parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay || 300;
@@ -6179,7 +6193,7 @@
      * @param {string} event.type - The type of event, determines which handler is called
      * @param {...*} event - Additional event properties vary by event type
      */
-    Context.prototype.handleEvent = function(event) {
+    Runtime.prototype.handleEvent = function(event) {
         // Route events to specialized handlers based on type
         // Each event type corresponds to a different aspect of the PAC (Presentation-Abstraction-Control) architecture
         switch (event.type) {
@@ -6217,7 +6231,7 @@
      * @param {Event} event.originalEvent - Reference to the original DOM event
      * @returns {void}
      */
-    Context.prototype.handlePacEvent = function(event) {
+    Runtime.prototype.handlePacEvent = function(event) {
         // Call user's message handler (msgProc) before framework processes the event
         // This allows user code to intercept and handle messages first, Win32-style
         let preventDefault = false;
@@ -6282,7 +6296,7 @@
      * Updates container focus reactive properties
      * Called automatically after MSG_SETFOCUS/MSG_KILLFOCUS events
      */
-    Context.prototype.updateFocusProperties = function() {
+    Runtime.prototype.updateFocusProperties = function() {
         this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
         this.abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
     }
@@ -6298,7 +6312,7 @@
      * @param {Array} fallbackArgs - Arguments to invoke the result with when it's a bare function reference
      * @returns {*} The evaluated result
      */
-    Context.prototype.evaluateHandlerExpression = function(bindingTarget, scopedAbstraction, scopeResolver, fallbackArgs) {
+    Runtime.prototype.evaluateHandlerExpression = function(bindingTarget, scopedAbstraction, scopeResolver, fallbackArgs) {
         const result = this.evaluateExpression(bindingTarget, scopedAbstraction, scopeResolver);
 
         if (typeof result === 'function') {
@@ -6317,7 +6331,7 @@
      * @param {CustomEvent} event - The event being handled; its target anchors path resolution
      * @returns {void}
      */
-    Context.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
+    Runtime.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
         try {
             // Build scope resolver, shared across the evaluation below
             const scopeResolver = this.makeScopeResolverFor(event.target);
@@ -6341,7 +6355,7 @@
      * @param {Element} event.target - The DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
-    Context.prototype.handleDomClicks = function(event) {
+    Runtime.prototype.handleDomClicks = function(event) {
         // Get interpolation data for the clicked element
         const mappingData = this.interpolationMap.get(event.target);
         if (!mappingData?.bindings?.click) {
@@ -6402,7 +6416,7 @@
      * @param {HTMLElement} event.target - The DOM element that triggered the submit
      * @returns {void}
      */
-    Context.prototype.handleDomSubmit = function(event) {
+    Runtime.prototype.handleDomSubmit = function(event) {
         // Retrieve mapping data for the target element from the interpolation map
         const mappingData = this.interpolationMap.get(event.target);
 
@@ -6428,7 +6442,7 @@
      * @param {Element} event.target - The DOM element that changed
      * @param {*} event.value - The new value from the changed element
      */
-    Context.prototype.handleDomChange = function(event) {
+    Runtime.prototype.handleDomChange = function(event) {
         const self = this;
         const targetElement = event.target;
 
@@ -6496,7 +6510,7 @@
      * @param {{bindings: {value?: {target: string}}}} mappingData - Its registered binding data
      * @returns {void}
      */
-    Context.prototype.syncValueBindingFromElement = function(element, mappingData) {
+    Runtime.prototype.syncValueBindingFromElement = function(element, mappingData) {
         const valueBinding = mappingData.bindings.value;
 
         if (!valueBinding) {
@@ -6519,7 +6533,7 @@
      * @param {CustomEvent} event - The post-mutation input event
      * @param {Element} event.target - The DOM element whose value changed
      */
-    Context.prototype.handleDomInputComplete = function(event) {
+    Runtime.prototype.handleDomInputComplete = function(event) {
         // Get the target element
         const targetElement = event.target;
 
@@ -6584,7 +6598,7 @@
      * @param {HTMLElement} event.target - The DOM element that lost focus
      * @returns {void}
      */
-    Context.prototype.handleDomBlur = function(event) {
+    Runtime.prototype.handleDomBlur = function(event) {
         // Get the target element
         const targetElement = event.target;
 
@@ -6632,7 +6646,7 @@
      * @param {*} event.detail.oldValue - The previous value before the change
      * @param {*} event.detail.newValue - The new value after the change
      */
-    Context.prototype.handleReactiveChange = function(event) {
+    Runtime.prototype.handleReactiveChange = function(event) {
         this.updateElementBindings();
         this.updateTextInterpolations();
         this.updateCommentConditionals();
@@ -6648,7 +6662,7 @@
      * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.).
      * Evaluates each binding expression and updates the DOM if the value has changed.
      */
-    Context.prototype.updateElementBindings = function() {
+    Runtime.prototype.updateElementBindings = function() {
         // Cache frequently accessed properties to avoid repeated lookups
         // through `this` in the inner loops
         const abstraction = this.abstraction;
@@ -6715,7 +6729,7 @@
      * Updates all text interpolations ({{expression}} in text nodes).
      * Re-evaluates template expressions and updates text content if changed.
      */
-    Context.prototype.updateTextInterpolations = function() {
+    Runtime.prototype.updateTextInterpolations = function() {
         const abstraction = this.abstraction;
         const self = this;
 
@@ -6756,7 +6770,7 @@
      * Updates all comment-based wp-if conditionals
      * Re-evaluates conditions and shows/hides content as needed
      */
-    Context.prototype.updateCommentConditionals = function() {
+    Runtime.prototype.updateCommentConditionals = function() {
         this.commentBindingMap.forEach((mappingData, commentNode) => {
             this.updateCommentConditional(commentNode, mappingData);
         });
@@ -6768,7 +6782,7 @@
      * Note: Does not trigger for array element changes - arrays are handled by foreach rebuilds
      * @param {CustomEvent} event - The pac:change event with change details
      */
-    Context.prototype.handleWatchersForChange = function(event) {
+    Runtime.prototype.handleWatchersForChange = function(event) {
         // Root-level change (e.g., this.count = 5)
         // Pass the actual primitive or object values directly
         const path = event.detail.path;
@@ -6826,7 +6840,7 @@
      * @param {CustomEvent} event - The pac:change event containing change details
      * @param {string[]} event.detail.path - Property path that changed
      */
-    Context.prototype.handleForeachRebuildForChange = function(event) {
+    Runtime.prototype.handleForeachRebuildForChange = function(event) {
         // Only handle top-level property changes (e.g., ['filter'], not ['todos', '0', 'text'])
         const path = event.detail.path;
 
@@ -6869,7 +6883,7 @@
      * @param {*} newValue - The new value
      * @param {*} oldValue - The old value
      */
-    Context.prototype.triggerWatcher = function(property, newValue, oldValue) {
+    Runtime.prototype.triggerWatcher = function(property, newValue, oldValue) {
         // Guard missing watch object
         if (!this.originalAbstraction.watch) {
             return;
@@ -6897,7 +6911,7 @@
      * @param {string} event.detail.stateType - Type of state change ('visibility'|'online'|'scroll'|'resize')
      * @param {Object} event.detail.stateData - State-specific data object
      */
-    Context.prototype.handleBrowserStateEvent = function(event) {
+    Runtime.prototype.handleBrowserStateEvent = function(event) {
         const { stateType, stateData } = event.detail;
 
         switch (stateType) {
@@ -6968,7 +6982,7 @@
      * @param {Object} event.detail - The event detail object
      * @param {Array<string|number>} event.detail.path - Array representing the path to the changed array
      */
-    Context.prototype.handleArrayChange = function(event) {
+    Runtime.prototype.handleArrayChange = function(event) {
         const detail = event.detail;
         const pathString = Utils.pathArrayToString(detail.path);
         const foreachElements = this.findForeachElementsByArrayPath(pathString);
@@ -6988,7 +7002,7 @@
      * their binding information along with expression dependencies.
      * @returns {Map<WeakKey, any>}
      */
-    Context.prototype.scanBindings = function(parentElement) {
+    Runtime.prototype.scanBindings = function(parentElement) {
         const interpolationMap = new Map();
         const elements = parentElement.querySelectorAll('[data-pac-bind]');
 
@@ -7035,7 +7049,7 @@
      * @param {string|number} forEachId - Identifier used to look up the element.
      * @returns {*} The matching element, or null if no match is found.
      */
-    Context.prototype.findElementByForEachId = function(forEachId) {
+    Runtime.prototype.findElementByForEachId = function(forEachId) {
         // Loop over all element → mappingData pairs in the interpolation map
         for (const [element, mappingData] of this.interpolationMap) {
             // Check whether this entry belongs to the requested forEachId
@@ -7053,7 +7067,7 @@
      * Extend data of foreach binds
      * @param interpolationMap {Map<WeakKey, any>}
      */
-    Context.prototype.extendBindingsWithForEachData = function(interpolationMap) {
+    Runtime.prototype.extendBindingsWithForEachData = function(interpolationMap) {
         const self = this;
 
         interpolationMap.forEach((mappingData, element) => {
@@ -7114,7 +7128,7 @@
      * a mapping of nodes to their templates and dependencies.
      * @returns {Map<WeakKey, any>}
      */
-    Context.prototype.scanTextBindings = function(parentElement) {
+    Runtime.prototype.scanTextBindings = function(parentElement) {
         const interpolationMap = new Map();
         const container = this.container;
 
@@ -7339,7 +7353,7 @@
      * Calls scanAndRegisterNewElements on every Element node in the given array.
      * Extracted as a module-level helper so it is defined once rather than
      * recreated as a closure on each updateCommentConditional call.
-     * @param {Context} context
+     * @param {Runtime} context
      * @param {Node[]} nodes
      */
     function scanElementNodes(context, nodes) {
@@ -7356,7 +7370,7 @@
      * @param {Element} parentElement - The parent element to scan
      * @returns {Map<Comment, {expression: string, closingComment: Comment, branches: Array<{expression: string|null, nodes: Node[], scanned: boolean}>, scopeResolver: Object, isVisible: number|null}>}
      */
-    Context.prototype.scanCommentBindings = function(parentElement) {
+    Runtime.prototype.scanCommentBindings = function(parentElement) {
         const commentBindingMap = new Map();
         const openComments = []; // Stack to track nested wp-if comments
 
@@ -7529,7 +7543,7 @@
      * @param {Comment} commentNode - The wp-if comment node
      * @param {Object} mappingData - The binding data for this comment
      */
-    Context.prototype.updateCommentConditional = function(commentNode, mappingData) {
+    Runtime.prototype.updateCommentConditional = function(commentNode, mappingData) {
         try {
             const abstraction = this.abstraction;
             const scopeResolver = mappingData.scopeResolver;
@@ -7605,7 +7619,7 @@
      * @param {Array<{__wpGroup: true, openMarker: Comment, closeMarker: Comment}>} groups
      * @returns {void}
      */
-    Context.prototype.reconcileRevealedGroups = function(groups) {
+    Runtime.prototype.reconcileRevealedGroups = function(groups) {
         groups.forEach(group => {
             const nestedMapping = this.commentBindingMap.get(group.openMarker);
 
@@ -7651,7 +7665,7 @@
      * @param {{openMarker: Comment, closeMarker: Comment}} group
      * @returns {void}
      */
-    Context.prototype.reconcileIfBindings = function(group) {
+    Runtime.prototype.reconcileIfBindings = function(group) {
         let foundAny = false;
 
         for (let node = group.openMarker; node; node = node.nextSibling) {
@@ -7697,7 +7711,7 @@
      * Must run before makeDeepReactiveProxy so the proxy wraps the final object.
      * @param {Object} abstraction
      */
-    Context.prototype.resolveAliases = function(abstraction) {
+    Runtime.prototype.resolveAliases = function(abstraction) {
         Object.keys(abstraction).forEach(function(key) {
             const value = abstraction[key];
 
@@ -7731,7 +7745,7 @@
      * Setup reactive properties for this container
      * @returns {*|object}
      */
-    Context.prototype.createReactiveAbstraction = function() {
+    Runtime.prototype.createReactiveAbstraction = function() {
         const self = this;
 
         // Inject system properties
@@ -7880,7 +7894,7 @@
      * @param {boolean} abstraction.hasParent - Will be set to false, indicating whether this abstraction has a parent
      * @returns {void} This method modifies the abstraction object in place
      */
-    Context.prototype.injectHierarchyProperties = function(abstraction) {
+    Runtime.prototype.injectHierarchyProperties = function(abstraction) {
         abstraction.childrenCount = 0;
         abstraction.hasParent = false;
     };
@@ -7889,7 +7903,7 @@
      * Injects system properties into the abstraction
      * @param {Object} abstraction - The abstraction to enhance
      */
-    Context.prototype.injectSystemProperties = function(abstraction) {
+    Runtime.prototype.injectSystemProperties = function(abstraction) {
         // Initialize online/offline state and network quality
         abstraction.browserOnline = navigator.onLine;
         abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
@@ -7955,7 +7969,7 @@
      * @param {Element} element - The DOM element to start searching from. Must be a valid DOM Element.
      * @returns {Element|null} The nearest parent element with a foreach binding, or null
      */
-    Context.prototype.findParentForeachElement = function(element) {
+    Runtime.prototype.findParentForeachElement = function(element) {
         let current = element.parentElement;
 
         while (current && current !== this.container) {
@@ -7981,7 +7995,7 @@
      * @returns {Map<number, number>} A Map where each key is a render index (position in filteredArray)
      *                                and each value is the corresponding source index (position in sourceArray).
      */
-    Context.prototype.buildIndexMap = function(sourceArray, filteredArray) {
+    Runtime.prototype.buildIndexMap = function(sourceArray, filteredArray) {
         const claimed = new Set();
         const result = new Map(); // keyed by renderIndex
 
@@ -8007,7 +8021,7 @@
      * @param {Array} array - The array to render; if falsy, this is a no-op
      * @returns {void}
      */
-    Context.prototype.renderForeach = function(foreachElement, array) {
+    Runtime.prototype.renderForeach = function(foreachElement, array) {
         const self = this;
         const mappingData = this.interpolationMap.get(foreachElement);
 
@@ -8105,7 +8119,7 @@
      * abstraction via syncValueBindingFromElement.
      * @param {Element} foreachElement - The element whose foreach just rebuilt
      */
-    Context.prototype.syncSelectAfterForeach = function(foreachElement) {
+    Runtime.prototype.syncSelectAfterForeach = function(foreachElement) {
         let selectElement = null;
         let selectMappingData = null;
 
@@ -8139,7 +8153,7 @@
      * @param {Element} element
      * @returns {Array<Object>}
      */
-    Context.prototype.getForeachChain = function(element) {
+    Runtime.prototype.getForeachChain = function(element) {
         // Attr nodes aren't part of the DOM tree (no parentElement, no previousSibling),
         // so foreach-scope traversal and caching have to happen on the owner element
         // instead — this also lets multiple interpolated attributes on the same element
@@ -8211,7 +8225,7 @@
      * Resolve scoped variables into a flattened token array.
      * Scope values may be numbers or string paths.
      */
-    Context.prototype.resolveScopedTokens = function(tokens, scope) {
+    Runtime.prototype.resolveScopedTokens = function(tokens, scope) {
         const resolved = [];
 
         for (let i = 0; i < tokens.length; i++) {
@@ -8245,7 +8259,7 @@
      * @param {Array<Object>} frames - Effective foreach frames (outer → inner).
      * @returns {Map<string, string|number>} Scoped variable map.
      */
-    Context.prototype.buildForeachScope = function(frames) {
+    Runtime.prototype.buildForeachScope = function(frames) {
         // Stores scoped variable → resolved path/index mappings
         const scope = new Map();
 
@@ -8287,7 +8301,7 @@
      * @param {HTMLElement} element - Element inside a foreach hierarchy.
      * @returns {string|number} Fully-qualified path or direct numeric index.
      */
-    Context.prototype.normalizePath = function(pathSegments, element) {
+    Runtime.prototype.normalizePath = function(pathSegments, element) {
         // Convert incoming path into normalized token form
         const path = Utils.pathStringToArray(pathSegments);
 
@@ -8361,7 +8375,7 @@
      *   and the element's content is cleared); or evaluation threw (logged, content
      *   preserved in case the error resolves itself once context becomes available).
      */
-    Context.prototype.evaluateForeachArray = function(foreachElement) {
+    Runtime.prototype.evaluateForeachArray = function(foreachElement) {
         const mappingData = this.interpolationMap.get(foreachElement);
 
         if (!mappingData || !mappingData.foreachId) {
@@ -8401,7 +8415,7 @@
      * @returns {Array|null} The new array if a rebuild is needed, or null if no rebuild
      *   is needed (including when the element/expression isn't valid).
      */
-    Context.prototype.getChangedForeachArray = function(foreachElement) {
+    Runtime.prototype.getChangedForeachArray = function(foreachElement) {
         // Evaluate and validate the current array
         const newArray = this.evaluateForeachArray(foreachElement);
 
@@ -8441,7 +8455,7 @@
      * @param {string} arrayPath - Fully-qualified data array path to match.
      * @returns {HTMLElement[]} Elements whose foreach bindings depend on the array.
      */
-    Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
+    Runtime.prototype.findForeachElementsByArrayPath = function(arrayPath) {
         const elementsToUpdate = [];
 
         for (const [element, mappingData] of this.interpolationMap) {
@@ -8485,7 +8499,7 @@
      * @param {Comment} commentNode - The DOM comment node to parse
      * @returns {{foreachId: string, index: number, renderIndex: number}|null}
      */
-    Context.parseForeachComment = function(commentNode) {
+    Runtime.parseForeachComment = function(commentNode) {
         const match = commentNode.textContent.trim().match(FOREACH_INDEX_REGEX);
 
         if (!match) {
@@ -8509,7 +8523,7 @@
      * @returns {number} returns.index - The logical index in the data array
      * @returns {number|null} returns.renderIndex - The rendering index (may differ from logical index)
      */
-    Context.prototype.extractClosestForeachContext = function(startElement) {
+    Runtime.prototype.extractClosestForeachContext = function(startElement) {
         // Cache container
         const container = this.container;
 
@@ -8533,7 +8547,7 @@
             while (sibling) {
                 // Only process comment nodes
                 if (sibling.nodeType === COMMENT_NODE) {
-                    const context = Context.parseForeachComment(sibling);
+                    const context = Runtime.parseForeachComment(sibling);
 
                     if (context) {
                         // Cache on the starting element so subsequent lookups
@@ -8561,7 +8575,7 @@
      * This enables O(1) context lookups instead of repeated comment parsing.
      * @param {HTMLElement} foreachElement - The foreach container element
      */
-    Context.prototype.cacheContextOnItemElements = function(foreachElement) {
+    Runtime.prototype.cacheContextOnItemElements = function(foreachElement) {
         let node;
         let currentContext = null;
 
@@ -8569,7 +8583,7 @@
 
         while ((node = walker.nextNode())) {
             if (node.nodeType === Node.COMMENT_NODE) {
-                const context = Context.parseForeachComment(node);
+                const context = Runtime.parseForeachComment(node);
 
                 if (context) {
                     // Found start marker - prepare context for next element
@@ -8589,7 +8603,7 @@
      * Removes all child elements of a foreach container from interpolation maps
      * @param {Element} foreachElement - The foreach container element
      */
-    Context.prototype.cleanupForeachMaps = function(foreachElement) {
+    Runtime.prototype.cleanupForeachMaps = function(foreachElement) {
         const elementsToRemove = [];
         const textNodesToRemove = [];
 
@@ -8634,10 +8648,10 @@
 
     /**
      * Establishes parent-child relationships for this component
-     * @param {Context|null} parent - Parent component (or null if top-level)
-     * @param {Context[]} children - Array of child components
+     * @param {Runtime|null} parent - Parent component (or null if top-level)
+     * @param {Runtime[]} children - Array of child components
      */
-    Context.prototype.establishHierarchy = function(parent, children) {
+    Runtime.prototype.establishHierarchy = function(parent, children) {
         // Updates relationships
         this.updateParentRelationship(parent);
         this.updateChildrenRelationships(children);
@@ -8670,7 +8684,7 @@
      * Updates parent relationship - only sets parent reference
      * @param {Object|null} newParent - New parent component or null
      */
-    Context.prototype.updateParentRelationship = function(newParent) {
+    Runtime.prototype.updateParentRelationship = function(newParent) {
         // Do nothing when parent did not change
         if (this.parent === newParent) {
             return;
@@ -8694,7 +8708,7 @@
      * Rebuilds children relationships from current DOM hierarchy
      * @param {Array} currentChildren - Children found in DOM
      */
-    Context.prototype.updateChildrenRelationships = function(currentChildren) {
+    Runtime.prototype.updateChildrenRelationships = function(currentChildren) {
         this.children.clear();
 
         currentChildren.forEach(child => {
@@ -8716,7 +8730,7 @@
      * @param {number} renderIndex - The item's position in the rendered output
      * @returns {string} Comment-delimited HTML string for one foreach iteration
      */
-    Context.prototype.buildForeachItemHTML = function(foreachId, template, originalIndex, renderIndex) {
+    Runtime.prototype.buildForeachItemHTML = function(foreachId, template, originalIndex, renderIndex) {
         return `<!-- pac-foreach-item: ${foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
             template +
             `<!-- /pac-foreach-item -->`;
@@ -9302,10 +9316,10 @@
      * Global registry for managing PAC components and their hierarchical relationships
      */
     function ComponentRegistry() {
-        /** @type {Map<string, Context>} All registered components indexed by pac-id */
+        /** @type {Map<string, Runtime>} All registered components indexed by pac-id */
         this.components = new Map();
 
-        /** @type {Set<Context>} Components waiting for hierarchy establishment */
+        /** @type {Set<Runtime>} Components waiting for hierarchy establishment */
         this.pendingHierarchy = new Set();
 
         /**
@@ -9431,7 +9445,7 @@
          * Time complexity: O(n) where n is the number of components
          * Space complexity: O(n) for the hierarchy map and container index
          *
-         * @returns {Map<Element, {parent: Context|null, children: Context[]}>} Complete hierarchy map
+         * @returns {Map<Element, {parent: Runtime|null, children: Runtime[]}>} Complete hierarchy map
          */
         buildHierarchyMap() {
             // Step 1: Create fast lookup index - container element -> component
@@ -10200,7 +10214,7 @@
             }
 
             // Create context for this container
-            const context = new Context(container, containerAbstraction, config);
+            const context = new Runtime(container, containerAbstraction, config);
 
             // Register using pac-id as key (not selector)
             window.PACRegistry.register(pacId, context);
