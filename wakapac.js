@@ -5608,7 +5608,6 @@
         this.initializeRuntimeServices();
         this.initializeUpdateQueue();
         this.initializeEventHandlers();
-        this.initializeCanvas();
 
         DomUpdateTracker.observeContainer(this.container);
     }
@@ -5709,32 +5708,20 @@
         }
 
         // WebGL canvases require runtime event handling.
-        this.initializeCanvasEvents();
+        if (this.contextType === 'webgl' || this.contextType === 'webgl2') {
+            // Store bound handlers so they can be removed during destroy().
+            this.boundWebGLContextLost = this.handleWebGLContextLost.bind(this);
+            this.boundWebGLContextRestored = this.handleWebGLContextRestored.bind(this);
 
-        // Run the render loop if specified to do so
-        if (this.config.renderLoop === true) {
-            RenderLoopEngine.start(this.abstraction.pacId, this.container);
+            // Listen for browser-driven WebGL context lifecycle events.
+            this.container.addEventListener('webglcontextlost', this.boundWebGLContextLost);
+            this.container.addEventListener('webglcontextrestored', this.boundWebGLContextRestored);
+
+            // Run the render loop if specified to do so
+            if (this.config.renderLoop === true) {
+                RenderLoopEngine.start(this.abstraction.pacId, this.container);
+            }
         }
-    };
-
-    /**
-     * Registers WebGL context lifecycle event handlers.
-     * Only WebGL and WebGL2 canvases require these handlers.
-     * @returns {void}
-     */
-    Runtime.prototype.initializeCanvasEvents = function() {
-        // Context loss/restoration events only apply to WebGL.
-        if (this.contextType !== 'webgl' && this.contextType !== 'webgl2') {
-            return;
-        }
-
-        // Store bound handlers so they can be removed during destroy().
-        this.boundWebGLContextLost = this.handleWebGLContextLost.bind(this);
-        this.boundWebGLContextRestored = this.handleWebGLContextRestored.bind(this);
-
-        // Listen for browser-driven WebGL context lifecycle events.
-        this.container.addEventListener('webglcontextlost', this.boundWebGLContextLost);
-        this.container.addEventListener('webglcontextrestored', this.boundWebGLContextRestored);
     };
 
     /**
@@ -10254,22 +10241,25 @@
                 wakaPAC.hydrateContainer(container, containerAbstraction);
             }
 
-            // Create context for this container
-            const context = new Runtime(container, containerAbstraction, config);
+            // Create runtime for this container
+            const runtime = new Runtime(container, containerAbstraction, config);
 
             // Register using pac-id as key (not selector)
-            window.PACRegistry.register(pacId, context);
+            window.PACRegistry.register(pacId, runtime);
 
             // Let plugins augment the component
-            wakaPAC.initializeComponent(context, pacId);
+            wakaPAC.initializeComponent(runtime, pacId);
+
+            // Initialize Canvas
+            runtime.initializeCanvas();
 
             // Signal that a new component is ready
             document.dispatchEvent(new CustomEvent('pac:component-ready', {
-                detail: { component: context, selector: selector, pacId: pacId }
+                detail: { component: runtime, selector: selector, pacId: pacId }
             }));
 
             // Collect the abstraction
-            abstractions.push(context.abstraction);
+            abstractions.push(runtime.abstraction);
         });
 
         // Return array for multi-selectors, single abstraction for ID selectors
