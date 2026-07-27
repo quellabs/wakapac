@@ -5608,6 +5608,7 @@
         this.initializeRuntimeServices();
         this.initializeUpdateQueue();
         this.initializeEventHandlers();
+        this.initializeCanvas();
 
         DomUpdateTracker.observeContainer(this.container);
     }
@@ -5684,6 +5685,109 @@
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
     }
 
+    /**
+     * Initializes canvas-specific runtime behavior.
+     * Performs the initial paint for 2D canvases and configures WebGL canvases
+     * by registering context lifecycle handlers and starting the render loop
+     * when enabled by the runtime configuration.
+     * @returns {void}
+     */
+    Runtime.prototype.initializeCanvas = function() {
+        // Only canvas elements can host WebGL contexts.
+        if (!(this.container instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        // Determine which rendering context this canvas uses.
+        this.contextType = this.container.dataset.pacContext || '2d';
+
+        // 2D canvases perform an initial synchronous paint and require no further setup.
+        if (this.contextType === '2d') {
+            _invalidateRect(this.abstraction.pacId);
+            _flushPaintQueue();
+            return;
+        }
+
+        // WebGL canvases require runtime event handling.
+        this.initializeCanvasEvents();
+
+        // Run the render loop if specified to do so
+        if (this.config.renderLoop === true) {
+            RenderLoopEngine.start(this.abstraction.pacId, this.container);
+        }
+    };
+
+    /**
+     * Registers WebGL context lifecycle event handlers.
+     * Only WebGL and WebGL2 canvases require these handlers.
+     * @returns {void}
+     */
+    Runtime.prototype.initializeCanvasEvents = function() {
+        // Context loss/restoration events only apply to WebGL.
+        if (this.contextType !== 'webgl' && this.contextType !== 'webgl2') {
+            return;
+        }
+
+        // Store bound handlers so they can be removed during destroy().
+        this.boundWebGLContextLost = this.handleWebGLContextLost.bind(this);
+        this.boundWebGLContextRestored = this.handleWebGLContextRestored.bind(this);
+
+        // Listen for browser-driven WebGL context lifecycle events.
+        this.container.addEventListener('webglcontextlost', this.boundWebGLContextLost);
+        this.container.addEventListener('webglcontextrestored', this.boundWebGLContextRestored);
+    };
+
+    /**
+     * Handles WebGL context loss.
+     * Suspends rendering and notifies the component so it can release all
+     * invalidated WebGL resources.
+     * @param {WebGLContextEvent} e
+     * @returns {void}
+     */
+    Runtime.prototype.handleWebGLContextLost = function(e) {
+        // Calling preventDefault() is required — without it the browser
+        // will not attempt to restore the context after it is lost.
+        e.preventDefault();
+
+        // Pause the render loop while the context is unavailable.
+        // Dispatching paint messages to a lost context produces GL errors.
+        RenderLoopEngine.pause(this.abstraction.pacId);
+
+        // Notify the component so it can discard all WebGL resource handles.
+        // Buffers, textures, framebuffers, programs, etc. become invalid after
+        // a context loss and must be recreated after restoration.
+        DomUpdateTracker.dispatchToContainer(
+            this.container,
+            DomUpdateTracker.wrapDomEventAsMessage(
+                MSG_WEBGL_CONTEXT_LOST, e, 0, 0
+            )
+        );
+    };
+
+    /**
+     * Handles restoration of a previously lost WebGL context.
+     * Notifies the component that a fresh context is available and resumes
+     * rendering if a render loop was active.
+     * @param {WebGLContextEvent} e
+     * @returns {void}
+     */
+    Runtime.prototype.handleWebGLContextRestored = function(e) {
+        // The browser has created a brand-new WebGL context. All GPU resources
+        // must be recreated before rendering can continue.
+        DomUpdateTracker.dispatchToContainer(
+            this.container,
+            DomUpdateTracker.wrapDomEventAsMessage(
+                MSG_WEBGL_CONTEXT_RESTORED, e, 0, 0,
+                {
+                    glContext: wakaPAC.getDC(this.abstraction.pacId)
+                }
+            )
+        );
+
+        // Resume rendering if the component was previously running a render loop.
+        RenderLoopEngine.resume(this.abstraction.pacId, this.container);
+    };
+
     // =============================================================================
     // LIFECYCLE METHODS
     // =============================================================================
@@ -5718,19 +5822,26 @@
         // Clean up observers
         DomUpdateTracker.unObserveContainer(this.container);
 
+        // Cleanup canvas rendering if needed
+        RenderLoopEngine.stop(this.abstraction.pacId);
+
         // Remove event listeners
+        this.container.removeEventListener('webglcontextlost', this.boundWebGLContextLost);
+        this.container.removeEventListener('webglcontextrestored', this.boundWebGLContextRestored);
         this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
+
+        // Clear bound events
+        this.boundWebGLContextLost = null;
+        this.boundWebGLContextRestored = null;
+        this.boundHandlePacEvent = null;
 
         // Clear updateQueueTimer
         if (this.updateQueueTimer !== null) {
             clearTimeout(this.updateQueueTimer);
             this.updateQueueTimer = null;
         }
-
-        // Clear boundHandlePacEvent callback
-        this.boundHandlePacEvent = null;
 
         // Clean up container scroll listener and cancel any pending debounced call
         if (this.containerScrollHandler) {
@@ -10126,7 +10237,7 @@
 
             if (existingComponent) {
                 abstractions.push(existingComponent.abstraction);
-                return; // Skip to next container
+                return;
             }
 
             // Merge configuration
@@ -10140,77 +10251,7 @@
 
             // Hydrate fields into abstraction before context is created
             if (config?.hydrate === true) {
-                // Read initial state from data-pac-state attribute if present
-                const pacState = container.dataset.pacState;
-
-                if (pacState) {
-                    try {
-                        Object.assign(containerAbstraction, JSON.parse(pacState));
-                    } catch (e) {
-                        console.warn('WakaPAC: Failed to parse data-pac-state:', e);
-                    }
-                }
-
-                // Scan data-pac-field elements and add to abstraction
-                container.querySelectorAll('[data-pac-field]').forEach(el => {
-                    // Element belongs to another container. Skip.
-                    if (!Utils.belongsToPacContainer(container, el)) {
-                        return;
-                    }
-
-                    // Fetch name attribute
-                    const name = el.getAttribute('name');
-
-                    // No name attribute exists. Skip.
-                    if (!name) {
-                        return;
-                    }
-
-                    // If the element has data-pac-same-as, register an alias instead
-                    // of importing the field value directly. The alias redirects reads
-                    // and writes to the target path via getter/setter after resolveAliases().
-                    const sameAs = el.getAttribute('data-pac-same-as');
-
-                    if (sameAs) {
-                        containerAbstraction[name] = wakaPAC.sameAs(sameAs);
-                        return;
-                    }
-
-                    switch (el.type) {
-                        case 'checkbox':
-                            // Read checked state as boolean
-                            Utils.setNestedProperty(name, el.checked, containerAbstraction);
-                            break;
-
-                        case 'number':
-                        case 'range':
-                            // Convert numeric input values to actual numbers
-                            Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', containerAbstraction);
-                            break;
-
-                        case 'radio':
-                            // Initialize the group property with an empty string on first encounter
-                            if (Utils.getNestedValue(containerAbstraction, name) === undefined) {
-                                Utils.setNestedProperty(name, '', containerAbstraction);
-                            }
-
-                            // Only overwrite if this radio button is the selected one
-                            if (el.checked) {
-                                Utils.setNestedProperty(name, el.value, containerAbstraction);
-                            }
-
-                            break;
-
-                        case 'file':
-                            // File inputs cannot be hydrated — skip
-                            break;
-
-                        default:
-                            // For all other field types, read the current value or fall back to the HTML attribute
-                            Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), containerAbstraction);
-                            break;
-                    }
-                });
+                wakaPAC.hydrateContainer(container, containerAbstraction);
             }
 
             // Create context for this container
@@ -10220,85 +10261,7 @@
             window.PACRegistry.register(pacId, context);
 
             // Let plugins augment the component
-            _plugins.forEach(function(plugin) {
-                if (typeof plugin.onComponentCreated === 'function') {
-                    plugin.onComponentCreated(context.abstraction, pacId, context.config);
-                }
-            });
-
-            // Call init() method if it exists after all setup is complete
-            if (
-                context.abstraction.init &&
-                typeof context.abstraction.init === 'function'
-            ) {
-                try {
-                    context.abstraction.init.call(context.abstraction);
-                } catch (error) {
-                    console.warn('Error in init() method:', error);
-                }
-            }
-
-            const isCanvasElement = container instanceof HTMLCanvasElement;
-            const contextType = isCanvasElement ? (container.dataset.pacContext || '2d') : '2d';
-
-            if (isCanvasElement) {
-                // Synchronously flush any paint requests queued during observation
-                // to avoid a blank frame before the first animation frame fires.
-                // Only applies to 2D canvases — WebGL canvases use MSG_PAINT via
-                // the render loop or manage their own redraws.
-                if (contextType === '2d') {
-                    _invalidateRect(container._pacId);
-                    _flushPaintQueue();
-                }
-
-                // Setup renderloop for webgl if renderLoop is set to true
-                if (contextType !== '2d' && config.renderLoop === true) {
-                    RenderLoopEngine.start(pacId, container);
-                }
-
-                // Attach WebGL context loss/restore handlers for all WebGL canvases,
-                // regardless of whether renderLoop is active.
-                if (contextType !== '2d') {
-                    container.addEventListener('webglcontextlost', function(e) {
-                        // Calling preventDefault() is required — without it the browser
-                        // will not attempt to restore the context after it is lost.
-                        e.preventDefault();
-
-                        // Pause the render loop while the context is unavailable.
-                        // Dispatching MSG_PAINT to a lost context produces GL errors and
-                        // is meaningless — suspend the loop until the context is restored.
-                        RenderLoopEngine.pause(pacId);
-
-                        // Notify the component so it can null out all GL resource handles.
-                        // All WebGL objects (buffers, textures, programs, etc.) are invalid
-                        // after context loss and must not be used until MSG_WEBGL_CONTEXT_RESTORED.
-                        DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                            MSG_WEBGL_CONTEXT_LOST,
-                            e,
-                            0,
-                            0
-                        ));
-                    });
-
-                    container.addEventListener('webglcontextrestored', function(e) {
-                        // The context has been recreated by the browser — all GL resources
-                        // must be rebuilt from scratch (shaders, buffers, textures, etc.).
-                        // Provide the fresh context on event.glContext, mirroring MSG_WEBGL_READY.
-                        DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                            MSG_WEBGL_CONTEXT_RESTORED,
-                            e,
-                            0,
-                            0,
-                            {
-                                glContext: wakaPAC.getDC(pacId)
-                            }
-                        ));
-
-                        // Resume the render loop if it was running before context loss.
-                        RenderLoopEngine.resume(pacId, container);
-                    });
-                }
-            }
+            wakaPAC.initializeComponent(context, pacId);
 
             // Signal that a new component is ready
             document.dispatchEvent(new CustomEvent('pac:component-ready', {
@@ -10311,6 +10274,114 @@
 
         // Return array for multi-selectors, single abstraction for ID selectors
         return isMultiSelector ? abstractions : abstractions[0];
+    }
+
+    /**
+     * Invokes component lifecycle hooks after the runtime has been created.
+     * Calls plugin initialization hooks followed by the abstraction's init()
+     * method, if present.
+     * @param {Runtime} context
+     * @param {string} pacId
+     */
+    wakaPAC.initializeComponent = function(context, pacId) {
+        _plugins.forEach(function(plugin) {
+            if (typeof plugin.onComponentCreated === 'function') {
+                plugin.onComponentCreated(context.abstraction, pacId, context.config);
+            }
+        });
+
+        // Call init() method if it exists after all setup is complete
+        if (
+            context.abstraction.init &&
+            typeof context.abstraction.init === 'function'
+        ) {
+            try {
+                context.abstraction.init.call(context.abstraction);
+            } catch (error) {
+                console.warn('Error in init() method:', error);
+            }
+        }
+    }
+
+    /**
+     * Hydrates an abstraction from the container's initial DOM state.
+     * Imports values from data-pac-state and data-pac-field elements before
+     * the runtime is created.
+     * @param {HTMLElement} container
+     * @param {Object} containerAbstraction
+     */
+    wakaPAC.hydrateContainer = function(container, containerAbstraction) {
+        // Read initial state from data-pac-state attribute if present
+        const pacState = container.dataset.pacState;
+
+        if (pacState) {
+            try {
+                Object.assign(containerAbstraction, JSON.parse(pacState));
+            } catch (e) {
+                console.warn('WakaPAC: Failed to parse data-pac-state:', e);
+            }
+        }
+
+        // Scan data-pac-field elements and add to abstraction
+        container.querySelectorAll('[data-pac-field]').forEach(el => {
+            // Element belongs to another container. Skip.
+            if (!Utils.belongsToPacContainer(container, el)) {
+                return;
+            }
+
+            // Fetch name attribute
+            const name = el.getAttribute('name');
+
+            // No name attribute exists. Skip.
+            if (!name) {
+                return;
+            }
+
+            // If the element has data-pac-same-as, register an alias instead
+            // of importing the field value directly. The alias redirects reads
+            // and writes to the target path via getter/setter after resolveAliases().
+            const sameAs = el.getAttribute('data-pac-same-as');
+
+            if (sameAs) {
+                containerAbstraction[name] = wakaPAC.sameAs(sameAs);
+                return;
+            }
+
+            switch (el.type) {
+                case 'checkbox':
+                    // Read checked state as boolean
+                    Utils.setNestedProperty(name, el.checked, containerAbstraction);
+                    break;
+
+                case 'number':
+                case 'range':
+                    // Convert numeric input values to actual numbers
+                    Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', containerAbstraction);
+                    break;
+
+                case 'radio':
+                    // Initialize the group property with an empty string on first encounter
+                    if (Utils.getNestedValue(containerAbstraction, name) === undefined) {
+                        Utils.setNestedProperty(name, '', containerAbstraction);
+                    }
+
+                    // Only overwrite if this radio button is the selected one
+                    if (el.checked) {
+                        Utils.setNestedProperty(name, el.value, containerAbstraction);
+                    }
+
+                    break;
+
+                case 'file':
+                    // File inputs cannot be hydrated — skip
+                    break;
+
+                default:
+                    // For all other field types, read the current value or fall back to the HTML attribute
+                    Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), containerAbstraction);
+                    break;
+            }
+        });
     }
 
     /**
