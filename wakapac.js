@@ -692,7 +692,7 @@
          * @returns {*} The value at the given path, or undefined if any part of the path does not exist
          */
         getNestedValue(obj, path) {
-            const parts = path.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
+            const parts = Utils.pathStringToArray(path);
             let current = obj;
 
             for (const part of parts) {
@@ -713,7 +713,7 @@
          * @param {object} current
          */
         setNestedProperty(path, value, current) {
-            const parts = path.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
+            const parts = Utils.pathStringToArray(path);
 
             for (let i = 0; i < parts.length - 1; i++) {
                 const part = parts[i];
@@ -1312,13 +1312,7 @@
                 }
 
                 // Dispatch events for the array change
-                container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                    detail: {
-                        path: currentPath,
-                        oldValue: oldArray,
-                        newValue: target
-                    }
-                }));
+                dispatchReactiveChange(currentPath, oldArray, target);
 
                 // Return the result
                 return result;
@@ -1347,13 +1341,7 @@
             target.length = newLength;
 
             // Dispatch events
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: currentPath,
-                    oldValue: oldArray,
-                    newValue: Array.prototype.slice.call(target)
-                }
-            }));
+            dispatchReactiveChange(currentPath, oldArray, Array.prototype.slice.call(target));
 
             return true;
         }
@@ -1480,13 +1468,7 @@
             }
 
             // Dispatch array-specific event if this is an array assignment
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: propertyPath,
-                    oldValue: oldValue,
-                    newValue: target[prop]
-                }
-            }));
+            dispatchReactiveChange(propertyPath, oldValue, target[prop]);
 
             return true;
         }
@@ -1520,13 +1502,7 @@
             delete target[prop];
 
             // Notify the DOM that this property is gone
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: propertyPath,
-                    oldValue: oldValue,
-                    newValue: undefined
-                }
-            }));
+            dispatchReactiveChange(propertyPath, oldValue, undefined);
 
             return true;
         }
@@ -1553,6 +1529,20 @@
                     return proxyDeleteHandler(target, prop, currentPath);
                 }
             });
+        }
+
+        /**
+         * Dispatches a pac:change event for a reactive property update.
+         * Called whenever a reactive property, array, or nested object changes,
+         * allowing bindings to synchronize with the updated state.
+         * @param {string[]} path - Path to the changed property.
+         * @param {*} oldValue - Value before the change.
+         * @param {*} newValue - Value after the change.
+         */
+        function dispatchReactiveChange(path, oldValue, newValue) {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                detail: { path, oldValue, newValue }
+            }));
         }
 
         if (!value || typeof value !== 'object') {
