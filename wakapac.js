@@ -20,31 +20,6 @@
     "use strict";
 
     // =============================================================================
-    // CANVAS HELPERS
-    // =============================================================================
-
-    /**
-     * Creates a canvas context of the given dimensions and type.
-     * Uses OffscreenCanvas where available, falling back to HTMLCanvasElement
-     * for environments that do not support it (notably older Safari versions).
-     * @param {number} width
-     * @param {number} height
-     * @param {string} [contextType='2d']
-     * @param {Object} [attributes={}]
-     * @returns {RenderingContext}
-     */
-    function _createCanvas(width, height, contextType = '2d', attributes = {}) {
-        if (typeof OffscreenCanvas !== 'undefined') {
-            return new OffscreenCanvas(width, height).getContext(contextType, attributes);
-        }
-
-        const canvas  = document.createElement('canvas');
-        canvas.width  = width;
-        canvas.height = height;
-        return canvas.getContext(contextType, attributes);
-    }
-
-    // =============================================================================
     // CONSTANTS AND CONFIGURATION
     // =============================================================================
 
@@ -1532,12 +1507,12 @@
         }
 
         /**
-         * Dispatches a pac:change event for a reactive property update.
-         * Called whenever a reactive property, array, or nested object changes,
-         * allowing bindings to synchronize with the updated state.
-         * @param {string[]} path - Path to the changed property.
-         * @param {*} oldValue - Value before the change.
-         * @param {*} newValue - Value after the change.
+         * Dispatches a reactive change notification for the specified property path.
+         * This is emitted whenever a reactive property, array, or nested object is
+         * modified, allowing DOM bindings to update in response.
+         * @param {string[]} path - Path to the changed property within the reactive object.
+         * @param {*} oldValue - The property's value before the change.
+         * @param {*} newValue - The property's value after the change.
          */
         function dispatchReactiveChange(path, oldValue, newValue) {
             container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
@@ -9963,6 +9938,27 @@
     // ========================================================================
     // PAINT INTERNAL HELPERS
     // ========================================================================
+
+    /**
+     * Creates a canvas context of the given dimensions and type.
+     * Uses OffscreenCanvas where available, falling back to HTMLCanvasElement
+     * for environments that do not support it (notably older Safari versions).
+     * @param {number} width
+     * @param {number} height
+     * @param {string} [contextType='2d']
+     * @param {Object} [attributes={}]
+     * @returns {RenderingContext}
+     */
+    function _createCanvas(width, height, contextType = '2d', attributes = {}) {
+        if (typeof OffscreenCanvas !== 'undefined') {
+            return new OffscreenCanvas(width, height).getContext(contextType, attributes);
+        }
+
+        const canvas  = document.createElement('canvas');
+        canvas.width  = width;
+        canvas.height = height;
+        return canvas.getContext(contextType, attributes);
+    }
 
     /**
      * Returns true if the given rendering context is a WebGL or WebGL2 context.
