@@ -3182,7 +3182,7 @@
         /**
          * Helper to dispatch mouse messages with proper wParam/lParam encoding
          * @param {number} msgType
-         * @param {Event} domEvent
+         * @param {MouseEvent | TouchEvent} domEvent
          * @param {HTMLElement} container
          * @param {Object} extended
          */
