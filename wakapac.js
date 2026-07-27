@@ -10791,8 +10791,8 @@
      */
     wakaPAC.MAKEPOINTS = function(lParam) {
         return {
-            x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
-            y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
+            x: wakaPAC.LOWORD(lParam),
+            y: wakaPAC.HIWORD(lParam)
         };
     };
 
