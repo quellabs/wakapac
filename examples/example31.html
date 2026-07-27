@@ -9,8 +9,10 @@
 <canvas id="scene" data-pac-context="webgl2" width="400" height="400"></canvas>
 
 <script src="../wakapac.js"></script>
+<script src="../plugins/wakad3d.js"></script>
 <script src="../units/waka-unit-math3d.js"></script>
 <script>
+    wakaPAC.use(wakaD3D);
     wakaPAC.use(Math3D);
 
     const VS = `#version 300 es
@@ -60,7 +62,7 @@ void main() {
         INDICES.set([b, b + 1, b + 2, b, b + 2, b + 3], f * 6);
     }
 
-const m3d = wakaPAC.unit(Math3D);
+    const m3d = wakaPAC.unit(Math3D);
 
     function compile(gl, type, src) {
         const sh = gl.createShader(type);
@@ -87,7 +89,7 @@ const m3d = wakaPAC.unit(Math3D);
 
             switch (event.message) {
 
-                case wakaPAC.MSG_WEBGL_READY: {
+                case wakaD3D.MSG_WEBGL_READY: {
                     const gl = event.detail.glContext;
 
                     const vs = compile(gl, gl.VERTEX_SHADER, VS);
@@ -140,7 +142,10 @@ const m3d = wakaPAC.unit(Math3D);
                     this._rx += 0.005;
                     this._ry += 0.009;
 
-                const mvp = m3d.mul(m3d.perspective(Math.PI / 4, this._w / this._h, 0.1, 100), m3d.mul(m3d.translation(0, 0, -4), m3d.mul(m3d.rotX(this._rx), m3d.rotY(this._ry))));
+                    const mvp = m3d.mul(
+                        m3d.perspective(Math.PI / 4, this._w / this._h, 0.1, 100),
+                        m3d.mul(m3d.translation(0, 0, -4), m3d.mul(m3d.rotX(this._rx), m3d.rotY(this._ry)))
+                    );
 
                     gl.viewport(0, 0, this._w, this._h);
                     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -156,7 +161,7 @@ const m3d = wakaPAC.unit(Math3D);
             }
         }
     }, {
-        dcAttributes: {antialias: true, depth: true},
+        dcAttributes: { antialias: true, depth: true },
         renderLoop: true
     });
 

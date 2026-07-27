@@ -242,9 +242,6 @@
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
     const MSG_FOREACH_REBUILT = 0x0400;
-    const MSG_WEBGL_READY = 0x0401;
-    const MSG_WEBGL_CONTEXT_LOST = 0x0402;
-    const MSG_WEBGL_CONTEXT_RESTORED = 0x0403;
     const MSG_USER = 0x1000;
     const MSG_PLUGIN = 0x2000;
 
@@ -2787,30 +2784,6 @@
 
                         // Dispatch size update to the owning container/component
                         self.dispatchToContainer(container, customEvent);
-
-                        // For WebGL canvas components, dispatch MSG_WEBGL_READY after the first MSG_SIZE.
-                        // At this point the canvas is laid out and getDC() returns a valid context — safe to
-                        // compile shaders, upload geometry, and set up any other GL resources. Only fires once
-                        // per component lifetime.
-                        if (!component._webglReadySent) {
-                            component._webglReadySent = true;
-
-                            const pacContextType = container.dataset?.pacContext;
-
-                            if (pacContextType === 'webgl' || pacContextType === 'webgl2') {
-                                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
-                                    MSG_WEBGL_READY,
-                                    null,
-                                    0,
-                                    0,
-                                    {
-                                        // Provide the GL context directly on the event so components
-                                        // can set up shaders in the handler without a separate getDC() call.
-                                        glContext: wakaPAC.getDC(container.dataset.pacId)
-                                    }
-                                ));
-                            }
-                        }
                     }
                 });
             });
@@ -5758,13 +5731,16 @@
 
     /**
      * Initializes canvas-specific runtime behavior.
-     * Performs the initial paint for 2D canvases and configures WebGL canvases
-     * by registering context lifecycle handlers and starting the render loop
-     * when enabled by the runtime configuration.
+     * Performs the initial paint for 2D canvases. Core has no knowledge of any
+     * other context type (webgl, webgl2, or otherwise) — that setup is entirely
+     * the responsibility of a plugin registered via wakaPAC.use(), which learns
+     * of this component through the onComponentCreated(abstraction, pacId, config)
+     * lifecycle hook (fired earlier, before this method runs) and is free to
+     * inspect container.dataset.pacContext itself and wire up whatever it needs.
      * @returns {void}
      */
     Runtime.prototype.initializeCanvas = function() {
-        // Only canvas elements can host WebGL contexts.
+        // Only canvas elements can host non-2D contexts at all.
         if (!(this.container instanceof HTMLCanvasElement)) {
             return;
         }
@@ -5776,75 +5752,10 @@
         if (this.contextType === '2d') {
             DomUpdateTracker.invalidateRect(this.abstraction.pacId);
             DomUpdateTracker.flushPaintQueue();
-            return;
         }
 
-        // WebGL canvases require runtime event handling.
-        if (this.contextType === 'webgl' || this.contextType === 'webgl2') {
-            // Store bound handlers so they can be removed during destroy().
-            this.boundWebGLContextLost = this.handleWebGLContextLost.bind(this);
-            this.boundWebGLContextRestored = this.handleWebGLContextRestored.bind(this);
-
-            // Listen for browser-driven WebGL context lifecycle events.
-            this.container.addEventListener('webglcontextlost', this.boundWebGLContextLost);
-            this.container.addEventListener('webglcontextrestored', this.boundWebGLContextRestored);
-
-            // Run the render loop if specified to do so
-            if (this.config.renderLoop === true) {
-                RenderLoopEngine.start(this.abstraction.pacId, this.container);
-            }
-        }
-    };
-
-    /**
-     * Handles WebGL context loss.
-     * Suspends rendering and notifies the component so it can release all
-     * invalidated WebGL resources.
-     * @param {WebGLContextEvent} e
-     * @returns {void}
-     */
-    Runtime.prototype.handleWebGLContextLost = function(e) {
-        // Calling preventDefault() is required — without it the browser
-        // will not attempt to restore the context after it is lost.
-        e.preventDefault();
-
-        // Pause the render loop while the context is unavailable.
-        // Dispatching paint messages to a lost context produces GL errors.
-        RenderLoopEngine.pause(this.abstraction.pacId);
-
-        // Notify the component so it can discard all WebGL resource handles.
-        // Buffers, textures, framebuffers, programs, etc. become invalid after
-        // a context loss and must be recreated after restoration.
-        DomUpdateTracker.dispatchToContainer(
-            this.container,
-            DomUpdateTracker.wrapDomEventAsMessage(
-                MSG_WEBGL_CONTEXT_LOST, e, 0, 0
-            )
-        );
-    };
-
-    /**
-     * Handles restoration of a previously lost WebGL context.
-     * Notifies the component that a fresh context is available and resumes
-     * rendering if a render loop was active.
-     * @param {WebGLContextEvent} e
-     * @returns {void}
-     */
-    Runtime.prototype.handleWebGLContextRestored = function(e) {
-        // The browser has created a brand-new WebGL context. All GPU resources
-        // must be recreated before rendering can continue.
-        DomUpdateTracker.dispatchToContainer(
-            this.container,
-            DomUpdateTracker.wrapDomEventAsMessage(
-                MSG_WEBGL_CONTEXT_RESTORED, e, 0, 0,
-                {
-                    glContext: wakaPAC.getDC(this.abstraction.pacId)
-                }
-            )
-        );
-
-        // Resume rendering if the component was previously running a render loop.
-        RenderLoopEngine.resume(this.abstraction.pacId, this.container);
+        // Any other context type (e.g. 'webgl'/'webgl2') is entirely a plugin's
+        // concern — core deliberately does nothing further here.
     };
 
     // =============================================================================
@@ -5881,19 +5792,12 @@
         // Clean up observers
         DomUpdateTracker.unObserveContainer(this.container);
 
-        // Cleanup canvas rendering if needed
-        RenderLoopEngine.stop(this.abstraction.pacId);
-
         // Remove event listeners
-        this.container.removeEventListener('webglcontextlost', this.boundWebGLContextLost);
-        this.container.removeEventListener('webglcontextrestored', this.boundWebGLContextRestored);
         this.container.removeEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
 
         // Clear bound events
-        this.boundWebGLContextLost = null;
-        this.boundWebGLContextRestored = null;
         this.boundHandlePacEvent = null;
 
         // Clear updateQueueTimer
@@ -5934,11 +5838,6 @@
         this.textInterpolationMap.clear();
         this.commentBindingMap.clear();
         this.updateQueue.clear();
-
-        // Cancel any active render loop for this component
-        if (this.abstraction?.pacId) {
-            RenderLoopEngine.stop(this.abstraction.pacId);
-        }
 
         // Capture identifiers needed for MSG_DESTROYED before nullification
         const destroyedPacId = this.abstraction.pacId || null;
@@ -9838,104 +9737,6 @@
     }
 
     // ========================================================================
-    // PAINT INVALIDATION ENGINE
-    // ========================================================================
-
-    /**
-     * Starts (or restarts) the WebGL render loop for a canvas container, driving
-     * MSG_PAINT dispatch via requestAnimationFrame. A tick is skipped whenever
-     * RenderLoopEngine.loops no longer has an entry for pacId — this is how
-     * stop() and context-loss pause() signal the in-flight rAF callback to stop
-     * rescheduling itself, without needing to cancel a stale handle.
-     * MSG_PAINT is withheld until the component has flagged _webglReadySent,
-     * since shaders/GL resources are not ready before that point.
-     *
-     * Mirrors RafTimerEngine's shape, but keeps one rAF handle per canvas
-     * rather than a single shared loop, since each canvas paints independently.
-     */
-    const RenderLoopEngine = {
-        /**
-         * Key:   pacId (string)
-         * Value: rAF handle (number) — cancel via cancelAnimationFrame() to stop/pause;
-         *        null — a "paused" sentinel, kept while a WebGL context is lost so
-         *        resume() can tell "was running, now paused" apart from "never started"
-         * @type {Map<string, number|null>}
-         */
-        loops: new Map(),
-
-        /**
-         * @param {string} pacId - data-pac-id of the target canvas container
-         * @param {HTMLCanvasElement} container - The canvas element to paint
-         * @returns {void}
-         */
-        start(pacId, container) {
-            const self = this;
-
-            const loop = function() {
-                if (!self.loops.has(pacId)) {
-                    return; // Loop was canceled — component destroyed, or suspended by context loss
-                }
-
-                const component = window.PACRegistry.getByElement(container);
-
-                if (component && component._webglReadySent) {
-                    DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                        MSG_PAINT,
-                        null,
-                        0,
-                        0
-                    ));
-                }
-
-                self.loops.set(pacId, requestAnimationFrame(loop));
-            };
-
-            this.loops.set(pacId, requestAnimationFrame(loop));
-        },
-
-        /**
-         * Stops a canvas container's render loop entirely and forgets its entry.
-         * Safe to call even if no loop is registered for pacId.
-         * @param {string} pacId - data-pac-id of the target canvas container
-         * @returns {void}
-         */
-        stop(pacId) {
-            if (this.loops.has(pacId)) {
-                cancelAnimationFrame(this.loops.get(pacId));
-                this.loops.delete(pacId);
-            }
-        },
-
-        /**
-         * Pauses a canvas container's render loop without forgetting it, so it
-         * can later be resumed via resume(). Used while a WebGL context is
-         * lost — dispatching MSG_PAINT to a lost context produces GL errors.
-         * @param {string} pacId - data-pac-id of the target canvas container
-         * @returns {void}
-         */
-        pause(pacId) {
-            if (this.loops.has(pacId)) {
-                cancelAnimationFrame(this.loops.get(pacId));
-                this.loops.set(pacId, null);
-            }
-        },
-
-        /**
-         * Resumes a canvas container's render loop if it was paused via
-         * pause(). No-op if the loop was never started or was fully stopped
-         * (component destroyed) rather than merely paused.
-         * @param {string} pacId - data-pac-id of the target canvas container
-         * @param {HTMLCanvasElement} container - The canvas element to paint
-         * @returns {void}
-         */
-        resume(pacId, container) {
-            if (this.loops.has(pacId) && this.loops.get(pacId) === null) {
-                this.start(pacId, container);
-            }
-        }
-    };
-
-    // ========================================================================
     // PAINT INTERNAL HELPERS
     // ========================================================================
 
@@ -9961,20 +9762,23 @@
     }
 
     /**
-     * Returns true if the given rendering context is a WebGL or WebGL2 context.
+     * Returns true if the given rendering context is a 2D canvas context.
+     * Core only understands 2D natively — anything else (webgl, webgl2, or a
+     * context type introduced by some future plugin) is opaque to core and is
+     * handled entirely through the blit-handler registry below.
      * @param {RenderingContext} ctx
      * @returns {boolean}
      */
-    function _isWebGLContext(ctx) {
-        return ctx instanceof WebGLRenderingContext || ctx instanceof WebGL2RenderingContext;
+    function _is2DContext(ctx) {
+        return ctx instanceof CanvasRenderingContext2D || ctx instanceof OffscreenCanvasRenderingContext2D;
     }
 
     /**
      * Copies srcCanvas onto a 2D destDC using drawImage.
-     * For WebGL sources, the source canvas must have been created with
-     * preserveDrawingBuffer: true in its glAttributes, otherwise the drawing
-     * buffer will have been cleared by the browser after compositing and the
-     * copy will produce a blank result.
+     * For non-2D sources (e.g. a WebGL canvas), the source canvas must have
+     * been created with preserveDrawingBuffer: true in its context attributes,
+     * otherwise the drawing buffer will have been cleared by the browser after
+     * compositing and the copy will produce a blank result.
      * @param {CanvasRenderingContext2D} destCtx2D
      * @param {HTMLCanvasElement} srcCanvas
      * @param {number} sx - Source X
@@ -9991,22 +9795,14 @@
     }
 
     /**
-     * Copies a source canvas onto a WebGL destination as a texture bound to
-     * the currently active texture unit. The caller is responsible for binding
-     * the target texture before calling this function.
-     * @param {WebGLRenderingContext|WebGL2RenderingContext} destGL
-     * @param {HTMLCanvasElement} srcCanvas
+     * Registry of blit handlers for non-2D destination contexts. Populated by
+     * plugins via wakaPAC.registerBlitHandler() — core ships with none. Each
+     * entry is { test(ctx): boolean, blit(destCtx, srcCanvas): void }.
+     * bitBlt()/stretchBlt() consult this list, in registration order, whenever
+     * the destination is not a 2D context.
+     * @type {Array<{test: function(RenderingContext): boolean, blit: function(RenderingContext, HTMLCanvasElement): void}>}
      */
-    function _blitToWebGL(destGL, srcCanvas) {
-        destGL.texImage2D(
-            destGL.TEXTURE_2D,
-            0,                  // mip level
-            destGL.RGBA,             // internal format
-            destGL.RGBA,             // format
-            destGL.UNSIGNED_BYTE,
-            srcCanvas
-        );
-    }
+    const _blitHandlers = [];
 
     // ========================================================================
     // STDLIB — built-in unit
@@ -11154,20 +10950,19 @@
      * Equivalent to Win32 GetDC() — retrieves the drawing context for a window.
      *
      * The context type is determined by the data-pac-context attribute on the
-     * canvas element (defaults to '2d' if absent):
-     *   '2d'     — returns CanvasRenderingContext2D  (dcAttributes from config)
-     *   'webgl'  — returns WebGLRenderingContext      (glAttributes from config)
-     *   'webgl2' — returns WebGL2RenderingContext     (glAttributes from config)
+     * canvas element (defaults to '2d' if absent). Core only knows '2d' natively;
+     * any other value (e.g. 'webgl'/'webgl2') is passed straight through to
+     * canvas.getContext() and returned as-is — support for that context type,
+     * and everything you can do with it, comes from a plugin (e.g. wakaD3D).
      *
-     * Calling getDC() on a WebGL/WebGL2 canvas returns the WebGL context directly.
-     * The dirty-rect clip logic only applies to 2D contexts; WebGL components drive
-     * their own render loop via requestAnimationFrame and do not use invalidateRect.
+     * The dirty-rect clip logic only applies to 2D contexts. Non-2D contexts
+     * drive their own render loop and do not use invalidateRect().
      *
      * Returns null if the container does not exist, is not a <canvas> element, or
      * if the requested context type is not supported by the browser.
      *
      * @param {string} pacId
-     * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
+     * @returns {RenderingContext|null}
      */
     wakaPAC.getDC = function(pacId) {
         const container = this.getContainerByPacId(pacId);
@@ -11216,9 +11011,9 @@
      * Must be called once for every getDC() call made inside a MSG_PAINT
      * handler for 2D canvases; outside of paint cycles this is a no-op and
      * safe to call unconditionally.
-     * For WebGL/WebGL2 contexts this is always a no-op — they do not use
-     * the dirty-rect clip mechanism.
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} ctx - the context returned by getDC()
+     * For non-2D contexts (e.g. webgl/webgl2) this is always a no-op — they
+     * do not use the dirty-rect clip mechanism.
+     * @param {RenderingContext} ctx - the context returned by getDC()
      */
     wakaPAC.releaseDC = function(ctx) {
         // Bail if no ctx passed
@@ -11226,8 +11021,8 @@
             return;
         }
 
-        // WebGL contexts do not participate in the dirty-rect clip mechanism
-        if (ctx instanceof WebGLRenderingContext || ctx instanceof WebGL2RenderingContext) {
+        // Non-2D contexts do not participate in the dirty-rect clip mechanism
+        if (!_is2DContext(ctx)) {
             return;
         }
 
@@ -11249,11 +11044,13 @@
 
     /**
      * Creates an off-screen context sized to match the canvas backing store.
-     * The context type matches the source canvas's data-pac-context attribute,
-     * so a WebGL2 canvas produces a WebGL2 OffscreenCanvas context.
-     * The component owns the returned DC; recreate it in MSG_SIZE after resizing.
+     * The context type matches the source canvas's data-pac-context attribute
+     * (any non-'2d' value is passed straight through to getContext(), so a
+     * plugin-defined type such as 'webgl2' produces a WebGL2 OffscreenCanvas
+     * context). The component owns the returned DC; recreate it in MSG_SIZE
+     * after resizing.
      * @param {string} pacId
-     * @returns {OffscreenCanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
+     * @returns {RenderingContext|null}
      */
     wakaPAC.createCompatibleDC = function(pacId) {
         const container = this.getContainerByPacId(pacId);
@@ -11297,14 +11094,13 @@
      * inside foreach items or other non-container canvases.
      *
      * The context type is determined by the data-pac-context attribute on the
-     * canvas element (defaults to '2d' if absent):
-     *   '2d'     — returns CanvasRenderingContext2D
-     *   'webgl'  — returns WebGLRenderingContext
-     *   'webgl2' — returns WebGL2RenderingContext
+     * canvas element (defaults to '2d' if absent). Any value other than '2d'
+     * is passed straight through to canvas.getContext() — support for that
+     * context type is provided by a plugin, not core.
      *
      * @param {HTMLCanvasElement} canvasElement
      * @param {Object} [attributes={}] - Context attributes passed to getContext()
-     * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
+     * @returns {RenderingContext|null}
      */
     wakaPAC.getDCFromElement = function(canvasElement, attributes = {}) {
         if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
@@ -11327,16 +11123,17 @@
     };
 
     /**
-     * Schedules a single MSG_PAINT for a WebGL canvas component on the next
+     * Schedules a single MSG_PAINT for a non-2D canvas component (e.g. one
+     * hosting a webgl/webgl2 context provided by a plugin) on the next
      * animation frame. Equivalent to invalidateRect() for 2D canvases — use
-     * this to trigger an on-demand redraw on a WebGL canvas that does not use
-     * renderLoop: true.
+     * this to trigger an on-demand redraw on a canvas that does not run a
+     * continuous render loop.
      *
      * Safe to call multiple times before the next frame — only one MSG_PAINT
      * will fire, since requestAnimationFrame deduplicates same-frame callbacks.
      *
      * Has no effect if the container does not exist, is not a canvas, or is
-     * not a WebGL/WebGL2 canvas.
+     * a plain 2D canvas.
      *
      * @param {string} pacId - data-pac-id of the target canvas container
      */
@@ -11350,7 +11147,7 @@
 
         const contextType = container.dataset.pacContext || '2d';
 
-        // requestRender is for WebGL canvases only — 2D canvases use invalidateRect()
+        // requestRender is for non-2D canvases only — 2D canvases use invalidateRect()
         if (contextType === '2d') {
             console.warn(`wakaPAC.requestRender: "${pacId}" is a 2D canvas — use invalidateRect() instead.`);
             return;
@@ -11404,6 +11201,25 @@
     };
 
     /**
+     * Registers a blit handler for a non-2D destination context type.
+     * bitBlt() and stretchBlt() consult the registered handlers, in
+     * registration order, whenever the destination context is not 2D — this
+     * is how a plugin like wakaD3D teaches core to blit into a WebGL canvas
+     * without core ever needing to know WebGL exists.
+     *
+     * @param {Object} handler
+     * @param {function(RenderingContext): boolean} handler.test - Returns true if this handler owns the given destination context
+     * @param {function(RenderingContext, HTMLCanvasElement): void} handler.blit - Copies srcCanvas onto destCtx
+     */
+    wakaPAC.registerBlitHandler = function(handler) {
+        if (!handler || typeof handler.test !== 'function' || typeof handler.blit !== 'function') {
+            throw new Error('wakaPAC.registerBlitHandler(): handler must implement test(ctx) and blit(destCtx, srcCanvas)');
+        }
+
+        _blitHandlers.push(handler);
+    };
+
+    /**
      * Performs a bit-block transfer from srcDC to destDC.
      * Equivalent to Win32 BitBlt() — copies a rectangle of pixels from the source
      * to the destination at 1:1 scale. No stretching or compression is performed.
@@ -11412,17 +11228,20 @@
      * both the source and the destination. sx/sy define the top-left corner of the
      * source rectangle; omit to copy from (0, 0).
      *
-     * Supports mixed 2D ↔ WebGL/WebGL2 copies:
+     * Supports mixed 2D ↔ non-2D copies:
      *
      *   2D   → 2D     drawImage() — straightforward
-     *   WebGL → 2D    drawImage() on the WebGL canvas — requires preserveDrawingBuffer: true
-     *                 in dcAttributes, otherwise the copy produces a blank result.
-     *   2D   → WebGL  texImage2D() on the currently bound TEXTURE_2D — caller must
-     *                 bind the target texture before calling bitBlt().
-     *   WebGL → WebGL drawImage() via the source canvas — requires preserveDrawingBuffer: true.
+     *   non-2D → 2D     drawImage() on the source canvas — for contexts like WebGL
+     *                    this requires preserveDrawingBuffer: true in dcAttributes,
+     *                    otherwise the copy produces a blank result.
+     *   2D     → non-2D delegated to a registered blit handler (see registerBlitHandler())
+     *   non-2D → non-2D delegated the same way
      *
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} destDC
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} srcDC
+     * If the destination is a non-2D context and no handler has been registered
+     * for it (e.g. the relevant plugin was never wakaPAC.use()'d), this is a no-op.
+     *
+     * @param {RenderingContext} destDC
+     * @param {RenderingContext} srcDC
      * @param {number} dx - Destination X
      * @param {number} dy - Destination Y
      * @param {number} [cx] - Width of the rectangle to copy. Defaults to full source width
@@ -11438,16 +11257,21 @@
         const srcCanvas = srcDC.canvas;
         const w = cx ?? srcCanvas.width;
         const h = cy ?? srcCanvas.height;
-        const destIsGL = _isWebGLContext(destDC);
 
-        if (destIsGL) {
-            // WebGL destination — upload source canvas as a texture.
-            // The caller must have bound the target texture before calling bitBlt().
-            _blitToWebGL(destDC, srcCanvas);
-        } else {
-            // 2D destination — drawImage handles both 2D and WebGL sources.
-            // WebGL sources require preserveDrawingBuffer: true.
+        if (_is2DContext(destDC)) {
+            // 2D destination — drawImage handles both 2D and non-2D sources.
+            // Non-2D sources (e.g. WebGL) require preserveDrawingBuffer: true.
             _blitToCanvas2D(destDC, srcCanvas, sx, sy, w, h, dx, dy, w, h);
+            return;
+        }
+
+        // Non-2D destination — delegate to whichever registered handler owns it.
+        const handler = _blitHandlers.find(h => h.test(destDC));
+
+        if (handler) {
+            handler.blit(destDC, srcCanvas);
+        } else {
+            console.warn('wakaPAC.bitBlt: no blit handler registered for this destination context type.');
         }
     };
 
@@ -11456,11 +11280,11 @@
      * Unlike bitBlt, the source is always stretched to fill the destination rect.
      * Use this when the offscreen DC dimensions differ from the target canvas.
      *
-     * Supports the same mixed 2D ↔ WebGL/WebGL2 copy paths as bitBlt().
-     * See bitBlt() for preserveDrawingBuffer and texture-binding requirements.
+     * Supports the same mixed 2D ↔ non-2D copy paths as bitBlt(). See bitBlt()
+     * for preserveDrawingBuffer requirements and the blit-handler fallback.
      *
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} destDC
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} srcDC
+     * @param {RenderingContext} destDC
+     * @param {RenderingContext} srcDC
      * @param {number} dx - Destination X
      * @param {number} dy - Destination Y
      * @param {number} dw - Destination width
@@ -11472,18 +11296,23 @@
         }
 
         const srcCanvas = srcDC.canvas;
-        const destIsGL = _isWebGLContext(destDC);
 
-        if (destIsGL) {
-            // WebGL destination — upload source canvas as a texture.
-            // The caller must have bound the target texture before calling stretchBlt().
-            // dx, dy, dw, dh are ignored; scaling is the caller's responsibility
-            // via their shader and geometry.
-            _blitToWebGL(destDC, srcCanvas);
-        } else {
+        if (_is2DContext(destDC)) {
             // 2D destination — drawImage handles stretching natively.
-            // WebGL sources require preserveDrawingBuffer: true.
+            // Non-2D sources (e.g. WebGL) require preserveDrawingBuffer: true.
             _blitToCanvas2D(destDC, srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, dx, dy, dw, dh);
+            return;
+        }
+
+        // Non-2D destination — delegate to whichever registered handler owns it.
+        // dx, dy, dw, dh are not forwarded; scaling into a non-2D context (e.g.
+        // via a shader) is that handler's responsibility.
+        const handler = _blitHandlers.find(h => h.test(destDC));
+
+        if (handler) {
+            handler.blit(destDC, srcCanvas);
+        } else {
+            console.warn('wakaPAC.stretchBlt: no blit handler registered for this destination context type.');
         }
     };
 
@@ -11513,8 +11342,8 @@
         container.height = height;
 
         // Schedule a repaint for 2D canvases — the canvas content is invalid after
-        // every resize. WebGL canvases drive their own render loop via
-        // requestAnimationFrame and do not use the dirty rect / MSG_PAINT mechanism.
+        // every resize. Non-2D canvases (e.g. WebGL, via a plugin) drive their own
+        // render loop and do not use the dirty rect / MSG_PAINT mechanism.
         const contextType = container.dataset.pacContext || '2d';
 
         if (contextType === '2d') {
@@ -11958,9 +11787,8 @@
         MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
         MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT,
-        MSG_WEBGL_READY, MSG_WEBGL_CONTEXT_LOST, MSG_WEBGL_CONTEXT_RESTORED, MSG_MOUSEENTER, MSG_MOUSELEAVE,
-        MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER,
-        MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
+        MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
+        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
