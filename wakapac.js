@@ -6937,11 +6937,20 @@
         const dependents = this.dependencies.get(changedProp);
         const bracketPattern = new RegExp('\\[' + changedProp + '\\]');
 
+        // Elements handleArrayChange already rebuilt for this event (see there) —
+        // nothing left for this dependency-based pass to do for those.
+        const alreadyRebuilt = event._rebuiltForeachElements;
+
         // Single-pass scan of interpolationMap instead of calling
         // findForeachElementsByArrayPath once per candidate property
         for (const [element, mappingData] of this.interpolationMap) {
             // Skip non-foreach elements
             if (!mappingData.bindings || !mappingData.bindings.foreach) {
+                continue;
+            }
+
+            // Skip elements already rebuilt by handleArrayChange for this event
+            if (alreadyRebuilt && alreadyRebuilt.has(element)) {
                 continue;
             }
 
@@ -7073,9 +7082,20 @@
             return;
         }
 
+        // Record which elements this pass rebuilds, scoped to this single event
+        // object (a fresh CustomEvent per dispatch, so nothing leaks across
+        // events). handleReactiveChange → handleForeachRebuildForChange runs
+        // next for this same event and can match the same element via the
+        // computed-dependency graph (e.g. a foreach over `filteredTodos` when
+        // `todos` — its source array — is what actually changed); this record
+        // lets it skip elements already handled here instead of redundantly
+        // calling renderForeach a second time for a change that's already applied.
+        const rebuilt = event._rebuiltForeachElements || (event._rebuiltForeachElements = new Set());
+
         for (let i = 0, len = foreachElements.length; i < len; i++) {
             const element = foreachElements[i];
             this.renderForeach(element, this.evaluateForeachArray(element));
+            rebuilt.add(element);
         }
     };
 
