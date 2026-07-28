@@ -29,7 +29,7 @@
  * ║  Or drive rendering on demand instead (no config needed):                            ║
  * ║    wakaD3D.requestRender(this.pacId);                                                ║
  * ║                                                                                      ║
- * ║  Messages fired into the component's msgProc(), same numeric values as before:       ║
+ * ║  Messages fired into the component's msgProc():                                      ║
  * ║    wakaD3D.MSG_WEBGL_READY             — canvas laid out, gl context is valid;       ║
  * ║                                          event.detail.glContext is provided so       ║
  * ║                                          the handler can set up shaders/buffers      ║
@@ -38,8 +38,6 @@
  * ║    wakaD3D.MSG_WEBGL_CONTEXT_RESTORED   — a fresh context exists; recreate           ║
  * ║                                          everything. event.detail.glContext is       ║
  * ║                                          provided                                    ║
- * ║  (These are also attached to wakaPAC itself — e.g. wakaPAC.MSG_WEBGL_READY — for     ║
- * ║  code that was written against the old, core-provided constants.)                    ║
  * ║                                                                                      ║
  * ║  Texture blitting — once this plugin is registered, the existing core APIs just      ║
  * ║  work with a WebGL destination:                                                      ║
@@ -408,16 +406,6 @@
     }
 
     /**
-     * Attaches the MSG_WEBGL_* constants onto the pac instance for callers
-     * written against the old, core-provided constants.
-     * @param {Object} pac
-     * @returns {void}
-     */
-    function _registerConstants(pac) {
-        Object.assign(pac, MESSAGE_CONSTANTS);
-    }
-
-    /**
      * Builds the onComponentCreated/onComponentDestroyed hooks.
      * @returns {{
      *   onComponentCreated: function(Object, string, Object): void,
@@ -512,9 +500,7 @@
 
         /**
          * Called by wakaPAC.use(wakaD3D). Registers the blit handler that lets
-         * bitBlt()/stretchBlt() target a WebGL destination, and attaches the
-         * MSG_WEBGL_* constants back onto wakaPAC for callers written against
-         * the old core-provided constants.
+         * bitBlt()/stretchBlt() target a WebGL destination.
          * @param {Object} pac
          * @returns {{
          *   name: string,
@@ -524,7 +510,6 @@
          */
         createPacPlugin(pac) {
             _registerBlitHandler(pac);
-            _registerConstants(pac);
 
             return {
                 name: 'WakaD3D',
