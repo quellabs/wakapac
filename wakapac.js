@@ -9785,11 +9785,8 @@
     }
 
     /**
-     * Copies srcCanvas onto a 2D destDC using drawImage.
-     * For non-2D sources (e.g. a WebGL canvas), the source canvas must have
-     * been created with preserveDrawingBuffer: true in its context attributes,
-     * otherwise the drawing buffer will have been cleared by the browser after
-     * compositing and the copy will produce a blank result.
+     * Copies srcCanvas onto a 2D destDC using drawImage. Called directly by
+     * wakaPAC.bitBlt()/stretchBlt() — there is no blit-handler registry;
      * @param {CanvasRenderingContext2D} destCtx2D
      * @param {HTMLCanvasElement} srcCanvas
      * @param {number} sx - Source X
@@ -9804,31 +9801,6 @@
     function _blitToCanvas2D(destCtx2D, srcCanvas, sx, sy, sw, sh, dx, dy, dw, dh) {
         destCtx2D.drawImage(srcCanvas, sx, sy, sw, sh, dx, dy, dw, dh);
     }
-
-    /**
-     * Registry of blit handlers, keyed by destination context type via test().
-     * Core registers its own 2D handler below; plugins add more via
-     * wakaPAC.registerBlitHandler() (e.g. wakaD3D registers one for WebGL).
-     * Each entry is { test(ctx): boolean, blit(destCtx, srcCanvas, rect): void },
-     * where rect is { sx, sy, sw, sh, dx, dy, dw, dh }. bitBlt()/stretchBlt()
-     * consult this list, in registration order, for every destination context —
-     * there is no special-cased fast path for 2D.
-     * @type {Array<{test: function(RenderingContext): boolean, blit: function(RenderingContext, HTMLCanvasElement, Object): void}>}
-     */
-    const _blitHandlers = [];
-
-    /**
-     * Core's own blit handler for 2D destination contexts. Registered like any
-     * other handler so bitBlt()/stretchBlt() don't need to know 2D exists any
-     * more than they know WebGL exists — it's just the entry whose test()
-     * happens to match first for a 2D canvas.
-     */
-    _blitHandlers.push({
-        test: _is2DContext,
-        blit(destCtx2D, srcCanvas, rect) {
-            _blitToCanvas2D(destCtx2D, srcCanvas, rect.sx, rect.sy, rect.sw, rect.sh, rect.dx, rect.dy, rect.dw, rect.dh);
-        }
-    });
 
     // ========================================================================
     // STDLIB — built-in unit
@@ -11181,29 +11153,15 @@
     };
 
     /**
-     * Registers a blit handler for a destination context type. bitBlt() and
-     * stretchBlt() consult all registered handlers.
-     * @param {Object} handler
-     * @param {function(RenderingContext): boolean} handler.test - Returns true if this handler owns the given destination context
-     * @param {function(RenderingContext, HTMLCanvasElement, {sx:number, sy:number, sw:number, sh:number, dx:number, dy:number, dw:number, dh:number}): void} handler.blit - Copies the given rect of srcCanvas onto destCtx. Non-2D handlers are free to ignore rect and copy the whole canvas.
-     */
-    wakaPAC.registerBlitHandler = function(handler) {
-        if (!handler || typeof handler.test !== 'function' || typeof handler.blit !== 'function') {
-            throw new Error('wakaPAC.registerBlitHandler(): handler must implement test(ctx) and blit(destCtx, srcCanvas)');
-        }
-
-        _blitHandlers.push(handler);
-    };
-
-    /**
      * Performs a bit-block transfer from srcDC to destDC.
      * Equivalent to Win32 BitBlt() — copies a rectangle of pixels from the source
      * to the destination at 1:1 scale. No stretching or compression is performed.
      *
-     * If the destination is a non-2D context and no handler has been registered
-     * for it (e.g. the relevant plugin was never wakaPAC.use()'d), this is a no-op.
+     * destDC must be a 2D canvas context. For a WebGL destination, use
+     * wakaD3D.bitBlt() instead — WebGL has no notion of a partial-rect, 1:1-scale
+     * copy the way a 2D context does, so it isn't handled here.
      *
-     * @param {RenderingContext} destDC
+     * @param {CanvasRenderingContext2D} destDC
      * @param {RenderingContext} srcDC
      * @param {number} dx - Destination X
      * @param {number} dy - Destination Y
@@ -11217,29 +11175,28 @@
             return;
         }
 
-
-        // Delegate to whichever registered handler owns this destination
-        // context — 2D included; see _blitHandlers above. Non-2D sources
-        // (e.g. WebGL) require preserveDrawingBuffer: true or the copy will
-        // be blank.
-        const handler = _blitHandlers.find(h => h.test(destDC));
-
-        if (handler) {
-            const srcCanvas = srcDC.canvas;
-            const w = cx ?? srcCanvas.width;
-            const h = cy ?? srcCanvas.height;
-
-            handler.blit(destDC, srcCanvas, { sx, sy, sw: w, sh: h, dx, dy, dw: w, dh: h });
-        } else {
-            console.warn('wakaPAC.bitBlt: no blit handler registered for this destination context type.');
+        if (!_is2DContext(destDC)) {
+            console.warn('wakaPAC.bitBlt: destDC must be a 2D canvas context. For a WebGL destination, use wakaD3D.bitBlt() instead.');
+            return;
         }
+
+        const srcCanvas = srcDC.canvas;
+        const w = cx ?? srcCanvas.width;
+        const h = cy ?? srcCanvas.height;
+
+        _blitToCanvas2D(destDC, srcCanvas, sx, sy, w, h, dx, dy, w, h);
     };
 
     /**
      * Blits srcDC onto destDC at (dx, dy) scaled to (dw, dh).
      * Unlike bitBlt, the source is always stretched to fill the destination rect.
      * Use this when the offscreen DC dimensions differ from the target canvas.
-     * @param {RenderingContext} destDC
+     *
+     * destDC must be a 2D canvas context. For a WebGL destination, use
+     * wakaD3D.bitBlt() instead — WebGL has no notion of a scaled copy the way
+     * a 2D context does, so it isn't handled here.
+     *
+     * @param {CanvasRenderingContext2D} destDC
      * @param {RenderingContext} srcDC
      * @param {number} dx - Destination X
      * @param {number} dy - Destination Y
@@ -11251,15 +11208,13 @@
             return;
         }
 
-        // Delegate to whichever registered handler owns this destination context
-        const handler = _blitHandlers.find(h => h.test(destDC));
-
-        if (handler) {
-            const srcCanvas = srcDC.canvas;
-            handler.blit(destDC, srcCanvas, { sx: 0, sy: 0, sw: srcCanvas.width, sh: srcCanvas.height, dx, dy, dw, dh });
-        } else {
-            console.warn('wakaPAC.stretchBlt: no blit handler registered for this destination context type.');
+        if (!_is2DContext(destDC)) {
+            console.warn('wakaPAC.stretchBlt: destDC must be a 2D canvas context. For a WebGL destination, use wakaD3D.bitBlt() instead.');
+            return;
         }
+
+        const srcCanvas = srcDC.canvas;
+        _blitToCanvas2D(destDC, srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, dx, dy, dw, dh);
     };
 
     /**

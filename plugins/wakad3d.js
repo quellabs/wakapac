@@ -12,11 +12,11 @@
  * ║                                                                                      ║
  * ║  This plugin wires up context-loss/restore handling, drives the per-canvas render    ║
  * ║  loop, dispatches the one-time "ready" message once a canvas has its first layout,   ║
- * ║  and registers a blit handler so wakaPAC.bitBlt()/stretchBlt() know how to copy      ║
- * ║  pixels into a WebGL destination. getDC(), createCompatibleDC() are already generic  ║
- * ║  in core and need no help from this plugin. requestRender() lives here instead of    ║
- * ║  core, since triggering an on-demand redraw is this plugin's job, same as the render ║
- * ║  loop.                                                                               ║
+ * ║  and provides its own bitBlt() for copying pixels into a WebGL destination —         ║
+ * ║  wakaPAC.bitBlt()/stretchBlt() only handle 2D contexts and do not accept a WebGL     ║
+ * ║  destination. getDC(), createCompatibleDC() are already generic in core and need     ║
+ * ║  no help from this plugin. requestRender() lives here instead of core, since         ║
+ * ║  triggering an on-demand redraw is this plugin's job, same as the render loop.       ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
  * ║    wakaPAC.use(wakaD3D);                                                             ║
@@ -39,11 +39,12 @@
  * ║                                          everything. event.detail.glContext is       ║
  * ║                                          provided                                    ║
  * ║                                                                                      ║
- * ║  Texture blitting — once this plugin is registered, the existing core APIs just      ║
- * ║  work with a WebGL destination:                                                      ║
+ * ║  Texture blitting — this plugin exposes its own bitBlt() for a WebGL destination:    ║
  * ║    gl.bindTexture(gl.TEXTURE_2D, myTexture);                                         ║
- * ║    wakaPAC.bitBlt(glDestDC, someSrcDC, 0, 0);                                        ║
- * ║    // uploads someSrcDC's canvas via texImage2D onto the currently bound texture     ║
+ * ║    wakaD3D.bitBlt(glDestDC, someSrcDC);                                              ║
+ * ║    // uploads someSrcDC's canvas via texImage2D onto the currently bound texture.    ║
+ * ║    // Unlike wakaPAC.bitBlt(), there's no dx/dy/cx/cy/sx/sy — WebGL has no           ║
+ * ║    // notion of a partial-rect copy, so those parameters simply don't exist.         ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -84,8 +85,8 @@
 
     /**
      * Returns true if ctx is a WebGL or WebGL2 context. Used both to decide
-     * whether a canvas is ours to manage and as the test() predicate registered
-     * with wakaPAC.registerBlitHandler().
+     * whether a canvas is ours to manage and to validate the destDC passed
+     * to wakaD3D.bitBlt().
      * @param {RenderingContext} ctx
      * @returns {boolean}
      */
@@ -96,17 +97,16 @@
     /**
      * Copies a source canvas onto a WebGL destination as a texture bound to
      * the currently active texture unit. The caller is responsible for binding
-     * the target texture before calling bitBlt()/stretchBlt() with a WebGL
-     * destination — this function assumes that has already been done.
-     * rect (the requested sub-region/scale, present since core's blit handler
-     * contract now always passes one) is intentionally unused: texImage2D
-     * uploads the whole srcCanvas as a texture, so partial or scaled blits
-     * aren't meaningful here the way they are for a 2D destination.
+     * the target texture before calling wakaD3D.bitBlt() — this function
+     * assumes that has already been done.
+     * There is no rect parameter: texImage2D always uploads the whole
+     * srcCanvas as a texture, so a partial-region or scaled copy — the way
+     * wakaPAC.bitBlt()/stretchBlt() do it for a 2D destination — isn't
+     * meaningful here.
      * @param {WebGLRenderingContext|WebGL2RenderingContext} destGL
      * @param {HTMLCanvasElement} srcCanvas
-     * @param {{sx:number, sy:number, sw:number, sh:number, dx:number, dy:number, dw:number, dh:number}} rect
      */
-    function _blitToWebGL(destGL, srcCanvas, rect) {
+    function _blitToWebGL(destGL, srcCanvas) {
         destGL.texImage2D(
             destGL.TEXTURE_2D,
             0,                  // mip level
@@ -393,19 +393,6 @@
     // independently as the plugin grows.
 
     /**
-     * Registers this plugin's WebGL blit handler with the pac instance so
-     * bitBlt()/stretchBlt() can target a WebGL destination.
-     * @param {Object} pac
-     * @returns {void}
-     */
-    function _registerBlitHandler(pac) {
-        pac.registerBlitHandler({
-            test: _isWebGLContext,
-            blit: _blitToWebGL
-        });
-    }
-
-    /**
      * Builds the onComponentCreated/onComponentDestroyed hooks.
      * @returns {{
      *   onComponentCreated: function(Object, string, Object): void,
@@ -499,8 +486,7 @@
         constructor: WakaD3D,
 
         /**
-         * Called by wakaPAC.use(wakaD3D). Registers the blit handler that lets
-         * bitBlt()/stretchBlt() target a WebGL destination.
+         * Called by wakaPAC.use(wakaD3D).
          * @param {Object} pac
          * @returns {{
          *   name: string,
@@ -509,8 +495,6 @@
          * }}
          */
         createPacPlugin(pac) {
-            _registerBlitHandler(pac);
-
             return {
                 name: 'WakaD3D',
                 ..._createLifecycleHooks()
@@ -525,6 +509,39 @@
          */
         requestRender(pacId) {
             _requestRender(pacId);
+        },
+
+        /**
+         * Copies srcDC's canvas onto a WebGL destination as a texture bound
+         * to the currently active texture unit. This is wakaD3D's own
+         * bitBlt — it is not registered with or dispatched through
+         * wakaPAC.bitBlt()/stretchBlt(), which only handle 2D destinations.
+         *
+         * Unlike wakaPAC.bitBlt(), there are no dx/dy/cx/cy/sx/sy parameters:
+         * texImage2D always uploads the whole source canvas, so a
+         * partial-region, 1:1-scale copy isn't meaningful for a WebGL
+         * destination.
+         *
+         * The caller is responsible for binding the target texture
+         * (gl.bindTexture(gl.TEXTURE_2D, ...)) before calling this, and for
+         * creating the source canvas's context with
+         * preserveDrawingBuffer: true if the source is itself a WebGL canvas.
+         *
+         * @param {WebGLRenderingContext|WebGL2RenderingContext} destDC
+         * @param {RenderingContext} srcDC
+         * @returns {void}
+         */
+        bitBlt(destDC, srcDC) {
+            if (!destDC || !srcDC) {
+                return;
+            }
+
+            if (!_isWebGLContext(destDC)) {
+                console.warn('wakaD3D.bitBlt: destDC must be a WebGL or WebGL2 context.');
+                return;
+            }
+
+            _blitToWebGL(destDC, srcDC.canvas);
         }
     };
 
