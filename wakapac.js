@@ -616,6 +616,24 @@
     const Utils = {
 
         /**
+         * Escapes the five HTML-significant characters in a string so it can
+         * be safely inserted into an HTML string being built for innerHTML
+         * assignment (e.g. a data-pac-placeholder value). Not a general
+         * sanitizer -- just enough to stop the text from breaking out of the
+         * <option> tag it's placed into.
+         * @param {string} value
+         * @returns {string}
+         */
+        escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        },
+
+        /**
          * Generates a unique identifier string based on current timestamp and optional random component
          * @param {string} [prefix=""] - Optional prefix to prepend to the generated ID
          * @param {boolean} [random=false] - Whether to append a random suffix for additional uniqueness
@@ -8165,6 +8183,26 @@
                     mappingData.foreachId, expandedTemplate, originalIndex, renderIndex
                 );
             });
+
+            // A <select> with foreach on itself is the only way to render real sibling
+            // <option> elements; foreach on an <option> only updates that option's
+            // contents. data-pac-placeholder injects an evaluated default/empty option
+            // during the rebuild, avoiding a separate static <option> (which would be
+            // replaced by innerHTML) or an <optgroup>. The placeholder expression is
+            // re-evaluated whenever the options are rebuilt, so it stays reactive.
+            if (foreachElement.tagName === 'SELECT' && foreachElement.hasAttribute('data-pac-placeholder')) {
+                const placeholderExpr = foreachElement.getAttribute('data-pac-placeholder');
+                let placeholderText = '';
+
+                try {
+                    const evaluated = self.evalInScope(placeholderExpr, foreachElement);
+                    placeholderText = evaluated != null ? String(evaluated) : '';
+                } catch (error) {
+                    console.warn(`Error evaluating data-pac-placeholder "${placeholderExpr}":`, error);
+                }
+
+                completeHTML = `<option value="">${Utils.escapeHtml(placeholderText)}</option>` + completeHTML;
+            }
 
             // Set the complete HTML at once - this preserves comment structure
             foreachElement.innerHTML = completeHTML;
