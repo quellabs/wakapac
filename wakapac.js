@@ -124,6 +124,22 @@
     const WP_ELSE_IF_COMMENT_REGEX = /^\s*wp-else-if:\s*(.+?)\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
+    /**
+     * Builds the opaque group entry a wp-if branch's node list uses to
+     * represent a nested wp-if as one atomic unit — see scanCommentBindings
+     * and updateCommentConditional's buried-comment handling, the two
+     * places that ever create one of these: a nested wp-if found as a
+     * direct comment sibling, and one found buried inside a descendant
+     * element respectively. Both need the identical shape, so both call
+     * this rather than each building the object literal itself.
+     * @param {Comment} openMarker
+     * @param {Comment} closeMarker
+     * @returns {{__wpGroup: true, openMarker: Comment, closeMarker: Comment}}
+     */
+    function makeWpIfGroup(openMarker, closeMarker) {
+        return { __wpGroup: true, openMarker, closeMarker };
+    }
+
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
 
@@ -614,6 +630,24 @@
      * @namespace Utils
      */
     const Utils = {
+
+        /**
+         * Escapes the five HTML-significant characters in a string so it can
+         * be safely inserted into an HTML string being built for innerHTML
+         * assignment (e.g. a data-pac-placeholder value). Not a general
+         * sanitizer -- just enough to stop the text from breaking out of the
+         * <option> tag it's placed into.
+         * @param {string} value
+         * @returns {string}
+         */
+        escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        },
 
         /**
          * Generates a unique identifier string based on current timestamp and optional random component
@@ -5117,6 +5151,35 @@
     };
 
     /**
+     * Keeps a <select>'s synthetic placeholder <option> (created by
+     * renderForeach during the first foreach rebuild) in sync. Unlike
+     * renderForeach, this runs on every reactive update, so placeholder
+     * expressions depending on unrelated state (e.g. a loading flag) still
+     * update even when the bound array is unchanged. A no-op until the
+     * placeholder option exists.
+     * @param {Runtime} context - The PAC component context
+     * @param {Element} element - The <select> element
+     * @param {*} value - The evaluated placeholder text
+     */
+    BindingHandlers.placeholder = function(context, element, value) {
+        if (element.tagName !== 'SELECT') {
+            return;
+        }
+
+        const placeholderOption = element.querySelector('option[data-pac-placeholder-option]');
+
+        if (!placeholderOption) {
+            return;
+        }
+
+        const text = value != null ? String(value) : '';
+
+        if (placeholderOption.textContent !== text) {
+            placeholderOption.textContent = text;
+        }
+    };
+
+    /**
      * If binding — conditionally renders an element's child content.
      * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
@@ -7499,35 +7562,33 @@
             // pop comment off array
             const { comment: openComment, expression } = openComments.pop();
 
+            // Skip if this wp-if is already registered. scanElementNodes can re-scan a
+            // subtree when an ancestor wp-if becomes visible, after this wp-if has already
+            // collapsed its content to a placeholder. Rebuilding from that modified DOM
+            // would overwrite the original node references and lose the real content.
+            // Keeping the existing registration preserves those references;
+            // updateCommentConditional's buried wp-if handling re-evaluates them correctly.
+            if (this.commentBindingMap.has(openComment)) {
+                continue;
+            }
+
             // Build a unified branches array so updateCommentConditional can
             // iterate a single list regardless of how many wp-else-if clauses exist.
             const branches = [{ expression, nodes: [], scanned: false }];
             let activeBucket = branches[0].nodes;
+            let activeBranch = branches[0];
 
-            // Walks the direct sibling span between this open comment and its
-            // matching close, building the branch node list(s). Uses a plain
-            // `while` (not a `for`) because the nested-wp-if case below needs
-            // to advance `node` by more than one sibling per iteration.
+            // Walk sibling nodes between this open comment and its matching close,
+            // building the branch node list. A `while` loop is required because
+            // nested `wp-if` groups advance `node` by multiple siblings.
             //
-            // A nested, independent <!-- wp-if: ... --> found in this span
-            // (as opposed to a wp-else-if/wp-else continuation of *this*
-            // branch) is captured as a single opaque group — its entire
-            // span, open comment through its own matching close, inclusive —
-            // rather than as flat individual nodes. Previously, individual
-            // nodes belonging to a nested wp-if (e.g. the div it controls)
-            // ended up in *both* this branch's own node list and the nested
-            // binding's node list. Since toggleNodeVisibility's "show" path
-            // restores any node carrying a pending hide-placeholder
-            // regardless of which binding put it there, whichever binding's
-            // update ran second would silently undo whatever the other one
-            // had just done to that same node — the nested wp-if would get
-            // shown again the moment the outer one re-evaluated, or vice
-            // versa. Grouping means this branch only ever toggles the
-            // nested span as one atomic unit (see toggleNodeVisibility's
-            // group handling) and never inspects or touches its interior;
-            // the nested binding — discovered independently by this same
-            // scanCommentBindings walk — remains the only thing that ever
-            // manages its own content.
+            // Nested, independent `<!-- wp-if: ... -->` blocks are recorded as a
+            // single opaque group (open through matching close, inclusive) rather
+            // than flattened into this branch. This prevents the outer and nested
+            // bindings from both managing the same DOM nodes, which would cause
+            // their visibility updates to interfere. The outer binding only toggles
+            // the nested span as an atomic group; the nested binding exclusively
+            // manages its own contents.
             let node = openComment.nextSibling;
 
             while (node && node !== commentNode) {
@@ -7538,6 +7599,7 @@
                         const branch = { expression: elseIfMatch[1].trim(), nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        activeBranch = branch;
                         node = node.nextSibling;
                         continue;
                     }
@@ -7546,6 +7608,7 @@
                         const branch = { expression: null, nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        activeBranch = branch;
                         node = node.nextSibling;
                         continue;
                     }
@@ -7582,8 +7645,21 @@
                             node = node.nextSibling;
                         } while (node && depth > 0);
 
-                        activeBucket.push({ __wpGroup: true, openMarker, closeMarker });
+                        activeBucket.push(makeWpIfGroup(openMarker, closeMarker));
                         continue;
+                    }
+                }
+
+                // A normal element may contain nested `wp-if` blocks that aren't visible
+                // to this sibling-only walk. Cache any already-registered nested bindings
+                // found in its subtree so later updates can use them directly instead of
+                // rescanning. Bindings not yet registered are ignored and handled when
+                // they are discovered.
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const buried = findRegisteredWpIfComments([node], commentBindingMap);
+
+                    if (buried.length > 0) {
+                        activeBranch.buriedWpIfs = (activeBranch.buriedWpIfs || []).concat(buried);
                     }
                 }
 
@@ -7680,6 +7756,20 @@
                 branches[winningBranch].scanned = true;
             }
 
+            // Wrapped (non-sibling) nested `wp-if`s are treated as normal nodes during
+            // scanning, so reconcile them explicitly when revealing this branch. The
+            // cached `buriedWpIfs` list is computed once during scanning since this
+            // structural relationship is static.
+            if (winningBranch !== -1 && branches[winningBranch].buriedWpIfs) {
+                const buriedOpenMarkers = branches[winningBranch].buriedWpIfs;
+
+                for (let i = 0; i < buriedOpenMarkers.length; i++) {
+                    const openMarker = buriedOpenMarkers[i];
+                    const buriedMapping = this.commentBindingMap.get(openMarker);
+                    revealedGroups.push(makeWpIfGroup(openMarker, buriedMapping.closingComment));
+                }
+            }
+
             if (revealedGroups.length > 0) {
                 this.reconcileRevealedGroups(revealedGroups);
             }
@@ -7687,6 +7777,38 @@
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
         }
     };
+
+    /**
+     * Finds registered `wp-if` open comments buried inside descendant
+     * elements rather than appearing as direct comment siblings. A comment
+     * is identified as a `wp-if` by its presence in `map`; unregistered
+     * bindings are ignored and discovered by the normal scan.
+     * @param {Node[]} nodes
+     * @param {Map<Comment, Object>} map
+     * @returns {Comment[]}
+     */
+    function findRegisteredWpIfComments(nodes, map) {
+        const found = [];
+
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+
+            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+                continue;
+            }
+
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
+            let commentNode;
+
+            while ((commentNode = walker.nextNode())) {
+                if (map.has(commentNode)) {
+                    found.push(commentNode);
+                }
+            }
+        }
+
+        return found;
+    }
 
     /**
      * Reconciles bindings inside wp-if groups that have just become visible.
@@ -8165,6 +8287,26 @@
                     mappingData.foreachId, expandedTemplate, originalIndex, renderIndex
                 );
             });
+
+            // A <select> with foreach on itself is the only way to render real sibling
+            // <option> elements; foreach on an <option> only updates that option's
+            // contents. data-pac-placeholder injects an evaluated default/empty option
+            // during the rebuild, avoiding a separate static <option> (which would be
+            // replaced by innerHTML) or an <optgroup>. The placeholder expression is
+            // re-evaluated whenever the options are rebuilt, so it stays reactive.
+            if (foreachElement.tagName === 'SELECT' && mappingData.bindings.placeholder) {
+                const placeholderExpr = mappingData.bindings.placeholder.target;
+                let placeholderText = '';
+
+                try {
+                    const evaluated = self.evalInScope(placeholderExpr, foreachElement);
+                    placeholderText = evaluated != null ? String(evaluated) : '';
+                } catch (error) {
+                    console.warn(`Error evaluating placeholder binding "${placeholderExpr}":`, error);
+                }
+
+                completeHTML = `<option value="" data-pac-placeholder-option>${Utils.escapeHtml(placeholderText)}</option>` + completeHTML;
+            }
 
             // Set the complete HTML at once - this preserves comment structure
             foreachElement.innerHTML = completeHTML;
