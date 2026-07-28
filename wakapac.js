@@ -7546,6 +7546,16 @@
             // pop comment off array
             const { comment: openComment, expression } = openComments.pop();
 
+            // Skip if this wp-if is already registered. scanElementNodes can re-scan a
+            // subtree when an ancestor wp-if becomes visible, after this wp-if has already
+            // collapsed its content to a placeholder. Rebuilding from that modified DOM
+            // would overwrite the original node references and lose the real content.
+            // Keeping the existing registration preserves those references;
+            // updateCommentConditional's buried wp-if handling re-evaluates them correctly.
+            if (this.commentBindingMap.has(openComment)) {
+                continue;
+            }
+
             // Build a unified branches array so updateCommentConditional can
             // iterate a single list regardless of how many wp-else-if clauses exist.
             const branches = [{ expression, nodes: [], scanned: false }];
@@ -7727,12 +7737,61 @@
                 branches[winningBranch].scanned = true;
             }
 
+            // scanCommentBindings only tracks nested wp-ifs that are direct comment
+            // siblings. Wrapped wp-ifs are treated as plain nodes, so they never reach
+            // reconcileRevealedGroups when an ancestor is revealed, leaving their stale
+            // state intact and preventing their content from being restored. Find these
+            // buried registered bindings and reconcile them as if they were __wpGroups.
+            if (winningBranch !== -1) {
+                const buriedOpenMarkers = this.findBuriedWpIfComments(branches[winningBranch].nodes);
+
+                for (let i = 0; i < buriedOpenMarkers.length; i++) {
+                    const openMarker = buriedOpenMarkers[i];
+                    const buriedMapping = this.commentBindingMap.get(openMarker);
+                    revealedGroups.push({ __wpGroup: true, openMarker, closeMarker: buriedMapping.closingComment });
+                }
+            }
+
             if (revealedGroups.length > 0) {
                 this.reconcileRevealedGroups(revealedGroups);
             }
         } catch (error) {
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
         }
+    };
+
+    /**
+     * Finds wp-if open comments already registered in commentBindingMap
+     * that are buried inside descendant elements of the given nodes,
+     * rather than being direct comment siblings within them -- see the
+     * comment in updateCommentConditional above for why this matters.
+     * Only returns comments already present as keys in commentBindingMap;
+     * a wp-if comment that hasn't been scanned into a binding yet is left
+     * for the ordinary scanning path to pick up on its own.
+     * @param {Node[]} nodes
+     * @returns {Comment[]}
+     */
+    Runtime.prototype.findBuriedWpIfComments = function(nodes) {
+        const found = [];
+
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+
+            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+                continue;
+            }
+
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
+            let commentNode;
+
+            while ((commentNode = walker.nextNode())) {
+                if (this.commentBindingMap.has(commentNode) && WP_IF_COMMENT_REGEX.test(commentNode.nodeValue)) {
+                    found.push(commentNode);
+                }
+            }
+        }
+
+        return found;
     };
 
     /**
