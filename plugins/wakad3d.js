@@ -30,6 +30,8 @@
  * ║    wakaD3D.requestRender(this.pacId);                                                ║
  * ║                                                                                      ║
  * ║  Messages fired into the component's msgProc():                                      ║
+ * ║    wakaD3D.MSG_WEBGL_RENDER            — a frame should be drawn now (see            ║
+ * ║                                          requestRender()/renderLoop above)           ║
  * ║    wakaD3D.MSG_WEBGL_READY             — canvas laid out, gl context is valid;       ║
  * ║                                          event.detail.glContext is provided so       ║
  * ║                                          the handler can set up shaders/buffers      ║
@@ -60,6 +62,7 @@
     // Same numeric values as when these lived in wakapac.js core, so any code
     // (or serialized state) that hardcoded the numbers keeps working.
 
+    const MSG_WEBGL_RENDER = 0x0011;
     const MSG_WEBGL_READY = 0x0401;
     const MSG_WEBGL_CONTEXT_LOST = 0x0402;
     const MSG_WEBGL_CONTEXT_RESTORED = 0x0403;
@@ -68,6 +71,7 @@
     // pac instance and the WakaD3D constructor/singleton below, so there's
     // only one place that lists them.
     const MESSAGE_CONSTANTS = {
+        MSG_WEBGL_RENDER,
         MSG_WEBGL_READY,
         MSG_WEBGL_CONTEXT_LOST,
         MSG_WEBGL_CONTEXT_RESTORED
@@ -151,8 +155,8 @@
     // =========================================================================
     // RENDER LOOP
     // =========================================================================
-    // Drives MSG_RENDER dispatch via requestAnimationFrame, one rAF handle per
-    // canvas since each renders independently. MSG_RENDER is withheld until the
+    // Drives MSG_WEBGL_RENDER dispatch via requestAnimationFrame, one rAF handle per
+    // canvas since each renders independently. MSG_WEBGL_RENDER is withheld until the
     // canvas has flagged `ready` (see _armReadySignal below), since shaders/GL
     // resources are not set up before that point.
 
@@ -177,7 +181,7 @@
             }
 
             if (e.ready) {
-                wakaPAC.sendMessage(pacId, wakaPAC.MSG_RENDER, 0, 0);
+                wakaPAC.sendMessage(pacId, MSG_WEBGL_RENDER, 0, 0);
             }
 
             e.loopHandle = requestAnimationFrame(e.tick);
@@ -218,7 +222,7 @@
     /**
      * Pauses a canvas's render loop without forgetting it, so it can later be
      * resumed via _resumeLoop(). Used while a WebGL context is lost —
-     * dispatching MSG_RENDER to a lost context produces GL errors.
+     * dispatching MSG_WEBGL_RENDER to a lost context produces GL errors.
      * @param {string} pacId
      * @returns {void}
      */
@@ -246,12 +250,12 @@
     }
 
     /**
-     * Schedules a single MSG_RENDER for a canvas on the next animation frame.
+     * Schedules a single MSG_WEBGL_RENDER for a canvas on the next animation frame.
      * The on-demand counterpart to renderLoop: true — use this for a canvas
      * that only needs to redraw in response to data changes or interaction,
      * not continuously.
      *
-     * Safe to call multiple times before the next frame — only one MSG_RENDER
+     * Safe to call multiple times before the next frame — only one MSG_WEBGL_RENDER
      * will fire, via the entry's own renderRequested flag rather than relying
      * on requestAnimationFrame to deduplicate (it doesn't; separate calls
      * schedule separate callbacks).
@@ -288,7 +292,7 @@
             e.renderRequested = false;
 
             if (e.ready) {
-                wakaPAC.sendMessage(pacId, wakaPAC.MSG_RENDER, 0, 0);
+                wakaPAC.sendMessage(pacId, MSG_WEBGL_RENDER, 0, 0);
             }
         });
     }
@@ -502,7 +506,7 @@
         },
 
         /**
-         * Schedules a single MSG_RENDER for a WakaD3D-managed canvas on the
+         * Schedules a single MSG_WEBGL_RENDER for a WakaD3D-managed canvas on the
          * next animation frame. See _requestRender() for full behavior.
          * @param {string} pacId
          * @returns {void}
