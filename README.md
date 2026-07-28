@@ -74,11 +74,11 @@ Stdlib (built-in), Math, StringUtils, DateUtils, NumberUtils, TypeUtils, Collect
 
 **WakaCanvas** — Win32-style GDI drawing API for wakaPAC canvas components. Provides stateful device context management with pens, brushes, and a complete set of drawing primitives (lines, rectangles, ellipses, arcs, polygons, text, bitmaps). Includes a MetaFile API for recording, replaying, and hit-testing display lists — enabling resolution-independent rendering and decoupled paint logic.
 
-**WakaD3D** — adds WebGL/WebGL2 support to wakaPAC canvas components, for 3D or GPU-accelerated drawing instead of plain 2D graphics. It recovers automatically if the browser drops the graphics context (which can happen anytime), keeps the canvas redrawing on a schedule for smooth animation, and lets wakaPAC's existing drawing functions copy pixels onto it just like a normal canvas.
-
 **WakaDDraw** — DirectDraw-inspired blitter plugin for pixel-level canvas work. Provides a two-tier API: a low-level stateless blitter (`bltFast`) for immediate surface-to-surface pixel transfer with color key transparency, and a higher-level scene system that manages sprites, z-ordering, and dirty rectangle compositing automatically. Includes a tilemap renderer for scrolling tile-based worlds with parallax support via layered z-ordered tilemaps.
 
 **WakaDSound** — DirectSound-inspired audio plugin for wakaPAC components. Manages static buffers for sound effects and streaming buffers for music and ambience. Includes 3D positional audio (opt-in per buffer), a waveform analyser with per-frame callback, and a rich message system that routes load, playback, and stream health events to the owning component automatically.
+
+**WakaD3D** — adds WebGL/WebGL2 support to wakaPAC canvas components, for 3D or GPU-accelerated drawing instead of plain 2D graphics. It recovers automatically if the browser drops the graphics context (which can happen anytime), keeps the canvas redrawing on a schedule for smooth animation, and lets wakaPAC's existing drawing functions copy pixels onto it just like a normal canvas.
 
 ## Documentation
 
