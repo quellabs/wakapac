@@ -6286,10 +6286,6 @@
 
             // Handle reactive data binding changes (property updates, computed value changes)
             case 'pac:change':
-                if (Array.isArray(event.detail.newValue)) {
-                    this.handleArrayChange(event);
-                }
-
                 this.handleReactiveChange(event);
                 break;
 
@@ -6915,56 +6911,80 @@
 
     /**
      * Handles foreach rebuilds triggered by reactive property changes.
-     * When a property changes, checks if any foreach elements need re-rendering,
-     * either because they're bound directly to the changed array, or because
-     * they're bound to a computed property that depends on the changed property
-     * (e.g., changing 'filter' triggers rebuild of foreach bound to 'filteredTodos').
+     * A foreach element needs rebuilding when any of the following holds:
+     *   1. Its bound array is exactly the array path that changed, or a path
+     *      nested under it (e.g. `foreach: todos` when `todos` itself was
+     *      mutated, or `foreach: rows[1].cells` when `rows[1].cells[3]` changed).
+     *   2. Its foreach expression is a computed property that depends on the
+     *      changed property (e.g. changing `filter` — or mutating `todos`,
+     *      which `filteredTodos` reads — rebuilds `foreach: filteredTodos`).
+     *   3. The changed property is used as a dynamic bracket key inside the
+     *      foreach expression (e.g. changing `region` rebuilds
+     *      `foreach: cities[country][region]`).
+     * Each matching element is rebuilt exactly once per event, even when more
+     * than one rule matches it — which happens routinely for a computed
+     * foreach over an array that was itself directly mutated (rules 1 and 2
+     * both match the same element in that case).
      * @param {CustomEvent} event - The pac:change event containing change details
      * @param {string[]} event.detail.path - Property path that changed
+     * @param {*} event.detail.newValue - The new value after the change
      */
     Runtime.prototype.handleForeachRebuildForChange = function(event) {
-        // Only handle top-level property changes (e.g., ['filter'], not ['todos', '0', 'text'])
         const path = event.detail.path;
+        const pathString = Utils.pathArrayToString(path);
+        const changedIsArray = Array.isArray(event.detail.newValue);
 
-        if (path.length !== 1) {
-            return;
-        }
+        // Rules 2 and 3 (computed dependency / bracket key) only apply to a
+        // single top-level property change (e.g. ['filter'], not
+        // ['todos', '0', 'text']). Rule 1 (direct array path) applies
+        // regardless of path depth, since a nested array can still be
+        // reassigned or mutated wholesale.
+        const changedProp = path.length === 1 ? path[0] : null;
+        const dependents = changedProp ? this.dependencies.get(changedProp) : null;
+        const bracketPattern = changedProp ? new RegExp('\\[' + changedProp + '\\]') : null;
 
-        // Build a pattern that matches the changed property used as a dynamic bracket
-        // key inside a foreach expression, e.g. cities[country][region] contains [region].
-        // This covers dependent dropdowns where options depend on a parent scalar value.
-        const changedProp = path[0];
-        const dependents = this.dependencies.get(changedProp);
-        const bracketPattern = new RegExp('\\[' + changedProp + '\\]');
+        // Rule 1 candidates: elements whose foreach is bound directly to (or
+        // nested under) the array path that changed. Reuses the same
+        // path/expression matching (including scoped-expression resolution)
+        // as a direct array mutation would use on its own.
+        const directMatches = changedIsArray
+            ? new Set(this.findForeachElementsByArrayPath(pathString))
+            : null;
 
-        // Elements handleArrayChange already rebuilt for this event (see there) —
-        // nothing left for this dependency-based pass to do for those.
-        const alreadyRebuilt = event._rebuiltForeachElements;
-
-        // Single-pass scan of interpolationMap instead of calling
-        // findForeachElementsByArrayPath once per candidate property
+        // Single-pass scan of interpolationMap, checking all three rules per
+        // element instead of running separate passes that could both match
+        // (and both rebuild) the same element for the same event.
         for (const [element, mappingData] of this.interpolationMap) {
             // Skip non-foreach elements
             if (!mappingData.bindings || !mappingData.bindings.foreach) {
                 continue;
             }
 
-            // Skip elements already rebuilt by handleArrayChange for this event
-            if (alreadyRebuilt && alreadyRebuilt.has(element)) {
+            const directMatch = directMatches !== null && directMatches.has(element);
+
+            let computedMatch = false;
+            let bracketMatch = false;
+
+            if (changedProp) {
+                const expr = mappingData.foreachExpr;
+                const source = mappingData.sourceArray;
+                computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+                bracketMatch = bracketPattern.test(expr);
+            }
+
+            if (!directMatch && !computedMatch && !bracketMatch) {
                 continue;
             }
 
-            // Match 1: computed property dependency (e.g., filter → filteredTodos)
-            // Match 2: expression uses changedProp as a dynamic bracket key e.g.
-            //          changing 'region' should rebuild foreach: cities[country][region]
-            const expr = mappingData.foreachExpr;
-            const source = mappingData.sourceArray;
-            const computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
-            const bracketMatch = bracketPattern.test(expr);
+            // A direct array-path match means the array itself just changed —
+            // always render its current value, the same way a standalone
+            // array mutation always would. Otherwise (computed/bracket match
+            // only), let getChangedForeachArray decide whether the rendered
+            // result actually differs before doing any work.
+            const array = directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
 
-            if (computedMatch || bracketMatch) {
-                this.renderForeach(element, this.getChangedForeachArray(element));
-            }
+            // Perform the rendering
+            this.renderForeach(element, array);
         }
     };
 
@@ -7064,38 +7084,6 @@
             default:
                 console.warn('Unknown browser state message ' + stateType);
                 break;
-        }
-    };
-
-    /**
-     * Handles array change events by re-rendering associated foreach elements.
-     * @param {CustomEvent} event - The array change event containing details about the modification
-     * @param {Object} event.detail - The event detail object
-     * @param {Array<string|number>} event.detail.path - Array representing the path to the changed array
-     */
-    Runtime.prototype.handleArrayChange = function(event) {
-        const detail = event.detail;
-        const pathString = Utils.pathArrayToString(detail.path);
-        const foreachElements = this.findForeachElementsByArrayPath(pathString);
-
-        if (foreachElements.length === 0) {
-            return;
-        }
-
-        // Record which elements this pass rebuilds, scoped to this single event
-        // object (a fresh CustomEvent per dispatch, so nothing leaks across
-        // events). handleReactiveChange → handleForeachRebuildForChange runs
-        // next for this same event and can match the same element via the
-        // computed-dependency graph (e.g. a foreach over `filteredTodos` when
-        // `todos` — its source array — is what actually changed); this record
-        // lets it skip elements already handled here instead of redundantly
-        // calling renderForeach a second time for a change that's already applied.
-        const rebuilt = event._rebuiltForeachElements || (event._rebuiltForeachElements = new Set());
-
-        for (let i = 0, len = foreachElements.length; i < len; i++) {
-            const element = foreachElements[i];
-            this.renderForeach(element, this.evaluateForeachArray(element));
-            rebuilt.add(element);
         }
     };
 
@@ -8132,15 +8120,11 @@
             return;
         }
 
-        // Nothing to render without an array — a true no-op, per this function's
-        // contract. Must be checked BEFORE cleanupForeachMaps: this function can be
-        // called twice for the same underlying change (once via handleArrayChange's
-        // direct rebuild, once via handleForeachRebuildForChange's dependency-based
-        // rebuild), and the second call legitimately resolves to "nothing changed"
-        // (array === null). Purging the maps in that case would strip already-correct,
-        // freshly-rendered child elements out of interpolationMap/textInterpolationMap
-        // without re-registering them, breaking event delegation (checked/class/click
-        // bindings) for those elements even though the DOM itself is untouched.
+        // No array means a true no-op. Check before cleanupForeachMaps(): null is the
+        // expected "retry later" result when a nested foreach's parent context isn't
+        // available yet. Cleaning up here would remove existing interpolation bindings
+        // without re-registering them, breaking event delegation while leaving the DOM
+        // unchanged.
         if (!array) {
             return;
         }
