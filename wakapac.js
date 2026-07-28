@@ -203,6 +203,7 @@
     const MSG_DESTROYED = 0x0002;
     const MSG_SIZE = 0x0005;
     const MSG_PAINT = 0x000F;
+    const MSG_RENDER = 0x0011;
     const MSG_DPR_CHANGE = 0x0010;
     const MSG_MOUSEMOVE = 0x0200;
     const MSG_LBUTTONDOWN = 0x0201;
@@ -5742,10 +5743,9 @@
 
     /**
      * Initializes canvas-specific runtime behavior.
-     * Performs the initial paint for 2D canvases. Core has no knowledge of any
-     * other context type (webgl, webgl2, or otherwise) — that setup is entirely
-     * the responsibility of a plugin registered via wakaPAC.use(), which learns
-     * of this component through the onComponentCreated(abstraction, pacId, config)
+     * Performs the initial paint for 2D canvases. Non-2D context types are set up
+     * entirely by a plugin registered via wakaPAC.use(), which learns of this
+     * component through the onComponentCreated(abstraction, pacId, config)
      * lifecycle hook (fired earlier, before this method runs) and is free to
      * inspect container.dataset.pacContext itself and wire up whatever it needs.
      * @returns {void}
@@ -11149,52 +11149,6 @@
     };
 
     /**
-     * Schedules a single MSG_PAINT for a non-2D canvas component (e.g. one
-     * hosting a webgl/webgl2 context provided by a plugin) on the next
-     * animation frame. Equivalent to invalidateRect() for 2D canvases — use
-     * this to trigger an on-demand redraw on a canvas that does not run a
-     * continuous render loop.
-     *
-     * Safe to call multiple times before the next frame — only one MSG_PAINT
-     * will fire, since requestAnimationFrame deduplicates same-frame callbacks.
-     *
-     * Has no effect if the container does not exist, is not a canvas, or is
-     * a plain 2D canvas.
-     *
-     * @param {string} pacId - data-pac-id of the target canvas container
-     */
-    wakaPAC.requestRender = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
-
-        // Bail if the container does not exist or is not a canvas element
-        if (!container || !(container instanceof HTMLCanvasElement)) {
-            return;
-        }
-
-        const contextType = container.dataset.pacContext || '2d';
-
-        // requestRender is for non-2D canvases only — 2D canvases use invalidateRect()
-        if (contextType === '2d') {
-            console.warn(`wakaPAC.requestRender: "${pacId}" is a 2D canvas — use invalidateRect() instead.`);
-            return;
-        }
-
-        requestAnimationFrame(() => {
-            // Guard: component may have been destroyed before the frame fired
-            if (!window.PACRegistry.get(pacId)) {
-                return;
-            }
-
-            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                MSG_PAINT,
-                null,
-                0,
-                0
-            ));
-        });
-    };
-
-    /**
      * Returns the bounding rectangle of the invalidated region for a canvas
      * PAC container, or null if no repaint is currently pending.
      * @param {string} pacId - data-pac-id of the target canvas container
@@ -11778,9 +11732,10 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
         MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
-        MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT,
-        MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
-        MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
+        MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_RENDER, MSG_SIZE,
+        MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
+        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
+        MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,

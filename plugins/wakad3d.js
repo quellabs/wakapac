@@ -10,13 +10,13 @@
  * ║                                                                                      ║
  * ║  WakaD3D — WebGL/WebGL2 canvas-lifecycle plugin for wakaPAC                          ║
  * ║                                                                                      ║
- * ║  Core knows nothing about WebGL. This plugin is what teaches it: it wires up         ║
- * ║  context-loss/restore handling, drives the per-canvas render loop, dispatches the    ║
- * ║  one-time "ready" message once a canvas has its first layout, and registers a        ║
- * ║  blit handler so wakaPAC.bitBlt()/stretchBlt() know how to copy pixels into a        ║
- * ║  WebGL destination. Everything else — getDC(), invalidateRect()-equivalent           ║
- * ║  requestRender(), createCompatibleDC() — is already generic in core and needs        ║
- * ║  no help from this plugin.                                                           ║
+ * ║  This plugin wires up context-loss/restore handling, drives the per-canvas render    ║
+ * ║  loop, dispatches the one-time "ready" message once a canvas has its first layout,   ║
+ * ║  and registers a blit handler so wakaPAC.bitBlt()/stretchBlt() know how to copy      ║
+ * ║  pixels into a WebGL destination. getDC(), createCompatibleDC() are already generic  ║
+ * ║  in core and need no help from this plugin. requestRender() lives here instead of    ║
+ * ║  core, since triggering an on-demand redraw is this plugin's job, same as the render ║
+ * ║  loop.                                                                               ║
  * ║                                                                                      ║
  * ║  Usage:                                                                              ║
  * ║    wakaPAC.use(wakaD3D);                                                             ║
@@ -27,7 +27,7 @@
  * ║  Opt into a continuous requestAnimationFrame render loop via config:                 ║
  * ║    wakaPAC('#scene', { ... }, { renderLoop: true });                                 ║
  * ║  Or drive rendering on demand instead (no config needed):                            ║
- * ║    wakaPAC.requestRender(this.pacId);                                                ║
+ * ║    wakaD3D.requestRender(this.pacId);                                                ║
  * ║                                                                                      ║
  * ║  Messages fired into the component's msgProc(), same numeric values as before:       ║
  * ║    wakaD3D.MSG_WEBGL_READY             — canvas laid out, gl context is valid;       ║
@@ -144,7 +144,8 @@
      *   onFirstSize: function(CustomEvent): void,
      *   ready: boolean,
      *   loopHandle: number|null|undefined,
-     *   tick: function(): void
+     *   tick: function(): void,
+     *   renderRequested: boolean
      * }>}
      */
     const _canvases = new Map();
@@ -152,8 +153,8 @@
     // =========================================================================
     // RENDER LOOP
     // =========================================================================
-    // Drives MSG_PAINT dispatch via requestAnimationFrame, one rAF handle per
-    // canvas since each paints independently. MSG_PAINT is withheld until the
+    // Drives MSG_RENDER dispatch via requestAnimationFrame, one rAF handle per
+    // canvas since each renders independently. MSG_RENDER is withheld until the
     // canvas has flagged `ready` (see _armReadySignal below), since shaders/GL
     // resources are not set up before that point.
 
@@ -178,7 +179,7 @@
             }
 
             if (e.ready) {
-                wakaPAC.sendMessage(pacId, wakaPAC.MSG_PAINT, 0, 0);
+                wakaPAC.sendMessage(pacId, wakaPAC.MSG_RENDER, 0, 0);
             }
 
             e.loopHandle = requestAnimationFrame(e.tick);
@@ -219,7 +220,7 @@
     /**
      * Pauses a canvas's render loop without forgetting it, so it can later be
      * resumed via _resumeLoop(). Used while a WebGL context is lost —
-     * dispatching MSG_PAINT to a lost context produces GL errors.
+     * dispatching MSG_RENDER to a lost context produces GL errors.
      * @param {string} pacId
      * @returns {void}
      */
@@ -244,6 +245,54 @@
         if (entry && entry.loopHandle === null) {
             _startLoop(pacId);
         }
+    }
+
+    /**
+     * Schedules a single MSG_RENDER for a canvas on the next animation frame.
+     * The on-demand counterpart to renderLoop: true — use this for a canvas
+     * that only needs to redraw in response to data changes or interaction,
+     * not continuously.
+     *
+     * Safe to call multiple times before the next frame — only one MSG_RENDER
+     * will fire, via the entry's own renderRequested flag rather than relying
+     * on requestAnimationFrame to deduplicate (it doesn't; separate calls
+     * schedule separate callbacks).
+     *
+     * Withheld until the canvas has fired MSG_WEBGL_READY, same as the
+     * continuous render loop — there is no context to render into before that.
+     *
+     * No-op (with a console warning) if pacId is not a canvas this plugin manages.
+     * @param {string} pacId
+     * @returns {void}
+     */
+    function _requestRender(pacId) {
+        const entry = _canvases.get(pacId);
+
+        if (!entry) {
+            console.warn(`wakaD3D.requestRender: "${pacId}" is not a WakaD3D-managed canvas.`);
+            return;
+        }
+
+        if (entry.renderRequested) {
+            return;
+        }
+
+        entry.renderRequested = true;
+
+        requestAnimationFrame(() => {
+            const e = _canvases.get(pacId);
+
+            // Guard: component may have been destroyed before the frame fired
+            if (!e) {
+                return;
+            }
+
+            e.renderRequested = false;
+
+            if (e.ready) {
+                wakaPAC.sendMessage(pacId, wakaPAC.MSG_RENDER, 0, 0);
+            }
+        });
     }
 
     // =========================================================================
@@ -411,7 +460,8 @@
                     onFirstSize: null,
                     ready: false,
                     loopHandle: undefined,
-                    tick: null
+                    tick: null,
+                    renderRequested: false
                 };
 
                 entry.tick = _createTick(pacId);
@@ -480,6 +530,16 @@
                 name: 'WakaD3D',
                 ..._createLifecycleHooks()
             };
+        },
+
+        /**
+         * Schedules a single MSG_RENDER for a WakaD3D-managed canvas on the
+         * next animation frame. See _requestRender() for full behavior.
+         * @param {string} pacId
+         * @returns {void}
+         */
+        requestRender(pacId) {
+            _requestRender(pacId);
         }
     };
 
