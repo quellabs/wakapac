@@ -5135,6 +5135,35 @@
     };
 
     /**
+     * Keeps a <select>'s synthetic placeholder <option> (created by
+     * renderForeach during the first foreach rebuild) in sync. Unlike
+     * renderForeach, this runs on every reactive update, so placeholder
+     * expressions depending on unrelated state (e.g. a loading flag) still
+     * update even when the bound array is unchanged. A no-op until the
+     * placeholder option exists.
+     * @param {Runtime} context - The PAC component context
+     * @param {Element} element - The <select> element
+     * @param {*} value - The evaluated placeholder text
+     */
+    BindingHandlers.placeholder = function(context, element, value) {
+        if (element.tagName !== 'SELECT') {
+            return;
+        }
+
+        const placeholderOption = element.querySelector('option[data-pac-placeholder-option]');
+
+        if (!placeholderOption) {
+            return;
+        }
+
+        const text = value != null ? String(value) : '';
+
+        if (placeholderOption.textContent !== text) {
+            placeholderOption.textContent = text;
+        }
+    };
+
+    /**
      * If binding — conditionally renders an element's child content.
      * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
@@ -8190,18 +8219,18 @@
             // during the rebuild, avoiding a separate static <option> (which would be
             // replaced by innerHTML) or an <optgroup>. The placeholder expression is
             // re-evaluated whenever the options are rebuilt, so it stays reactive.
-            if (foreachElement.tagName === 'SELECT' && foreachElement.hasAttribute('data-pac-placeholder')) {
-                const placeholderExpr = foreachElement.getAttribute('data-pac-placeholder');
+            if (foreachElement.tagName === 'SELECT' && mappingData.bindings.placeholder) {
+                const placeholderExpr = mappingData.bindings.placeholder.target;
                 let placeholderText = '';
 
                 try {
                     const evaluated = self.evalInScope(placeholderExpr, foreachElement);
                     placeholderText = evaluated != null ? String(evaluated) : '';
                 } catch (error) {
-                    console.warn(`Error evaluating data-pac-placeholder "${placeholderExpr}":`, error);
+                    console.warn(`Error evaluating placeholder binding "${placeholderExpr}":`, error);
                 }
 
-                completeHTML = `<option value="">${Utils.escapeHtml(placeholderText)}</option>` + completeHTML;
+                completeHTML = `<option value="" data-pac-placeholder-option>${Utils.escapeHtml(placeholderText)}</option>` + completeHTML;
             }
 
             // Set the complete HTML at once - this preserves comment structure
