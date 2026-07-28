@@ -5661,7 +5661,7 @@
         this.dependencies = this.getDependencies();
 
         this.initializeImportedUnits();
-        this.initializeRuntimeServices();
+        this.setupContainerScrollTracking();
         this.initializeUpdateQueue();
         this.initializeEventHandlers();
 
@@ -5702,7 +5702,7 @@
      * @memberof {Object} - The parent class/object containing this method
      * @returns {void}
      */
-    Runtime.prototype.initializeRuntimeServices = function() {
+    Runtime.prototype.setupContainerScrollTracking = function() {
         // Debounce scroll updates to ~1 frame (16 ms) so rapid scroll events
         // are coalesced rather than triggering a state update on every pixel.
         const scrollHandler = Utils.debounce(() => {
