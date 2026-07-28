@@ -124,6 +124,22 @@
     const WP_ELSE_IF_COMMENT_REGEX = /^\s*wp-else-if:\s*(.+?)\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
+    /**
+     * Builds the opaque group entry a wp-if branch's node list uses to
+     * represent a nested wp-if as one atomic unit — see scanCommentBindings
+     * and updateCommentConditional's buried-comment handling, the two
+     * places that ever create one of these: a nested wp-if found as a
+     * direct comment sibling, and one found buried inside a descendant
+     * element respectively. Both need the identical shape, so both call
+     * this rather than each building the object literal itself.
+     * @param {Comment} openMarker
+     * @param {Comment} closeMarker
+     * @returns {{__wpGroup: true, openMarker: Comment, closeMarker: Comment}}
+     */
+    function makeWpIfGroup(openMarker, closeMarker) {
+        return { __wpGroup: true, openMarker, closeMarker };
+    }
+
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
 
@@ -7639,7 +7655,7 @@
                             node = node.nextSibling;
                         } while (node && depth > 0);
 
-                        activeBucket.push({ __wpGroup: true, openMarker, closeMarker });
+                        activeBucket.push(makeWpIfGroup(openMarker, closeMarker));
                         continue;
                     }
                 }
@@ -7748,7 +7764,7 @@
                 for (let i = 0; i < buriedOpenMarkers.length; i++) {
                     const openMarker = buriedOpenMarkers[i];
                     const buriedMapping = this.commentBindingMap.get(openMarker);
-                    revealedGroups.push({ __wpGroup: true, openMarker, closeMarker: buriedMapping.closingComment });
+                    revealedGroups.push(makeWpIfGroup(openMarker, buriedMapping.closingComment));
                 }
             }
 
@@ -7761,13 +7777,9 @@
     };
 
     /**
-     * Finds wp-if open comments already registered in commentBindingMap
-     * that are buried inside descendant elements of the given nodes,
-     * rather than being direct comment siblings within them -- see the
-     * comment in updateCommentConditional above for why this matters.
-     * Only returns comments already present as keys in commentBindingMap;
-     * a wp-if comment that hasn't been scanned into a binding yet is left
-     * for the ordinary scanning path to pick up on its own.
+     * Finds registered wp-if open comments in commentBindingMap that are nested
+     * inside descendant elements of the given nodes rather than being direct
+     * comment siblings. Unregistered comments are left for the normal scan.
      * @param {Node[]} nodes
      * @returns {Comment[]}
      */
@@ -7785,7 +7797,7 @@
             let commentNode;
 
             while ((commentNode = walker.nextNode())) {
-                if (this.commentBindingMap.has(commentNode) && WP_IF_COMMENT_REGEX.test(commentNode.nodeValue)) {
+                if (this.commentBindingMap.has(commentNode)) {
                     found.push(commentNode);
                 }
             }
