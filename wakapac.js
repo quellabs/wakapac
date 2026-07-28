@@ -7576,31 +7576,19 @@
             // iterate a single list regardless of how many wp-else-if clauses exist.
             const branches = [{ expression, nodes: [], scanned: false }];
             let activeBucket = branches[0].nodes;
+            let activeBranch = branches[0];
 
-            // Walks the direct sibling span between this open comment and its
-            // matching close, building the branch node list(s). Uses a plain
-            // `while` (not a `for`) because the nested-wp-if case below needs
-            // to advance `node` by more than one sibling per iteration.
+            // Walk sibling nodes between this open comment and its matching close,
+            // building the branch node list. A `while` loop is required because
+            // nested `wp-if` groups advance `node` by multiple siblings.
             //
-            // A nested, independent <!-- wp-if: ... --> found in this span
-            // (as opposed to a wp-else-if/wp-else continuation of *this*
-            // branch) is captured as a single opaque group — its entire
-            // span, open comment through its own matching close, inclusive —
-            // rather than as flat individual nodes. Previously, individual
-            // nodes belonging to a nested wp-if (e.g. the div it controls)
-            // ended up in *both* this branch's own node list and the nested
-            // binding's node list. Since toggleNodeVisibility's "show" path
-            // restores any node carrying a pending hide-placeholder
-            // regardless of which binding put it there, whichever binding's
-            // update ran second would silently undo whatever the other one
-            // had just done to that same node — the nested wp-if would get
-            // shown again the moment the outer one re-evaluated, or vice
-            // versa. Grouping means this branch only ever toggles the
-            // nested span as one atomic unit (see toggleNodeVisibility's
-            // group handling) and never inspects or touches its interior;
-            // the nested binding — discovered independently by this same
-            // scanCommentBindings walk — remains the only thing that ever
-            // manages its own content.
+            // Nested, independent `<!-- wp-if: ... -->` blocks are recorded as a
+            // single opaque group (open through matching close, inclusive) rather
+            // than flattened into this branch. This prevents the outer and nested
+            // bindings from both managing the same DOM nodes, which would cause
+            // their visibility updates to interfere. The outer binding only toggles
+            // the nested span as an atomic group; the nested binding exclusively
+            // manages its own contents.
             let node = openComment.nextSibling;
 
             while (node && node !== commentNode) {
@@ -7611,6 +7599,7 @@
                         const branch = { expression: elseIfMatch[1].trim(), nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        activeBranch = branch;
                         node = node.nextSibling;
                         continue;
                     }
@@ -7619,6 +7608,7 @@
                         const branch = { expression: null, nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        activeBranch = branch;
                         node = node.nextSibling;
                         continue;
                     }
@@ -7657,6 +7647,19 @@
 
                         activeBucket.push(makeWpIfGroup(openMarker, closeMarker));
                         continue;
+                    }
+                }
+
+                // A normal element may contain nested `wp-if` blocks that aren't visible
+                // to this sibling-only walk. Cache any already-registered nested bindings
+                // found in its subtree so later updates can use them directly instead of
+                // rescanning. Bindings not yet registered are ignored and handled when
+                // they are discovered.
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const buried = findRegisteredWpIfComments([node], commentBindingMap);
+
+                    if (buried.length > 0) {
+                        activeBranch.buriedWpIfs = (activeBranch.buriedWpIfs || []).concat(buried);
                     }
                 }
 
@@ -7753,13 +7756,12 @@
                 branches[winningBranch].scanned = true;
             }
 
-            // scanCommentBindings only tracks nested wp-ifs that are direct comment
-            // siblings. Wrapped wp-ifs are treated as plain nodes, so they never reach
-            // reconcileRevealedGroups when an ancestor is revealed, leaving their stale
-            // state intact and preventing their content from being restored. Find these
-            // buried registered bindings and reconcile them as if they were __wpGroups.
-            if (winningBranch !== -1) {
-                const buriedOpenMarkers = this.findBuriedWpIfComments(branches[winningBranch].nodes);
+            // Wrapped (non-sibling) nested `wp-if`s are treated as normal nodes during
+            // scanning, so reconcile them explicitly when revealing this branch. The
+            // cached `buriedWpIfs` list is computed once during scanning since this
+            // structural relationship is static.
+            if (winningBranch !== -1 && branches[winningBranch].buriedWpIfs) {
+                const buriedOpenMarkers = branches[winningBranch].buriedWpIfs;
 
                 for (let i = 0; i < buriedOpenMarkers.length; i++) {
                     const openMarker = buriedOpenMarkers[i];
@@ -7777,13 +7779,15 @@
     };
 
     /**
-     * Finds registered wp-if open comments in commentBindingMap that are nested
-     * inside descendant elements of the given nodes rather than being direct
-     * comment siblings. Unregistered comments are left for the normal scan.
+     * Finds registered `wp-if` open comments buried inside descendant
+     * elements rather than appearing as direct comment siblings. A comment
+     * is identified as a `wp-if` by its presence in `map`; unregistered
+     * bindings are ignored and discovered by the normal scan.
      * @param {Node[]} nodes
+     * @param {Map<Comment, Object>} map
      * @returns {Comment[]}
      */
-    Runtime.prototype.findBuriedWpIfComments = function(nodes) {
+    function findRegisteredWpIfComments(nodes, map) {
         const found = [];
 
         for (let i = 0; i < nodes.length; i++) {
@@ -7797,14 +7801,14 @@
             let commentNode;
 
             while ((commentNode = walker.nextNode())) {
-                if (this.commentBindingMap.has(commentNode)) {
+                if (map.has(commentNode)) {
                     found.push(commentNode);
                 }
             }
         }
 
         return found;
-    };
+    }
 
     /**
      * Reconciles bindings inside wp-if groups that have just become visible.
