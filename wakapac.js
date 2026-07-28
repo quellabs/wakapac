@@ -5660,9 +5660,9 @@
         this.domUpdater = new DomUpdater(this);
         this.dependencies = this.getDependencies();
 
-        this.initializeUpdateQueue();
         this.initializeImportedUnits();
         this.setupContainerScrollTracking();
+        this.initializeUpdateQueue();
         this.registerPacEventListeners();
 
         DomUpdateTracker.observeContainer(this.container);
@@ -8112,14 +8112,22 @@
             return;
         }
 
-        // Clean up old elements from maps before clearing innerHTML
-        // This prevents memory leaks when re-rendering dynamic content
-        this.cleanupForeachMaps(foreachElement);
-
-        // Nothing to render without an array — see the docstring above
+        // Nothing to render without an array — a true no-op, per this function's
+        // contract. Must be checked BEFORE cleanupForeachMaps: this function can be
+        // called twice for the same underlying change (once via handleArrayChange's
+        // direct rebuild, once via handleForeachRebuildForChange's dependency-based
+        // rebuild), and the second call legitimately resolves to "nothing changed"
+        // (array === null). Purging the maps in that case would strip already-correct,
+        // freshly-rendered child elements out of interpolationMap/textInterpolationMap
+        // without re-registering them, breaking event delegation (checked/class/click
+        // bindings) for those elements even though the DOM itself is untouched.
         if (!array) {
             return;
         }
+
+        // Clean up old elements from maps before clearing innerHTML
+        // This prevents memory leaks when re-rendering dynamic content
+        this.cleanupForeachMaps(foreachElement);
 
         try {
             // Resolve the source array for index mapping.
