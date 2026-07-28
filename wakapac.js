@@ -5703,9 +5703,6 @@
      * @returns {void}
      */
     Runtime.prototype.initializeRuntimeServices = function() {
-        // First time setup
-        requestAnimationFrame(() => this.updateContainerScrollState());
-
         // Debounce scroll updates to ~1 frame (16 ms) so rapid scroll events
         // are coalesced rather than triggering a state update on every pixel.
         const scrollHandler = Utils.debounce(() => {
@@ -6020,6 +6017,12 @@
             .forEach(([element]) => {
                 this.renderForeach(element, this.evaluateForeachArray(element));
             });
+
+        // Content just changed as a result of this scan (new bindings applied,
+        // foreach items rendered, etc.) — recompute scroll metrics now, tied to
+        // the actual DOM mutation rather than an independently-timed check that
+        // could fire before or after rendering completes.
+        this.updateContainerScrollState();
     };
 
     /**
