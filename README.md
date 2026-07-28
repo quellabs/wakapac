@@ -78,6 +78,8 @@ Stdlib (built-in), Math, StringUtils, DateUtils, NumberUtils, TypeUtils, Collect
 
 **WakaDSound** — DirectSound-inspired audio plugin for wakaPAC components. Manages static buffers for sound effects and streaming buffers for music and ambience. Includes 3D positional audio (opt-in per buffer), a waveform analyser with per-frame callback, and a rich message system that routes load, playback, and stream health events to the owning component automatically.
 
+**WakaD3D** — adds WebGL/WebGL2 support to wakaPAC canvas components, for 3D or GPU-accelerated drawing instead of plain 2D graphics. It recovers automatically if the browser drops the graphics context (which can happen anytime), keeps the canvas redrawing on a schedule for smooth animation.
+
 ## Documentation
 
 Full docs, guides, and API reference:

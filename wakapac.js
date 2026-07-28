@@ -20,31 +20,6 @@
     "use strict";
 
     // =============================================================================
-    // CANVAS HELPERS
-    // =============================================================================
-
-    /**
-     * Creates a canvas context of the given dimensions and type.
-     * Uses OffscreenCanvas where available, falling back to HTMLCanvasElement
-     * for environments that do not support it (notably older Safari versions).
-     * @param {number} width
-     * @param {number} height
-     * @param {string} [contextType='2d']
-     * @param {Object} [attributes={}]
-     * @returns {RenderingContext}
-     */
-    function _createCanvas(width, height, contextType = '2d', attributes = {}) {
-        if (typeof OffscreenCanvas !== 'undefined') {
-            return new OffscreenCanvas(width, height).getContext(contextType, attributes);
-        }
-
-        const canvas  = document.createElement('canvas');
-        canvas.width  = width;
-        canvas.height = height;
-        return canvas.getContext(contextType, attributes);
-    }
-
-    // =============================================================================
     // CONSTANTS AND CONFIGURATION
     // =============================================================================
 
@@ -267,9 +242,6 @@
     const MSG_MOUSEWHEEL = 0x020A;
     const MSG_GESTURE = 0x0250;
     const MSG_FOREACH_REBUILT = 0x0400;
-    const MSG_WEBGL_READY = 0x0401;
-    const MSG_WEBGL_CONTEXT_LOST = 0x0402;
-    const MSG_WEBGL_CONTEXT_RESTORED = 0x0403;
     const MSG_USER = 0x1000;
     const MSG_PLUGIN = 0x2000;
 
@@ -547,25 +519,6 @@
         'IntlBackslash': VK_OEM_102
     };
 
-    /**
-     * Maps data-pac-event modifier names to KeyboardEvent.key values.
-     * Defined at module level to avoid per-call object allocation in processEventModifiers().
-     * @type {Object<string, string>}
-     */
-    const KEY_MODIFIER_MAP = {
-        enter: 'Enter',
-        escape: 'Escape',
-        esc: 'Escape',
-        space: ' ',
-        tab: 'Tab',
-        delete: 'Delete',
-        del: 'Delete',
-        up: 'ArrowUp',
-        down: 'ArrowDown',
-        left: 'ArrowLeft',
-        right: 'ArrowRight'
-    };
-
     // ========================================================================
     // METAFILE — Display list recording and playback
     // ========================================================================
@@ -711,7 +664,7 @@
          * @returns {*} The value at the given path, or undefined if any part of the path does not exist
          */
         getNestedValue(obj, path) {
-            const parts = path.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
+            const parts = Utils.pathStringToArray(path);
             let current = obj;
 
             for (const part of parts) {
@@ -732,7 +685,7 @@
          * @param {object} current
          */
         setNestedProperty(path, value, current) {
-            const parts = path.split(DOTS_AND_BRACKETS_PATTERN).filter(Boolean);
+            const parts = Utils.pathStringToArray(path);
 
             for (let i = 0; i < parts.length - 1; i++) {
                 const part = parts[i];
@@ -750,6 +703,17 @@
             // Set the final property
             const finalPart = parts[parts.length - 1];
             current[finalPart] = value;
+        },
+
+        /**
+         * Reads the pac-id of a container element, preferring the cached
+         * `_pacId` property (stamped on the element at registration time,
+         * see ComponentRegistry) over a DOM attribute read.
+         * @param {Element|null|undefined} element - The container element
+         * @returns {string|null} The pac-id, or null if element is falsy
+         */
+        getPacId(element) {
+            return element ? (element._pacId || element.getAttribute('data-pac-id')) : null;
         },
 
         /**
@@ -1221,6 +1185,20 @@
             };
 
             return debounced;
+        },
+
+        /**
+         * Returns the single namespaced cache object stashed on a DOM node (element or
+         * text node), creating it on first use. All per-node PAC caches (previous values,
+         * previous array, dynamic classes, foreach chain, foreach context, previous text)
+         * live inside this one object instead of as separate `_pacXxx` properties, so
+         * teardown only ever needs to delete one property regardless of how many cache
+         * fields end up stored here.
+         * @param {Node} node - The DOM element or text node to get/create a cache on
+         * @returns {Object} The node's PAC cache object
+         */
+        getPacCache(node) {
+            return node._pacCache || (node._pacCache = {});
         }
     }
 
@@ -1317,13 +1295,7 @@
                 }
 
                 // Dispatch events for the array change
-                container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                    detail: {
-                        path: currentPath,
-                        oldValue: oldArray,
-                        newValue: target
-                    }
-                }));
+                dispatchReactiveChange(currentPath, oldArray, target);
 
                 // Return the result
                 return result;
@@ -1352,13 +1324,7 @@
             target.length = newLength;
 
             // Dispatch events
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: currentPath,
-                    oldValue: oldArray,
-                    newValue: Array.prototype.slice.call(target)
-                }
-            }));
+            dispatchReactiveChange(currentPath, oldArray, Array.prototype.slice.call(target));
 
             return true;
         }
@@ -1485,13 +1451,7 @@
             }
 
             // Dispatch array-specific event if this is an array assignment
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: propertyPath,
-                    oldValue: oldValue,
-                    newValue: target[prop]
-                }
-            }));
+            dispatchReactiveChange(propertyPath, oldValue, target[prop]);
 
             return true;
         }
@@ -1525,13 +1485,7 @@
             delete target[prop];
 
             // Notify the DOM that this property is gone
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: {
-                    path: propertyPath,
-                    oldValue: oldValue,
-                    newValue: undefined
-                }
-            }));
+            dispatchReactiveChange(propertyPath, oldValue, undefined);
 
             return true;
         }
@@ -1558,6 +1512,20 @@
                     return proxyDeleteHandler(target, prop, currentPath);
                 }
             });
+        }
+
+        /**
+         * Dispatches a reactive change notification for the specified property path.
+         * This is emitted whenever a reactive property, array, or nested object is
+         * modified, allowing DOM bindings to update in response.
+         * @param {string[]} path - Path to the changed property within the reactive object.
+         * @param {*} oldValue - The property's value before the change.
+         * @param {*} newValue - The property's value after the change.
+         */
+        function dispatchReactiveChange(path, oldValue, newValue) {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                detail: { path, oldValue, newValue }
+            }));
         }
 
         if (!value || typeof value !== 'object') {
@@ -1604,6 +1572,13 @@
 
         /** @type {Element|null} Dropzone being targeted */
         _dropzoneTarget: null,
+
+        /**
+         * Tracks canvas containers that have been invalidated and are waiting for
+         * their MSG_PAINT to be dispatched on the next animation frame.
+         * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, width:number, height:number}, rects: Array<{x:number, y:number, width:number, height:number}>}>}
+         */
+        _dirtyCanvases: new Map(),
 
         /**
          * Performs one-time initialization of the input/event subsystem.
@@ -2515,8 +2490,8 @@
             // Preserve instance reference for DOM callback scope
             const self = this;
 
-            // Change events (select, radio, checkbox)
-            // Handles discrete value changes for non-text form controls
+            // Change events (select, radio, checkbox, and — see below — text-like inputs)
+            // Handles discrete value commits for form controls
             document.addEventListener('change', function(event) {
                 // Fetch target element
                 const target = event.target;
@@ -2524,9 +2499,11 @@
                 // Identify supported control types
                 const isSelect = target.tagName === 'SELECT';
                 const isChangeInput = target.tagName === 'INPUT' && CHANGE_INPUT_TYPES.has(target.type);
+                const isTextLikeInput = target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
+                const isTextarea = target.tagName === 'TEXTAREA';
 
                 // Only process relevant control changes
-                if (isSelect || isChangeInput) {
+                if (isSelect || isChangeInput || isTextLikeInput || isTextarea) {
                     // Resolve owning container and build change message payload
                     const container = self.getContainerForEvent(MSG_CHANGE, event);
                     const wParam = self.buildChangeWParam(event);
@@ -2534,7 +2511,7 @@
 
                     // Create wrapper event (MSG_CHANGE)
                     const customEvent = self.wrapDomEventAsMessage(MSG_CHANGE, event, wParam, lParam, {
-                        elementType: isSelect ? 'select' : target.type // Describe control type for consumers
+                        elementType: isSelect ? 'select' : (isTextarea ? 'textarea' : target.type)
                     });
 
                     // Dispatch normalized change event
@@ -2818,30 +2795,6 @@
 
                         // Dispatch size update to the owning container/component
                         self.dispatchToContainer(container, customEvent);
-
-                        // For WebGL canvas components, dispatch MSG_WEBGL_READY after the first MSG_SIZE.
-                        // At this point the canvas is laid out and getDC() returns a valid context — safe to
-                        // compile shaders, upload geometry, and set up any other GL resources. Only fires once
-                        // per component lifetime.
-                        if (!component._webglReadySent) {
-                            component._webglReadySent = true;
-
-                            const pacContextType = container.dataset?.pacContext;
-
-                            if (pacContextType === 'webgl' || pacContextType === 'webgl2') {
-                                self.dispatchToContainer(container, self.wrapDomEventAsMessage(
-                                    MSG_WEBGL_READY,
-                                    null,
-                                    0,
-                                    0,
-                                    {
-                                        // Provide the GL context directly on the event so components
-                                        // can set up shaders in the handler without a separate getDC() call.
-                                        glContext: wakaPAC.getDC(container.dataset.pacId)
-                                    }
-                                ));
-                            }
-                        }
                     }
                 });
             });
@@ -3164,17 +3117,9 @@
                 return;
             }
 
-            // Apply event modifiers before entering the hook chain.
-            // processEventModifiers handles concerns like mouse capture routing and
-            // drag state filtering. Returning false means the event should be suppressed
-            // entirely — do not enter the hook chain at all.
-            if (!this.processEventModifiers(event.target, event)) {
-                return;
-            }
-
             // Stamp the container onto the event so hooks and handlers always know the pacId.
             // _pacId is cached on the element at registration time to avoid a DOM attribute read here.
-            event.pacId = container._pacId || container.getAttribute('data-pac-id');
+            event.pacId = Utils.getPacId(container);
 
             // Snapshot the hook array at dispatch time. This prevents mutations to _hooks
             // (installs or uninstalls that happen inside a hook function) from affecting
@@ -3221,7 +3166,7 @@
         /**
          * Helper to dispatch mouse messages with proper wParam/lParam encoding
          * @param {number} msgType
-         * @param {Event} domEvent
+         * @param {MouseEvent | TouchEvent} domEvent
          * @param {HTMLElement} container
          * @param {Object} extended
          */
@@ -3523,69 +3468,6 @@
         },
 
         /**
-         * Processes event modifiers defined on an element via the `data-pac-event` attribute.
-         * @param {Element|null|undefined} element - DOM element that may contain modifier attribute.
-         * @param {Event & { originalEvent?: Event }} event - Event wrapper or native event.
-         * @returns {boolean} True if the event should continue to be dispatched, false if blocked.
-         */
-        processEventModifiers(element, event) {
-            // Guard: invalid element or missing attribute API → allow event
-            if (!element || typeof element.getAttribute !== 'function') {
-                return true;
-            }
-
-            // Read modifier string from attribute
-            const attr = element.getAttribute('data-pac-event');
-
-            if (!attr) {
-                return true;
-            }
-
-            // Support wrapped events
-            const originalEvent = event.originalEvent || event;
-
-            // Split modifiers on whitespace
-            const modifiers = attr.split(/\s+/);
-
-            // Precompute keyboard-event check once
-            const isKeyboard = originalEvent.type === 'keyup' || originalEvent.type === 'keydown';
-
-            // Map modifier names to required KeyboardEvent.key values
-            const keyMap = KEY_MODIFIER_MAP;
-
-            for (const raw of modifiers) {
-                // transform modifier to lowercase
-                const modifier = raw.toLowerCase();
-
-                // Flow-control modifiers with side effects
-                if (modifier === 'prevent') {
-                    originalEvent.preventDefault();
-                    continue;
-                }
-
-                if (modifier === 'stop') {
-                    originalEvent.stopPropagation();
-                    continue;
-                }
-
-                // Key filter modifiers
-                const requiredKey = keyMap[modifier];
-
-                if (!requiredKey) {
-                    continue; // Unknown modifier → ignore
-                }
-
-                // If keyboard event and key does not match → block dispatch
-                if (isKeyboard && originalEvent.key !== requiredKey) {
-                    return false;
-                }
-            }
-
-            // All modifiers satisfied → allow event
-            return true;
-        },
-
-        /**
          * Determines if a message type is affected by mouse capture
          * @param {number} messageType - The message type to check
          * @returns {boolean} True if this message type should use capture routing
@@ -3659,7 +3541,7 @@
 
             // Send capture changed message to container losing the capture
             if (this._capturedContainer?.isConnected) {
-                const pacId = this._capturedContainer._pacId || this._capturedContainer.getAttribute('data-pac-id');
+                const pacId = Utils.getPacId(this._capturedContainer);
 
                 if (pacId !== null) {
                     wakaPAC.sendMessage(pacId, wakaPAC.MSG_CAPTURECHANGED, 0, 0);
@@ -3683,6 +3565,134 @@
         hasCapture() {
             return this._captureActive;
         },
+
+        /**
+         * Releases capture only if the given container is the one currently
+         * holding it. No-op otherwise (capture inactive, or held by a different
+         * container). Lets callers unconditionally "give up capture on teardown"
+         * without reaching into _captureActive/_capturedContainer themselves.
+         * @param {HTMLElement} container - The container to release capture for
+         * @returns {void}
+         */
+        releaseCaptureIfOwnedBy(container) {
+            if (this._captureActive && this._capturedContainer === container) {
+                this.releaseCapture();
+            }
+        },
+
+        /**
+         * Returns the pac-id of the container that currently has mouse capture.
+         * Equivalent to Win32 GetCapture() returning a window handle.
+         * @returns {string|null} The pac-id of the capturing container, or null if no capture is active
+         */
+        getCapturedPacId() {
+            if (!this._captureActive) {
+                return null;
+            }
+
+            const pacId = Utils.getPacId(this._capturedContainer);
+            return pacId || null;
+        },
+
+        /**
+         * Marks a canvas PAC container as needing repaint and schedules a
+         * requestAnimationFrame flush if one is not already pending.
+         *
+         * Multiple calls with different rects before the next frame are accumulated
+         * into a dirty region: rcPaint tracks the bounding union (used by getDC()
+         * for clipping), while rects collects each distinct incoming rectangle for
+         * getUpdateRgn(). Incoming rects that are fully contained within an
+         * already-queued rect are dropped to keep the list compact.
+         *
+         * @param {string} pacId  - data-pac-id of the target canvas container
+         * @param {{x:number, y:number, width:number, height:number}|null} [rect]
+         *   Rectangle to invalidate in canvas-local coordinates.
+         *   Pass null (or omit) to invalidate the entire canvas.
+         * @returns {void}
+         */
+        invalidateRect(pacId, rect) {
+            // Fetch the container
+            const container = wakaPAC.getContainerByPacId(pacId);
+
+            // If not found, bail
+            if (!container) {
+                return;
+            }
+
+            // Do nothing if the container is not a canvas
+            if (!(container instanceof HTMLCanvasElement)) {
+                return;
+            }
+
+            // Normalize: null rect means the whole canvas
+            const fullRect = {
+                x: 0,
+                y: 0,
+                width: container.width,
+                height: container.height
+            };
+
+            // Fetch the rect or default to the entire canvas if omitted
+            const incoming = rect || fullRect;
+
+            // Queue the repaint
+            if (this._dirtyCanvases.has(pacId)) {
+                const existing = this._dirtyCanvases.get(pacId);
+
+                // If the canvas is already fully invalidated there is nothing more to accumulate
+                if (existing.rcPaint.x === 0 && existing.rcPaint.y === 0 &&
+                    existing.rcPaint.width === container.width &&
+                    existing.rcPaint.height === container.height) {
+                    return;
+                }
+
+                // Drop the incoming rect if it is fully contained within any rect already
+                // in the list — it adds no new dirty area
+                const absorbed = existing.rects.some(r =>
+                    incoming.x >= r.x &&
+                    incoming.y >= r.y &&
+                    incoming.x + incoming.width <= r.x + r.width &&
+                    incoming.y + incoming.height <= r.y + r.height
+                );
+
+                if (!absorbed) {
+                    existing.rects.push(incoming);
+                    existing.rcPaint = Utils.unionRect(existing.rcPaint, incoming);
+                }
+            } else {
+                // First invalidation this frame — schedule the flush
+                this._dirtyCanvases.set(pacId, { container, rcPaint: incoming, rects: [incoming] });
+                requestAnimationFrame(this.flushPaintQueue);
+            }
+        },
+
+        /**
+         * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
+         * the dirty set. Called once per animation frame by requestAnimationFrame.
+         */
+        flushPaintQueue() {
+            DomUpdateTracker._dirtyCanvases.forEach(function(entry) {
+                const { container } = entry;
+
+                // Skip containers that were removed from the DOM before the frame fired
+                if (!container.isConnected) {
+                    return;
+                }
+
+                // Mark as actively painting so getDC() knows to apply the clip
+                entry.painting = true;
+
+                DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
+                    MSG_PAINT, null, 0, 0
+                ));
+
+                // Clear the painting flag — releaseDC() uses this to decide whether
+                // to restore the context state
+                entry.painting = false;
+            });
+
+            DomUpdateTracker._dirtyCanvases.clear();
+        }
     }
 
     // ============================================================================
@@ -4996,7 +5006,7 @@
 
     /**
      * Value binding - Updates form element values
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5032,7 +5042,7 @@
 
     /**
      * Checked binding - Updates checkbox/radio checked state
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5081,7 +5091,7 @@
 
     /**
      * Visible binding - Shows/hides elements by managing display CSS
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5108,7 +5118,7 @@
 
     /**
      * If binding — conditionally renders an element's child content.
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param {*} value - Truthy = show, falsy = hide
      */
@@ -5142,7 +5152,7 @@
 
     /**
      * Class binding - Manages CSS classes (string or object syntax)
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5164,12 +5174,13 @@
         if (typeof value === 'string') {
             // Parse new classes from the space-separated string
             const newClasses = value.split(/\s+/).filter(Boolean);
+            const cache = Utils.getPacCache(element);
 
             // Remove old dynamic classes that aren't in the new set
-            if (element._pacDynamicClasses) {
-                for (let i = 0; i < element._pacDynamicClasses.length; i++) {
-                    if (newClasses.indexOf(element._pacDynamicClasses[i]) === -1) {
-                        element.classList.remove(element._pacDynamicClasses[i]);
+            if (cache.dynamicClasses) {
+                for (let i = 0; i < cache.dynamicClasses.length; i++) {
+                    if (newClasses.indexOf(cache.dynamicClasses[i]) === -1) {
+                        element.classList.remove(cache.dynamicClasses[i]);
                     }
                 }
             }
@@ -5180,13 +5191,13 @@
             }
 
             // Track current set for next update
-            element._pacDynamicClasses = newClasses;
+            cache.dynamicClasses = newClasses;
         }
     };
 
     /**
      * Style binding - Applies inline styles (object or string syntax)
-     * @param {Context} context - The PAC component context
+     * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
      * @param value - The evaluated expression
      */
@@ -5232,6 +5243,62 @@
         };
     }
 
+    /**
+     * Builds a scopeResolver anchored to a specific element, using this context's
+     * normalizePath and importedUnits. Exposed separately from evalInScope for call
+     * sites that need to evaluate more than one expression against the same resolver
+     * (e.g. a handler expression plus its fallback-args lookup).
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @returns {{ resolveScopedPath: function(string): * }}
+     */
+    Runtime.prototype.makeScopeResolverFor = function(element) {
+        return makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
+    };
+
+    /**
+     * Parses and evaluates an expression string against a given abstraction and
+     * scopeResolver. Lowest-level entry point to ExpressionParser — used directly
+     * by call sites that already have a scopeResolver (e.g. a cached one, or one
+     * being shared across multiple evaluations), and by evalInScope for the
+     * common case of building that resolver from a single element.
+     * @param {string} exprString - The expression to parse and evaluate
+     * @param {Object} abstraction - The abstraction (or scoped abstraction) to evaluate against
+     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolverFor()
+     * @returns {*} The evaluated result
+     */
+    Runtime.prototype.evaluateExpression = function(exprString, abstraction, scopeResolver) {
+        return ExpressionParser.evaluate(
+            ExpressionCache.parseExpression(exprString),
+            abstraction,
+            scopeResolver
+        );
+    };
+
+    /**
+     * Convenience wrapper around evaluateExpression for the common case: evaluate
+     * an expression against this context's abstraction (or an explicitly scoped one),
+     * with paths resolved relative to a single element. Builds a fresh scopeResolver
+     * for that element — call sites that need to reuse the same resolver across
+     * multiple evaluations should call makeScopeResolverFor()/evaluateExpression()
+     * directly instead.
+     * @param {string} exprString - The expression to parse and evaluate
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @param {Object} [abstraction] - Abstraction to evaluate against; defaults to this.abstraction
+     * @returns {*} The evaluated result
+     */
+    Runtime.prototype.evalInScope = function(exprString, element, abstraction) {
+        return this.evaluateExpression(
+            exprString,
+            abstraction || this.abstraction,
+            this.makeScopeResolverFor(element)
+        );
+    };
+
+    /**
+     * Defines DomUpdater class
+     * @param context
+     * @constructor
+     */
     function DomUpdater(context) {
         this.context = context;
     }
@@ -5248,17 +5315,7 @@
 
         const newText = template.replace(INTERPOLATION_REGEX, (match, expression) => {
             try {
-                // Evaluate the expression using the scope resolver
-                const result = ExpressionParser.evaluate(
-                    ExpressionCache.parseExpression(expression),
-                    self.context.abstraction,
-                    makeScopeResolver(
-                        self.context.normalizePath.bind(self.context),
-                        element,
-                        self.context.importedUnits
-                    )
-                );
-
+                const result = self.context.evalInScope(expression, element);
                 return result != null ? String(result) : '';
             } catch (error) {
                 console.warn('Error in text interpolation:', expression, error);
@@ -5316,30 +5373,157 @@
      * Toggles visibility of a set of DOM nodes by swapping them with
      * lightweight placeholder comments. Preserves all node state (event
      * listeners, component instances, form values) across hide/show cycles.
-     * @param {Node[]} nodes - The DOM nodes to show or hide
+     * @param {Array<Node|{__wpGroup: true}>} nodes - The entries to show or hide
      * @param {boolean} show - True to restore nodes, false to replace with placeholders
-     * @returns {void}
+     * @returns {Array} Groups that actually transitioned from hidden to shown
+     *          (see reconcileRevealedGroups) — always empty when show is false
      */
     DomUpdater.prototype.toggleNodeVisibility = function(nodes, show) {
-        if (show) {
-            for (let i = 0; i < nodes.length; i++) {
-                const placeholder = nodes[i]._pacIfPlaceholder;
+        const justRevealedGroups = [];
 
-                if (placeholder && placeholder.parentNode) {
-                    placeholder.parentNode.replaceChild(nodes[i], placeholder);
-                }
-            }
-        } else {
-            for (let i = 0; i < nodes.length; i++) {
-                if (nodes[i].parentNode) {
-                    if (!nodes[i]._pacIfPlaceholder) {
-                        nodes[i]._pacIfPlaceholder = document.createComment('pac-if: hidden');
-                    }
-
-                    nodes[i].parentNode.replaceChild(nodes[i]._pacIfPlaceholder, nodes[i]);
-                }
+        for (let i = 0; i < nodes.length; i++) {
+            if (this.toggleEntry(nodes[i], show)) {
+                justRevealedGroups.push(nodes[i]);
             }
         }
+
+        return justRevealedGroups;
+    };
+
+    /**
+     * Toggles one branch entry — either a nested-wp-if group or a plain
+     * node — dispatching to the matching show/hide handler.
+     * @param {Node|{__wpGroup: true}} entry
+     * @param {boolean} show
+     * @returns {boolean} true only if this call revealed a group (see showGroup)
+     */
+    DomUpdater.prototype.toggleEntry = function(entry, show) {
+        if (entry && entry.__wpGroup) {
+            if (show) {
+                return this.showGroup(entry);
+            } else {
+                return this.hideGroup(entry);
+            }
+        }
+
+        if (show) {
+            this.showNode(entry);
+        } else {
+            this.hideNode(entry);
+        }
+
+        return false;
+    };
+
+    /**
+     * Restores a single node from its placeholder, if it currently has one
+     * attached. A no-op when the node was never hidden, or when its
+     * placeholder is itself still detached (e.g. trapped inside a
+     * currently-hidden ancestor group).
+     * @param {Node} node
+     * @returns {void}
+     */
+    DomUpdater.prototype.showNode = function(node) {
+        const placeholder = node._pacIfPlaceholder;
+
+        if (placeholder && placeholder.parentNode) {
+            placeholder.parentNode.replaceChild(node, placeholder);
+        }
+    };
+
+    /**
+     * Replaces a single node with a placeholder comment, creating one on
+     * first use and reusing it on subsequent hides. A no-op when the node
+     * isn't currently attached to anything.
+     * @param {Node} node
+     * @returns {void}
+     */
+    DomUpdater.prototype.hideNode = function(node) {
+        if (!node.parentNode) {
+            return;
+        }
+
+        if (!node._pacIfPlaceholder) {
+            node._pacIfPlaceholder = document.createComment('pac-if: hidden');
+        }
+
+        node.parentNode.replaceChild(node._pacIfPlaceholder, node);
+    };
+
+    /**
+     * Hides an entire nested-wp-if group (see scanCommentBindings) as one
+     * atomic unit: walks the *live* DOM between the group's stable
+     * open/close markers right now — capturing whatever the nested
+     * binding's own independent toggling has already done to its
+     * interior, rather than trusting a stale scan-time snapshot — then
+     * detaches all of it and leaves a single shared placeholder comment
+     * in its place. The captured contents are remembered on the group
+     * itself so showGroup() can restore exactly what was removed.
+     * @param {{__wpGroup: true, openMarker: Comment, closeMarker: Comment, _pacGroupPlaceholder?: Comment, _pacGroupContents?: Node[]}} group
+     * @returns {boolean} Always false — hiding never reveals a group, this
+     *          exists only so toggleEntry can return this.hideGroup(entry)
+     *          symmetrically with the showGroup case.
+     */
+    DomUpdater.prototype.hideGroup = function(group) {
+        if (group._pacGroupPlaceholder) {
+            return false; // already hidden
+        }
+
+        if (!group.openMarker.parentNode) {
+            return false; // already detached — an ancestor group hid it first
+        }
+
+        const contents = [];
+
+        for (let node = group.openMarker; node; node = node.nextSibling) {
+            contents.push(node);
+
+            if (node === group.closeMarker) {
+                break;
+            }
+        }
+
+        const placeholder = document.createComment('pac-if: hidden group');
+        group.openMarker.parentNode.insertBefore(placeholder, group.openMarker);
+
+        contents.forEach(node => {
+            if (node.parentNode) {
+                node.parentNode.removeChild(node);
+            }
+        });
+
+        group._pacGroupPlaceholder = placeholder;
+        group._pacGroupContents = contents;
+        return false;
+    };
+
+    /**
+     * Reverses hideGroup(): reinserts every node captured at hide time,
+     * in document order, at the position of the shared placeholder, then
+     * removes the placeholder. Restores exactly what was detached,
+     * including whatever state the nested binding's own toggling had
+     * already put it in.
+     * @param {{__wpGroup: true, openMarker: Comment, closeMarker: Comment, _pacGroupPlaceholder?: Comment, _pacGroupContents?: Node[]}} group
+     * @returns {boolean} true if this call actually performed a hidden→shown
+     *          transition; false if it was a no-op (nothing to show)
+     */
+    DomUpdater.prototype.showGroup = function(group) {
+        const placeholder = group._pacGroupPlaceholder;
+
+        if (!placeholder || !placeholder.parentNode) {
+            return false;
+        }
+
+        const parent = placeholder.parentNode;
+
+        (group._pacGroupContents || []).forEach(node => {
+            parent.insertBefore(node, placeholder);
+        });
+
+        parent.removeChild(placeholder);
+        group._pacGroupPlaceholder = null;
+        group._pacGroupContents = null;
+        return true;
     };
 
     // =============================================================================
@@ -5365,13 +5549,13 @@
         /** @type {number} Global timer ID counter, incremented on each add() call */
         nextTimerId: 1,
 
-        /** @type {Map<number, {context: Context, timerId: number, elapse: number, lastFired: number}>} */
+        /** @type {Map<number, {context: Runtime, timerId: number, elapse: number, lastFired: number}>} */
         timers: new Map(),
 
         /**
          * Registers a new timer entry and returns its globally unique ID.
          * Starts the rAF loop if it wasn't already running.
-         * @param {Context} context - Owning context, used to resolve pacId for sendMessage
+         * @param {Runtime} context - Owning context, used to resolve pacId for sendMessage
          * @param {number} elapse - Desired interval in milliseconds
          * @returns {number} Globally unique timer ID
          */
@@ -5415,7 +5599,7 @@
         /**
          * Removes all timers belonging to a specific context.
          * Called by killAllTimers to clean up when a component is destroyed.
-         * @param {Context} context - The context whose timers should be removed
+         * @param {Runtime} context - The context whose timers should be removed
          */
         removeAllForContext(context) {
             // Match entries by context reference — globally unique IDs make this safe
@@ -5459,12 +5643,10 @@
     };
 
     // ========================================================================
-    // CONTEXT
+    // COMPONENT RUNTIME
     // ========================================================================
 
-    function Context(container, abstraction, config) {
-        const self = this;
-
+    function Runtime(container, abstraction, config) {
         this.originalAbstraction = abstraction;
         this.parent = null;
         this.children = new Set();
@@ -5476,11 +5658,27 @@
         this.readyCalled = false;
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
+        this.dependencies = this.getDependencies();
 
-        // Resolve data-pac-uses into a flat function map for this component.
-        // Functions are merged in declaration order; last entry wins on collision.
+        this.initializeImportedUnits();
+        this.setupContainerScrollTracking();
+        this.initializeUpdateQueue();
+        this.registerPacEventListeners();
+
+        DomUpdateTracker.observeContainer(this.container);
+    }
+
+    // =============================================================================
+    // RUNTIME INITIALIZATION METHODS
+    // =============================================================================
+
+    /**
+     * Resolves the component's imported units from the `data-pac-uses` attribute.
+     */
+    Runtime.prototype.initializeImportedUnits = function() {
         this.importedUnits = {};
-        const usesAttr = container.getAttribute('data-pac-uses');
+
+        const usesAttr = this.container.getAttribute('data-pac-uses');
 
         if (usesAttr) {
             usesAttr.split(',').forEach(name => {
@@ -5495,29 +5693,77 @@
                 Object.assign(this.importedUnits, unit);
             });
         }
+    }
 
-        // Setup dependencies
-        this.dependencies = this.getDependencies();
+    /**
+     * Sets up scroll event tracking for the container element with debounced handling.
+     * Creates an optimized scroll listener that updates container scroll state at ~60fps
+     * to prevent performance issues during rapid scroll events.
+     * @memberof {Object} - The parent class/object containing this method
+     * @returns {void}
+     */
+    Runtime.prototype.setupContainerScrollTracking = function() {
+        // Debounce scroll updates to ~1 frame (16 ms) so rapid scroll events
+        // are coalesced rather than triggering a state update on every pixel.
+        const scrollHandler = Utils.debounce(() => {
+            this.updateContainerScrollState();
+        }, 16);
 
-        // Set up container-specific scroll tracking
-        this.setupContainerScrollTracking();
+        // Add scroll listener to this container
+        this.container.addEventListener('scroll', scrollHandler, { passive: true });
 
-        // Register container to shared observers
-        DomUpdateTracker.observeContainer(this.container);
+        // Store reference for cleanup (scrollHandler.cancel() is called on teardown)
+        this.containerScrollHandler = scrollHandler;
+    }
 
-        // Add interval for checking updateQueue
+    /**
+     * Initializes the deferred update queue used to batch reactive DOM updates.
+     */
+    Runtime.prototype.initializeUpdateQueue = function() {
         this.updateQueue = new Map();
         this.updateQueueTimer = null;
         this.updateQueueFireAt = 0;
+    }
 
-        // Handle click events
-        this.boundHandlePacEvent = function(event) { self.handleEvent(event); };
+    /**
+     * Registers DOM event listeners used to receive runtime events for this
+     * context.
+     */
+    Runtime.prototype.registerPacEventListeners = function() {
+        this.boundHandlePacEvent = this.handleEvent.bind(this);
 
-        // Add listeners using the stored references
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.addEventListener(EV_PAC_BROWSER_STATE, this.boundHandlePacEvent);
     }
+
+    /**
+     * Initializes canvas-specific runtime behavior.
+     * Performs the initial paint for 2D canvases. Non-2D context types are set up
+     * entirely by a plugin registered via wakaPAC.use(), which learns of this
+     * component through the onComponentCreated(abstraction, pacId, config)
+     * lifecycle hook (fired earlier, before this method runs) and is free to
+     * inspect container.dataset.pacContext itself and wire up whatever it needs.
+     * @returns {void}
+     */
+    Runtime.prototype.initializeCanvas = function() {
+        // Only canvas elements can host non-2D contexts at all.
+        if (!(this.container instanceof HTMLCanvasElement)) {
+            return;
+        }
+
+        // Determine which rendering context this canvas uses.
+        this.contextType = this.container.dataset.pacContext || '2d';
+
+        // 2D canvases perform an initial synchronous paint and require no further setup.
+        if (this.contextType === '2d') {
+            DomUpdateTracker.invalidateRect(this.abstraction.pacId);
+            DomUpdateTracker.flushPaintQueue();
+        }
+
+        // Any other context type (e.g. 'webgl'/'webgl2') is entirely a plugin's
+        // concern — core deliberately does nothing further here.
+    };
 
     // =============================================================================
     // LIFECYCLE METHODS
@@ -5546,15 +5792,9 @@
      *
      * @returns {void}
      */
-    Context.prototype.destroy = function() {
+    Runtime.prototype.destroy = function() {
         // Release mouse capture if this container had it
-        if (
-            DomUpdateTracker._captureActive &&
-            DomUpdateTracker._capturedContainer &&
-            this.container === DomUpdateTracker._capturedContainer
-        ) {
-            DomUpdateTracker.releaseCapture();
-        }
+        DomUpdateTracker.releaseCaptureIfOwnedBy(this.container);
 
         // Clean up observers
         DomUpdateTracker.unObserveContainer(this.container);
@@ -5564,14 +5804,14 @@
         this.container.removeEventListener(EV_PAC_CHANGE, this.boundHandlePacEvent);
         this.container.removeEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
 
+        // Clear bound events
+        this.boundHandlePacEvent = null;
+
         // Clear updateQueueTimer
         if (this.updateQueueTimer !== null) {
             clearTimeout(this.updateQueueTimer);
             this.updateQueueTimer = null;
         }
-
-        // Clear boundHandlePacEvent callback
-        this.boundHandlePacEvent = null;
 
         // Clean up container scroll listener and cancel any pending debounced call
         if (this.containerScrollHandler) {
@@ -5605,12 +5845,6 @@
         this.textInterpolationMap.clear();
         this.commentBindingMap.clear();
         this.updateQueue.clear();
-
-        // Cancel any active render loop for this component
-        if (this.abstraction?.pacId && _renderLoops.has(this.abstraction.pacId)) {
-            cancelAnimationFrame(_renderLoops.get(this.abstraction.pacId));
-            _renderLoops.delete(this.abstraction.pacId);
-        }
 
         // Capture identifiers needed for MSG_DESTROYED before nullification
         const destroyedPacId = this.abstraction.pacId || null;
@@ -5647,7 +5881,7 @@
      * @param {number} elapse - Timer interval in milliseconds
      * @returns {number} The globally unique timer ID (use this to kill the timer later)
      */
-    Context.prototype.setTimer = function(elapse) {
+    Runtime.prototype.setTimer = function(elapse) {
         // Delegate ID generation and registration to the engine
         return RafTimerEngine.add(this, elapse);
     };
@@ -5658,7 +5892,7 @@
      * @param {number} timerId - The timer ID returned from setTimer()
      * @returns {void}
      */
-    Context.prototype.killTimer = function(timerId) {
+    Runtime.prototype.killTimer = function(timerId) {
         // Delegate directly to the engine — timer IDs are globally unique
         return RafTimerEngine.remove(timerId);
     };
@@ -5669,7 +5903,7 @@
      * to a context that no longer exists.
      * @returns {void}
      */
-    Context.prototype.killAllTimers = function() {
+    Runtime.prototype.killAllTimers = function() {
         // Delegate bulk removal to the engine, which matches by context reference
         return RafTimerEngine.removeAllForContext(this);
     };
@@ -5679,32 +5913,9 @@
     // =============================================================================
 
     /**
-     * Sets up scroll event tracking for the container element with debounced handling.
-     * Creates an optimized scroll listener that updates container scroll state at ~60fps
-     * to prevent performance issues during rapid scroll events.
-     * @memberof {Object} - The parent class/object containing this method
-     * @method setupContainerScrollTracking
-     * @returns {void}
+     * Callback to update container scroll state
      */
-    Context.prototype.setupContainerScrollTracking = function() {
-        // First time setup
-        requestAnimationFrame(() => this.updateContainerScrollState());
-
-        // Debounce scroll updates to ~1 frame (16 ms) so rapid scroll events
-        // are coalesced rather than triggering a state update on every pixel.
-        const scrollHandler = Utils.debounce(() => {
-            this.updateContainerScrollState();
-        }, 16);
-
-        // Add scroll listener to this container
-        this.container.addEventListener('scroll', scrollHandler, { passive: true });
-
-        // Store reference for cleanup (scrollHandler.cancel() is called on teardown)
-        this.containerScrollHandler = scrollHandler;
-    }
-
-    // Add new method to update container scroll state
-    Context.prototype.updateContainerScrollState = function() {
+    Runtime.prototype.updateContainerScrollState = function() {
         // Get scroll measurements
         const scrollX = this.container.scrollLeft;
         const scrollY = this.container.scrollTop;
@@ -5744,7 +5955,7 @@
      * Scans and registers newly created content within a foreach container
      * @param {Element} parentElement - The foreach container element
      */
-    Context.prototype.scanAndRegisterNewElements = function(parentElement) {
+    Runtime.prototype.scanAndRegisterNewElements = function(parentElement) {
         const self = this;
 
         // Expand partial templates before scanning so injected markup
@@ -5781,19 +5992,9 @@
                     return;
                 }
 
-                // Evaluate the expression
+                // Evaluate the expression and set the binding
                 const bindingData = mappingData.bindings[bindingType];
-
-                const value = ExpressionParser.evaluate(
-                    ExpressionCache.parseExpression(bindingData.target),
-                    self.abstraction,
-                    makeScopeResolver(
-                        self.normalizePath.bind(self),
-                        element,
-                        self.importedUnits
-                    )
-                );
-
+                const value = self.evalInScope(bindingData.target, element);
                 self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
             });
         });
@@ -5814,8 +6015,14 @@
                 return depthB - depthA; // deepest first
             })
             .forEach(([element]) => {
-                this.renderForeach(element);
+                this.renderForeach(element, this.evaluateForeachArray(element));
             });
+
+        // Content just changed as a result of this scan (new bindings applied,
+        // foreach items rendered, etc.) — recompute scroll metrics now, tied to
+        // the actual DOM mutation rather than an independently-timed check that
+        // could fire before or after rendering completes.
+        this.updateContainerScrollState();
     };
 
     /**
@@ -5824,7 +6031,7 @@
      * @param element
      * @returns {number}
      */
-    Context.prototype.getElementDepth = function(element) {
+    Runtime.prototype.getElementDepth = function(element) {
         // Depth counter relative to the container root
         let depth = 0;
 
@@ -5848,7 +6055,7 @@
      * @returns {Map<string, Set<string>>} Keys are accessed property names; values are
      *   the set of computed properties that ultimately depend on them.
      */
-    Context.prototype.getDependencies = function() {
+    Runtime.prototype.getDependencies = function() {
         const computed = this.originalAbstraction.computed ?? {};
         const computedNames = new Set(Object.keys(computed));
 
@@ -5920,7 +6127,7 @@
      * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`).
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
-    Context.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
+    Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
         // Step 1: Try dependency map (cheap and reliable if set up correctly).
         for (const [rootProperty, dependentList] of this.dependencies) {
             const rootValue = this.abstraction[rootProperty];
@@ -5941,14 +6148,14 @@
      * Iterates through queued entries in a single pass, immediately applying any
      * whose scheduled time has elapsed and tracking the earliest future entry
      * for rescheduling. Blur-triggered entries are skipped here since they are
-     * handled synchronously by {@link Context#handleDomBlur}.
+     * handled synchronously by {@link Runtime#handleDomBlur}.
      *
      * Deletion of processed entries is deferred to a separate pass to avoid
      * mutating the Map during iteration.
      *
      * @returns {void}
      */
-    Context.prototype.updateQueueHandler = function() {
+    Runtime.prototype.updateQueueHandler = function() {
         // Clear timer reference — this callback is now executing
         this.updateQueueTimer = null;
         this.updateQueueFireAt = 0;
@@ -6006,7 +6213,7 @@
     /**
      * Schedules a future run of the update queue processor.
      *
-     * Sets a single timeout to fire {@link Context#updateQueueHandler} after
+     * Sets a single timeout to fire {@link Runtime#updateQueueHandler} after
      * the given delay. If a timer is already pending, it is replaced only when
      * the new delay would fire sooner — ensuring the earliest queued entry is
      * always processed on time without creating redundant timers.
@@ -6015,7 +6222,7 @@
      *                         Clamped to a minimum of 1ms to guarantee asynchronous execution.
      * @returns {void}
      */
-    Context.prototype.scheduleQueueProcessing = function(delay) {
+    Runtime.prototype.scheduleQueueProcessing = function(delay) {
         const self = this;
         const clampedDelay = Math.max(delay, 1);
         const fireAt = Date.now() + clampedDelay;
@@ -6045,7 +6252,7 @@
      * @returns {string} returns.updateMode - The update mode ('immediate' or other configured modes)
      * @returns {number} returns.delay - The delay in milliseconds, capped at maximum 3000ms
      */
-    Context.prototype.getUpdateConfiguration = function(element) {
+    Runtime.prototype.getUpdateConfiguration = function(element) {
         // Check element attributes first
         const updateMode = element.getAttribute('data-pac-update-mode') || this.config.updateMode || 'immediate';
         const delay = parseInt(element.getAttribute('data-pac-update-delay')) || this.config.delay || 300;
@@ -6068,7 +6275,7 @@
      * @param {string} event.type - The type of event, determines which handler is called
      * @param {...*} event - Additional event properties vary by event type
      */
-    Context.prototype.handleEvent = function(event) {
+    Runtime.prototype.handleEvent = function(event) {
         // Route events to specialized handlers based on type
         // Each event type corresponds to a different aspect of the PAC (Presentation-Abstraction-Control) architecture
         switch (event.type) {
@@ -6079,10 +6286,6 @@
 
             // Handle reactive data binding changes (property updates, computed value changes)
             case 'pac:change':
-                if (Array.isArray(event.detail.newValue)) {
-                    this.handleArrayChange(event);
-                }
-
                 this.handleReactiveChange(event);
                 break;
 
@@ -6106,7 +6309,7 @@
      * @param {Event} event.originalEvent - Reference to the original DOM event
      * @returns {void}
      */
-    Context.prototype.handlePacEvent = function(event) {
+    Runtime.prototype.handlePacEvent = function(event) {
         // Call user's message handler (msgProc) before framework processes the event
         // This allows user code to intercept and handle messages first, Win32-style
         let preventDefault = false;
@@ -6171,7 +6374,7 @@
      * Updates container focus reactive properties
      * Called automatically after MSG_SETFOCUS/MSG_KILLFOCUS events
      */
-    Context.prototype.updateFocusProperties = function() {
+    Runtime.prototype.updateFocusProperties = function() {
         this.abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
         this.abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
     }
@@ -6187,12 +6390,8 @@
      * @param {Array} fallbackArgs - Arguments to invoke the result with when it's a bare function reference
      * @returns {*} The evaluated result
      */
-    Context.prototype.evaluateHandlerExpression = function(bindingTarget, scopedAbstraction, scopeResolver, fallbackArgs) {
-        const result = ExpressionParser.evaluate(
-            ExpressionCache.parseExpression(bindingTarget),
-            scopedAbstraction,
-            scopeResolver
-        );
+    Runtime.prototype.evaluateHandlerExpression = function(bindingTarget, scopedAbstraction, scopeResolver, fallbackArgs) {
+        const result = this.evaluateExpression(bindingTarget, scopedAbstraction, scopeResolver);
 
         if (typeof result === 'function') {
             result.call(this.abstraction, ...fallbackArgs);
@@ -6210,14 +6409,10 @@
      * @param {CustomEvent} event - The event being handled; its target anchors path resolution
      * @returns {void}
      */
-    Context.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
+    Runtime.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
         try {
             // Build scope resolver, shared across the evaluation below
-            const scopeResolver = makeScopeResolver(
-                this.normalizePath.bind(this),
-                event.target,
-                this.importedUnits
-            );
+            const scopeResolver = this.makeScopeResolverFor(event.target);
 
             // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
             const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
@@ -6238,7 +6433,7 @@
      * @param {Element} event.target - The DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
-    Context.prototype.handleDomClicks = function(event) {
+    Runtime.prototype.handleDomClicks = function(event) {
         // Get interpolation data for the clicked element
         const mappingData = this.interpolationMap.get(event.target);
         if (!mappingData?.bindings?.click) {
@@ -6258,19 +6453,10 @@
 
                 if (foreachElement) {
                     // Build scope resolver once, shared across all evaluations below
-                    const scopeResolver = makeScopeResolver(
-                        this.normalizePath.bind(this),
-                        event.target,
-                        this.importedUnits
-                    );
-
-                    // Evaluate the foreach expression to get the source array
+                    // and evaluate the foreach expression to get the source array
+                    const scopeResolver = this.makeScopeResolverFor(event.target);
                     const foreachData = this.interpolationMap.get(foreachElement);
-                    const array = ExpressionParser.evaluate(
-                        ExpressionCache.parseExpression(foreachData.foreachExpr),
-                        this.abstraction,
-                        scopeResolver
-                    );
+                    const array = this.evaluateExpression(foreachData.foreachExpr, this.abstraction, scopeResolver);
 
                     // Inject foreach context into scope so expressions can reference $item, $index, $event
                     const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
@@ -6308,7 +6494,7 @@
      * @param {HTMLElement} event.target - The DOM element that triggered the submit
      * @returns {void}
      */
-    Context.prototype.handleDomSubmit = function(event) {
+    Runtime.prototype.handleDomSubmit = function(event) {
         // Retrieve mapping data for the target element from the interpolation map
         const mappingData = this.interpolationMap.get(event.target);
 
@@ -6334,7 +6520,7 @@
      * @param {Element} event.target - The DOM element that changed
      * @param {*} event.value - The new value from the changed element
      */
-    Context.prototype.handleDomChange = function(event) {
+    Runtime.prototype.handleDomChange = function(event) {
         const self = this;
         const targetElement = event.target;
 
@@ -6349,24 +6535,17 @@
 
         // Handle value binding (for inputs, selects, textareas)
         // This covers most form controls that have a "value" property
+        this.syncValueBindingFromElement(targetElement, mappingData);
+
+        // A real 'change' event means the browser considers this value committed —
+        // that's authoritative regardless of update-mode, so drop any update-mode
+        // 'delayed' or 'change' entry still sitting in the queue for this path.
+        // Without this, a stale queued entry could re-apply an older value later
+        // (delayed mode's timer) or simply linger unused (change mode, now moot
+        // since the value was just written above).
         if (mappingData.bindings.value) {
-            // Fetch value binding
-            const valueBinding = mappingData.bindings.value;
-
-            // Resolve the target path considering any scoped context (e.g., loops, nested objects)
-            const resolvedPath = self.normalizePath(valueBinding.target, targetElement);
-
-            // Update the options
-            let selectOption;
-
-            if (targetElement.tagName === 'SELECT' && targetElement.multiple) {
-                selectOption = Array.from(targetElement.selectedOptions).map(opt => opt.value);
-            } else {
-                selectOption = targetElement.value;
-            }
-
-            // Set new option(s)
-            Utils.setNestedProperty(resolvedPath, selectOption, this.abstraction);
+            const resolvedPath = this.normalizePath(mappingData.bindings.value.target, targetElement);
+            this.updateQueue.delete(resolvedPath);
         }
 
         // Handle checked binding (for checkboxes and radio buttons)
@@ -6395,14 +6574,45 @@
     };
 
     /**
+     * Reads a value-bound element's current DOM value and writes it into
+     * the abstraction at its bound path. The single implementation shared
+     * by handleDomChange (a real 'change' event) and
+     * syncSelectAfterForeach (a <select>'s value settling after its
+     * <option>s are rebuilt by a foreach) — kept as one function
+     * specifically so behavior like the <select multiple> case below
+     * can't drift between the two call sites the way it previously did
+     * (syncSelectAfterForeach used to read element.value unconditionally,
+     * which only ever returns a multi-select's first selected option).
+     * A no-op if $mappingData has no "value" binding at all.
+     * @param {Element} element - The value-bound element to read from
+     * @param {{bindings: {value?: {target: string}}}} mappingData - Its registered binding data
+     * @returns {void}
+     */
+    Runtime.prototype.syncValueBindingFromElement = function(element, mappingData) {
+        const valueBinding = mappingData.bindings.value;
+
+        if (!valueBinding) {
+            return;
+        }
+
+        const resolvedPath = this.normalizePath(valueBinding.target, element);
+
+        const domValue = (element.tagName === 'SELECT' && element.multiple)
+            ? Array.from(element.selectedOptions).map(opt => opt.value)
+            : element.value;
+
+        Utils.setNestedProperty(resolvedPath, domValue, this.abstraction);
+    };
+
+    /**
      * Handles post-mutation input events for data-bound elements, updating the underlying
      * data model with the correct (post-mutation) value from targetElement.value.
      * Fires on the 'input' DOM event via MSG_INPUT_COMPLETE.
      * @param {CustomEvent} event - The post-mutation input event
      * @param {Element} event.target - The DOM element whose value changed
      */
-    Context.prototype.handleDomInputComplete = function(event) {
-        const self = this;
+    Runtime.prototype.handleDomInputComplete = function(event) {
+        // Get the target element
         const targetElement = event.target;
 
         // Get the mapping data for this specific element from the interpolation map
@@ -6421,7 +6631,7 @@
             const valueBinding = mappingData.bindings.value;
 
             // Resolve the target path considering any scoped context (e.g., loops, nested objects)
-            const resolvedPath = self.normalizePath(valueBinding.target, targetElement);
+            const resolvedPath = this.normalizePath(valueBinding.target, targetElement);
 
             // Get update configuration for this element
             const config = this.getUpdateConfiguration(targetElement);
@@ -6466,7 +6676,8 @@
      * @param {HTMLElement} event.target - The DOM element that lost focus
      * @returns {void}
      */
-    Context.prototype.handleDomBlur = function(event) {
+    Runtime.prototype.handleDomBlur = function(event) {
+        // Get the target element
         const targetElement = event.target;
 
         // Get the mapping data for this element
@@ -6513,14 +6724,12 @@
      * @param {*} event.detail.oldValue - The previous value before the change
      * @param {*} event.detail.newValue - The new value after the change
      */
-    Context.prototype.handleReactiveChange = function(event) {
+    Runtime.prototype.handleReactiveChange = function(event) {
         this.updateElementBindings();
         this.updateTextInterpolations();
         this.updateCommentConditionals();
         this.handleWatchersForChange(event);
         this.handleForeachRebuildForChange(event);
-
-        //wakaPAC.sendMessage(this.abstraction.pacId, MSG_VALUE_CHANGE, 0, 0, event.detail);
     };
 
     // =============================================================================
@@ -6531,7 +6740,7 @@
      * Updates all element attribute bindings (value, checked, visible, if, class, style, etc.).
      * Evaluates each binding expression and updates the DOM if the value has changed.
      */
-    Context.prototype.updateElementBindings = function() {
+    Runtime.prototype.updateElementBindings = function() {
         // Cache frequently accessed properties to avoid repeated lookups
         // through `this` in the inner loops
         const abstraction = this.abstraction;
@@ -6550,12 +6759,14 @@
             // Initialize the previous values store on first encounter.
             // Cache the reference to avoid repeated DOM element property access
             // inside the binding loop.
-            if (!element._pacPreviousValues) {
-                element._pacPreviousValues = {};
+            const cache = Utils.getPacCache(element);
+
+            if (!cache.previousValues) {
+                cache.previousValues = {};
             }
 
             // Fetch the previousValues list
-            const previousValues = element._pacPreviousValues;
+            const previousValues = cache.previousValues;
 
             // Iterate bindings using a for loop to avoid closure creation per key
             for (let i = 0, len = keys.length; i < len; i++) {
@@ -6572,16 +6783,7 @@
                 try {
                     // Parse and evaluate the binding expression
                     const bindingData = bindings[bindingType];
-
-                    const currentValue = ExpressionParser.evaluate(
-                        ExpressionCache.parseExpression(bindingData.target),
-                        abstraction,
-                        makeScopeResolver(
-                            self.normalizePath.bind(self),
-                            element,
-                            self.importedUnits
-                        )
-                    );
+                    const currentValue = self.evalInScope(bindingData.target, element, abstraction);
 
                     // Only touch the DOM if the value actually changed.
                     // DOM writes are expensive, so we diff against the cached
@@ -6605,31 +6807,25 @@
      * Updates all text interpolations ({{expression}} in text nodes).
      * Re-evaluates template expressions and updates text content if changed.
      */
-    Context.prototype.updateTextInterpolations = function() {
+    Runtime.prototype.updateTextInterpolations = function() {
         const abstraction = this.abstraction;
         const self = this;
 
         this.textInterpolationMap.forEach((mappingData, textNode) => {
             try {
+                // Fetch node cache
+                const cache = Utils.getPacCache(textNode);
+
                 // Store previous text content to detect changes
-                if (!textNode._pacPreviousText) {
-                    textNode._pacPreviousText = textNode.textContent;
+                if (!cache.previousText) {
+                    cache.previousText = textNode.textContent;
                 }
 
                 // Build the scope resolver once per text node, not once per expression.
                 // The resolver only depends on the text node for path normalization.
                 const newText = mappingData.template.replace(INTERPOLATION_REGEX, function(match, expression) {
                     try {
-                        const result = ExpressionParser.evaluate(
-                            ExpressionCache.parseExpression(expression),
-                            abstraction,
-                            makeScopeResolver(
-                                self.normalizePath.bind(self),
-                                textNode,
-                                self.importedUnits
-                            )
-                        );
-
+                        const result = self.evalInScope(expression, textNode, abstraction);
                         return result != null ? String(result) : '';
                     } catch (error) {
                         console.warn('Error evaluating text interpolation:', expression, error);
@@ -6638,9 +6834,9 @@
                 });
 
                 // Only update DOM if text actually changed
-                if (textNode._pacPreviousText !== newText) {
+                if (cache.previousText !== newText) {
                     textNode.textContent = newText;
-                    textNode._pacPreviousText = newText;
+                    cache.previousText = newText;
                 }
             } catch (error) {
                 console.warn('Error updating text node:', error);
@@ -6652,7 +6848,7 @@
      * Updates all comment-based wp-if conditionals
      * Re-evaluates conditions and shows/hides content as needed
      */
-    Context.prototype.updateCommentConditionals = function() {
+    Runtime.prototype.updateCommentConditionals = function() {
         this.commentBindingMap.forEach((mappingData, commentNode) => {
             this.updateCommentConditional(commentNode, mappingData);
         });
@@ -6664,7 +6860,7 @@
      * Note: Does not trigger for array element changes - arrays are handled by foreach rebuilds
      * @param {CustomEvent} event - The pac:change event with change details
      */
-    Context.prototype.handleWatchersForChange = function(event) {
+    Runtime.prototype.handleWatchersForChange = function(event) {
         // Root-level change (e.g., this.count = 5)
         // Pass the actual primitive or object values directly
         const path = event.detail.path;
@@ -6715,52 +6911,80 @@
 
     /**
      * Handles foreach rebuilds triggered by reactive property changes.
-     * When a property changes, checks if any foreach elements need re-rendering,
-     * either because they're bound directly to the changed array, or because
-     * they're bound to a computed property that depends on the changed property
-     * (e.g., changing 'filter' triggers rebuild of foreach bound to 'filteredTodos').
+     * A foreach element needs rebuilding when any of the following holds:
+     *   1. Its bound array is exactly the array path that changed, or a path
+     *      nested under it (e.g. `foreach: todos` when `todos` itself was
+     *      mutated, or `foreach: rows[1].cells` when `rows[1].cells[3]` changed).
+     *   2. Its foreach expression is a computed property that depends on the
+     *      changed property (e.g. changing `filter` — or mutating `todos`,
+     *      which `filteredTodos` reads — rebuilds `foreach: filteredTodos`).
+     *   3. The changed property is used as a dynamic bracket key inside the
+     *      foreach expression (e.g. changing `region` rebuilds
+     *      `foreach: cities[country][region]`).
+     * Each matching element is rebuilt exactly once per event, even when more
+     * than one rule matches it — which happens routinely for a computed
+     * foreach over an array that was itself directly mutated (rules 1 and 2
+     * both match the same element in that case).
      * @param {CustomEvent} event - The pac:change event containing change details
      * @param {string[]} event.detail.path - Property path that changed
+     * @param {*} event.detail.newValue - The new value after the change
      */
-    Context.prototype.handleForeachRebuildForChange = function(event) {
-        // Only handle top-level property changes (e.g., ['filter'], not ['todos', '0', 'text'])
+    Runtime.prototype.handleForeachRebuildForChange = function(event) {
         const path = event.detail.path;
+        const pathString = Utils.pathArrayToString(path);
+        const changedIsArray = Array.isArray(event.detail.newValue);
 
-        if (path.length !== 1) {
-            return;
-        }
+        // Rules 2 and 3 (computed dependency / bracket key) only apply to a
+        // single top-level property change (e.g. ['filter'], not
+        // ['todos', '0', 'text']). Rule 1 (direct array path) applies
+        // regardless of path depth, since a nested array can still be
+        // reassigned or mutated wholesale.
+        const changedProp = path.length === 1 ? path[0] : null;
+        const dependents = changedProp ? this.dependencies.get(changedProp) : null;
+        const bracketPattern = changedProp ? new RegExp('\\[' + changedProp + '\\]') : null;
 
-        const changedProp = path[0];
-        const dependents = this.dependencies.get(changedProp);
+        // Rule 1 candidates: elements whose foreach is bound directly to (or
+        // nested under) the array path that changed. Reuses the same
+        // path/expression matching (including scoped-expression resolution)
+        // as a direct array mutation would use on its own.
+        const directMatches = changedIsArray
+            ? new Set(this.findForeachElementsByArrayPath(pathString))
+            : null;
 
-        // Build a pattern that matches the changed property used as a dynamic bracket
-        // key inside a foreach expression, e.g. cities[country][region] contains [region].
-        // This covers dependent dropdowns where options depend on a parent scalar value.
-        const bracketPattern = new RegExp('\\[' + changedProp + '\\]');
-
-        // Single-pass scan of interpolationMap instead of calling
-        // findForeachElementsByArrayPath once per candidate property
+        // Single-pass scan of interpolationMap, checking all three rules per
+        // element instead of running separate passes that could both match
+        // (and both rebuild) the same element for the same event.
         for (const [element, mappingData] of this.interpolationMap) {
             // Skip non-foreach elements
             if (!mappingData.bindings || !mappingData.bindings.foreach) {
                 continue;
             }
 
-            const expr = mappingData.foreachExpr;
-            const source = mappingData.sourceArray;
+            const directMatch = directMatches !== null && directMatches.has(element);
 
-            // Match 1: computed property dependency (e.g., filter → filteredTodos)
-            const computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+            let computedMatch = false;
+            let bracketMatch = false;
 
-            // Match 2: expression uses changedProp as a dynamic bracket key
-            // e.g. changing 'region' should rebuild foreach: cities[country][region]
-            const bracketMatch = bracketPattern.test(expr);
-
-            if (computedMatch || bracketMatch) {
-                if (this.shouldRebuildForeach(element)) {
-                    this.renderForeach(element);
-                }
+            if (changedProp) {
+                const expr = mappingData.foreachExpr;
+                const source = mappingData.sourceArray;
+                computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+                bracketMatch = bracketPattern.test(expr);
             }
+
+            if (!directMatch && !computedMatch && !bracketMatch) {
+                continue;
+            }
+
+            // A direct array-path match means the array itself just changed —
+            // always render its current value, the same way a standalone
+            // array mutation always would. Otherwise (computed/bracket match
+            // only), let getChangedForeachArray decide whether the rendered
+            // result actually differs before doing any work.
+            const array = directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
+
+            // Perform the rendering
+            this.renderForeach(element, array);
         }
     };
 
@@ -6770,7 +6994,7 @@
      * @param {*} newValue - The new value
      * @param {*} oldValue - The old value
      */
-    Context.prototype.triggerWatcher = function(property, newValue, oldValue) {
+    Runtime.prototype.triggerWatcher = function(property, newValue, oldValue) {
         // Guard missing watch object
         if (!this.originalAbstraction.watch) {
             return;
@@ -6798,7 +7022,7 @@
      * @param {string} event.detail.stateType - Type of state change ('visibility'|'online'|'scroll'|'resize')
      * @param {Object} event.detail.stateData - State-specific data object
      */
-    Context.prototype.handleBrowserStateEvent = function(event) {
+    Runtime.prototype.handleBrowserStateEvent = function(event) {
         const { stateType, stateData } = event.detail;
 
         switch (stateType) {
@@ -6864,31 +7088,11 @@
     };
 
     /**
-     * Handles array change events by re-rendering associated foreach elements.
-     * @param {CustomEvent} event - The array change event containing details about the modification
-     * @param {Object} event.detail - The event detail object
-     * @param {Array<string|number>} event.detail.path - Array representing the path to the changed array
-     */
-    Context.prototype.handleArrayChange = function(event) {
-        const detail = event.detail;
-        const pathString = Utils.pathArrayToString(detail.path);
-        const foreachElements = this.findForeachElementsByArrayPath(pathString);
-
-        if (foreachElements.length === 0) {
-            return;
-        }
-
-        for (let i = 0, len = foreachElements.length; i < len; i++) {
-            this.renderForeach(foreachElements[i]);
-        }
-    };
-
-    /**
      * Scans the container for elements with data-pac-bind attributes and extracts
      * their binding information along with expression dependencies.
      * @returns {Map<WeakKey, any>}
      */
-    Context.prototype.scanBindings = function(parentElement) {
+    Runtime.prototype.scanBindings = function(parentElement) {
         const interpolationMap = new Map();
         const elements = parentElement.querySelectorAll('[data-pac-bind]');
 
@@ -6935,7 +7139,7 @@
      * @param {string|number} forEachId - Identifier used to look up the element.
      * @returns {*} The matching element, or null if no match is found.
      */
-    Context.prototype.findElementByForEachId = function(forEachId) {
+    Runtime.prototype.findElementByForEachId = function(forEachId) {
         // Loop over all element → mappingData pairs in the interpolation map
         for (const [element, mappingData] of this.interpolationMap) {
             // Check whether this entry belongs to the requested forEachId
@@ -6953,7 +7157,7 @@
      * Extend data of foreach binds
      * @param interpolationMap {Map<WeakKey, any>}
      */
-    Context.prototype.extendBindingsWithForEachData = function(interpolationMap) {
+    Runtime.prototype.extendBindingsWithForEachData = function(interpolationMap) {
         const self = this;
 
         interpolationMap.forEach((mappingData, element) => {
@@ -7014,7 +7218,7 @@
      * a mapping of nodes to their templates and dependencies.
      * @returns {Map<WeakKey, any>}
      */
-    Context.prototype.scanTextBindings = function(parentElement) {
+    Runtime.prototype.scanTextBindings = function(parentElement) {
         const interpolationMap = new Map();
         const container = this.container;
 
@@ -7239,7 +7443,7 @@
      * Calls scanAndRegisterNewElements on every Element node in the given array.
      * Extracted as a module-level helper so it is defined once rather than
      * recreated as a closure on each updateCommentConditional call.
-     * @param {Context} context
+     * @param {Runtime} context
      * @param {Node[]} nodes
      */
     function scanElementNodes(context, nodes) {
@@ -7256,7 +7460,7 @@
      * @param {Element} parentElement - The parent element to scan
      * @returns {Map<Comment, {expression: string, closingComment: Comment, branches: Array<{expression: string|null, nodes: Node[], scanned: boolean}>, scopeResolver: Object, isVisible: number|null}>}
      */
-    Context.prototype.scanCommentBindings = function(parentElement) {
+    Runtime.prototype.scanCommentBindings = function(parentElement) {
         const commentBindingMap = new Map();
         const openComments = []; // Stack to track nested wp-if comments
 
@@ -7300,7 +7504,33 @@
             const branches = [{ expression, nodes: [], scanned: false }];
             let activeBucket = branches[0].nodes;
 
-            for (let node = openComment.nextSibling; node && node !== commentNode; node = node.nextSibling) {
+            // Walks the direct sibling span between this open comment and its
+            // matching close, building the branch node list(s). Uses a plain
+            // `while` (not a `for`) because the nested-wp-if case below needs
+            // to advance `node` by more than one sibling per iteration.
+            //
+            // A nested, independent <!-- wp-if: ... --> found in this span
+            // (as opposed to a wp-else-if/wp-else continuation of *this*
+            // branch) is captured as a single opaque group — its entire
+            // span, open comment through its own matching close, inclusive —
+            // rather than as flat individual nodes. Previously, individual
+            // nodes belonging to a nested wp-if (e.g. the div it controls)
+            // ended up in *both* this branch's own node list and the nested
+            // binding's node list. Since toggleNodeVisibility's "show" path
+            // restores any node carrying a pending hide-placeholder
+            // regardless of which binding put it there, whichever binding's
+            // update ran second would silently undo whatever the other one
+            // had just done to that same node — the nested wp-if would get
+            // shown again the moment the outer one re-evaluated, or vice
+            // versa. Grouping means this branch only ever toggles the
+            // nested span as one atomic unit (see toggleNodeVisibility's
+            // group handling) and never inspects or touches its interior;
+            // the nested binding — discovered independently by this same
+            // scanCommentBindings walk — remains the only thing that ever
+            // manages its own content.
+            let node = openComment.nextSibling;
+
+            while (node && node !== commentNode) {
                 if (node.nodeType === Node.COMMENT_NODE) {
                     const elseIfMatch = node.nodeValue.match(WP_ELSE_IF_COMMENT_REGEX);
 
@@ -7308,6 +7538,7 @@
                         const branch = { expression: elseIfMatch[1].trim(), nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        node = node.nextSibling;
                         continue;
                     }
 
@@ -7315,11 +7546,49 @@
                         const branch = { expression: null, nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        node = node.nextSibling;
+                        continue;
+                    }
+
+                    if (node.nodeValue.match(WP_IF_COMMENT_REGEX)) {
+                        // Nested wp-if: find its own matching close (tracking
+                        // depth so a further-nested wp-if inside it doesn't
+                        // end this early), and remember only the stable
+                        // open/close comment markers — never a snapshot of
+                        // the content between them. Content nodes can be
+                        // independently swapped for their own placeholder by
+                        // the nested binding's own toggling at any time; the
+                        // open/close comments themselves are never touched
+                        // by anyone, so they're the only safe long-lived
+                        // reference. See hideGroup()/showGroup(), which walk
+                        // the live DOM between these markers at the moment
+                        // they actually run, rather than trusting a snapshot
+                        // that could have gone stale in the meantime.
+                        const openMarker = node;
+                        let closeMarker = node;
+                        let depth = 0;
+
+                        do {
+                            closeMarker = node;
+
+                            if (node.nodeType === Node.COMMENT_NODE) {
+                                if (node.nodeValue.match(WP_IF_COMMENT_REGEX)) {
+                                    depth++;
+                                } else if (node.nodeValue.match(WP_IF_CLOSE_COMMENT_REGEX)) {
+                                    depth--;
+                                }
+                            }
+
+                            node = node.nextSibling;
+                        } while (node && depth > 0);
+
+                        activeBucket.push({ __wpGroup: true, openMarker, closeMarker });
                         continue;
                     }
                 }
 
                 activeBucket.push(node);
+                node = node.nextSibling;
             }
 
             // Build the scopeResolver once at scan time. The comment's parent
@@ -7364,7 +7633,7 @@
      * @param {Comment} commentNode - The wp-if comment node
      * @param {Object} mappingData - The binding data for this comment
      */
-    Context.prototype.updateCommentConditional = function(commentNode, mappingData) {
+    Runtime.prototype.updateCommentConditional = function(commentNode, mappingData) {
         try {
             const abstraction = this.abstraction;
             const scopeResolver = mappingData.scopeResolver;
@@ -7377,11 +7646,7 @@
             for (let i = 0; i < branches.length; i++) {
                 const branch = branches[i];
 
-                if (branch.expression === null || ExpressionParser.evaluate(
-                    ExpressionCache.parseExpression(branch.expression),
-                    abstraction,
-                    scopeResolver
-                )) {
+                if (branch.expression === null || this.evaluateExpression(branch.expression, abstraction, scopeResolver)) {
                     winningBranch = i;
                     break;
                 }
@@ -7392,9 +7657,18 @@
                 return;
             }
 
-            // Show the winning branch, hide all others
+            // Show the winning branch, hide all others. toggleNodeVisibility
+            // reports which nested-wp-if groups it actually just revealed
+            // (as opposed to a no-op, e.g. a group that was never hidden) —
+            // see reconcileRevealedGroups() below for why that matters.
+            let revealedGroups = [];
+
             for (let i = 0; i < branches.length; i++) {
-                this.domUpdater.toggleNodeVisibility(branches[i].nodes, i === winningBranch);
+                const result = this.domUpdater.toggleNodeVisibility(branches[i].nodes, i === winningBranch);
+
+                if (result && result.length > 0) {
+                    revealedGroups = revealedGroups.concat(result);
+                }
             }
 
             mappingData.isVisible = winningBranch;
@@ -7405,8 +7679,115 @@
                 scanElementNodes(this, branches[winningBranch].nodes);
                 branches[winningBranch].scanned = true;
             }
+
+            if (revealedGroups.length > 0) {
+                this.reconcileRevealedGroups(revealedGroups);
+            }
         } catch (error) {
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
+        }
+    };
+
+    /**
+     * Reconciles bindings inside wp-if groups that have just become visible.
+     *
+     * Nested bindings may previously have "succeeded" logically while their
+     * ancestor group was still detached, leaving visibility state and
+     * one-time registration flags marked as complete even though no DOM work
+     * actually occurred. That prevents future updates from retrying.
+     *
+     * For each revealed group this:
+     * - resets the group's visibility state to force a real re-evaluation;
+     * - clears branch scan flags so bindings (including foreach) are
+     *   re-registered now that the DOM is attached;
+     * - reconciles nested `data-pac-bind="if: ..."` bindings, which have the
+     *   same failure mode.
+     *
+     * Recursion is automatic: newly revealed nested groups are reconciled by
+     * subsequent updateCommentConditional() calls.
+     *
+     * @param {Array<{__wpGroup: true, openMarker: Comment, closeMarker: Comment}>} groups
+     * @returns {void}
+     */
+    Runtime.prototype.reconcileRevealedGroups = function(groups) {
+        groups.forEach(group => {
+            const nestedMapping = this.commentBindingMap.get(group.openMarker);
+
+            if (nestedMapping) {
+                nestedMapping.isVisible = null;
+
+                nestedMapping.branches.forEach(branch => {
+                    branch.scanned = false;
+                });
+
+                this.updateCommentConditional(group.openMarker, nestedMapping);
+            }
+
+            this.reconcileIfBindings(group);
+        });
+    };
+
+    /**
+     * Finds any data-pac-bind="if: ..." elements within a just-revealed
+     * group's live content and forces each one to re-run its own
+     * registration step, for the same reason reconcileRevealedGroups
+     * resets a nested wp-if's `scanned` flag: BindingHandlers.if's first
+     * attempt may have happened while this element was still trapped
+     * inside the (then-hidden) ancestor group, in which case its
+     * scanAndRegisterNewElements() call (see BindingHandlers.if) hit the
+     * same belongsToPacContainer rejection a detached wp-if's content
+     * does, and its own `_pacIsVisible` flag was left recording that
+     * attempt as if it had succeeded. Resetting that flag (and the
+     * cached child snapshot alongside it, so BindingHandlers.if treats
+     * this as a first-ever call) makes the very next binding pass
+     * actually re-run the toggle and re-scan, rather than bailing early
+     * on a stale "nothing changed" comparison — mirroring exactly what
+     * isVisible/scanned reset does for wp-if above, just for a different
+     * mechanism that happens to use its own separate bookkeeping.
+     *
+     * Walks the group's live DOM directly (openMarker to closeMarker)
+     * rather than a captured node list — by the time this runs, the
+     * group has already been reattached and its transient
+     * _pacGroupContents snapshot has already been cleared (see
+     * showGroup), so the live DOM is the only thing left to look at,
+     * exactly as hideGroup does when it later needs to capture this same
+     * span again.
+     * @param {{openMarker: Comment, closeMarker: Comment}} group
+     * @returns {void}
+     */
+    Runtime.prototype.reconcileIfBindings = function(group) {
+        let foundAny = false;
+
+        for (let node = group.openMarker; node; node = node.nextSibling) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                const candidates = [node].concat(Array.from(node.querySelectorAll('[data-pac-bind]')));
+
+                candidates.forEach(el => {
+                    const bindingString = el.getAttribute('data-pac-bind');
+
+                    if (!bindingString) {
+                        return;
+                    }
+
+                    const hasIfBinding = ExpressionCache
+                        .parseBindingString(bindingString)
+                        .some(pair => pair.type === 'if');
+
+                    if (hasIfBinding && el._pacIsVisible !== undefined) {
+                        el._pacIsVisible = undefined;
+                        el._pacIfChildren = undefined;
+                        foundAny = true;
+                    }
+                });
+            }
+
+            if (node === group.closeMarker) {
+                break;
+            }
+        }
+
+        if (foundAny) {
+            this.updateElementBindings();
         }
     };
 
@@ -7420,7 +7801,7 @@
      * Must run before makeDeepReactiveProxy so the proxy wraps the final object.
      * @param {Object} abstraction
      */
-    Context.prototype.resolveAliases = function(abstraction) {
+    Runtime.prototype.resolveAliases = function(abstraction) {
         Object.keys(abstraction).forEach(function(key) {
             const value = abstraction[key];
 
@@ -7454,7 +7835,7 @@
      * Setup reactive properties for this container
      * @returns {*|object}
      */
-    Context.prototype.createReactiveAbstraction = function() {
+    Runtime.prototype.createReactiveAbstraction = function() {
         const self = this;
 
         // Inject system properties
@@ -7585,7 +7966,7 @@
         });
 
         Object.defineProperty(proxiedReactive, 'pacId', {
-            value:        this.container._pacId || this.container.getAttribute('data-pac-id'),
+            value:        Utils.getPacId(this.container),
             writable:     false,
             enumerable:   true,
             configurable: true
@@ -7603,7 +7984,7 @@
      * @param {boolean} abstraction.hasParent - Will be set to false, indicating whether this abstraction has a parent
      * @returns {void} This method modifies the abstraction object in place
      */
-    Context.prototype.injectHierarchyProperties = function(abstraction) {
+    Runtime.prototype.injectHierarchyProperties = function(abstraction) {
         abstraction.childrenCount = 0;
         abstraction.hasParent = false;
     };
@@ -7612,7 +7993,7 @@
      * Injects system properties into the abstraction
      * @param {Object} abstraction - The abstraction to enhance
      */
-    Context.prototype.injectSystemProperties = function(abstraction) {
+    Runtime.prototype.injectSystemProperties = function(abstraction) {
         // Initialize online/offline state and network quality
         abstraction.browserOnline = navigator.onLine;
         abstraction.browserNetworkEffectiveType = Utils.getNetworkEffectiveType();
@@ -7678,7 +8059,7 @@
      * @param {Element} element - The DOM element to start searching from. Must be a valid DOM Element.
      * @returns {Element|null} The nearest parent element with a foreach binding, or null
      */
-    Context.prototype.findParentForeachElement = function(element) {
+    Runtime.prototype.findParentForeachElement = function(element) {
         let current = element.parentElement;
 
         while (current && current !== this.container) {
@@ -7704,7 +8085,7 @@
      * @returns {Map<number, number>} A Map where each key is a render index (position in filteredArray)
      *                                and each value is the corresponding source index (position in sourceArray).
      */
-    Context.prototype.buildIndexMap = function(sourceArray, filteredArray) {
+    Runtime.prototype.buildIndexMap = function(sourceArray, filteredArray) {
         const claimed = new Set();
         const result = new Map(); // keyed by renderIndex
 
@@ -7722,11 +8103,15 @@
     }
 
     /**
-     * Renders a foreach loop by evaluating its array expression and generating DOM content.
+     * Renders a foreach loop's DOM content from an already-evaluated array.
+     * Evaluating and validating the foreach expression is the caller's job (see
+     * evaluateForeachArray / getChangedForeachArray) — this function only renders
+     * whatever array it's handed, or does nothing if not handed one.
      * @param {Element} foreachElement - DOM element with foreach binding
+     * @param {Array} array - The array to render; if falsy, this is a no-op
      * @returns {void}
      */
-    Context.prototype.renderForeach = function(foreachElement) {
+    Runtime.prototype.renderForeach = function(foreachElement, array) {
         const self = this;
         const mappingData = this.interpolationMap.get(foreachElement);
 
@@ -7735,39 +8120,20 @@
             return;
         }
 
+        // No array means a true no-op. Check before cleanupForeachMaps(): null is the
+        // expected "retry later" result when a nested foreach's parent context isn't
+        // available yet. Cleaning up here would remove existing interpolation bindings
+        // without re-registering them, breaking event delegation while leaving the DOM
+        // unchanged.
+        if (!array) {
+            return;
+        }
+
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
         this.cleanupForeachMaps(foreachElement);
 
         try {
-            // Evaluate the foreach expression (e.g., "todos" or "todo.subs")
-            const array = ExpressionParser.evaluate(
-                ExpressionCache.parseExpression(mappingData.foreachExpr),
-                this.abstraction,
-                makeScopeResolver(
-                    this.normalizePath.bind(this),
-                    foreachElement,
-                    this.importedUnits
-                )
-            );
-
-            // TIMING FIX: Handle the case where parent context doesn't exist yet
-            // Strategy: Silently skip rendering now, let natural retry handle it later
-            // When parent foreach renders and calls scanAndRegisterNewElements(), this
-            // method will be called again with proper context available.
-            if (!array) {
-                // Don't clear innerHTML - preserve template for when context becomes available
-                // Don't log errors - this is expected behavior during initialization
-                return;
-            }
-
-            // Validate that the resolved expression is actually an array
-            if (!Array.isArray(array)) {
-                console.warn(`Foreach expression "${mappingData.foreachExpr}" did not evaluate to an array, got:`, typeof array, array);
-                foreachElement.innerHTML = ''; // Clear invalid content
-                return;
-            }
-
             // Resolve the source array for index mapping.
             // For filtered/sorted expressions the foreach may render a subset of a larger
             // array — fall back to the evaluated array itself when no root can be found.
@@ -7776,7 +8142,7 @@
             const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;
 
             // Store array to be able to compare later
-            foreachElement._pacPreviousArray = array;
+            Utils.getPacCache(foreachElement).previousArray = array;
 
             // Build complete HTML string first, then set innerHTML once
             // This prevents DOM corruption caused by repeated innerHTML += operations
@@ -7833,21 +8199,21 @@
             );
 
         } catch (error) {
-            console.warn(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
+            console.warn(`Error rendering foreach for expression "${mappingData.foreachExpr}":`, error);
             // Don't clear innerHTML on error during initial scan - preserve template
             // The error might resolve itself when parent context becomes available
         }
     };
 
     /**
-     * Syncs a <select> element's DOM value back into the model after its
-     * child <option> elements were rebuilt by a foreach. The browser reconciles
-     * the selection against the new option set; this method reads the resulting
-     * .value and writes it into the abstraction so the proxy fires a pac:change
-     * event and dependent bindings stay in sync.
+     * After a foreach rebuilds a <select>'s <option>s, the browser
+     * reconciles the selection against the new option set — this finds
+     * the affected <select> (whether the foreach element itself, or its
+     * immediate parent) and syncs its resulting value back into the
+     * abstraction via syncValueBindingFromElement.
      * @param {Element} foreachElement - The element whose foreach just rebuilt
      */
-    Context.prototype.syncSelectAfterForeach = function(foreachElement) {
+    Runtime.prototype.syncSelectAfterForeach = function(foreachElement) {
         let selectElement = null;
         let selectMappingData = null;
 
@@ -7863,19 +8229,16 @@
             selectMappingData = this.interpolationMap.get(selectElement);
         }
 
+        // Do nothing when there's no select element or mapping data.
         if (!selectElement || !selectMappingData || !selectMappingData.bindings.value) {
             return;
         }
 
-        // Read what the browser settled on after the options were replaced
-        const domValue = selectElement.value;
-
-        // Resolve the bound property path and write the DOM value into the abstraction
-        const valueBinding = selectMappingData.bindings.value;
-        const resolvedPath = this.normalizePath(valueBinding.target, selectElement);
-
-        // Write the DOM value into the abstraction — the proxy handles the change event
-        Utils.setNestedProperty(resolvedPath, domValue, this.abstraction);
+        // Read what the browser settled on after the options were replaced,
+        // and write it into the abstraction — see syncValueBindingFromElement,
+        // shared with handleDomChange so the <select multiple> case can't
+        // drift between the two call sites.
+        this.syncValueBindingFromElement(selectElement, selectMappingData);
     };
 
     /**
@@ -7884,7 +8247,7 @@
      * @param {Element} element
      * @returns {Array<Object>}
      */
-    Context.prototype.getForeachChain = function(element) {
+    Runtime.prototype.getForeachChain = function(element) {
         // Attr nodes aren't part of the DOM tree (no parentElement, no previousSibling),
         // so foreach-scope traversal and caching have to happen on the owner element
         // instead — this also lets multiple interpolated attributes on the same element
@@ -7896,8 +8259,10 @@
         // Return cached chain if available — avoids repeated DOM traversal
         // and comment parsing for the same element across multiple normalizePath calls.
         // Cache is valid until foreach rebuild (old elements are discarded entirely).
-        if (element._pacForeachChain) {
-            return element._pacForeachChain;
+        const cache = Utils.getPacCache(element);
+
+        if (cache.foreachChain) {
+            return cache.foreachChain;
         }
 
         // Accumulates the discovered foreach contexts in traversal order
@@ -7944,7 +8309,7 @@
         }
 
         // Cache the chain on the element for subsequent lookups
-        element._pacForeachChain = chain;
+        cache.foreachChain = chain;
 
         // Return the collected foreach chain
         return chain;
@@ -7954,7 +8319,7 @@
      * Resolve scoped variables into a flattened token array.
      * Scope values may be numbers or string paths.
      */
-    Context.prototype.resolveScopedTokens = function(tokens, scope) {
+    Runtime.prototype.resolveScopedTokens = function(tokens, scope) {
         const resolved = [];
 
         for (let i = 0; i < tokens.length; i++) {
@@ -7988,7 +8353,7 @@
      * @param {Array<Object>} frames - Effective foreach frames (outer → inner).
      * @returns {Map<string, string|number>} Scoped variable map.
      */
-    Context.prototype.buildForeachScope = function(frames) {
+    Runtime.prototype.buildForeachScope = function(frames) {
         // Stores scoped variable → resolved path/index mappings
         const scope = new Map();
 
@@ -8030,7 +8395,7 @@
      * @param {HTMLElement} element - Element inside a foreach hierarchy.
      * @returns {string|number} Fully-qualified path or direct numeric index.
      */
-    Context.prototype.normalizePath = function(pathSegments, element) {
+    Runtime.prototype.normalizePath = function(pathSegments, element) {
         // Convert incoming path into normalized token form
         const path = Utils.pathStringToArray(pathSegments);
 
@@ -8092,58 +8457,90 @@
     };
 
     /**
-     * Determines whether a foreach element needs to be rebuilt based on array changes
+     * Evaluates and validates a foreach element's array expression. This is the one
+     * place expression-evaluation happens for foreach — renderForeach no longer does
+     * it itself; callers (this function's own callers, and renderForeach's callers)
+     * evaluate first and hand the result to renderForeach, which just renders it.
      * @param {Element} foreachElement - The DOM element with foreach directive
-     * @returns {boolean} True if the foreach should be rebuilt, false otherwise
+     * @returns {Array|null} The evaluated array, or null if: the element isn't a
+     *   foreach binding; the expression's context isn't available yet (a nested
+     *   foreach whose parent hasn't rendered — expected and silent, the natural
+     *   retry handles it later); the expression didn't evaluate to an array (logged,
+     *   and the element's content is cleared); or evaluation threw (logged, content
+     *   preserved in case the error resolves itself once context becomes available).
      */
-    Context.prototype.shouldRebuildForeach = function(foreachElement) {
-        // Get the mapping data for this foreach element from the interpolation map
+    Runtime.prototype.evaluateForeachArray = function(foreachElement) {
         const mappingData = this.interpolationMap.get(foreachElement);
 
-        // No mapping data means this isn't a valid foreach element
-        if (!mappingData) {
-            return false;
+        if (!mappingData || !mappingData.foreachId) {
+            return null;
         }
 
-        // Evaluate the foreach expression to get the current array
-        const newArray = ExpressionParser.evaluate(
-            ExpressionCache.parseExpression(mappingData.foreachExpr),
-            this.abstraction,
-            makeScopeResolver(
-                this.normalizePath.bind(this),
-                foreachElement,
-                this.importedUnits
-            )
-        );
+        try {
+            const array = this.evalInScope(mappingData.foreachExpr, foreachElement);
 
-        // If evaluation doesn't result in an array, no rebuild needed
-        if (!Array.isArray(newArray)) {
-            return false;
+            // TIMING FIX: Handle the case where parent context doesn't exist yet
+            // Strategy: Silently skip for now, let natural retry handle it later
+            if (!array) {
+                return null;
+            }
+
+            // Validate that the resolved expression is actually an array
+            if (!Array.isArray(array)) {
+                console.warn(`Foreach expression "${mappingData.foreachExpr}" did not evaluate to an array, got:`, typeof array, array);
+                foreachElement.innerHTML = ''; // Clear invalid content
+                return null;
+            }
+
+            return array;
+        } catch (error) {
+            console.warn(`Error evaluating foreach expression "${mappingData.foreachExpr}":`, error);
+            // Don't clear innerHTML on error - preserve template; the error might
+            // resolve itself once parent context becomes available
+            return null;
+        }
+    };
+
+    /**
+     * Determines whether a foreach element needs to be rebuilt based on array changes,
+     * and if so, returns the freshly-evaluated array so the caller can pass it straight
+     * to renderForeach instead of having it re-evaluate the same expression a second time.
+     * @param {Element} foreachElement - The DOM element with foreach directive
+     * @returns {Array|null} The new array if a rebuild is needed, or null if no rebuild
+     *   is needed (including when the element/expression isn't valid).
+     */
+    Runtime.prototype.getChangedForeachArray = function(foreachElement) {
+        // Evaluate and validate the current array
+        const newArray = this.evaluateForeachArray(foreachElement);
+
+        // If no array, do nothing
+        if (!newArray) {
+            return null;
         }
 
-        // Get the previously cached array from the element's internal property
-        const previousArray = foreachElement._pacPreviousArray;
+        // Get the previously cached array from the element's cache
+        const previousArray = Utils.getPacCache(foreachElement).previousArray;
 
+        // First time rendering - rebuild required
         if (!previousArray) {
-            // First time rendering - rebuild required
-            return true;
+            return newArray;
         }
 
         // Quick length comparison - if lengths differ, rebuild needed
         if (newArray.length !== previousArray.length) {
-            return true;
+            return newArray;
         }
 
         // Check if any array items changed by reference comparison
         // This catches object mutations and item replacements
         for (let i = 0; i < newArray.length; i++) {
             if (newArray[i] !== previousArray[i]) {
-                return true;
+                return newArray;
             }
         }
 
         // Arrays are identical - no rebuild needed
-        return false;
+        return null;
     };
 
     /**
@@ -8152,7 +8549,7 @@
      * @param {string} arrayPath - Fully-qualified data array path to match.
      * @returns {HTMLElement[]} Elements whose foreach bindings depend on the array.
      */
-    Context.prototype.findForeachElementsByArrayPath = function(arrayPath) {
+    Runtime.prototype.findForeachElementsByArrayPath = function(arrayPath) {
         const elementsToUpdate = [];
 
         for (const [element, mappingData] of this.interpolationMap) {
@@ -8196,7 +8593,7 @@
      * @param {Comment} commentNode - The DOM comment node to parse
      * @returns {{foreachId: string, index: number, renderIndex: number}|null}
      */
-    Context.parseForeachComment = function(commentNode) {
+    Runtime.parseForeachComment = function(commentNode) {
         const match = commentNode.textContent.trim().match(FOREACH_INDEX_REGEX);
 
         if (!match) {
@@ -8220,7 +8617,7 @@
      * @returns {number} returns.index - The logical index in the data array
      * @returns {number|null} returns.renderIndex - The rendering index (may differ from logical index)
      */
-    Context.prototype.extractClosestForeachContext = function(startElement) {
+    Runtime.prototype.extractClosestForeachContext = function(startElement) {
         // Cache container
         const container = this.container;
 
@@ -8232,8 +8629,10 @@
 
         while (current && current !== container) {
             // Check cache first — avoids repeated DOM traversal and regex matching
-            if (current._pacForeachContext) {
-                return current._pacForeachContext;
+            const currentCache = Utils.getPacCache(current);
+
+            if (currentCache.foreachContext) {
+                return currentCache.foreachContext;
             }
 
             // Not cached — check previous siblings for comment markers
@@ -8242,12 +8641,12 @@
             while (sibling) {
                 // Only process comment nodes
                 if (sibling.nodeType === COMMENT_NODE) {
-                    const context = Context.parseForeachComment(sibling);
+                    const context = Runtime.parseForeachComment(sibling);
 
                     if (context) {
                         // Cache on the starting element so subsequent lookups
                         // from the same element or its descendants are O(1)
-                        startElement._pacForeachContext = context;
+                        Utils.getPacCache(startElement).foreachContext = context;
                         return context;
                     }
                 }
@@ -8270,7 +8669,7 @@
      * This enables O(1) context lookups instead of repeated comment parsing.
      * @param {HTMLElement} foreachElement - The foreach container element
      */
-    Context.prototype.cacheContextOnItemElements = function(foreachElement) {
+    Runtime.prototype.cacheContextOnItemElements = function(foreachElement) {
         let node;
         let currentContext = null;
 
@@ -8278,7 +8677,7 @@
 
         while ((node = walker.nextNode())) {
             if (node.nodeType === Node.COMMENT_NODE) {
-                const context = Context.parseForeachComment(node);
+                const context = Runtime.parseForeachComment(node);
 
                 if (context) {
                     // Found start marker - prepare context for next element
@@ -8289,7 +8688,7 @@
                 }
             } else if (node.nodeType === Node.ELEMENT_NODE && currentContext) {
                 // Cache context on the first element after start comment
-                node._pacForeachContext = currentContext;
+                Utils.getPacCache(node).foreachContext = currentContext;
             }
         }
     };
@@ -8298,7 +8697,7 @@
      * Removes all child elements of a foreach container from interpolation maps
      * @param {Element} foreachElement - The foreach container element
      */
-    Context.prototype.cleanupForeachMaps = function(foreachElement) {
+    Runtime.prototype.cleanupForeachMaps = function(foreachElement) {
         const elementsToRemove = [];
         const textNodesToRemove = [];
 
@@ -8322,20 +8721,18 @@
         elementsToRemove.forEach(element => {
             this.interpolationMap.delete(element);
 
-            // Clean up cached state to prevent memory leaks
-            delete element._pacPreviousValues;
-            delete element._pacPreviousArray;
-            delete element._pacDynamicClasses;
-            delete element._pacForeachChain;
-            delete element._pacForeachContext;
+            // Clean up cached state to prevent memory leaks — all per-node caches
+            // (previous values, previous array, dynamic classes, foreach chain,
+            // foreach context) live under this single property, so any cache
+            // field added in the future is covered here without further changes.
+            delete element._pacCache;
         });
 
         textNodesToRemove.forEach(textNode => {
             this.textInterpolationMap.delete(textNode);
 
-            // Clean up cached text state
-            delete textNode._pacPreviousText;
-            delete textNode._pacForeachChain;
+            // Clean up cached text state (previous text, foreach chain)
+            delete textNode._pacCache;
         });
     };
 
@@ -8345,10 +8742,10 @@
 
     /**
      * Establishes parent-child relationships for this component
-     * @param {Context|null} parent - Parent component (or null if top-level)
-     * @param {Context[]} children - Array of child components
+     * @param {Runtime|null} parent - Parent component (or null if top-level)
+     * @param {Runtime[]} children - Array of child components
      */
-    Context.prototype.establishHierarchy = function(parent, children) {
+    Runtime.prototype.establishHierarchy = function(parent, children) {
         // Updates relationships
         this.updateParentRelationship(parent);
         this.updateChildrenRelationships(children);
@@ -8381,7 +8778,7 @@
      * Updates parent relationship - only sets parent reference
      * @param {Object|null} newParent - New parent component or null
      */
-    Context.prototype.updateParentRelationship = function(newParent) {
+    Runtime.prototype.updateParentRelationship = function(newParent) {
         // Do nothing when parent did not change
         if (this.parent === newParent) {
             return;
@@ -8405,7 +8802,7 @@
      * Rebuilds children relationships from current DOM hierarchy
      * @param {Array} currentChildren - Children found in DOM
      */
-    Context.prototype.updateChildrenRelationships = function(currentChildren) {
+    Runtime.prototype.updateChildrenRelationships = function(currentChildren) {
         this.children.clear();
 
         currentChildren.forEach(child => {
@@ -8427,7 +8824,7 @@
      * @param {number} renderIndex - The item's position in the rendered output
      * @returns {string} Comment-delimited HTML string for one foreach iteration
      */
-    Context.prototype.buildForeachItemHTML = function(foreachId, template, originalIndex, renderIndex) {
+    Runtime.prototype.buildForeachItemHTML = function(foreachId, template, originalIndex, renderIndex) {
         return `<!-- pac-foreach-item: ${foreachId}, index=${originalIndex}, renderIndex=${renderIndex} -->` +
             template +
             `<!-- /pac-foreach-item -->`;
@@ -9013,10 +9410,10 @@
      * Global registry for managing PAC components and their hierarchical relationships
      */
     function ComponentRegistry() {
-        /** @type {Map<string, Context>} All registered components indexed by pac-id */
+        /** @type {Map<string, Runtime>} All registered components indexed by pac-id */
         this.components = new Map();
 
-        /** @type {Set<Context>} Components waiting for hierarchy establishment */
+        /** @type {Set<Runtime>} Components waiting for hierarchy establishment */
         this.pendingHierarchy = new Set();
 
         /**
@@ -9142,7 +9539,7 @@
          * Time complexity: O(n) where n is the number of components
          * Space complexity: O(n) for the hierarchy map and container index
          *
-         * @returns {Map<Element, {parent: Context|null, children: Context[]}>} Complete hierarchy map
+         * @returns {Map<Element, {parent: Runtime|null, children: Runtime[]}>} Complete hierarchy map
          */
         buildHierarchyMap() {
             // Step 1: Create fast lookup index - container element -> component
@@ -9282,7 +9679,7 @@
         const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
 
         // Fetch the pacId from the container
-        const pacId = container._pacId || container.getAttribute('data-pac-id');
+        const pacId = Utils.getPacId(container);
 
         // Fetch accelerator tables of this container and parent containers
         const tables = _accelTablesForContainer(container);
@@ -9365,160 +9762,46 @@
     }
 
     // ========================================================================
-    // PAINT INVALIDATION ENGINE
-    // ========================================================================
-
-    /**
-     * Tracks canvas containers that have been invalidated and are waiting for
-     * their MSG_PAINT to be dispatched on the next animation frame.
-     *
-     * Key:   pacId (string)
-     * Value: {
-     *   container: HTMLCanvasElement,
-     *   rcPaint:   {x, y, width, height}  — union of all dirty rects; used by getDC() for clipping
-     *   rects:     [{x, y, width, height}] — list of discrete dirty rects; exposed via getUpdateRgn()
-     * }
-     *
-     * A container is present in this map if and only if a rAF flush is already
-     * scheduled for it. Multiple invalidateRect() calls before the next frame
-     * are accumulated: rcPaint grows as the bounding union, while rects collects
-     * each distinct incoming rectangle (absorbed duplicates are dropped).
-     *
-     * @type {Map<string, {container: HTMLCanvasElement, rcPaint: {x:number, y:number, width:number, height:number}, rects: Array<{x:number, y:number, width:number, height:number}>}>}
-     */
-    const _dirtyCanvases = new Map();
-
-    /**
-     * Tracks active render loops for WebGL canvas components registered with renderLoop: true.
-     * Key:   pacId (string)
-     * Value: rAF handle (number) — the return value of the most recent requestAnimationFrame call,
-     *        used to cancel the loop via cancelAnimationFrame() when the component is destroyed.
-     * @type {Map<string, number>}
-     */
-    const _renderLoops = new Map();
-
-    /**
-     * Dispatches MSG_PAINT to all invalidated canvas containers, then clears
-     * the dirty set. Called once per animation frame by requestAnimationFrame.
-     */
-    function _flushPaintQueue() {
-        _dirtyCanvases.forEach(function(entry) {
-            const { container } = entry;
-
-            // Skip containers that were removed from the DOM before the frame fired
-            if (!container.isConnected) {
-                return;
-            }
-
-            // Mark as actively painting so getDC() knows to apply the clip
-            entry.painting = true;
-
-            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                MSG_PAINT,
-                null,   // No originating DOM event
-                0,      // wParam unused
-                0       // lParam unused
-            ));
-
-            // Clear the painting flag — releaseDC() uses this to decide whether
-            // to restore the context state
-            entry.painting = false;
-        });
-
-        _dirtyCanvases.clear();
-    }
-
-    /**
-     * Marks a canvas PAC container as needing repaint and schedules a
-     * requestAnimationFrame flush if one is not already pending.
-     *
-     * Multiple calls with different rects before the next frame are accumulated
-     * into a dirty region: rcPaint tracks the bounding union (used by getDC()
-     * for clipping), while rects collects each distinct incoming rectangle for
-     * getUpdateRgn(). Incoming rects that are fully contained within an
-     * already-queued rect are dropped to keep the list compact.
-     *
-     * @param {string} pacId  - data-pac-id of the target canvas container
-     * @param {{x:number, y:number, width:number, height:number}|null} [rect]
-     *   Rectangle to invalidate in canvas-local coordinates.
-     *   Pass null (or omit) to invalidate the entire canvas.
-     * @returns {void}
-     */
-    function _invalidateRect(pacId, rect) {
-        // Fetch the container
-        const container = wakaPAC.getContainerByPacId(pacId);
-
-        // If not found, bail
-        if (!container) {
-            return;
-        }
-
-        // Do nothing if the container is not a canvas
-        if (!(container instanceof HTMLCanvasElement)) {
-            return;
-        }
-
-        // Normalize: null rect means the whole canvas
-        const fullRect = {
-            x: 0,
-            y: 0,
-            width: container.width,
-            height: container.height
-        };
-
-        // Fetch the rect or default to the entire canvas if omitted
-        const incoming = rect || fullRect;
-
-        // Queue the repaint
-        if (_dirtyCanvases.has(pacId)) {
-            const existing = _dirtyCanvases.get(pacId);
-
-            // If the canvas is already fully invalidated there is nothing more to accumulate
-            if (existing.rcPaint.x === 0 && existing.rcPaint.y === 0 &&
-                existing.rcPaint.width === container.width &&
-                existing.rcPaint.height === container.height) {
-                return;
-            }
-
-            // Drop the incoming rect if it is fully contained within any rect already
-            // in the list — it adds no new dirty area
-            const absorbed = existing.rects.some(r =>
-                incoming.x >= r.x &&
-                incoming.y >= r.y &&
-                incoming.x + incoming.width <= r.x + r.width &&
-                incoming.y + incoming.height <= r.y + r.height
-            );
-
-            if (!absorbed) {
-                existing.rects.push(incoming);
-                existing.rcPaint = Utils.unionRect(existing.rcPaint, incoming);
-            }
-        } else {
-            // First invalidation this frame — schedule the flush
-            _dirtyCanvases.set(pacId, { container, rcPaint: incoming, rects: [incoming] });
-            requestAnimationFrame(_flushPaintQueue);
-        }
-    }
-
-    // ========================================================================
     // PAINT INTERNAL HELPERS
     // ========================================================================
 
     /**
-     * Returns true if the given rendering context is a WebGL or WebGL2 context.
-     * @param {RenderingContext} ctx
-     * @returns {boolean}
+     * Creates a canvas context of the given dimensions and type.
+     * Uses OffscreenCanvas where available, falling back to HTMLCanvasElement
+     * for environments that do not support it (notably older Safari versions).
+     * @param {number} width
+     * @param {number} height
+     * @param {string} [contextType='2d']
+     * @param {Object} [attributes={}]
+     * @returns {RenderingContext}
      */
-    function _isWebGLContext(ctx) {
-        return ctx instanceof WebGLRenderingContext || ctx instanceof WebGL2RenderingContext;
+    function _createCanvas(width, height, contextType = '2d', attributes = {}) {
+        if (typeof OffscreenCanvas !== 'undefined') {
+            return new OffscreenCanvas(width, height).getContext(contextType, attributes);
+        }
+
+        const canvas  = document.createElement('canvas');
+        canvas.width  = width;
+        canvas.height = height;
+        return canvas.getContext(contextType, attributes);
     }
 
     /**
-     * Copies srcCanvas onto a 2D destDC using drawImage.
-     * For WebGL sources, the source canvas must have been created with
-     * preserveDrawingBuffer: true in its glAttributes, otherwise the drawing
-     * buffer will have been cleared by the browser after compositing and the
-     * copy will produce a blank result.
+     * Returns true if the given rendering context is a 2D canvas context.
+     * Core only understands 2D natively — anything else (webgl, webgl2, or a
+     * context type introduced by some future plugin) is opaque to core and is
+     * the responsibility of the relevant plugin (e.g. wakaD3D.bitBlt() for WebGL).
+     * @param {RenderingContext} ctx
+     * @returns {boolean}
+     */
+    function _is2DContext(ctx) {
+        return ctx instanceof CanvasRenderingContext2D || ctx instanceof OffscreenCanvasRenderingContext2D;
+    }
+
+    /**
+     * Copies srcCanvas onto a 2D destDC using drawImage. Called directly by
+     * wakaPAC.bitBlt()/stretchBlt(); a WebGL destination is handled
+     * separately by wakaD3D.bitBlt().
      * @param {CanvasRenderingContext2D} destCtx2D
      * @param {HTMLCanvasElement} srcCanvas
      * @param {number} sx - Source X
@@ -9532,24 +9815,6 @@
      */
     function _blitToCanvas2D(destCtx2D, srcCanvas, sx, sy, sw, sh, dx, dy, dw, dh) {
         destCtx2D.drawImage(srcCanvas, sx, sy, sw, sh, dx, dy, dw, dh);
-    }
-
-    /**
-     * Copies a source canvas onto a WebGL destination as a texture bound to
-     * the currently active texture unit. The caller is responsible for binding
-     * the target texture before calling this function.
-     * @param {WebGLRenderingContext|WebGL2RenderingContext} destGL
-     * @param {HTMLCanvasElement} srcCanvas
-     */
-    function _blitToWebGL(destGL, srcCanvas) {
-        destGL.texImage2D(
-            destGL.TEXTURE_2D,
-            0,                  // mip level
-            destGL.RGBA,             // internal format
-            destGL.RGBA,             // format
-            destGL.UNSIGNED_BYTE,
-            srcCanvas
-        );
     }
 
     // ========================================================================
@@ -9738,7 +10003,7 @@
 
             if (existingComponent) {
                 abstractions.push(existingComponent.abstraction);
-                return; // Skip to next container
+                return;
             }
 
             // Merge configuration
@@ -9752,221 +10017,140 @@
 
             // Hydrate fields into abstraction before context is created
             if (config?.hydrate === true) {
-                // Read initial state from data-pac-state attribute if present
-                const pacState = container.dataset.pacState;
-
-                if (pacState) {
-                    try {
-                        Object.assign(containerAbstraction, JSON.parse(pacState));
-                    } catch (e) {
-                        console.warn('WakaPAC: Failed to parse data-pac-state:', e);
-                    }
-                }
-
-                // Scan data-pac-field elements and add to abstraction
-                container.querySelectorAll('[data-pac-field]').forEach(el => {
-                    // Element belongs to another container. Skip.
-                    if (!Utils.belongsToPacContainer(container, el)) {
-                        return;
-                    }
-
-                    // Fetch name attribute
-                    const name = el.getAttribute('name');
-
-                    // No name attribute exists. Skip.
-                    if (!name) {
-                        return;
-                    }
-
-                    // If the element has data-pac-same-as, register an alias instead
-                    // of importing the field value directly. The alias redirects reads
-                    // and writes to the target path via getter/setter after resolveAliases().
-                    const sameAs = el.getAttribute('data-pac-same-as');
-
-                    if (sameAs) {
-                        containerAbstraction[name] = wakaPAC.sameAs(sameAs);
-                        return;
-                    }
-
-                    switch (el.type) {
-                        case 'checkbox':
-                            // Read checked state as boolean
-                            Utils.setNestedProperty(name, el.checked, containerAbstraction);
-                            break;
-
-                        case 'number':
-                        case 'range':
-                            // Convert numeric input values to actual numbers
-                            Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', containerAbstraction);
-                            break;
-
-                        case 'radio':
-                            // Initialize the group property with an empty string on first encounter
-                            if (Utils.getNestedValue(containerAbstraction, name) === undefined) {
-                                Utils.setNestedProperty(name, '', containerAbstraction);
-                            }
-
-                            // Only overwrite if this radio button is the selected one
-                            if (el.checked) {
-                                Utils.setNestedProperty(name, el.value, containerAbstraction);
-                            }
-
-                            break;
-
-                        case 'file':
-                            // File inputs cannot be hydrated — skip
-                            break;
-
-                        default:
-                            // For all other field types, read the current value or fall back to the HTML attribute
-                            Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), containerAbstraction);
-                            break;
-                    }
-                });
+                wakaPAC.hydrateContainer(container, containerAbstraction);
             }
 
-            // Create context for this container
-            const context = new Context(container, containerAbstraction, config);
+            // Create runtime for this container
+            const runtime = new Runtime(container, containerAbstraction, config);
 
             // Register using pac-id as key (not selector)
-            window.PACRegistry.register(pacId, context);
+            window.PACRegistry.register(pacId, runtime);
 
             // Let plugins augment the component
-            _plugins.forEach(function(plugin) {
-                if (typeof plugin.onComponentCreated === 'function') {
-                    plugin.onComponentCreated(context.abstraction, pacId, context.config);
-                }
-            });
+            wakaPAC.initializeComponent(runtime, pacId);
 
-            // Call init() method if it exists after all setup is complete
-            if (
-                context.abstraction.init &&
-                typeof context.abstraction.init === 'function'
-            ) {
-                try {
-                    context.abstraction.init.call(context.abstraction);
-                } catch (error) {
-                    console.warn('Error in init() method:', error);
-                }
-            }
-
-            const isCanvasElement = container instanceof HTMLCanvasElement;
-            const contextType = isCanvasElement ? (container.dataset.pacContext || '2d') : '2d';
-
-            if (isCanvasElement) {
-                // Synchronously flush any paint requests queued during observation
-                // to avoid a blank frame before the first animation frame fires.
-                // Only applies to 2D canvases — WebGL canvases use MSG_PAINT via
-                // the render loop or manage their own redraws.
-                if (contextType === '2d') {
-                    _invalidateRect(container._pacId);
-                    _flushPaintQueue();
-                }
-
-                // Setup renderloop for webgl if renderLoop is set to true
-                if (contextType !== '2d' && config.renderLoop === true) {
-                    const loop = function() {
-                        if (!_renderLoops.has(pacId)) {
-                            return; // Loop was canceled — component destroyed
-                        }
-
-                        // Do not dispatch MSG_PAINT before MSG_WEBGL_READY has been sent —
-                        // shaders and GL resources are not yet initialized at that point.
-                        const _component = window.PACRegistry.getByElement(container);
-
-                        if (_component && _component._webglReadySent) {
-                            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                                MSG_PAINT,
-                                null,
-                                0,
-                                0
-                            ));
-                        }
-
-                        _renderLoops.set(pacId, requestAnimationFrame(loop));
-                    };
-
-                    _renderLoops.set(pacId, requestAnimationFrame(loop));
-                }
-
-                // Attach WebGL context loss/restore handlers for all WebGL canvases,
-                // regardless of whether renderLoop is active.
-                if (contextType !== '2d') {
-                    container.addEventListener('webglcontextlost', function(e) {
-                        // Calling preventDefault() is required — without it the browser
-                        // will not attempt to restore the context after it is lost.
-                        e.preventDefault();
-
-                        // Pause the render loop while the context is unavailable.
-                        // Dispatching MSG_PAINT to a lost context produces GL errors and
-                        // is meaningless — suspend the loop until the context is restored.
-                        if (_renderLoops.has(pacId)) {
-                            cancelAnimationFrame(_renderLoops.get(pacId));
-                            // Use a sentinel value to indicate suspended (not destroyed).
-                            // The loop check uses _renderLoops.has(), so we must keep the
-                            // key present to allow resumption on restore.
-                            _renderLoops.set(pacId, null);
-                        }
-
-                        // Notify the component so it can null out all GL resource handles.
-                        // All WebGL objects (buffers, textures, programs, etc.) are invalid
-                        // after context loss and must not be used until MSG_WEBGL_CONTEXT_RESTORED.
-                        DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                            MSG_WEBGL_CONTEXT_LOST,
-                            e,
-                            0,
-                            0
-                        ));
-                    });
-
-                    container.addEventListener('webglcontextrestored', function(e) {
-                        // The context has been recreated by the browser — all GL resources
-                        // must be rebuilt from scratch (shaders, buffers, textures, etc.).
-                        // Provide the fresh context on event.glContext, mirroring MSG_WEBGL_READY.
-                        DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                            MSG_WEBGL_CONTEXT_RESTORED,
-                            e,
-                            0,
-                            0,
-                            {
-                                glContext: wakaPAC.getDC(pacId)
-                            }
-                        ));
-
-                        // Resume the render loop if it was running before context loss.
-                        if (_renderLoops.has(pacId) && _renderLoops.get(pacId) === null) {
-                            const loop = function() {
-                                if (!_renderLoops.has(pacId)) {
-                                    return;
-                                }
-
-                                DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                                    MSG_PAINT,
-                                    null,
-                                    0,
-                                    0
-                                ));
-
-                                _renderLoops.set(pacId, requestAnimationFrame(loop));
-                            };
-
-                            _renderLoops.set(pacId, requestAnimationFrame(loop));
-                        }
-                    });
-                }
-            }
+            // Initialize Canvas
+            runtime.initializeCanvas();
 
             // Signal that a new component is ready
             document.dispatchEvent(new CustomEvent('pac:component-ready', {
-                detail: { component: context, selector: selector, pacId: pacId }
+                detail: { component: runtime, selector: selector, pacId: pacId }
             }));
 
             // Collect the abstraction
-            abstractions.push(context.abstraction);
+            abstractions.push(runtime.abstraction);
         });
 
         // Return array for multi-selectors, single abstraction for ID selectors
         return isMultiSelector ? abstractions : abstractions[0];
+    }
+
+    /**
+     * Invokes component lifecycle hooks after the runtime has been created.
+     * Calls plugin initialization hooks followed by the abstraction's init()
+     * method, if present.
+     * @param {Runtime} context
+     * @param {string} pacId
+     */
+    wakaPAC.initializeComponent = function(context, pacId) {
+        _plugins.forEach(function(plugin) {
+            if (typeof plugin.onComponentCreated === 'function') {
+                plugin.onComponentCreated(context.abstraction, pacId, context.config);
+            }
+        });
+
+        // Call init() method if it exists after all setup is complete
+        if (
+            context.abstraction.init &&
+            typeof context.abstraction.init === 'function'
+        ) {
+            try {
+                context.abstraction.init.call(context.abstraction);
+            } catch (error) {
+                console.warn('Error in init() method:', error);
+            }
+        }
+    }
+
+    /**
+     * Hydrates an abstraction from the container's initial DOM state.
+     * Imports values from data-pac-state and data-pac-field elements before
+     * the runtime is created.
+     * @param {HTMLElement} container
+     * @param {Object} containerAbstraction
+     */
+    wakaPAC.hydrateContainer = function(container, containerAbstraction) {
+        // Read initial state from data-pac-state attribute if present
+        const pacState = container.dataset.pacState;
+
+        if (pacState) {
+            try {
+                Object.assign(containerAbstraction, JSON.parse(pacState));
+            } catch (e) {
+                console.warn('WakaPAC: Failed to parse data-pac-state:', e);
+            }
+        }
+
+        // Scan data-pac-field elements and add to abstraction
+        container.querySelectorAll('[data-pac-field]').forEach(el => {
+            // Element belongs to another container. Skip.
+            if (!Utils.belongsToPacContainer(container, el)) {
+                return;
+            }
+
+            // Fetch name attribute
+            const name = el.getAttribute('name');
+
+            // No name attribute exists. Skip.
+            if (!name) {
+                return;
+            }
+
+            // If the element has data-pac-same-as, register an alias instead
+            // of importing the field value directly. The alias redirects reads
+            // and writes to the target path via getter/setter after resolveAliases().
+            const sameAs = el.getAttribute('data-pac-same-as');
+
+            if (sameAs) {
+                containerAbstraction[name] = wakaPAC.sameAs(sameAs);
+                return;
+            }
+
+            switch (el.type) {
+                case 'checkbox':
+                    // Read checked state as boolean
+                    Utils.setNestedProperty(name, el.checked, containerAbstraction);
+                    break;
+
+                case 'number':
+                case 'range':
+                    // Convert numeric input values to actual numbers
+                    Utils.setNestedProperty(name, el.value !== '' ? Number(el.value) : '', containerAbstraction);
+                    break;
+
+                case 'radio':
+                    // Initialize the group property with an empty string on first encounter
+                    if (Utils.getNestedValue(containerAbstraction, name) === undefined) {
+                        Utils.setNestedProperty(name, '', containerAbstraction);
+                    }
+
+                    // Only overwrite if this radio button is the selected one
+                    if (el.checked) {
+                        Utils.setNestedProperty(name, el.value, containerAbstraction);
+                    }
+
+                    break;
+
+                case 'file':
+                    // File inputs cannot be hydrated — skip
+                    break;
+
+                default:
+                    // For all other field types, read the current value or fall back to the HTML attribute
+                    Utils.setNestedProperty(name, el.value ?? el.getAttribute('value'), containerAbstraction);
+                    break;
+            }
+        });
     }
 
     /**
@@ -10089,7 +10273,7 @@
             return null;
         }
 
-        return context.parent.container._pacId || context.parent.container.getAttribute('data-pac-id');
+        return Utils.getPacId(context.parent.container);
     };
 
     /**
@@ -10402,8 +10586,8 @@
      */
     wakaPAC.MAKEPOINTS = function(lParam) {
         return {
-            x: lParam & 0xFFFF,           // Low 16 bits = x coordinate (container-relative)
-            y: (lParam >> 16) & 0xFFFF    // High 16 bits = y coordinate (container-relative)
+            x: wakaPAC.LOWORD(lParam),
+            y: wakaPAC.HIWORD(lParam)
         };
     };
 
@@ -10501,17 +10685,7 @@
      * @returns {string|null} The pac-id of the capturing container, or null if no capture is active
      */
     wakaPAC.getCapture = function() {
-        // Return null if no capture is currently active
-        if (!DomUpdateTracker._captureActive) {
-            return null;
-        }
-
-        // Extract the pac-id from the captured container element
-        // Use optional chaining since container might be removed from DOM
-        const pacId = DomUpdateTracker._capturedContainer?._pacId || DomUpdateTracker._capturedContainer?.getAttribute('data-pac-id');
-
-        // Return pac-id or null if container no longer has the attribute
-        return pacId || null;
+        return DomUpdateTracker.getCapturedPacId();
     };
 
     /**
@@ -10558,7 +10732,7 @@
             return null;
         }
 
-        return hitElement.closest("[data-pac-id]");
+        return hitElement.closest(CONTAINER_SEL);
     };
 
     /**
@@ -10789,20 +10963,19 @@
      * Equivalent to Win32 GetDC() — retrieves the drawing context for a window.
      *
      * The context type is determined by the data-pac-context attribute on the
-     * canvas element (defaults to '2d' if absent):
-     *   '2d'     — returns CanvasRenderingContext2D  (dcAttributes from config)
-     *   'webgl'  — returns WebGLRenderingContext      (glAttributes from config)
-     *   'webgl2' — returns WebGL2RenderingContext     (glAttributes from config)
+     * canvas element (defaults to '2d' if absent). Core only knows '2d' natively;
+     * any other value (e.g. 'webgl'/'webgl2') is passed straight through to
+     * canvas.getContext() and returned as-is — support for that context type,
+     * and everything you can do with it, comes from a plugin (e.g. wakaD3D).
      *
-     * Calling getDC() on a WebGL/WebGL2 canvas returns the WebGL context directly.
-     * The dirty-rect clip logic only applies to 2D contexts; WebGL components drive
-     * their own render loop via requestAnimationFrame and do not use invalidateRect.
+     * The dirty-rect clip logic only applies to 2D contexts. Non-2D contexts
+     * drive their own render loop and do not use invalidateRect().
      *
      * Returns null if the container does not exist, is not a <canvas> element, or
      * if the requested context type is not supported by the browser.
      *
      * @param {string} pacId
-     * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
+     * @returns {RenderingContext|null}
      */
     wakaPAC.getDC = function(pacId) {
         const container = this.getContainerByPacId(pacId);
@@ -10829,7 +11002,7 @@
         // a matching releaseDC() call so the saved state is properly unwound.
         // WebGL contexts drive their own render loop and do not use this mechanism.
         if (contextType === '2d') {
-            const entry = _dirtyCanvases.get(pacId);
+            const entry = DomUpdateTracker._dirtyCanvases.get(pacId);
 
             if (entry?.painting && entry.rects?.length) {
                 ctx.save();
@@ -10851,9 +11024,9 @@
      * Must be called once for every getDC() call made inside a MSG_PAINT
      * handler for 2D canvases; outside of paint cycles this is a no-op and
      * safe to call unconditionally.
-     * For WebGL/WebGL2 contexts this is always a no-op — they do not use
-     * the dirty-rect clip mechanism.
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} ctx - the context returned by getDC()
+     * For non-2D contexts (e.g. webgl/webgl2) this is always a no-op — they
+     * do not use the dirty-rect clip mechanism.
+     * @param {RenderingContext} ctx - the context returned by getDC()
      */
     wakaPAC.releaseDC = function(ctx) {
         // Bail if no ctx passed
@@ -10861,8 +11034,8 @@
             return;
         }
 
-        // WebGL contexts do not participate in the dirty-rect clip mechanism
-        if (ctx instanceof WebGLRenderingContext || ctx instanceof WebGL2RenderingContext) {
+        // Non-2D contexts do not participate in the dirty-rect clip mechanism
+        if (!_is2DContext(ctx)) {
             return;
         }
 
@@ -10874,7 +11047,7 @@
         }
 
         // Fetch entry from the store
-        const entry = _dirtyCanvases.get(pacId);
+        const entry = DomUpdateTracker._dirtyCanvases.get(pacId);
 
         // Only restore if getDC() pushed a save — it does so only during painting
         if (entry?.painting && entry.rects?.length) {
@@ -10884,11 +11057,13 @@
 
     /**
      * Creates an off-screen context sized to match the canvas backing store.
-     * The context type matches the source canvas's data-pac-context attribute,
-     * so a WebGL2 canvas produces a WebGL2 OffscreenCanvas context.
-     * The component owns the returned DC; recreate it in MSG_SIZE after resizing.
+     * The context type matches the source canvas's data-pac-context attribute
+     * (any non-'2d' value is passed straight through to getContext(), so a
+     * plugin-defined type such as 'webgl2' produces a WebGL2 OffscreenCanvas
+     * context). The component owns the returned DC; recreate it in MSG_SIZE
+     * after resizing.
      * @param {string} pacId
-     * @returns {OffscreenCanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
+     * @returns {RenderingContext|null}
      */
     wakaPAC.createCompatibleDC = function(pacId) {
         const container = this.getContainerByPacId(pacId);
@@ -10932,14 +11107,13 @@
      * inside foreach items or other non-container canvases.
      *
      * The context type is determined by the data-pac-context attribute on the
-     * canvas element (defaults to '2d' if absent):
-     *   '2d'     — returns CanvasRenderingContext2D
-     *   'webgl'  — returns WebGLRenderingContext
-     *   'webgl2' — returns WebGL2RenderingContext
+     * canvas element (defaults to '2d' if absent). Any value other than '2d'
+     * is passed straight through to canvas.getContext() — support for that
+     * context type is provided by a plugin, not core.
      *
      * @param {HTMLCanvasElement} canvasElement
      * @param {Object} [attributes={}] - Context attributes passed to getContext()
-     * @returns {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext|null}
+     * @returns {RenderingContext|null}
      */
     wakaPAC.getDCFromElement = function(canvasElement, attributes = {}) {
         if (!canvasElement || !(canvasElement instanceof HTMLCanvasElement)) {
@@ -10958,52 +11132,7 @@
      *   Omit or pass null to invalidate the entire canvas surface.
      */
     wakaPAC.invalidateRect = function(pacId, rect) {
-        _invalidateRect(pacId, rect || null);
-    };
-
-    /**
-     * Schedules a single MSG_PAINT for a WebGL canvas component on the next
-     * animation frame. Equivalent to invalidateRect() for 2D canvases — use
-     * this to trigger an on-demand redraw on a WebGL canvas that does not use
-     * renderLoop: true.
-     *
-     * Safe to call multiple times before the next frame — only one MSG_PAINT
-     * will fire, since requestAnimationFrame deduplicates same-frame callbacks.
-     *
-     * Has no effect if the container does not exist, is not a canvas, or is
-     * not a WebGL/WebGL2 canvas.
-     *
-     * @param {string} pacId - data-pac-id of the target canvas container
-     */
-    wakaPAC.requestRender = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
-
-        // Bail if the container does not exist or is not a canvas element
-        if (!container || !(container instanceof HTMLCanvasElement)) {
-            return;
-        }
-
-        const contextType = container.dataset.pacContext || '2d';
-
-        // requestRender is for WebGL canvases only — 2D canvases use invalidateRect()
-        if (contextType === '2d') {
-            console.warn(`wakaPAC.requestRender: "${pacId}" is a 2D canvas — use invalidateRect() instead.`);
-            return;
-        }
-
-        requestAnimationFrame(() => {
-            // Guard: component may have been destroyed before the frame fired
-            if (!window.PACRegistry.get(pacId)) {
-                return;
-            }
-
-            DomUpdateTracker.dispatchToContainer(container, DomUpdateTracker.wrapDomEventAsMessage(
-                MSG_PAINT,
-                null,
-                0,
-                0
-            ));
-        });
+        DomUpdateTracker.invalidateRect(pacId, rect || null);
     };
 
     /**
@@ -11013,7 +11142,7 @@
      * @returns {{x:number, y:number, width:number, height:number}|null}
      */
     wakaPAC.getInvalidatedRect = function(pacId) {
-        const entry = _dirtyCanvases.get(pacId);
+        const entry = DomUpdateTracker._dirtyCanvases.get(pacId);
 
         if (!entry) {
             return null;
@@ -11029,7 +11158,7 @@
      * @returns {Array<{x:number, y:number, width:number, height:number}>|null}
      */
     wakaPAC.getUpdateRgn = function(pacId) {
-        const entry = _dirtyCanvases.get(pacId);
+        const entry = DomUpdateTracker._dirtyCanvases.get(pacId);
 
         if (!entry) {
             return null;
@@ -11043,21 +11172,12 @@
      * Equivalent to Win32 BitBlt() — copies a rectangle of pixels from the source
      * to the destination at 1:1 scale. No stretching or compression is performed.
      *
-     * cx/cy define the size of the rectangle copied; the same dimensions apply to
-     * both the source and the destination. sx/sy define the top-left corner of the
-     * source rectangle; omit to copy from (0, 0).
+     * destDC must be a 2D canvas context. For a WebGL destination, use
+     * wakaD3D.bitBlt() instead — WebGL has no notion of a partial-rect, 1:1-scale
+     * copy the way a 2D context does, so it isn't handled here.
      *
-     * Supports mixed 2D ↔ WebGL/WebGL2 copies:
-     *
-     *   2D   → 2D     drawImage() — straightforward
-     *   WebGL → 2D    drawImage() on the WebGL canvas — requires preserveDrawingBuffer: true
-     *                 in dcAttributes, otherwise the copy produces a blank result.
-     *   2D   → WebGL  texImage2D() on the currently bound TEXTURE_2D — caller must
-     *                 bind the target texture before calling bitBlt().
-     *   WebGL → WebGL drawImage() via the source canvas — requires preserveDrawingBuffer: true.
-     *
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} destDC
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} srcDC
+     * @param {CanvasRenderingContext2D} destDC
+     * @param {RenderingContext} srcDC
      * @param {number} dx - Destination X
      * @param {number} dy - Destination Y
      * @param {number} [cx] - Width of the rectangle to copy. Defaults to full source width
@@ -11070,20 +11190,16 @@
             return;
         }
 
+        if (!_is2DContext(destDC)) {
+            console.warn('wakaPAC.bitBlt: destDC must be a 2D canvas context. For a WebGL destination, use wakaD3D.bitBlt() instead.');
+            return;
+        }
+
         const srcCanvas = srcDC.canvas;
         const w = cx ?? srcCanvas.width;
         const h = cy ?? srcCanvas.height;
-        const destIsGL = _isWebGLContext(destDC);
 
-        if (destIsGL) {
-            // WebGL destination — upload source canvas as a texture.
-            // The caller must have bound the target texture before calling bitBlt().
-            _blitToWebGL(destDC, srcCanvas);
-        } else {
-            // 2D destination — drawImage handles both 2D and WebGL sources.
-            // WebGL sources require preserveDrawingBuffer: true.
-            _blitToCanvas2D(destDC, srcCanvas, sx, sy, w, h, dx, dy, w, h);
-        }
+        _blitToCanvas2D(destDC, srcCanvas, sx, sy, w, h, dx, dy, w, h);
     };
 
     /**
@@ -11091,11 +11207,12 @@
      * Unlike bitBlt, the source is always stretched to fill the destination rect.
      * Use this when the offscreen DC dimensions differ from the target canvas.
      *
-     * Supports the same mixed 2D ↔ WebGL/WebGL2 copy paths as bitBlt().
-     * See bitBlt() for preserveDrawingBuffer and texture-binding requirements.
+     * destDC must be a 2D canvas context. For a WebGL destination, use
+     * wakaD3D.bitBlt() instead — WebGL has no notion of a scaled copy the way
+     * a 2D context does, so it isn't handled here.
      *
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} destDC
-     * @param {CanvasRenderingContext2D|WebGLRenderingContext|WebGL2RenderingContext} srcDC
+     * @param {CanvasRenderingContext2D} destDC
+     * @param {RenderingContext} srcDC
      * @param {number} dx - Destination X
      * @param {number} dy - Destination Y
      * @param {number} dw - Destination width
@@ -11106,20 +11223,13 @@
             return;
         }
 
-        const srcCanvas = srcDC.canvas;
-        const destIsGL = _isWebGLContext(destDC);
-
-        if (destIsGL) {
-            // WebGL destination — upload source canvas as a texture.
-            // The caller must have bound the target texture before calling stretchBlt().
-            // dx, dy, dw, dh are ignored; scaling is the caller's responsibility
-            // via their shader and geometry.
-            _blitToWebGL(destDC, srcCanvas);
-        } else {
-            // 2D destination — drawImage handles stretching natively.
-            // WebGL sources require preserveDrawingBuffer: true.
-            _blitToCanvas2D(destDC, srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, dx, dy, dw, dh);
+        if (!_is2DContext(destDC)) {
+            console.warn('wakaPAC.stretchBlt: destDC must be a 2D canvas context. For a WebGL destination, use wakaD3D.bitBlt() instead.');
+            return;
         }
+
+        const srcCanvas = srcDC.canvas;
+        _blitToCanvas2D(destDC, srcCanvas, 0, 0, srcCanvas.width, srcCanvas.height, dx, dy, dw, dh);
     };
 
     /**
@@ -11148,12 +11258,12 @@
         container.height = height;
 
         // Schedule a repaint for 2D canvases — the canvas content is invalid after
-        // every resize. WebGL canvases drive their own render loop via
-        // requestAnimationFrame and do not use the dirty rect / MSG_PAINT mechanism.
+        // every resize. Non-2D canvases (e.g. WebGL, via a plugin) drive their own
+        // render loop and do not use the dirty rect / MSG_PAINT mechanism.
         const contextType = container.dataset.pacContext || '2d';
 
         if (contextType === '2d') {
-            _invalidateRect(pacId, null);
+            DomUpdateTracker.invalidateRect(pacId, null);
         }
     };
 
@@ -11592,10 +11702,10 @@
         MSG_RBUTTONDOWN, MSG_RBUTTONUP, MSG_MBUTTONDOWN, MSG_MBUTTONUP, MSG_LCLICK, MSG_MCLICK,
         MSG_RCLICK, MSG_CONTEXTMENU, MSG_CHAR, MSG_CHANGE, MSG_SUBMIT, MSG_INPUT, MSG_INPUT_COMPLETE,
         MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
-        MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE, MSG_FOREACH_REBUILT,
-        MSG_WEBGL_READY, MSG_WEBGL_CONTEXT_LOST, MSG_WEBGL_CONTEXT_RESTORED, MSG_MOUSEENTER, MSG_MOUSELEAVE,
-        MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER,
-        MSG_DRAGLEAVE, MSG_DROP, MSG_DPR_CHANGE,
+        MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE,
+        MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
+        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
+        MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,

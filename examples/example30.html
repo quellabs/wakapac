@@ -97,8 +97,6 @@
         return c.toDataURL();
     })();
 
-
-
     // ----------------------------------------------------------------
     // Canvas component — receives a bitmap DC from the parent via message
     // ----------------------------------------------------------------
@@ -149,7 +147,6 @@
 
         async onLoadUrl() {
             const dc = await wakaPAC.loadBitmap(urlSource);
-
             wakaPAC.sendMessage('viewport', MSG_BITMAP_LOADED, 0, 0, { dc });
         },
 
