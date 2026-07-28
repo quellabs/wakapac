@@ -513,9 +513,8 @@
 
         /**
          * Copies srcDC's canvas onto a WebGL destination as a texture bound
-         * to the currently active texture unit. This is wakaD3D's own
-         * bitBlt — it is not registered with or dispatched through
-         * wakaPAC.bitBlt()/stretchBlt(), which only handle 2D destinations.
+         * to the currently active texture unit. wakaPAC.bitBlt()/stretchBlt()
+         * only handle 2D destinations; this is wakaD3D's own bitBlt for WebGL.
          *
          * Unlike wakaPAC.bitBlt(), there are no dx/dy/cx/cy/sx/sy parameters:
          * texImage2D always uploads the whole source canvas, so a

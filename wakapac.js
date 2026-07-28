@@ -9776,7 +9776,7 @@
      * Returns true if the given rendering context is a 2D canvas context.
      * Core only understands 2D natively — anything else (webgl, webgl2, or a
      * context type introduced by some future plugin) is opaque to core and is
-     * handled entirely through the blit-handler registry below.
+     * the responsibility of the relevant plugin (e.g. wakaD3D.bitBlt() for WebGL).
      * @param {RenderingContext} ctx
      * @returns {boolean}
      */
@@ -9786,7 +9786,8 @@
 
     /**
      * Copies srcCanvas onto a 2D destDC using drawImage. Called directly by
-     * wakaPAC.bitBlt()/stretchBlt() — there is no blit-handler registry;
+     * wakaPAC.bitBlt()/stretchBlt(); a WebGL destination is handled
+     * separately by wakaD3D.bitBlt().
      * @param {CanvasRenderingContext2D} destCtx2D
      * @param {HTMLCanvasElement} srcCanvas
      * @param {number} sx - Source X
