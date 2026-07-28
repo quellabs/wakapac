@@ -781,8 +781,11 @@
                 // Update field-level dirty: true if current value differs from initial.
                 proxy[fieldName].dirty = state[fieldName].value !== initialValues[fieldName];
 
-                // Form-level dirty is recomputed from all field dirty states.
-                proxy.dirty = Object.keys(fieldRules).some(function(fn) { return state[fn].dirty; });
+                // Re-run validation for the changed field and refresh form-level
+                // valid/dirty derived state to match. Without this, .valid would
+                // only ever update via an explicit validate()/reset() call — a
+                // plain value assignment must keep it live too.
+                recomputeFormState(fieldName);
             });
 
             // ── Public methods ────────────────────────────────────────────────────
