@@ -5660,10 +5660,10 @@
         this.domUpdater = new DomUpdater(this);
         this.dependencies = this.getDependencies();
 
+        this.initializeUpdateQueue();
         this.initializeImportedUnits();
         this.setupContainerScrollTracking();
-        this.initializeUpdateQueue();
-        this.initializeEventHandlers();
+        this.registerPacEventListeners();
 
         DomUpdateTracker.observeContainer(this.container);
     }
@@ -5729,7 +5729,7 @@
      * Registers DOM event listeners used to receive runtime events for this
      * context.
      */
-    Runtime.prototype.initializeEventHandlers = function() {
+    Runtime.prototype.registerPacEventListeners = function() {
         this.boundHandlePacEvent = this.handleEvent.bind(this);
 
         this.container.addEventListener(EV_PAC_EVENT, this.boundHandlePacEvent);
