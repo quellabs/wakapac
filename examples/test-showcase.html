@@ -587,7 +587,7 @@
             }
         },
 
-        removeTodoById(todo, index, event) {
+        removeTodoById(event, todo, index) {
             // Remove from the todos array
             const todoIndex = this.todos.findIndex(t => t.id === todo.id);
             if (todoIndex !== -1) {
