@@ -6528,12 +6528,14 @@
                         $event: event
                     });
 
-                    // Fallback (if bindingTarget is a bare method name): call with (item, index, event)
+                    // Fallback (if bindingTarget is a bare method name): call with (event, item, index).
+                    // event goes first so a handler written for the plain (non-foreach) case still
+                    // receives it correctly if reused inside a foreach without change.
                     this.evaluateHandlerExpression(
                         bindingTarget,
                         scopedAbstraction,
                         scopeResolver,
-                        [array[contextInfo.index], contextInfo.index, event]
+                        [event, array[contextInfo.index], contextInfo.index]
                     );
 
                     return;
