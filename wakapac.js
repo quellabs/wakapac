@@ -3035,6 +3035,7 @@
                 // Standard tracking fields
                 timestamp: { value: Date.now(), enumerable: true, configurable: true },
                 target: { value: targetOverride ?? originalEvent?.target, enumerable: true, configurable: true },
+                realTarget: { value: originalEvent?.target, enumerable: true, configurable: true },
 
                 // Reference to the original DOM event for debugging/advanced usage
                 originalEvent: { value: originalEvent, enumerable: true, configurable: true }
@@ -6543,6 +6544,16 @@
         if (!clickElement) {
             return;
         }
+
+        // If the click lands on a decorative child (e.g. an icon inside a
+        // button), treat the control as the target. This shadows the native
+        // Event.target getter so handlers consistently see the bound control
+        // rather than the clicked descendant.
+        Object.defineProperty(event, 'target', {
+            value: clickElement,
+            enumerable: true,
+            configurable: true
+        });
 
         const mappingData = this.interpolationMap.get(clickElement);
         const bindingTarget = mappingData.bindings.click.target;
