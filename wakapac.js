@@ -6490,6 +6490,44 @@
     };
 
     /**
+     * Walks up from `event.target` to the nearest ancestor with a click
+     * binding, stopping at the container boundary.
+     *
+     * This handles clicks on non-interactive descendants (e.g. an icon
+     * inside a click-bound button), where `event.target` is not the
+     * bound element. The search stops if it reaches an inherently
+     * interactive element with no click binding, since such elements
+     * are their own controls and must not inherit an ancestor's click
+     * handler (e.g. an unbound `<button>` inside a click-bound `<div>`).
+     *
+     * @param {Element|Node} target - The element that was clicked (`event.target`)
+     * @returns {Element|null} The nearest element with a click binding, or null
+     */
+    Runtime.prototype.findClickBindingElement = function(target) {
+        let el = target instanceof Element ? target : target?.parentElement;
+
+        while (el) {
+            const mappingData = this.interpolationMap.get(el);
+
+            if (mappingData?.bindings?.click) {
+                return el;
+            }
+
+            if (INTERACTIVE_TAGS.has(el.tagName) || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex')) {
+                return null;
+            }
+
+            if (el === this.container) {
+                return null;
+            }
+
+            el = el.parentElement;
+        }
+
+        return null;
+    };
+
+    /**
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
@@ -6497,12 +6535,16 @@
      * @throws {Error} Logs errors if method execution fails
      */
     Runtime.prototype.handleDomClicks = function(event) {
-        // Get interpolation data for the clicked element
-        const mappingData = this.interpolationMap.get(event.target);
-        if (!mappingData?.bindings?.click) {
+        // Resolve the element the click binding actually lives on — see
+        // findClickBindingElement()'s own docblock for why this can't be a
+        // plain interpolationMap.get(event.target) lookup.
+        const clickElement = this.findClickBindingElement(event.target);
+
+        if (!clickElement) {
             return;
         }
 
+        const mappingData = this.interpolationMap.get(clickElement);
         const bindingTarget = mappingData.bindings.click.target;
 
         try {
