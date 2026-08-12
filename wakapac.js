@@ -10423,6 +10423,32 @@
     };
 
     /**
+     * Resolves the nearest interactive control ancestor within the WakaPAC
+     * container identified by pacId. Can be used in msgProc when target/realTarget
+     * may point to a decorative descendant rather than the control itself.
+     *
+     * Interactivity follows DomUpdateTracker.findInteractiveDescendant(): native
+     * form/link elements, [data-pac-hoverable], or tabindex. This is independent
+     * of interpolationMap click bindings.
+     *
+     * The container is resolved via pacId rather than element.closest(), matching
+     * the message routing context, including mouse-capture redirection.
+     *
+     * @param {string} pacId - data-pac-id of the relevant container.
+     * @param {Element} element - Element to resolve upward from, typically realTarget.
+     * @returns {Element|null} Nearest interactive control within the container.
+     */
+    wakaPAC.findControlElement = function(pacId, element) {
+        const container = wakaPAC.getContainerByPacId(pacId);
+
+        if (!container) {
+            return null;
+        }
+
+        return DomUpdateTracker.findInteractiveDescendant(element, container);
+    };
+
+    /**
      * Shows a PAC container by removing its HTML hidden attribute.
      * Equivalent to Win32 ShowWindow(hWnd, SW_SHOW).
      * Has no effect if the container is already visible or does not exist.
