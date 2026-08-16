@@ -388,7 +388,7 @@
              * @param {string} pacId - The component's data-pac-id
              * @param {Object} config - The component's configuration
              */
-            onComponentCreated(abstraction, pacId, config) {
+            onComponentCreated(abstraction, pacId, _config) {
                 // Fetch container
                 const container = pac.getContainerByPacId(pacId);
 

@@ -296,7 +296,7 @@
      * @param {number} newState
      */
     function onStateChange(pacId, entry, newState) {
-        const {pac, player, abstraction, msgConstants} = entry;
+        const {pac, msgConstants} = entry;
 
         switch (newState) {
 

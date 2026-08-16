@@ -840,7 +840,7 @@
 
                             try {
                                 data = JSON.parse(event.data);
-                            } catch (e) {
+                            } catch (_e) {
                                 console.error('wakaStore: received non-JSON message, ignoring', event.data);
                                 return;
                             }
