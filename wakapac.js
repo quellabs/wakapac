@@ -3144,6 +3144,9 @@
          *   during the transition period — new markup should prefer
          *   [data-pac-control])
          * - Has a tabindex (making it focusable/interactive by convention)
+         * - Is editable (contenteditable, including inherited from an
+         *   editable ancestor) — isContentEditable already resolves the
+         *   contenteditable="false" island-within-editable-region case
          * - Has a data-pac-bind="click: ..." binding — a click-bound element
          *   is a control regardless of tag, so this walk agrees with
          *   findClickBindingElement() on what counts as "the control" a
@@ -3169,6 +3172,7 @@
                     el.hasAttribute('data-pac-control') ||
                     el.hasAttribute('data-pac-hoverable') ||
                     el.hasAttribute('tabindex') ||
+                    el.isContentEditable ||
                     this.hasClickBinding(el)
                 ) {
                     return el;
@@ -6602,9 +6606,10 @@
      * This handles clicks on non-interactive descendants (e.g. an icon
      * inside a click-bound button), where the literal click point is not
      * the bound element. The search stops if it reaches an inherently
-     * interactive element with no click binding, since such elements
-     * are their own controls and must not inherit an ancestor's click
-     * handler (e.g. an unbound `<button>` inside a click-bound `<div>`).
+     * interactive element with no click binding — including an editable
+     * (contenteditable) region — since such elements are their own
+     * controls and must not inherit an ancestor's click handler (e.g. an
+     * unbound `<button>` inside a click-bound `<div>`).
      *
      * @param {Element|Node} target - The element that was clicked (`event.realTarget`)
      * @returns {Element|null} The nearest element with a click binding, or null
@@ -6621,7 +6626,7 @@
 
             // el.tagName is lowercase for SVG elements, unlike HTML — normalize
             // so this agrees with findInteractiveDescendant() on SVG controls too.
-            if (INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) || el.hasAttribute('data-pac-control') || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex')) {
+            if (INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) || el.hasAttribute('data-pac-control') || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex') || el.isContentEditable) {
                 return null;
             }
 
