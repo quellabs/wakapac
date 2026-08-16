@@ -3161,8 +3161,11 @@
             // the container boundary. The first control we encounter is
             // the logical "child window" being hovered or clicked.
             while (el && el !== container) {
+                // el.tagName is lowercase for SVG elements (e.g. an <a> inside
+                // an inline icon) unlike HTML, where it's always uppercase —
+                // normalize so INTERACTIVE_TAGS matches both.
                 if (
-                    INTERACTIVE_TAGS.has(el.tagName) ||
+                    INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) ||
                     el.hasAttribute('data-pac-control') ||
                     el.hasAttribute('data-pac-hoverable') ||
                     el.hasAttribute('tabindex') ||
@@ -6616,7 +6619,9 @@
                 return el;
             }
 
-            if (INTERACTIVE_TAGS.has(el.tagName) || el.hasAttribute('data-pac-control') || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex')) {
+            // el.tagName is lowercase for SVG elements, unlike HTML — normalize
+            // so this agrees with findInteractiveDescendant() on SVG controls too.
+            if (INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) || el.hasAttribute('data-pac-control') || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex')) {
                 return null;
             }
 
