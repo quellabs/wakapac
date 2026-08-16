@@ -2036,12 +2036,20 @@
                 const wParam = self.buildWheelWParam(event.deltaY, modifiers, event.deltaMode);
                 const lParam = self.buildMouseLParam(event, container);
 
+                // MOUSEWHEEL is capture-affected (see getContainerForEvent()), so under
+                // capture `container` can be forced to a container that doesn't actually
+                // contain event.target. Address the capturing container itself rather
+                // than leave target pointing outside it — see the identical fallback in
+                // dispatchMouseMessage() for isControlTargetMessage() types.
+                const rawTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+                const targetOverride = (container && !container.contains(rawTarget)) ? container : null;
+
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
                     wheelDeltaX: event.deltaX,  // Horizontal scroll delta (if supported)
                     deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
-                });
+                }, targetOverride);
 
                 // Dispatch normalized wheel message
                 self.dispatchToContainer(container, customEvent);
