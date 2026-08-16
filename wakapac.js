@@ -1963,7 +1963,7 @@
                             if (self._hoveredContainer) {
                                 // Clean up any lingering descendant hover first
                                 if (self._hoveredDescendant) {
-                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer);
+                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
                                 }
 
                                 self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
@@ -1990,11 +1990,11 @@
 
                         if (self._hoveredDescendant !== currentDescendant) {
                             if (self._hoveredDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer);
+                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer, self._hoveredDescendant);
                             }
 
                             if (currentDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer);
+                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer, currentDescendant);
                             }
 
                             self._hoveredDescendant = currentDescendant;
@@ -2385,7 +2385,7 @@
                 if (self._hoveredContainer) {
                     // Clean up any lingering descendant hover first
                     if (self._hoveredDescendant) {
-                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer);
+                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
                         self._hoveredDescendant = null;
                     }
 
@@ -3103,15 +3103,44 @@
         },
 
         /**
+         * Returns true if the element carries a data-pac-bind="click: ..."
+         * binding, i.e. it's a control by virtue of the declarative binding
+         * system rather than its tag or an explicit control attribute.
+         * Reads the DOM attribute directly and parses it via ExpressionCache
+         * (already memoized), so this has no dependency on any Runtime
+         * instance or its interpolationMap.
+         * @param {Element} el - The element to check
+         * @returns {boolean} True if el has a click binding
+         * @private
+         */
+        hasClickBinding(el) {
+            const bindingString = el.getAttribute('data-pac-bind');
+
+            if (!bindingString) {
+                return false;
+            }
+
+            return ExpressionCache.parseBindingString(bindingString)
+                .some(binding => binding.type === 'click');
+        },
+
+        /**
          * Walks up from a target element to find the nearest interactive
          * descendant within a container, mimicking Win32's child window
          * hit-testing. Returns null if the target is plain content (text
          * nodes, layout divs, etc.) that wouldn't be a "control".
          *
-         * An element is considered interactive if it:
+         * An element is considered interactive (a "control") if it:
          * - Is a native form/link element (input, button, select, etc.)
-         * - Has a [data-pac-hoverable] attribute
+         * - Has a [data-pac-control] attribute ([data-pac-hoverable] is
+         *   the deprecated name for the same thing and is still recognized
+         *   during the transition period — new markup should prefer
+         *   [data-pac-control])
          * - Has a tabindex (making it focusable/interactive by convention)
+         * - Has a data-pac-bind="click: ..." binding — a click-bound element
+         *   is a control regardless of tag, so this walk agrees with
+         *   findClickBindingElement() on what counts as "the control" a
+         *   click belongs to
          *
          * @param {Element} target - The DOM element that received the event
          * @param {Element} container - The container root to stop walking at
@@ -3122,12 +3151,16 @@
             let el = target;
 
             // Walk up the DOM tree from the event target, stopping at
-            // the container boundary. The first interactive element we
-            // encounter is the logical "child window" being hovered.
+            // the container boundary. The first control we encounter is
+            // the logical "child window" being hovered or clicked.
             while (el && el !== container) {
-                if (INTERACTIVE_TAGS.has(el.tagName) ||
+                if (
+                    INTERACTIVE_TAGS.has(el.tagName) ||
+                    el.hasAttribute('data-pac-control') ||
                     el.hasAttribute('data-pac-hoverable') ||
-                    el.hasAttribute('tabindex')) {
+                    el.hasAttribute('tabindex') ||
+                    this.hasClickBinding(el)
+                ) {
                     return el;
                 }
 
@@ -3203,12 +3236,43 @@
          * @param {number} msgType
          * @param {MouseEvent | TouchEvent} domEvent
          * @param {HTMLElement} container
+         * @param {Element|null} [descendantOverride] - For MSG_MOUSEENTER_DESCENDANT
+         *   and MSG_MOUSELEAVE_DESCENDANT only: the specific descendant element
+         *   entered/left. Required for LEAVE because the descendant being left
+         *   cannot be derived from domEvent — by the time MSG_MOUSELEAVE_DESCENDANT
+         *   fires, the cursor may already be over a different descendant, outside
+         *   the container, or outside the document entirely (see
+         *   _setupDocumentLeave()). Required for ENTER too, purely so the caller's
+         *   already-computed descendant is reused rather than
+         *   findInteractiveDescendant() being run a second time against the same
+         *   event/container. Ignored for every other message type.
          * @param {Object} extended
          */
-        dispatchMouseMessage(msgType, domEvent, container, extended = {}) {
+        dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}) {
             const wParam = this.getModifierState(domEvent);
             const lParam = this.buildMouseLParam(domEvent, container);
-            const targetOverride = (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) ? container : null;
+
+            let targetOverride;
+
+            if (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) {
+                targetOverride = container;
+            } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
+                targetOverride = descendantOverride;
+            } else if (this.isControlTargetMessage(msgType)) {
+                // originalEvent.target can be a TextNode when the cursor is
+                // over bare text content, so normalize to an Element first.
+                const rawTarget = domEvent.target instanceof Element
+                    ? domEvent.target
+                    : domEvent.target?.parentElement;
+
+                // Resolve to the nearest control; falls back to the literal
+                // DOM target (via the `??` in wrapDomEventAsMessage) if the
+                // click landed on plain content with no control ancestor.
+                targetOverride = this.findInteractiveDescendant(rawTarget, container);
+            } else {
+                targetOverride = null;
+            }
+
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended, targetOverride);
 
             this.dispatchToContainer(container, customEvent);
@@ -3511,6 +3575,30 @@
             return messageType === MSG_MOUSEMOVE ||
                 messageType === MSG_MOUSEWHEEL ||
                 messageType === MSG_LBUTTONDOWN ||
+                messageType === MSG_LBUTTONUP ||
+                messageType === MSG_LBUTTONDBLCLK ||
+                messageType === MSG_RBUTTONDOWN ||
+                messageType === MSG_RBUTTONUP ||
+                messageType === MSG_MBUTTONDOWN ||
+                messageType === MSG_MBUTTONUP ||
+                messageType === MSG_LCLICK ||
+                messageType === MSG_MCLICK ||
+                messageType === MSG_RCLICK ||
+                messageType === MSG_CONTEXTMENU;
+        },
+
+        /**
+         * Determines if a message type is a click/button-family message
+         * whose `target` should be resolved to the nearest control (see
+         * findInteractiveDescendant()) rather than left as the literal DOM
+         * node under the cursor. Mirrors Win32, where WM_LBUTTONDOWN/UP/
+         * DBLCLK and friends are always addressed to a window (a control),
+         * never to something merely painted inside one.
+         * @param {number} messageType - The message type to check
+         * @returns {boolean} True if this message type's target should be control-resolved
+         */
+        isControlTargetMessage(messageType) {
+            return messageType === MSG_LBUTTONDOWN ||
                 messageType === MSG_LBUTTONUP ||
                 messageType === MSG_LBUTTONDBLCLK ||
                 messageType === MSG_RBUTTONDOWN ||
@@ -6491,17 +6579,24 @@
     };
 
     /**
-     * Walks up from `event.target` to the nearest ancestor with a click
+     * Walks up from `event.realTarget` to the nearest ancestor with a click
      * binding, stopping at the container boundary.
      *
+     * Takes `event.realTarget`, not `event.target` — `target` on a click
+     * message may already be control-resolved by
+     * DomUpdateTracker.findInteractiveDescendant() (see dispatchMouseMessage()),
+     * and this walk needs the literal DOM click point to run its own,
+     * broader resolution correctly. `realTarget` is unaffected by that
+     * resolution and always holds the literal DOM node.
+     *
      * This handles clicks on non-interactive descendants (e.g. an icon
-     * inside a click-bound button), where `event.target` is not the
-     * bound element. The search stops if it reaches an inherently
+     * inside a click-bound button), where the literal click point is not
+     * the bound element. The search stops if it reaches an inherently
      * interactive element with no click binding, since such elements
      * are their own controls and must not inherit an ancestor's click
      * handler (e.g. an unbound `<button>` inside a click-bound `<div>`).
      *
-     * @param {Element|Node} target - The element that was clicked (`event.target`)
+     * @param {Element|Node} target - The element that was clicked (`event.realTarget`)
      * @returns {Element|null} The nearest element with a click binding, or null
      */
     Runtime.prototype.findClickBindingElement = function(target) {
@@ -6514,7 +6609,7 @@
                 return el;
             }
 
-            if (INTERACTIVE_TAGS.has(el.tagName) || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex')) {
+            if (INTERACTIVE_TAGS.has(el.tagName) || el.hasAttribute('data-pac-control') || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex')) {
                 return null;
             }
 
@@ -6532,14 +6627,16 @@
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
-     * @param {Element} event.target - The DOM element that was clicked
+     * @param {Element} event.realTarget - The literal DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
     Runtime.prototype.handleDomClicks = function(event) {
-        // Resolve the element the click binding actually lives on — see
-        // findClickBindingElement()'s own docblock for why this can't be a
-        // plain interpolationMap.get(event.target) lookup.
-        const clickElement = this.findClickBindingElement(event.target);
+        // Resolve the element the click binding actually lives on, from the
+        // literal click point (event.realTarget) — see
+        // findClickBindingElement()'s own docblock for why this must be
+        // realTarget rather than event.target, and why it can't be a plain
+        // interpolationMap.get(event.realTarget) lookup either.
+        const clickElement = this.findClickBindingElement(event.realTarget);
 
         if (!clickElement) {
             return;
@@ -10420,32 +10517,6 @@
         }
 
         return context.container;
-    };
-
-    /**
-     * Resolves the nearest interactive control ancestor within the WakaPAC
-     * container identified by pacId. Can be used in msgProc when target/realTarget
-     * may point to a decorative descendant rather than the control itself.
-     *
-     * Interactivity follows DomUpdateTracker.findInteractiveDescendant(): native
-     * form/link elements, [data-pac-hoverable], or tabindex. This is independent
-     * of interpolationMap click bindings.
-     *
-     * The container is resolved via pacId rather than element.closest(), matching
-     * the message routing context, including mouse-capture redirection.
-     *
-     * @param {string} pacId - data-pac-id of the relevant container.
-     * @param {Element} element - Element to resolve upward from, typically realTarget.
-     * @returns {Element|null} Nearest interactive control within the container.
-     */
-    wakaPAC.findControlElement = function(pacId, element) {
-        const container = wakaPAC.getContainerByPacId(pacId);
-
-        if (!container) {
-            return null;
-        }
-
-        return DomUpdateTracker.findInteractiveDescendant(element, container);
     };
 
     /**
