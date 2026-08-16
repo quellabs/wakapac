@@ -3283,6 +3283,22 @@
                 // DOM target (via the `??` in wrapDomEventAsMessage) if the
                 // click landed on plain content with no control ancestor.
                 targetOverride = this.findInteractiveDescendant(rawTarget, container);
+
+                // Normal hit-testing always derives `container` from rawTarget
+                // itself (see getContainerForEvent()), so rawTarget is guaranteed
+                // to live inside it and the `??` fallback above is safe. Under
+                // mouse capture, though, `container` is forced to the capturing
+                // container regardless of where the cursor actually is, so
+                // rawTarget can belong to a different container entirely — or
+                // none. Falling back to that foreign node as `target` would
+                // violate the invariant that a message's target lives within
+                // the container it's delivered to, so address the capturing
+                // container itself instead, mirroring Win32: a captured message
+                // with no more specific hit is simply addressed to the
+                // capturing window.
+                if (!targetOverride && container && !container.contains(rawTarget)) {
+                    targetOverride = container;
+                }
             } else {
                 targetOverride = null;
             }
