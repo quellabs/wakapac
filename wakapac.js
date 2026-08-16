@@ -262,6 +262,20 @@
     const MSG_PLUGIN = 0x2000;
 
     /**
+     * Click/button-family message types whose target should resolve to the
+     * nearest control via DomUpdateTracker.findInteractiveDescendant(),
+     * mirroring Win32's behavior of addressing mouse button messages to
+     * controls rather than content painted inside them.
+     */
+    const CONTROL_TARGET_MESSAGES = new Set([
+        MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
+        MSG_RBUTTONDOWN, MSG_RBUTTONUP,
+        MSG_MBUTTONDOWN, MSG_MBUTTONUP,
+        MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
+        MSG_CONTEXTMENU
+    ]);
+
+    /**
      * Mouse and keyboard modifier key state flags
      * Used as bitmask - multiple flags can be OR'd together
      */
@@ -2031,11 +2045,9 @@
                 const wParam = self.buildWheelWParam(event.deltaY, modifiers, event.deltaMode);
                 const lParam = self.buildMouseLParam(event, container);
 
-                // MOUSEWHEEL is capture-affected (see getContainerForEvent()), so under
-                // capture `container` can be forced to a container that doesn't actually
-                // contain event.target. Address the capturing container itself rather
-                // than leave target pointing outside it — see the identical fallback in
-                // dispatchMouseMessage() for isControlTargetMessage() types.
+                // MOUSEWHEEL is capture-affected (see getContainerForEvent()), so `container`
+                // may not contain event.target. Address the capturing container itself, as in
+                // the dispatchMouseMessage() fallback for CONTROL_TARGET_MESSAGES types.
                 const rawTarget = self.normalizeToElement(event.target);
                 const targetOverride = (container && !container.contains(rawTarget)) ? container : null;
 
@@ -3159,19 +3171,13 @@
         },
 
         /**
-         * Walks up from a target element to find the nearest interactive
-         * descendant within a container, mimicking Win32's child window
-         * hit-testing. Returns null if the target is plain content (text
-         * nodes, layout divs, etc.) that wouldn't be a "control".
-         *
-         * A control is an element isInherentlyInteractive() accepts, or one
-         * carrying a data-pac-bind="click: ..." binding — the latter check
-         * keeps this walk in agreement with findClickBindingElement() on
-         * what counts as "the control" a click belongs to.
-         *
-         * @param {Element} target - The DOM element that received the event
-         * @param {Element} container - The container root to stop walking at
-         * @returns {Element|null} The nearest interactive ancestor of target, or null
+         * Finds the nearest interactive element from `target` within `container`,
+         * mirroring Win32 child-window hit-testing. Returns null for plain content.
+         * A control is accepted by isInherentlyInteractive() or has a
+         * data-pac-bind="click: ..." binding, matching findClickBindingElement().
+         * @param {Element} target - Element that received the event
+         * @param {Element} container - Container root to stop at
+         * @returns {Element|null} Nearest interactive ancestor, or null
          * @private
          */
         findInteractiveDescendant(target, container) {
@@ -3253,20 +3259,14 @@
         },
 
         /**
-         * Helper to dispatch mouse messages with proper wParam/lParam encoding
+         * Dispatches mouse messages with proper wParam/lParam encoding.
          * @param {number} msgType
          * @param {MouseEvent | TouchEvent} domEvent
          * @param {HTMLElement} container
-         * @param {Element|null} [descendantOverride] - For MSG_MOUSEENTER_DESCENDANT
-         *   and MSG_MOUSELEAVE_DESCENDANT only: the specific descendant element
-         *   entered/left. Required for LEAVE because the descendant being left
-         *   cannot be derived from domEvent — by the time MSG_MOUSELEAVE_DESCENDANT
-         *   fires, the cursor may already be over a different descendant, outside
-         *   the container, or outside the document entirely (see
-         *   _setupDocumentLeave()). Required for ENTER too, purely so the caller's
-         *   already-computed descendant is reused rather than
-         *   findInteractiveDescendant() being run a second time against the same
-         *   event/container. Ignored for every other message type.
+         * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
+         *   the specific descendant entered/left. Required for LEAVE because it cannot
+         *   be derived from the event after the cursor moves; for ENTER it reuses the
+         *   caller's computed descendant. Ignored for other message types.
          * @param {Object} extended
          */
         dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}) {
@@ -3279,7 +3279,7 @@
                 targetOverride = container;
             } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
                 targetOverride = descendantOverride;
-            } else if (this.isControlTargetMessage(msgType)) {
+            } else if (CONTROL_TARGET_MESSAGES.has(msgType)) {
                 const rawTarget = this.normalizeToElement(domEvent.target);
 
                 // Resolve to the nearest control; falls back to the literal
@@ -3601,30 +3601,6 @@
             return messageType === MSG_MOUSEMOVE ||
                 messageType === MSG_MOUSEWHEEL ||
                 messageType === MSG_LBUTTONDOWN ||
-                messageType === MSG_LBUTTONUP ||
-                messageType === MSG_LBUTTONDBLCLK ||
-                messageType === MSG_RBUTTONDOWN ||
-                messageType === MSG_RBUTTONUP ||
-                messageType === MSG_MBUTTONDOWN ||
-                messageType === MSG_MBUTTONUP ||
-                messageType === MSG_LCLICK ||
-                messageType === MSG_MCLICK ||
-                messageType === MSG_RCLICK ||
-                messageType === MSG_CONTEXTMENU;
-        },
-
-        /**
-         * Determines if a message type is a click/button-family message
-         * whose `target` should be resolved to the nearest control (see
-         * findInteractiveDescendant()) rather than left as the literal DOM
-         * node under the cursor. Mirrors Win32, where WM_LBUTTONDOWN/UP/
-         * DBLCLK and friends are always addressed to a window (a control),
-         * never to something merely painted inside one.
-         * @param {number} messageType - The message type to check
-         * @returns {boolean} True if this message type's target should be control-resolved
-         */
-        isControlTargetMessage(messageType) {
-            return messageType === MSG_LBUTTONDOWN ||
                 messageType === MSG_LBUTTONUP ||
                 messageType === MSG_LBUTTONDBLCLK ||
                 messageType === MSG_RBUTTONDOWN ||
