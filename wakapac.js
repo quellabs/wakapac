@@ -3110,6 +3110,23 @@
         },
 
         /**
+         * True if el is inherently interactive — independent of any click
+         * binding. Shared by findInteractiveDescendant() and
+         * Runtime.prototype.findClickBindingElement() so both walks agree on
+         * what counts as "a control" a click can't pass through.
+         * @param {Element} el
+         * @returns {boolean}
+         * @private
+         */
+        isInherentlyInteractive(el) {
+            return INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) ||
+                el.hasAttribute('data-pac-control') ||
+                el.hasAttribute('data-pac-hoverable') ||
+                el.hasAttribute('tabindex') ||
+                el.isContentEditable;
+        },
+
+        /**
          * Returns true if the element carries a data-pac-bind="click: ..."
          * binding, i.e. it's a control by virtue of the declarative binding
          * system rather than its tag or an explicit control attribute.
@@ -3137,20 +3154,10 @@
          * hit-testing. Returns null if the target is plain content (text
          * nodes, layout divs, etc.) that wouldn't be a "control".
          *
-         * An element is considered interactive (a "control") if it:
-         * - Is a native form/link element (input, button, select, etc.)
-         * - Has a [data-pac-control] attribute ([data-pac-hoverable] is
-         *   the deprecated name for the same thing and is still recognized
-         *   during the transition period — new markup should prefer
-         *   [data-pac-control])
-         * - Has a tabindex (making it focusable/interactive by convention)
-         * - Is editable (contenteditable, including inherited from an
-         *   editable ancestor) — isContentEditable already resolves the
-         *   contenteditable="false" island-within-editable-region case
-         * - Has a data-pac-bind="click: ..." binding — a click-bound element
-         *   is a control regardless of tag, so this walk agrees with
-         *   findClickBindingElement() on what counts as "the control" a
-         *   click belongs to
+         * A control is an element isInherentlyInteractive() accepts, or one
+         * carrying a data-pac-bind="click: ..." binding — the latter check
+         * keeps this walk in agreement with findClickBindingElement() on
+         * what counts as "the control" a click belongs to.
          *
          * @param {Element} target - The DOM element that received the event
          * @param {Element} container - The container root to stop walking at
@@ -3164,17 +3171,7 @@
             // the container boundary. The first control we encounter is
             // the logical "child window" being hovered or clicked.
             while (el && el !== container) {
-                // el.tagName is lowercase for SVG elements (e.g. an <a> inside
-                // an inline icon) unlike HTML, where it's always uppercase —
-                // normalize so INTERACTIVE_TAGS matches both.
-                if (
-                    INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) ||
-                    el.hasAttribute('data-pac-control') ||
-                    el.hasAttribute('data-pac-hoverable') ||
-                    el.hasAttribute('tabindex') ||
-                    el.isContentEditable ||
-                    this.hasClickBinding(el)
-                ) {
+                if (this.isInherentlyInteractive(el) || this.hasClickBinding(el)) {
                     return el;
                 }
 
@@ -3284,18 +3281,11 @@
                 // click landed on plain content with no control ancestor.
                 targetOverride = this.findInteractiveDescendant(rawTarget, container);
 
-                // Normal hit-testing always derives `container` from rawTarget
-                // itself (see getContainerForEvent()), so rawTarget is guaranteed
-                // to live inside it and the `??` fallback above is safe. Under
-                // mouse capture, though, `container` is forced to the capturing
-                // container regardless of where the cursor actually is, so
-                // rawTarget can belong to a different container entirely — or
-                // none. Falling back to that foreign node as `target` would
-                // violate the invariant that a message's target lives within
-                // the container it's delivered to, so address the capturing
-                // container itself instead, mirroring Win32: a captured message
-                // with no more specific hit is simply addressed to the
-                // capturing window.
+                // Under mouse capture, `container` may not actually contain
+                // rawTarget (capture redirects regardless of cursor position).
+                // Address the capturing container itself rather than fall back
+                // to a node outside it — Win32 addresses a captured message
+                // with no more specific hit to the capturing window.
                 if (!targetOverride && container && !container.contains(rawTarget)) {
                     targetOverride = container;
                 }
@@ -6614,16 +6604,15 @@
      *
      * Takes `event.realTarget`, not `event.target` — `target` on a click
      * message may already be control-resolved by
-     * DomUpdateTracker.findInteractiveDescendant() (see dispatchMouseMessage()),
+     * findInteractiveDescendant() (see dispatchMouseMessage()),
      * and this walk needs the literal DOM click point to run its own,
      * broader resolution correctly. `realTarget` is unaffected by that
      * resolution and always holds the literal DOM node.
      *
      * This handles clicks on non-interactive descendants (e.g. an icon
      * inside a click-bound button), where the literal click point is not
-     * the bound element. The search stops if it reaches an inherently
-     * interactive element with no click binding — including an editable
-     * (contenteditable) region — since such elements are their own
+     * the bound element. The search stops at the first element
+     * isInherentlyInteractive() accepts, since such elements are their own
      * controls and must not inherit an ancestor's click handler (e.g. an
      * unbound `<button>` inside a click-bound `<div>`).
      *
@@ -6640,9 +6629,7 @@
                 return el;
             }
 
-            // el.tagName is lowercase for SVG elements, unlike HTML — normalize
-            // so this agrees with findInteractiveDescendant() on SVG controls too.
-            if (INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) || el.hasAttribute('data-pac-control') || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex') || el.isContentEditable) {
+            if (DomUpdateTracker.isInherentlyInteractive(el)) {
                 return null;
             }
 
