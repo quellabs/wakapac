@@ -1984,9 +1984,16 @@
                     // changes, enabling per-element hover effects without requiring
                     // each child to register its own listeners.
                     if (currentContainer && !captured) {
+                        // event.target can be a TextNode when the cursor is over bare
+                        // text content — normalize to the nearest Element first, same
+                        // as the other findInteractiveDescendant() call sites.
+                        const rawTarget = event.target instanceof Element
+                            ? event.target
+                            : event.target?.parentElement;
+
                         // Resolve the descendant: any element other than the
                         // container root itself is a hovered child
-                        const currentDescendant = self.findInteractiveDescendant(event.target, currentContainer);
+                        const currentDescendant = self.findInteractiveDescendant(rawTarget, currentContainer);
 
                         if (self._hoveredDescendant !== currentDescendant) {
                             if (self._hoveredDescendant) {
