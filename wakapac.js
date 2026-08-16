@@ -1984,12 +1984,7 @@
                     // changes, enabling per-element hover effects without requiring
                     // each child to register its own listeners.
                     if (currentContainer && !captured) {
-                        // event.target can be a TextNode when the cursor is over bare
-                        // text content — normalize to the nearest Element first, same
-                        // as the other findInteractiveDescendant() call sites.
-                        const rawTarget = event.target instanceof Element
-                            ? event.target
-                            : event.target?.parentElement;
+                        const rawTarget = self.normalizeToElement(event.target);
 
                         // Resolve the descendant: any element other than the
                         // container root itself is a hovered child
@@ -2041,7 +2036,7 @@
                 // contain event.target. Address the capturing container itself rather
                 // than leave target pointing outside it — see the identical fallback in
                 // dispatchMouseMessage() for isControlTargetMessage() types.
-                const rawTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+                const rawTarget = self.normalizeToElement(event.target);
                 const targetOverride = (container && !container.contains(rawTarget)) ? container : null;
 
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
@@ -3086,18 +3081,25 @@
         },
 
         /**
+         * Normalizes a DOM event/hit-test target to the nearest Element. Event
+         * targets can be a TextNode when the cursor is over bare text content;
+         * TextNode has no closest()/hasAttribute(), so callers that walk the
+         * DOM from a target need an Element to start from.
+         * @param {Node|null|undefined} node
+         * @returns {Element|null}
+         */
+        normalizeToElement(node) {
+            return node instanceof Element ? node : (node?.parentElement ?? null);
+        },
+
+        /**
          * Returns the container the event will be dispatched to
          * @param {number} msgType
          * @param {Event} originalEvent
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            // originalEvent.target can be a TextNode when the cursor is over bare text content.
-            // TextNode does not implement Element and has no closest() — normalise to the
-            // nearest Element ancestor before querying the PAC container hierarchy.
-            const target = originalEvent.target instanceof Element
-                ? originalEvent.target
-                : originalEvent.target?.parentElement;
+            const target = this.normalizeToElement(originalEvent.target);
 
             // Walk up the DOM to find the nearest [data-pac-id] ancestor (or self).
             // Returns null if the event originated outside any registered container.
@@ -3278,11 +3280,7 @@
             } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
                 targetOverride = descendantOverride;
             } else if (this.isControlTargetMessage(msgType)) {
-                // originalEvent.target can be a TextNode when the cursor is
-                // over bare text content, so normalize to an Element first.
-                const rawTarget = domEvent.target instanceof Element
-                    ? domEvent.target
-                    : domEvent.target?.parentElement;
+                const rawTarget = this.normalizeToElement(domEvent.target);
 
                 // Resolve to the nearest control; falls back to the literal
                 // DOM target (via the `??` in wrapDomEventAsMessage) if the
@@ -6628,7 +6626,7 @@
      * @returns {Element|null} The nearest element with a click binding, or null
      */
     Runtime.prototype.findClickBindingElement = function(target) {
-        let el = target instanceof Element ? target : target?.parentElement;
+        let el = DomUpdateTracker.normalizeToElement(target);
 
         while (el) {
             const mappingData = this.interpolationMap.get(el);
@@ -9617,29 +9615,24 @@
         },
 
         /**
-         * Finds the containing PAC component for an element
-         * Walks up the DOM tree to find a registered PAC container
+         * Finds the containing PAC component for an element. Walks the
+         * [data-pac-id] ancestor chain (skipping non-container nodes in one
+         * closest() step) rather than every DOM node, and keeps walking past
+         * an ancestor whose pacId is no longer in the registry — destroy()
+         * deregisters a component without stripping its container's
+         * data-pac-id, so a stale attribute can still be in the DOM.
          * @param {HTMLElement} element - Starting element (typically event.target)
          * @returns {HTMLElement|null} The PAC container element or null if not found
          */
         findContainer(element) {
-            // Ensure we start with an actual Element node
-            if (!element || element.nodeType !== Node.ELEMENT_NODE) {
-                element = element?.parentElement;
-            }
+            const start = DomUpdateTracker.normalizeToElement(element);
 
-            while (element && element !== document.body) {
-                const pacId = element.getAttribute('data-pac-id');
+            for (let el = start?.closest(CONTAINER_SEL); el; el = el.parentElement?.closest(CONTAINER_SEL)) {
+                const context = window.PACRegistry.get(el.getAttribute('data-pac-id'));
 
-                if (pacId) {
-                    const context = window.PACRegistry.get(pacId);
-
-                    if (context) {
-                        return context.container;
-                    }
+                if (context) {
+                    return context.container;
                 }
-
-                element = element.parentElement;
             }
 
             return null;
