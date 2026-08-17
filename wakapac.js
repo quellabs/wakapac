@@ -3175,12 +3175,25 @@
          * mirroring Win32 child-window hit-testing. Returns null for plain content.
          * A control is accepted by isInherentlyInteractive() or has a
          * data-pac-bind="click: ..." binding, matching findClickBindingElement().
+         *
+         * Requires `container` to actually contain `target` (checked up front).
+         * Without this, a `target` from outside `container` — e.g. a raw click
+         * point during mouse capture, which redirects messages to the capturing
+         * container regardless of where the cursor actually is — would never
+         * reach the `el !== container` stop condition while climbing `target`'s
+         * real ancestor chain, and could walk into and return an unrelated
+         * control from a completely different part of the document.
+         *
          * @param {Element} target - Element that received the event
          * @param {Element} container - Container root to stop at
          * @returns {Element|null} Nearest interactive ancestor, or null
          * @private
          */
         findInteractiveDescendant(target, container) {
+            if (container && !container.contains(target)) {
+                return null;
+            }
+
             let el = target;
 
             // Walk up the DOM tree from the event target, stopping at
@@ -3289,9 +3302,11 @@
 
                 // Under mouse capture, `container` may not actually contain
                 // rawTarget (capture redirects regardless of cursor position).
-                // Address the capturing container itself rather than fall back
-                // to a node outside it — Win32 addresses a captured message
-                // with no more specific hit to the capturing window.
+                // findInteractiveDescendant() refuses to resolve across that
+                // mismatch (see its own containment check) and returns null,
+                // so address the capturing container itself rather than fall
+                // back to a node outside it — Win32 addresses a captured
+                // message with no more specific hit to the capturing window.
                 if (!targetOverride && container && !container.contains(rawTarget)) {
                     targetOverride = container;
                 }
@@ -6585,11 +6600,17 @@
      * binding, stopping at the container boundary.
      *
      * Takes `event.realTarget`, not `event.target` — `target` on a click
-     * message may already be control-resolved by
-     * findInteractiveDescendant() (see dispatchMouseMessage()),
-     * and this walk needs the literal DOM click point to run its own,
-     * broader resolution correctly. `realTarget` is unaffected by that
-     * resolution and always holds the literal DOM node.
+     * message may already be control-resolved by findInteractiveDescendant()
+     * (see dispatchMouseMessage()). That walk currently agrees with this one
+     * node-for-node (both defer to the shared isInherentlyInteractive(), and
+     * hasClickBinding() mirrors mappingData.bindings.click), with one
+     * exception: under mouse capture, `target` can be forced all the way to
+     * `container` itself when the literal click lands outside it, which is
+     * not an ancestor of the real click point at all. Resolving from
+     * `realTarget` keeps this walk correct independent of that raw-layer
+     * override, and independent of the two resolvers ever being changed
+     * out of sync with each other. `realTarget` is unaffected by any of
+     * this and always holds the literal DOM node.
      *
      * This handles clicks on non-interactive descendants (e.g. an icon
      * inside a click-bound button), where the literal click point is not
@@ -6635,9 +6656,10 @@
     Runtime.prototype.handleDomClicks = function(event) {
         // Resolve the element the click binding actually lives on, from the
         // literal click point (event.realTarget) — see
-        // findClickBindingElement()'s own docblock for why this must be
-        // realTarget rather than event.target, and why it can't be a plain
-        // interpolationMap.get(event.realTarget) lookup either.
+        // findClickBindingElement()'s own docblock for why this stays
+        // decoupled from the raw-layer's event.target resolution, and why
+        // it can't be a plain interpolationMap.get(event.realTarget) lookup
+        // either.
         const clickElement = this.findClickBindingElement(event.realTarget);
 
         if (!clickElement) {
