@@ -262,17 +262,24 @@
     const MSG_PLUGIN = 0x2000;
 
     /**
-     * Click/button-family message types whose target should resolve to the
-     * nearest control via DomUpdateTracker.findInteractiveDescendant(),
-     * mirroring Win32's behavior of addressing mouse button messages to
-     * controls rather than content painted inside them.
+     * Mouse message types whose target should resolve to the nearest control
+     * via DomUpdateTracker.findInteractiveDescendant(), mirroring Win32's
+     * behavior of addressing mouse messages to controls rather than content
+     * painted inside them. Covers the discrete click/button family, the two
+     * continuous pointer streams (move, wheel), HTML5 drag-and-drop, and
+     * gesture recognition — every message type dispatched through
+     * dispatchMouseMessage() except MOUSEENTER/LEAVE (always the container)
+     * and ENTER/LEAVE_DESCENDANT (resolved by the caller, not here).
      */
     const CONTROL_TARGET_MESSAGES = new Set([
         MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP,
         MSG_MBUTTONDOWN, MSG_MBUTTONUP,
         MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
-        MSG_CONTEXTMENU
+        MSG_CONTEXTMENU,
+        MSG_MOUSEMOVE, MSG_MOUSEWHEEL,
+        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP,
+        MSG_GESTURE
     ]);
 
     /**
@@ -2039,27 +2046,23 @@
 
             // Listen for wheel input at the document level
             document.addEventListener("wheel", function(event) {
-                // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
-                const modifiers = self.getModifierState(event);
-                const wParam = self.buildWheelWParam(event.deltaY, modifiers, event.deltaMode);
-                const lParam = self.buildMouseLParam(event, container);
 
-                // MOUSEWHEEL is capture-affected (see getContainerForEvent()), so `container`
-                // may not contain event.target. Address the capturing container itself, as in
-                // the dispatchMouseMessage() fallback for CONTROL_TARGET_MESSAGES types.
-                const rawTarget = self.normalizeToElement(event.target);
-                const targetOverride = (container && !container.contains(rawTarget)) ? container : null;
+                // MSG_MOUSEWHEEL encodes scroll delta into wParam alongside the
+                // modifier state, unlike every other mouse message where wParam is
+                // modifiers alone — computed here and passed as an override, the
+                // same way MSG_GESTURE supplies its own non-standard wParam/lParam
+                // (see dispatchMouseMessage()).
+                const wParam = self.buildWheelWParam(event.deltaY, self.getModifierState(event), event.deltaMode);
 
-                // Wrap DOM wheel event with raw delta metadata for downstream consumers
-                const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
+                // dispatchMouseMessage() handles lParam encoding, control-target
+                // resolution, and the mouse-capture target fallback — same as every
+                // other mouse message.
+                self.dispatchMouseMessage(MSG_MOUSEWHEEL, event, container, null, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
                     wheelDeltaX: event.deltaX,  // Horizontal scroll delta (if supported)
                     deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
-                }, targetOverride);
-
-                // Dispatch normalized wheel message
-                self.dispatchToContainer(container, customEvent);
+                }, wParam);
             }, {
                 passive: true
             });
@@ -2199,18 +2202,9 @@
                     return;
                 }
 
-                // Create the event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGENTER, event, wParam, lParam, {
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch the event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGENTER, event, container, null, {
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2241,18 +2235,9 @@
                     return;
                 }
 
-                // Create event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGLEAVE, event, wParam, lParam, {
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGLEAVE, event, container, null, {
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2299,23 +2284,10 @@
                 // Store the new dropzone
                 self._dropzoneTarget = dropTarget;
 
-                // Create the event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGOVER,
-                    event,
-                    wParam,
-                    lParam,
-                    {
-                        dropTarget: dropTarget,
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch the event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGOVER, event, container, null, {
+                    dropTarget: dropTarget,
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2348,24 +2320,16 @@
                 // Drag sequence complete — clean up tracking state
                 self._enterDepths.delete(container);
 
-                // Create the event
                 const transfer = event.dataTransfer;
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
 
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DROP, event, wParam, lParam, {
-                        dropTarget: dropTarget,
-                        text: transfer.getData('text/plain'),
-                        html: transfer.getData('text/html'),
-                        uri: transfer.getData('text/uri-list'),
-                        files: self._extractFileMetadata(transfer.files),
-                        rawFiles: transfer.files
-                    }
-                );
-
-                // Dispatch event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DROP, event, container, null, {
+                    dropTarget: dropTarget,
+                    text: transfer.getData('text/plain'),
+                    html: transfer.getData('text/html'),
+                    uri: transfer.getData('text/uri-list'),
+                    files: self._extractFileMetadata(transfer.files),
+                    rawFiles: transfer.files
+                });
             });
         },
 
@@ -3274,17 +3238,27 @@
         /**
          * Dispatches mouse messages with proper wParam/lParam encoding.
          * @param {number} msgType
-         * @param {MouseEvent | TouchEvent} domEvent
+         * @param {MouseEvent | TouchEvent | WheelEvent | DragEvent} domEvent
          * @param {HTMLElement} container
          * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
          *   the specific descendant entered/left. Required for LEAVE because it cannot
          *   be derived from the event after the cursor moves; for ENTER it reuses the
          *   caller's computed descendant. Ignored for other message types.
-         * @param {Object} extended
+         * @param {Object} [extended]
+         * @param {number|null} [wParamOverride] - Bypasses the default wParam
+         *   encoding (modifier state) with a caller-supplied value, for message
+         *   types whose wParam means something else entirely. Used by
+         *   MSG_MOUSEWHEEL (scroll delta + modifiers, via buildWheelWParam())
+         *   and MSG_GESTURE (always 0 — a gesture carries no modifier-state
+         *   semantics of its own).
+         * @param {number|null} [lParamOverride] - Bypasses buildMouseLParam()
+         *   with a caller-supplied value. Used by MSG_GESTURE, whose lParam
+         *   packs the gesture path's bounding-box center rather than a single
+         *   event position.
          */
-        dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}) {
-            const wParam = this.getModifierState(domEvent);
-            const lParam = this.buildMouseLParam(domEvent, container);
+        dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}, wParamOverride = null, lParamOverride = null) {
+            const wParam = wParamOverride !== null ? wParamOverride : this.getModifierState(domEvent);
+            const lParam = lParamOverride !== null ? lParamOverride : this.buildMouseLParam(domEvent, container);
 
             let targetOverride;
 
@@ -9682,11 +9656,16 @@
             const width = maxX - minX;  // Width/height are same in both coordinate systems
             const height = maxY - minY;
 
-            // lParam data: packed center coordinates (Y high word, X low word)
+            // lParam data: packed center coordinates (Y high word, X low word) —
+            // the gesture path's bounding-box center, not the terminating event's
+            // raw position, so this bypasses dispatchMouseMessage()'s own
+            // buildMouseLParam() via lParamOverride. wParam is likewise overridden
+            // to 0: a gesture carries no modifier-state semantics of its own.
             const lParam = (centerY << 16) | centerX; //
 
-            // Build the event using the standard factory
-            const customEvent = DomUpdateTracker.wrapDomEventAsMessage(MSG_GESTURE, originalEvent, 0, lParam, {
+            // Dispatch through the shared mouse-message path so `target` resolves
+            // to the nearest control the same way every other mouse message does.
+            DomUpdateTracker.dispatchMouseMessage(MSG_GESTURE, originalEvent, this.gestureContainer, null, {
                 pattern,      // Matched pattern name (e.g. 'back') or raw direction string if unregistered
                 directions,   // Array of direction codes used in matching: ['R', 'D', 'L']
                 pointCount,   // Number of recorded points along the gesture path
@@ -9705,10 +9684,7 @@
                     width,
                     height,
                 },
-            });
-
-            // Dispatch to the container where gesture was initiated
-            DomUpdateTracker.dispatchToContainer(this.gestureContainer, customEvent);
+            }, 0, lParam);
         }
     };
 

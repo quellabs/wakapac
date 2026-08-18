@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WakaPAC core — test suite</title>
+    <style>
+        body { font-family: monospace; padding: 2rem; background: #1e1e1e; color: #d4d4d4; }
+        h1   { color: #9cdcfe; margin-bottom: 0.25rem; font-size: 1.1rem; }
+        p.subtitle { color: #6a9955; margin-top: 0; margin-bottom: 2rem; font-size: 0.85rem; }
+
+        #results { display: flex; flex-direction: column; gap: 0.35rem; }
+        #fixtures { position: absolute; left: -9999px; top: -9999px; }
+
+        .suite  { color: #569cd6; margin-top: 1rem; margin-bottom: 0.2rem; font-weight: bold; }
+        .pass   { color: #4ec9b0; }
+        .pass::before { content: '✓ '; }
+        .fail   { color: #f44747; }
+        .fail::before { content: '✗ '; }
+        .info   { color: #808080; padding-left: 1.5rem; font-size: 0.85rem; }
+
+        #summary {
+            margin-top: 2rem;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        #summary.all-pass { background: #1e3a2f; color: #4ec9b0; }
+        #summary.has-fail { background: #3a1e1e; color: #f44747; }
+    </style>
+</head>
+<body>
+
+<h1>WakaPAC core — test suite</h1>
+<p class="subtitle">Open DevTools console for detailed failure output</p>
+<div id="results"></div>
+<div id="summary"></div>
+
+<!-- Fixtures are created/removed per test; kept off-screen rather than
+     hidden so layout-dependent bindings (e.g. focus, viewport) still work. -->
+<div id="fixtures"></div>
+
+<script src="../wakapac.js"></script>
+
+<script>
+    (function () {
+        'use strict';
+
+        // ─── Mini test runner (mirrors test-wakaform.html / test-wakastore.html) ──
+
+        const results  = document.getElementById('results');
+        const summary  = document.getElementById('summary');
+        const fixtures = document.getElementById('fixtures');
+        let passed = 0;
+        let failed = 0;
+        let currentSuite = null;
+
+        function suite(name) {
+            currentSuite = name;
+            const el = document.createElement('div');
+            el.className = 'suite';
+            el.textContent = name;
+            results.appendChild(el);
+        }
+
+        function pass(name) {
+            passed++;
+            const el = document.createElement('div');
+            el.className = 'pass';
+            el.textContent = name;
+            results.appendChild(el);
+        }
+
+        function fail(name, reason) {
+            failed++;
+            console.error('[FAIL]', currentSuite, '>', name, '\n', reason);
+            const el = document.createElement('div');
+            el.className = 'fail';
+            el.textContent = name;
+            results.appendChild(el);
+            const info = document.createElement('div');
+            info.className = 'info';
+            info.textContent = String(reason);
+            results.appendChild(info);
+        }
+
+        function assert(condition, message) {
+            if (!condition) throw new Error('Assertion failed: ' + message);
+        }
+
+        function assertEqual(actual, expected, label) {
+            if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                throw new Error(
+                    (label || 'assertEqual') +
+                    '\n  expected: ' + JSON.stringify(expected) +
+                    '\n  actual:   ' + JSON.stringify(actual)
+                );
+            }
+        }
+
+        async function test(name, fn) {
+            try {
+                await fn();
+                pass(name);
+            } catch (e) {
+                fail(name, e.message || e);
+            }
+        }
+
+        // ─── Helpers ─────────────────────────────────────────────────────────────
+
+        /**
+         * Waits past WakaPAC's internal batching windows so pending DOM
+         * updates have flushed. Component hierarchy/initial-bind establishment
+         * is debounced by 10ms (see establishAllHierarchies in wakapac.js);
+         * 50ms gives comfortable margin under headless/CI load.
+         */
+        function tick() {
+            return new Promise(function (resolve) { setTimeout(resolve, 50); });
+        }
+
+        /** Dispatches a bubbling synthetic mousemove with `el` as event.target. */
+        function moveOver(el) {
+            el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 0, clientY: 0 }));
+        }
+
+        /**
+         * Waits past the mousemove coalescer's requestAnimationFrame-based
+         * throttle (see setupMoveCoalescer in wakapac.js) so a dispatched
+         * mousemove has been processed.
+         */
+        function flushMouseMove() {
+            return new Promise(function (resolve) {
+                requestAnimationFrame(function () { requestAnimationFrame(resolve); });
+            }).then(tick);
+        }
+
+        let fixtureCounter = 0;
+
+        /**
+         * Creates a fixture container with the given innerHTML, mounts it via
+         * wakaPAC(), and returns { pacId, container, abstraction, destroy }.
+         * destroy() removes the container from the DOM (triggering WakaPAC's
+         * MutationObserver-based cleanup) so the caller doesn't leak components
+         * across tests.
+         */
+        function mount(html, abstraction, options) {
+            const pacId = 'core-fixture-' + (++fixtureCounter);
+            const container = document.createElement('div');
+            container.id = pacId;
+            container.innerHTML = html;
+            fixtures.appendChild(container);
+
+            const result = wakaPAC('#' + pacId, abstraction, options);
+
+            return {
+                pacId: pacId,
+                container: container,
+                abstraction: result,
+                destroy: function () {
+                    if (container.parentNode) {
+                        container.parentNode.removeChild(container);
+                    }
+                }
+            };
+        }
+
+        // ─── Suites ─────────────────────────────────────────────────────────────
+
+        async function runAll() {
+
+            suite('Component creation & interpolation');
+
+            await test('renders {{ }} interpolation with initial value', async function () {
+                const c = mount('<p id="out">{{count}}</p>', { count: 5 });
+                await tick();
+                assertEqual(c.container.querySelector('#out').textContent, '5');
+                c.destroy();
+            });
+
+            await test('property change updates interpolated text', async function () {
+                const c = mount('<p id="out">{{count}}</p>', { count: 0 });
+                await tick();
+                c.abstraction.count = 42;
+                await tick();
+                assertEqual(c.container.querySelector('#out').textContent, '42');
+                c.destroy();
+            });
+
+            await test('component-ready event fires with the correct pacId', async function () {
+                let seen = null;
+                function handler(e) { seen = e.detail; }
+                document.addEventListener('pac:component-ready', handler);
+                const c = mount('<p>{{count}}</p>', { count: 0 });
+                document.removeEventListener('pac:component-ready', handler);
+                assert(seen !== null, 'event fired');
+                assertEqual(seen.pacId, c.pacId, 'pacId matches');
+                c.destroy();
+            });
+
+            suite('Two-way value binding');
+
+            await test('abstraction change updates bound input value', async function () {
+                const c = mount('<input id="inp" data-pac-bind="value: name">', { name: 'a' });
+                await tick();
+                c.abstraction.name = 'b';
+                await tick();
+                assertEqual(c.container.querySelector('#inp').value, 'b');
+                c.destroy();
+            });
+
+            await test('user input updates the abstraction property', async function () {
+                const c = mount('<input id="inp" data-pac-bind="value: name">', { name: '' });
+                await tick();
+                const input = c.container.querySelector('#inp');
+                input.value = 'typed';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await tick();
+                assertEqual(c.abstraction.name, 'typed');
+                c.destroy();
+            });
+
+            suite('Computed properties');
+
+            await test('computed recalculates when its dependency changes', async function () {
+                const c = mount('<p id="out">{{doubled}}</p>', {
+                    count: 3,
+                    computed: { doubled() { return this.count * 2; } }
+                });
+                await tick();
+                assertEqual(c.container.querySelector('#out').textContent, '6');
+                c.abstraction.count = 10;
+                await tick();
+                assertEqual(c.container.querySelector('#out').textContent, '20');
+                c.destroy();
+            });
+
+            suite('Array reactivity (foreach)');
+
+            await test('foreach renders one element per array item', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li>{{item.label}}</li></ul>',
+                    { items: [{ label: 'a' }, { label: 'b' }] }
+                );
+                await tick();
+                assertEqual(c.container.querySelectorAll('li').length, 2);
+                c.destroy();
+            });
+
+            await test('push() adds a rendered element', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li>{{item.label}}</li></ul>',
+                    { items: [{ label: 'a' }] }
+                );
+                c.abstraction.items.push({ label: 'b' });
+                await tick();
+                assertEqual(c.container.querySelectorAll('li').length, 2);
+                c.destroy();
+            });
+
+            await test('splice() removes a rendered element', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li>{{item.label}}</li></ul>',
+                    { items: [{ label: 'a' }, { label: 'b' }] }
+                );
+                c.abstraction.items.splice(0, 1);
+                await tick();
+                const lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 1);
+                assertEqual(lis[0].textContent, 'b');
+                c.destroy();
+            });
+
+            suite('Click bindings & msgProc');
+
+            await test('click binding invokes the bound method', async function () {
+                let calls = 0;
+                const c = mount('<button id="btn" data-pac-bind="click: bump">+</button>', {
+                    bump() { calls++; }
+                });
+                await tick();
+                c.container.querySelector('#btn').click();
+                assertEqual(calls, 1);
+                c.destroy();
+            });
+
+            await test('msgProc receives MSG_TIMER after setTimer', async function () {
+                const c = mount('<p>timer</p>', {
+                    ticks: 0,
+                    msgProc(message) {
+                        if (message.message === wakaPAC.MSG_TIMER) {
+                            this.ticks++;
+                        }
+                    }
+                });
+                await tick();
+                const timerId = wakaPAC.setTimer(c.pacId, 10);
+                await new Promise(function (resolve) { setTimeout(resolve, 60); });
+                wakaPAC.killTimer(c.pacId, timerId);
+                assert(c.abstraction.ticks > 0, 'at least one MSG_TIMER delivered, got ' + c.abstraction.ticks);
+                c.destroy();
+            });
+
+            suite('Mouse target resolution');
+
+            await test('MSG_MOUSEMOVE over a decorative descendant resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="btn"><span id="icon">*</span></button>',
+                    {
+                        moveTargets: [],
+                        enterTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_MOUSEMOVE) {
+                                this.moveTargets.push(message.target.id);
+                            }
+                            if (message.message === wakaPAC.MSG_MOUSEENTER_DESCENDANT) {
+                                this.enterTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                moveOver(c.container.querySelector('#icon'));
+                await flushMouseMove();
+                assert(c.abstraction.enterTargets.includes('btn'), 'MSG_MOUSEENTER_DESCENDANT resolved to the button');
+                assert(c.abstraction.moveTargets.length > 0, 'at least one MSG_MOUSEMOVE delivered');
+                assert(
+                    c.abstraction.moveTargets.every(function (id) { return id === 'btn'; }),
+                    'every MSG_MOUSEMOVE target resolved to the button while hovering its icon, got ' + JSON.stringify(c.abstraction.moveTargets)
+                );
+                c.destroy();
+            });
+
+            await test('MSG_MOUSEMOVE over plain content reports the literal element', async function () {
+                const c = mount('<div id="content">plain</div>', {
+                    moveTargets: [],
+                    msgProc(message) {
+                        if (message.message === wakaPAC.MSG_MOUSEMOVE) {
+                            this.moveTargets.push(message.target.id);
+                        }
+                    }
+                });
+                await tick();
+                moveOver(c.container.querySelector('#content'));
+                await flushMouseMove();
+                assert(
+                    c.abstraction.moveTargets.includes('content'),
+                    'plain non-control content reported as itself, got ' + JSON.stringify(c.abstraction.moveTargets)
+                );
+                c.destroy();
+            });
+
+            await test('MSG_MOUSEWHEEL over a decorative descendant resolves target to the owning control, wParam intact', async function () {
+                const c = mount(
+                    '<button id="wheelBtn"><span id="wheelIcon">*</span></button>',
+                    {
+                        wheelTargets: [],
+                        wheelDeltas: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_MOUSEWHEEL) {
+                                this.wheelTargets.push(message.target.id);
+                                this.wheelDeltas.push(wakaPAC.GET_WHEEL_DELTA(message.wParam));
+                            }
+                        }
+                    }
+                );
+                await tick();
+                c.container.querySelector('#wheelIcon').dispatchEvent(
+                    new WheelEvent('wheel', { bubbles: true, deltaY: 10 })
+                );
+                await tick();
+                assertEqual(c.abstraction.wheelTargets, ['wheelBtn']);
+                // Verifies buildWheelWParam() still encodes correctly now that it's
+                // called from _setupMouseWheelEvent() and passed in as wParamOverride,
+                // rather than from inside dispatchMouseMessage() itself.
+                assertEqual(c.abstraction.wheelDeltas, [120]);
+                c.destroy();
+            });
+
+            await test('MSG_MOUSEWHEEL over plain content reports the literal element', async function () {
+                const c = mount('<div id="wheelContent">plain</div>', {
+                    wheelTargets: [],
+                    msgProc(message) {
+                        if (message.message === wakaPAC.MSG_MOUSEWHEEL) {
+                            this.wheelTargets.push(message.target.id);
+                        }
+                    }
+                });
+                await tick();
+                c.container.querySelector('#wheelContent').dispatchEvent(
+                    new WheelEvent('wheel', { bubbles: true, deltaY: 10 })
+                );
+                await tick();
+                assertEqual(c.abstraction.wheelTargets, ['wheelContent']);
+                c.destroy();
+            });
+
+            await test('MSG_DRAGENTER over a decorative descendant resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="dragBtn"><span id="dragIcon">*</span></button>',
+                    {
+                        enterTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_DRAGENTER) {
+                                this.enterTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                c.container.querySelector('#dragIcon').dispatchEvent(
+                    new DragEvent('dragenter', { bubbles: true, dataTransfer: new DataTransfer() })
+                );
+                await tick();
+                assertEqual(c.abstraction.enterTargets, ['dragBtn']);
+                c.destroy();
+            });
+
+            await test('MSG_DROP over a decorative descendant resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="dropBtn" data-pac-drop-target="copy"><span id="dropIcon">*</span></button>',
+                    {
+                        dropTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_DROP) {
+                                this.dropTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                c.container.querySelector('#dropIcon').dispatchEvent(
+                    new DragEvent('drop', { bubbles: true, dataTransfer: new DataTransfer() })
+                );
+                await tick();
+                assertEqual(c.abstraction.dropTargets, ['dropBtn']);
+                c.destroy();
+            });
+
+            await test('MSG_GESTURE resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="gestureBtn"><span id="gestureIcon">*</span></button>',
+                    {
+                        gestureTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_GESTURE) {
+                                this.gestureTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                const icon = c.container.querySelector('#gestureIcon');
+
+                // A right-button drag traced purely rightward matches the built-in
+                // 'right' pattern (see MouseGestureRecognizer.patterns).
+                icon.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2, clientX: 0, clientY: 0 }));
+                icon.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 2, clientX: 150, clientY: 0 }));
+                await flushMouseMove();
+                icon.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 2, clientX: 150, clientY: 0 }));
+                await tick();
+                assertEqual(c.abstraction.gestureTargets, ['gestureBtn']);
+                c.destroy();
+            });
+
+            suite('Component lifecycle');
+
+            await test('component is registered under its pacId while mounted', async function () {
+                const c = mount('<p>{{count}}</p>', { count: 0 });
+                assert(!!wakaPAC.getContextByPacId(c.pacId), 'context resolvable while mounted');
+                c.destroy();
+            });
+
+            await test('removing the container deregisters the component', async function () {
+                const c = mount('<p>{{count}}</p>', { count: 0 });
+                await tick();
+                c.destroy();
+                await tick();
+                assert(!wakaPAC.getContextByPacId(c.pacId), 'context gone after removal');
+            });
+
+            // ── Summary ───────────────────────────────────────────────────────────
+
+            const total = passed + failed;
+            summary.textContent = failed === 0
+                ? '✓ All ' + total + ' tests passed'
+                : '✗ ' + failed + ' of ' + total + ' tests failed';
+            summary.className = failed === 0 ? 'all-pass' : 'has-fail';
+        }
+
+        runAll().catch(function (err) {
+            console.error('Test runner error:', err);
+            summary.textContent = 'ERROR: ' + (err.message || err);
+            summary.className = 'has-fail';
+        });
+
+    })();
+</script>
+</body>
+</html>
