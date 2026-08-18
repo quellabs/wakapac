@@ -118,6 +118,22 @@
             return new Promise(function (resolve) { setTimeout(resolve, 50); });
         }
 
+        /** Dispatches a bubbling synthetic mousemove with `el` as event.target. */
+        function moveOver(el) {
+            el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 0, clientY: 0 }));
+        }
+
+        /**
+         * Waits past the mousemove coalescer's requestAnimationFrame-based
+         * throttle (see setupMoveCoalescer in wakapac.js) so a dispatched
+         * mousemove has been processed.
+         */
+        function flushMouseMove() {
+            return new Promise(function (resolve) {
+                requestAnimationFrame(function () { requestAnimationFrame(resolve); });
+            }).then(tick);
+        }
+
         let fixtureCounter = 0;
 
         /**
@@ -284,6 +300,55 @@
                 await new Promise(function (resolve) { setTimeout(resolve, 60); });
                 wakaPAC.killTimer(c.pacId, timerId);
                 assert(c.abstraction.ticks > 0, 'at least one MSG_TIMER delivered, got ' + c.abstraction.ticks);
+                c.destroy();
+            });
+
+            suite('Mouse target resolution');
+
+            await test('MSG_MOUSEMOVE over a decorative descendant resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="btn"><span id="icon">*</span></button>',
+                    {
+                        moveTargets: [],
+                        enterTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_MOUSEMOVE) {
+                                this.moveTargets.push(message.target.id);
+                            }
+                            if (message.message === wakaPAC.MSG_MOUSEENTER_DESCENDANT) {
+                                this.enterTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                moveOver(c.container.querySelector('#icon'));
+                await flushMouseMove();
+                assert(c.abstraction.enterTargets.includes('btn'), 'MSG_MOUSEENTER_DESCENDANT resolved to the button');
+                assert(c.abstraction.moveTargets.length > 0, 'at least one MSG_MOUSEMOVE delivered');
+                assert(
+                    c.abstraction.moveTargets.every(function (id) { return id === 'btn'; }),
+                    'every MSG_MOUSEMOVE target resolved to the button while hovering its icon, got ' + JSON.stringify(c.abstraction.moveTargets)
+                );
+                c.destroy();
+            });
+
+            await test('MSG_MOUSEMOVE over plain content reports the literal element', async function () {
+                const c = mount('<div id="content">plain</div>', {
+                    moveTargets: [],
+                    msgProc(message) {
+                        if (message.message === wakaPAC.MSG_MOUSEMOVE) {
+                            this.moveTargets.push(message.target.id);
+                        }
+                    }
+                });
+                await tick();
+                moveOver(c.container.querySelector('#content'));
+                await flushMouseMove();
+                assert(
+                    c.abstraction.moveTargets.includes('content'),
+                    'plain non-control content reported as itself, got ' + JSON.stringify(c.abstraction.moveTargets)
+                );
                 c.destroy();
             });
 

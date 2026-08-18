@@ -3292,7 +3292,13 @@
                 targetOverride = container;
             } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
                 targetOverride = descendantOverride;
-            } else if (CONTROL_TARGET_MESSAGES.has(msgType)) {
+            } else if (CONTROL_TARGET_MESSAGES.has(msgType) || msgType === MSG_MOUSEMOVE) {
+                // MSG_MOUSEMOVE shares this resolution so that `target` agrees with
+                // MSG_MOUSEENTER_DESCENDANT/MSG_MOUSELEAVE_DESCENDANT while hovering
+                // the same control — those already address a decorative descendant's
+                // owning control (e.g. an icon inside a button reports the button),
+                // and a continuous move over that same descendant should not report
+                // something more specific than the enter/leave pair bracketing it.
                 const rawTarget = this.normalizeToElement(domEvent.target);
 
                 // Resolve to the nearest control, if any is present.
