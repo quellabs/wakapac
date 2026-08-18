@@ -647,7 +647,7 @@
          * Ends the paint cycle. Reserved for future use.
          * @param {CanvasRenderingContext2D|Object} dc
          */
-        endPaint(dc) {
+        endPaint(_dc) {
             // Reserved for future use
         },
 

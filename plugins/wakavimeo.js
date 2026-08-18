@@ -277,7 +277,7 @@
         /**
          * Fires when playback is paused. data: { seconds, percent, duration }
          */
-        player.on('pause', function (data) {
+        player.on('pause', function (_data) {
             // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PAUSE, 0, 0);
         });
@@ -285,7 +285,7 @@
         /**
          * Fires when playback reaches the end of the video. data: { seconds, percent, duration }
          */
-        player.on('ended', function (data) {
+        player.on('ended', function (_data) {
             // Notify msgProc
             pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ENDED, 0, 0);
         });

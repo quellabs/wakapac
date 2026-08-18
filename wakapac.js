@@ -262,6 +262,20 @@
     const MSG_PLUGIN = 0x2000;
 
     /**
+     * Click/button-family message types whose target should resolve to the
+     * nearest control via DomUpdateTracker.findInteractiveDescendant(),
+     * mirroring Win32's behavior of addressing mouse button messages to
+     * controls rather than content painted inside them.
+     */
+    const CONTROL_TARGET_MESSAGES = new Set([
+        MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
+        MSG_RBUTTONDOWN, MSG_RBUTTONUP,
+        MSG_MBUTTONDOWN, MSG_MBUTTONUP,
+        MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
+        MSG_CONTEXTMENU
+    ]);
+
+    /**
      * Mouse and keyboard modifier key state flags
      * Used as bitmask - multiple flags can be OR'd together
      */
@@ -1963,7 +1977,7 @@
                             if (self._hoveredContainer) {
                                 // Clean up any lingering descendant hover first
                                 if (self._hoveredDescendant) {
-                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer);
+                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
                                 }
 
                                 self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
@@ -1984,17 +1998,19 @@
                     // changes, enabling per-element hover effects without requiring
                     // each child to register its own listeners.
                     if (currentContainer && !captured) {
+                        const rawTarget = self.normalizeToElement(event.target);
+
                         // Resolve the descendant: any element other than the
                         // container root itself is a hovered child
-                        const currentDescendant = self.findInteractiveDescendant(event.target, currentContainer);
+                        const currentDescendant = self.findInteractiveDescendant(rawTarget, currentContainer);
 
                         if (self._hoveredDescendant !== currentDescendant) {
                             if (self._hoveredDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer);
+                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer, self._hoveredDescendant);
                             }
 
                             if (currentDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer);
+                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer, currentDescendant);
                             }
 
                             self._hoveredDescendant = currentDescendant;
@@ -2029,12 +2045,18 @@
                 const wParam = self.buildWheelWParam(event.deltaY, modifiers, event.deltaMode);
                 const lParam = self.buildMouseLParam(event, container);
 
+                // MOUSEWHEEL is capture-affected (see getContainerForEvent()), so `container`
+                // may not contain event.target. Address the capturing container itself, as in
+                // the dispatchMouseMessage() fallback for CONTROL_TARGET_MESSAGES types.
+                const rawTarget = self.normalizeToElement(event.target);
+                const targetOverride = (container && !container.contains(rawTarget)) ? container : null;
+
                 // Wrap DOM wheel event with raw delta metadata for downstream consumers
                 const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
                     wheelDeltaX: event.deltaX,  // Horizontal scroll delta (if supported)
                     deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
-                });
+                }, targetOverride);
 
                 // Dispatch normalized wheel message
                 self.dispatchToContainer(container, customEvent);
@@ -2385,7 +2407,7 @@
                 if (self._hoveredContainer) {
                     // Clean up any lingering descendant hover first
                     if (self._hoveredDescendant) {
-                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer);
+                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
                         self._hoveredDescendant = null;
                     }
 
@@ -3071,18 +3093,25 @@
         },
 
         /**
+         * Normalizes a DOM event/hit-test target to the nearest Element. Event
+         * targets can be a TextNode when the cursor is over bare text content;
+         * TextNode has no closest()/hasAttribute(), so callers that walk the
+         * DOM from a target need an Element to start from.
+         * @param {Node|null|undefined} node
+         * @returns {Element|null}
+         */
+        normalizeToElement(node) {
+            return node instanceof Element ? node : (node?.parentElement ?? null);
+        },
+
+        /**
          * Returns the container the event will be dispatched to
          * @param {number} msgType
          * @param {Event} originalEvent
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            // originalEvent.target can be a TextNode when the cursor is over bare text content.
-            // TextNode does not implement Element and has no closest() — normalise to the
-            // nearest Element ancestor before querying the PAC container hierarchy.
-            const target = originalEvent.target instanceof Element
-                ? originalEvent.target
-                : originalEvent.target?.parentElement;
+            const target = this.normalizeToElement(originalEvent.target);
 
             // Walk up the DOM to find the nearest [data-pac-id] ancestor (or self).
             // Returns null if the event originated outside any registered container.
@@ -3103,31 +3132,75 @@
         },
 
         /**
-         * Walks up from a target element to find the nearest interactive
-         * descendant within a container, mimicking Win32's child window
-         * hit-testing. Returns null if the target is plain content (text
-         * nodes, layout divs, etc.) that wouldn't be a "control".
+         * True if el is inherently interactive — independent of any click
+         * binding. Shared by findInteractiveDescendant() and
+         * Runtime.prototype.findClickBindingElement() so both walks agree on
+         * what counts as "a control" a click can't pass through.
+         * @param {Element} el
+         * @returns {boolean}
+         * @private
+         */
+        isInherentlyInteractive(el) {
+            return INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) ||
+                el.hasAttribute('data-pac-control') ||
+                el.hasAttribute('data-pac-hoverable') ||
+                el.hasAttribute('tabindex') ||
+                el.isContentEditable;
+        },
+
+        /**
+         * Returns true if the element carries a data-pac-bind="click: ..."
+         * binding, i.e. it's a control by virtue of the declarative binding
+         * system rather than its tag or an explicit control attribute.
+         * Reads the DOM attribute directly and parses it via ExpressionCache
+         * (already memoized), so this has no dependency on any Runtime
+         * instance or its interpolationMap.
+         * @param {Element} el - The element to check
+         * @returns {boolean} True if el has a click binding
+         * @private
+         */
+        hasClickBinding(el) {
+            const bindingString = el.getAttribute('data-pac-bind');
+
+            if (!bindingString) {
+                return false;
+            }
+
+            return ExpressionCache.parseBindingString(bindingString)
+                .some(binding => binding.type === 'click');
+        },
+
+        /**
+         * Finds the nearest interactive element from `target` within `container`,
+         * mirroring Win32 child-window hit-testing. Returns null for plain content.
+         * A control is accepted by isInherentlyInteractive() or has a
+         * data-pac-bind="click: ..." binding, matching findClickBindingElement().
          *
-         * An element is considered interactive if it:
-         * - Is a native form/link element (input, button, select, etc.)
-         * - Has a [data-pac-hoverable] attribute
-         * - Has a tabindex (making it focusable/interactive by convention)
+         * Requires `container` to actually contain `target` (checked up front).
+         * Without this, a `target` from outside `container` — e.g. a raw click
+         * point during mouse capture, which redirects messages to the capturing
+         * container regardless of where the cursor actually is — would never
+         * reach the `el !== container` stop condition while climbing `target`'s
+         * real ancestor chain, and could walk into and return an unrelated
+         * control from a completely different part of the document.
          *
-         * @param {Element} target - The DOM element that received the event
-         * @param {Element} container - The container root to stop walking at
-         * @returns {Element|null} The nearest interactive ancestor of target, or null
+         * @param {Element} target - Element that received the event
+         * @param {Element} container - Container root to stop at
+         * @returns {Element|null} Nearest interactive ancestor, or null
          * @private
          */
         findInteractiveDescendant(target, container) {
+            if (container && !container.contains(target)) {
+                return null;
+            }
+
             let el = target;
 
             // Walk up the DOM tree from the event target, stopping at
-            // the container boundary. The first interactive element we
-            // encounter is the logical "child window" being hovered.
+            // the container boundary. The first control we encounter is
+            // the logical "child window" being hovered or clicked.
             while (el && el !== container) {
-                if (INTERACTIVE_TAGS.has(el.tagName) ||
-                    el.hasAttribute('data-pac-hoverable') ||
-                    el.hasAttribute('tabindex')) {
+                if (this.isInherentlyInteractive(el) || this.hasClickBinding(el)) {
                     return el;
                 }
 
@@ -3199,16 +3272,45 @@
         },
 
         /**
-         * Helper to dispatch mouse messages with proper wParam/lParam encoding
+         * Dispatches mouse messages with proper wParam/lParam encoding.
          * @param {number} msgType
          * @param {MouseEvent | TouchEvent} domEvent
          * @param {HTMLElement} container
+         * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
+         *   the specific descendant entered/left. Required for LEAVE because it cannot
+         *   be derived from the event after the cursor moves; for ENTER it reuses the
+         *   caller's computed descendant. Ignored for other message types.
          * @param {Object} extended
          */
-        dispatchMouseMessage(msgType, domEvent, container, extended = {}) {
+        dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}) {
             const wParam = this.getModifierState(domEvent);
             const lParam = this.buildMouseLParam(domEvent, container);
-            const targetOverride = (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) ? container : null;
+
+            let targetOverride;
+
+            if (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) {
+                targetOverride = container;
+            } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
+                targetOverride = descendantOverride;
+            } else if (CONTROL_TARGET_MESSAGES.has(msgType)) {
+                const rawTarget = this.normalizeToElement(domEvent.target);
+
+                // Resolve to the nearest control, if any is present.
+                targetOverride = this.findInteractiveDescendant(rawTarget, container);
+
+                if (!targetOverride) {
+                    // Under mouse capture, rawTarget may lie outside container
+                    // (capture redirects regardless of cursor position); address
+                    // the capturing container itself rather than a foreign node —
+                    // Win32 addresses a captured message with no more specific hit
+                    // to the capturing window. Otherwise report rawTarget directly
+                    // (already normalized, so never a bare TextNode).
+                    targetOverride = (container && !container.contains(rawTarget)) ? container : rawTarget;
+                }
+            } else {
+                targetOverride = null;
+            }
+
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended, targetOverride);
 
             this.dispatchToContainer(container, customEvent);
@@ -6491,21 +6593,34 @@
     };
 
     /**
-     * Walks up from `event.target` to the nearest ancestor with a click
+     * Walks up from `event.realTarget` to the nearest ancestor with a click
      * binding, stopping at the container boundary.
      *
-     * This handles clicks on non-interactive descendants (e.g. an icon
-     * inside a click-bound button), where `event.target` is not the
-     * bound element. The search stops if it reaches an inherently
-     * interactive element with no click binding, since such elements
-     * are their own controls and must not inherit an ancestor's click
-     * handler (e.g. an unbound `<button>` inside a click-bound `<div>`).
+     * Takes `event.realTarget`, not `event.target` — `target` on a click
+     * message may already be control-resolved by findInteractiveDescendant()
+     * (see dispatchMouseMessage()). That walk currently agrees with this one
+     * node-for-node (both defer to the shared isInherentlyInteractive(), and
+     * hasClickBinding() mirrors mappingData.bindings.click), with one
+     * exception: under mouse capture, `target` can be forced all the way to
+     * `container` itself when the literal click lands outside it, which is
+     * not an ancestor of the real click point at all. Resolving from
+     * `realTarget` keeps this walk correct independent of that raw-layer
+     * override, and independent of the two resolvers ever being changed
+     * out of sync with each other. `realTarget` is unaffected by any of
+     * this and always holds the literal DOM node.
      *
-     * @param {Element|Node} target - The element that was clicked (`event.target`)
+     * This handles clicks on non-interactive descendants (e.g. an icon
+     * inside a click-bound button), where the literal click point is not
+     * the bound element. The search stops at the first element
+     * isInherentlyInteractive() accepts, since such elements are their own
+     * controls and must not inherit an ancestor's click handler (e.g. an
+     * unbound `<button>` inside a click-bound `<div>`).
+     *
+     * @param {Element|Node} target - The element that was clicked (`event.realTarget`)
      * @returns {Element|null} The nearest element with a click binding, or null
      */
     Runtime.prototype.findClickBindingElement = function(target) {
-        let el = target instanceof Element ? target : target?.parentElement;
+        let el = DomUpdateTracker.normalizeToElement(target);
 
         while (el) {
             const mappingData = this.interpolationMap.get(el);
@@ -6514,7 +6629,7 @@
                 return el;
             }
 
-            if (INTERACTIVE_TAGS.has(el.tagName) || el.hasAttribute('data-pac-hoverable') || el.hasAttribute('tabindex')) {
+            if (DomUpdateTracker.isInherentlyInteractive(el)) {
                 return null;
             }
 
@@ -6532,14 +6647,17 @@
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
-     * @param {Element} event.target - The DOM element that was clicked
+     * @param {Element} event.realTarget - The literal DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
     Runtime.prototype.handleDomClicks = function(event) {
-        // Resolve the element the click binding actually lives on — see
-        // findClickBindingElement()'s own docblock for why this can't be a
-        // plain interpolationMap.get(event.target) lookup.
-        const clickElement = this.findClickBindingElement(event.target);
+        // Resolve the element the click binding actually lives on, from the
+        // literal click point (event.realTarget) — see
+        // findClickBindingElement()'s own docblock for why this stays
+        // decoupled from the raw-layer's event.target resolution, and why
+        // it can't be a plain interpolationMap.get(event.realTarget) lookup
+        // either.
+        const clickElement = this.findClickBindingElement(event.realTarget);
 
         if (!clickElement) {
             return;
@@ -6698,9 +6816,9 @@
      * syncSelectAfterForeach (a <select>'s value settling after its
      * <option>s are rebuilt by a foreach) — kept as one function
      * specifically so behavior like the <select multiple> case below
-     * can't drift between the two call sites the way it previously did
-     * (syncSelectAfterForeach used to read element.value unconditionally,
-     * which only ever returns a multi-select's first selected option).
+     * can't drift between the two call sites: reading element.value
+     * unconditionally only ever returns a multi-select's first selected
+     * option.
      * A no-op if $mappingData has no "value" binding at all.
      * @param {Element} element - The value-bound element to read from
      * @param {{bindings: {value?: {target: string}}}} mappingData - Its registered binding data
@@ -9492,29 +9610,24 @@
         },
 
         /**
-         * Finds the containing PAC component for an element
-         * Walks up the DOM tree to find a registered PAC container
+         * Finds the containing PAC component for an element. Walks the
+         * [data-pac-id] ancestor chain (skipping non-container nodes in one
+         * closest() step) rather than every DOM node, and keeps walking past
+         * an ancestor whose pacId is no longer in the registry — destroy()
+         * deregisters a component without stripping its container's
+         * data-pac-id, so a stale attribute can still be in the DOM.
          * @param {HTMLElement} element - Starting element (typically event.target)
          * @returns {HTMLElement|null} The PAC container element or null if not found
          */
         findContainer(element) {
-            // Ensure we start with an actual Element node
-            if (!element || element.nodeType !== Node.ELEMENT_NODE) {
-                element = element?.parentElement;
-            }
+            const start = DomUpdateTracker.normalizeToElement(element);
 
-            while (element && element !== document.body) {
-                const pacId = element.getAttribute('data-pac-id');
+            for (let el = start?.closest(CONTAINER_SEL); el; el = el.parentElement?.closest(CONTAINER_SEL)) {
+                const context = window.PACRegistry.get(el.getAttribute('data-pac-id'));
 
-                if (pacId) {
-                    const context = window.PACRegistry.get(pacId);
-
-                    if (context) {
-                        return context.container;
-                    }
+                if (context) {
+                    return context.container;
                 }
-
-                element = element.parentElement;
             }
 
             return null;

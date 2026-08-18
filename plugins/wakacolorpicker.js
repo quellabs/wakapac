@@ -599,7 +599,7 @@
                  * @param {string} pacId       - The component's unique PAC identifier.
                  * @param {object} config      - The component configuration object.
                  */
-                onComponentCreated(abstraction, pacId, config) {
+                onComponentCreated(abstraction, pacId, _config) {
                     const container = pac.getContainerByPacId(pacId);
 
                     if (!container) {

@@ -231,10 +231,10 @@
 
         /**
          * Called by wakaPAC.use(). Returns the plugin descriptor with lifecycle hooks.
-         * @param {function} wakaPAC - The wakaPAC function (not used directly here)
+         * @param {function} _wakaPAC - The wakaPAC function (not used directly here)
          * @returns {{ onComponentCreated: function, onComponentDestroyed: function }}
          */
-        createPacPlugin(wakaPAC) {
+        createPacPlugin(_wakaPAC) {
             // On non-iOS, attach the devicemotion listener immediately.
             // On iOS it is deferred until requestMotionPermission() is called from a tap handler.
             if (typeof DeviceMotionEvent !== 'undefined' &&
@@ -341,7 +341,7 @@
                 }
 
                 return result;
-            } catch (err) {
+            } catch (_err) {
                 return 'error';
             }
         },
