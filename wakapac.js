@@ -3295,20 +3295,17 @@
             } else if (CONTROL_TARGET_MESSAGES.has(msgType)) {
                 const rawTarget = this.normalizeToElement(domEvent.target);
 
-                // Resolve to the nearest control; falls back to the literal
-                // DOM target (via the `??` in wrapDomEventAsMessage) if the
-                // click landed on plain content with no control ancestor.
+                // Resolve to the nearest control, if any is present.
                 targetOverride = this.findInteractiveDescendant(rawTarget, container);
 
-                // Under mouse capture, `container` may not actually contain
-                // rawTarget (capture redirects regardless of cursor position).
-                // findInteractiveDescendant() refuses to resolve across that
-                // mismatch (see its own containment check) and returns null,
-                // so address the capturing container itself rather than fall
-                // back to a node outside it — Win32 addresses a captured
-                // message with no more specific hit to the capturing window.
-                if (!targetOverride && container && !container.contains(rawTarget)) {
-                    targetOverride = container;
+                if (!targetOverride) {
+                    // Under mouse capture, rawTarget may lie outside container
+                    // (capture redirects regardless of cursor position); address
+                    // the capturing container itself rather than a foreign node —
+                    // Win32 addresses a captured message with no more specific hit
+                    // to the capturing window. Otherwise report rawTarget directly
+                    // (already normalized, so never a bare TextNode).
+                    targetOverride = (container && !container.contains(rawTarget)) ? container : rawTarget;
                 }
             } else {
                 targetOverride = null;
@@ -6819,9 +6816,9 @@
      * syncSelectAfterForeach (a <select>'s value settling after its
      * <option>s are rebuilt by a foreach) — kept as one function
      * specifically so behavior like the <select multiple> case below
-     * can't drift between the two call sites the way it previously did
-     * (syncSelectAfterForeach used to read element.value unconditionally,
-     * which only ever returns a multi-select's first selected option).
+     * can't drift between the two call sites: reading element.value
+     * unconditionally only ever returns a multi-select's first selected
+     * option.
      * A no-op if $mappingData has no "value" binding at all.
      * @param {Element} element - The value-bound element to read from
      * @param {{bindings: {value?: {target: string}}}} mappingData - Its registered binding data
