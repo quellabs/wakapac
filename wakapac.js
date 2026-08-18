@@ -266,10 +266,10 @@
      * via DomUpdateTracker.findInteractiveDescendant(), mirroring Win32's
      * behavior of addressing mouse messages to controls rather than content
      * painted inside them. Covers the discrete click/button family, the two
-     * continuous pointer streams (move, wheel), and HTML5 drag-and-drop —
-     * every message type dispatched through dispatchMouseMessage() except
-     * MOUSEENTER/LEAVE (always the container) and ENTER/LEAVE_DESCENDANT
-     * (resolved by the caller, not here).
+     * continuous pointer streams (move, wheel), HTML5 drag-and-drop, and
+     * gesture recognition — every message type dispatched through
+     * dispatchMouseMessage() except MOUSEENTER/LEAVE (always the container)
+     * and ENTER/LEAVE_DESCENDANT (resolved by the caller, not here).
      */
     const CONTROL_TARGET_MESSAGES = new Set([
         MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
@@ -278,7 +278,8 @@
         MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
         MSG_CONTEXTMENU,
         MSG_MOUSEMOVE, MSG_MOUSEWHEEL,
-        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP
+        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP,
+        MSG_GESTURE
     ]);
 
     /**
@@ -3236,15 +3237,25 @@
          *   the specific descendant entered/left. Required for LEAVE because it cannot
          *   be derived from the event after the cursor moves; for ENTER it reuses the
          *   caller's computed descendant. Ignored for other message types.
-         * @param {Object} extended
+         * @param {Object} [extended]
+         * @param {number|null} [wParamOverride] - Bypasses the built-in wParam
+         *   encoding (modifier state, or the wheel-delta encoding used for
+         *   MSG_MOUSEWHEEL) with a caller-supplied value. Used by MSG_GESTURE,
+         *   whose wParam carries no modifier state.
+         * @param {number|null} [lParamOverride] - Bypasses buildMouseLParam()
+         *   with a caller-supplied value. Used by MSG_GESTURE, whose lParam
+         *   packs the gesture path's bounding-box center rather than a single
+         *   event position.
          */
-        dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}) {
+        dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}, wParamOverride = null, lParamOverride = null) {
             // MSG_MOUSEWHEEL encodes scroll delta into wParam alongside the modifier
             // state, unlike every other mouse message where wParam is modifiers alone.
-            const wParam = msgType === MSG_MOUSEWHEEL
-                ? this.buildWheelWParam(domEvent.deltaY, this.getModifierState(domEvent), domEvent.deltaMode)
-                : this.getModifierState(domEvent);
-            const lParam = this.buildMouseLParam(domEvent, container);
+            const wParam = wParamOverride !== null
+                ? wParamOverride
+                : (msgType === MSG_MOUSEWHEEL
+                    ? this.buildWheelWParam(domEvent.deltaY, this.getModifierState(domEvent), domEvent.deltaMode)
+                    : this.getModifierState(domEvent));
+            const lParam = lParamOverride !== null ? lParamOverride : this.buildMouseLParam(domEvent, container);
 
             let targetOverride;
 
@@ -9642,11 +9653,16 @@
             const width = maxX - minX;  // Width/height are same in both coordinate systems
             const height = maxY - minY;
 
-            // lParam data: packed center coordinates (Y high word, X low word)
+            // lParam data: packed center coordinates (Y high word, X low word) —
+            // the gesture path's bounding-box center, not the terminating event's
+            // raw position, so this bypasses dispatchMouseMessage()'s own
+            // buildMouseLParam() via lParamOverride. wParam is likewise overridden
+            // to 0: a gesture carries no modifier-state semantics of its own.
             const lParam = (centerY << 16) | centerX; //
 
-            // Build the event using the standard factory
-            const customEvent = DomUpdateTracker.wrapDomEventAsMessage(MSG_GESTURE, originalEvent, 0, lParam, {
+            // Dispatch through the shared mouse-message path so `target` resolves
+            // to the nearest control the same way every other mouse message does.
+            DomUpdateTracker.dispatchMouseMessage(MSG_GESTURE, originalEvent, this.gestureContainer, null, {
                 pattern,      // Matched pattern name (e.g. 'back') or raw direction string if unregistered
                 directions,   // Array of direction codes used in matching: ['R', 'D', 'L']
                 pointCount,   // Number of recorded points along the gesture path
@@ -9665,10 +9681,7 @@
                     width,
                     height,
                 },
-            });
-
-            // Dispatch to the container where gesture was initiated
-            DomUpdateTracker.dispatchToContainer(this.gestureContainer, customEvent);
+            }, 0, lParam);
         }
     };
 

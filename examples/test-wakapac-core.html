@@ -433,6 +433,32 @@
                 c.destroy();
             });
 
+            await test('MSG_GESTURE resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="gestureBtn"><span id="gestureIcon">*</span></button>',
+                    {
+                        gestureTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_GESTURE) {
+                                this.gestureTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                const icon = c.container.querySelector('#gestureIcon');
+
+                // A right-button drag traced purely rightward matches the built-in
+                // 'right' pattern (see MouseGestureRecognizer.patterns).
+                icon.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2, clientX: 0, clientY: 0 }));
+                icon.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 2, clientX: 150, clientY: 0 }));
+                await flushMouseMove();
+                icon.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 2, clientX: 150, clientY: 0 }));
+                await tick();
+                assertEqual(c.abstraction.gestureTargets, ['gestureBtn']);
+                c.destroy();
+            });
+
             suite('Component lifecycle');
 
             await test('component is registered under its pacId while mounted', async function () {
