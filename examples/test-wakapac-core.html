@@ -352,14 +352,16 @@
                 c.destroy();
             });
 
-            await test('MSG_MOUSEWHEEL over a decorative descendant resolves target to the owning control', async function () {
+            await test('MSG_MOUSEWHEEL over a decorative descendant resolves target to the owning control, wParam intact', async function () {
                 const c = mount(
                     '<button id="wheelBtn"><span id="wheelIcon">*</span></button>',
                     {
                         wheelTargets: [],
+                        wheelDeltas: [],
                         msgProc(message) {
                             if (message.message === wakaPAC.MSG_MOUSEWHEEL) {
                                 this.wheelTargets.push(message.target.id);
+                                this.wheelDeltas.push(wakaPAC.GET_WHEEL_DELTA(message.wParam));
                             }
                         }
                     }
@@ -370,6 +372,10 @@
                 );
                 await tick();
                 assertEqual(c.abstraction.wheelTargets, ['wheelBtn']);
+                // Verifies buildWheelWParam() still encodes correctly now that it's
+                // called from _setupMouseWheelEvent() and passed in as wParamOverride,
+                // rather than from inside dispatchMouseMessage() itself.
+                assertEqual(c.abstraction.wheelDeltas, [120]);
                 c.destroy();
             });
 

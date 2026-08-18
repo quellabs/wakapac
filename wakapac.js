@@ -2048,14 +2048,21 @@
             document.addEventListener("wheel", function(event) {
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
 
-                // dispatchMouseMessage() handles wParam/lParam encoding, control-target
+                // MSG_MOUSEWHEEL encodes scroll delta into wParam alongside the
+                // modifier state, unlike every other mouse message where wParam is
+                // modifiers alone — computed here and passed as an override, the
+                // same way MSG_GESTURE supplies its own non-standard wParam/lParam
+                // (see dispatchMouseMessage()).
+                const wParam = self.buildWheelWParam(event.deltaY, self.getModifierState(event), event.deltaMode);
+
+                // dispatchMouseMessage() handles lParam encoding, control-target
                 // resolution, and the mouse-capture target fallback — same as every
                 // other mouse message.
                 self.dispatchMouseMessage(MSG_MOUSEWHEEL, event, container, null, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
                     wheelDeltaX: event.deltaX,  // Horizontal scroll delta (if supported)
                     deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
-                });
+                }, wParam);
             }, {
                 passive: true
             });
@@ -3238,23 +3245,19 @@
          *   be derived from the event after the cursor moves; for ENTER it reuses the
          *   caller's computed descendant. Ignored for other message types.
          * @param {Object} [extended]
-         * @param {number|null} [wParamOverride] - Bypasses the built-in wParam
-         *   encoding (modifier state, or the wheel-delta encoding used for
-         *   MSG_MOUSEWHEEL) with a caller-supplied value. Used by MSG_GESTURE,
-         *   whose wParam carries no modifier state.
+         * @param {number|null} [wParamOverride] - Bypasses the default wParam
+         *   encoding (modifier state) with a caller-supplied value, for message
+         *   types whose wParam means something else entirely. Used by
+         *   MSG_MOUSEWHEEL (scroll delta + modifiers, via buildWheelWParam())
+         *   and MSG_GESTURE (always 0 — a gesture carries no modifier-state
+         *   semantics of its own).
          * @param {number|null} [lParamOverride] - Bypasses buildMouseLParam()
          *   with a caller-supplied value. Used by MSG_GESTURE, whose lParam
          *   packs the gesture path's bounding-box center rather than a single
          *   event position.
          */
         dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}, wParamOverride = null, lParamOverride = null) {
-            // MSG_MOUSEWHEEL encodes scroll delta into wParam alongside the modifier
-            // state, unlike every other mouse message where wParam is modifiers alone.
-            const wParam = wParamOverride !== null
-                ? wParamOverride
-                : (msgType === MSG_MOUSEWHEEL
-                    ? this.buildWheelWParam(domEvent.deltaY, this.getModifierState(domEvent), domEvent.deltaMode)
-                    : this.getModifierState(domEvent));
+            const wParam = wParamOverride !== null ? wParamOverride : this.getModifierState(domEvent);
             const lParam = lParamOverride !== null ? lParamOverride : this.buildMouseLParam(domEvent, container);
 
             let targetOverride;
