@@ -303,6 +303,79 @@
                 c.destroy();
             });
 
+            suite('Accelerator tables');
+
+            await test('MSG_ACCEL from a container\'s own table fires in its own msgProc', async function () {
+                const CMD_SAVE = 1;
+                const c = mount('<input id="accelInput">', {
+                    received: null,
+                    msgProc(message) {
+                        if (message.message === wakaPAC.MSG_ACCEL) {
+                            this.received = message.wParam;
+                        }
+                    }
+                });
+                await tick();
+                wakaPAC.loadAcceleratorTable(c.pacId, [{ key: 'Ctrl+S', cmdId: CMD_SAVE }]);
+                c.container.querySelector('#accelInput').dispatchEvent(
+                    new KeyboardEvent('keydown', { bubbles: true, code: 'KeyS', ctrlKey: true })
+                );
+                await tick();
+                assertEqual(c.abstraction.received, CMD_SAVE, 'own table matched and delivered to itself');
+                wakaPAC.destroyAcceleratorTable(c.pacId);
+                c.destroy();
+            });
+
+            await test('MSG_ACCEL from a parent\'s table is delivered to the parent, not a focused child with no table of its own', async function () {
+                // Regression test: _accelTablesForContainer() walks up to ancestor
+                // tables, but _translateAccelerator() used to always send MSG_ACCEL
+                // to the originally focused (child) container's pacId regardless of
+                // which table matched -- so a shortcut resolved via a parent's table
+                // never actually reached the parent's msgProc. See MsgProcAcceleratorTables.html
+                // "Nested Containers".
+                const CMD_SAVE = 1;
+                const parentId = 'core-fixture-accel-parent-' + (++fixtureCounter);
+                const childId = 'core-fixture-accel-child-' + fixtureCounter;
+
+                const container = document.createElement('div');
+                container.id = parentId;
+                container.innerHTML = '<div id="' + childId + '"><input id="accelChildInput"></div>';
+                fixtures.appendChild(container);
+
+                const parent = wakaPAC('#' + parentId, {
+                    received: null,
+                    msgProc(message) {
+                        if (message.message === wakaPAC.MSG_ACCEL) {
+                            this.received = message.wParam;
+                        }
+                    }
+                });
+
+                const child = wakaPAC('#' + childId, {
+                    received: null,
+                    msgProc(message) {
+                        if (message.message === wakaPAC.MSG_ACCEL) {
+                            this.received = message.wParam;
+                        }
+                    }
+                });
+
+                await tick();
+
+                wakaPAC.loadAcceleratorTable(parentId, [{ key: 'Ctrl+S', cmdId: CMD_SAVE }]);
+
+                container.querySelector('#accelChildInput').dispatchEvent(
+                    new KeyboardEvent('keydown', { bubbles: true, code: 'KeyS', ctrlKey: true })
+                );
+                await tick();
+
+                assertEqual(parent.received, CMD_SAVE, 'parent msgProc received MSG_ACCEL, got ' + JSON.stringify({ parent: parent.received, child: child.received }));
+                assertEqual(child.received, null, 'child msgProc did not receive MSG_ACCEL (no table of its own)');
+
+                wakaPAC.destroyAcceleratorTable(parentId);
+                container.parentNode.removeChild(container);
+            });
+
             suite('Mouse target resolution');
 
             await test('MSG_MOUSEMOVE over a decorative descendant resolves target to the owning control', async function () {

@@ -9906,12 +9906,19 @@
     /**
      * Returns the ordered list of accelerator tables to search for a container,
      * walking up the hierarchy innermost-first with the global table as fallback.
+     * Each entry pairs a table with the pacId that owns it, so a match against
+     * an ancestor's table can be delivered to that ancestor rather than the
+     * originally focused container — mirroring Win32, where a window's own
+     * accelerator table posts WM_COMMAND to that window. The global table isn't
+     * tied to any container, so it pairs with the originally focused container's
+     * pacId instead.
      * @param {HTMLElement} container
-     * @returns {Array}
+     * @returns {Array<{pacId: string, table: Array}>}
      * @private
      */
     function _accelTablesForContainer(container) {
         const tables = [];
+        const focusedPacId = Utils.getPacId(container);
 
         // Walk up the container hierarchy, innermost first.
         // Uses closest() on parentElement to skip non-container ancestors in one step.
@@ -9924,7 +9931,7 @@
                 const table = _accelTables.get(id);
 
                 if (table) {
-                    tables.push(table);
+                    tables.push({ pacId: id, table });
                 }
             }
         }
@@ -9933,7 +9940,7 @@
         const global = _accelTables.get(ACCEL_GLOBAL_KEY);
 
         if (global) {
-            tables.push(global);
+            tables.push({ pacId: focusedPacId, table: global });
         }
 
         return tables;
@@ -9964,14 +9971,12 @@
         // extended key flag, etc. and must not affect the comparison.
         const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
 
-        // Fetch the pacId from the container
-        const pacId = Utils.getPacId(container);
-
-        // Fetch accelerator tables of this container and parent containers
+        // Fetch accelerator tables of this container and parent containers,
+        // each paired with the pacId that owns it.
         const tables = _accelTablesForContainer(container);
 
         // Walk them to map accelerators
-        for (const table of tables) {
+        for (const { pacId, table } of tables) {
             if (!table) {
                 continue;
             }
@@ -9981,6 +9986,10 @@
                 // Partial modifier matches are intentionally rejected — Ctrl+Shift+S
                 // must not trigger a Ctrl+S entry.
                 if (entry.vk === vk && entry.modifiers === modifiers) {
+                    // Deliver to the container whose table matched, not necessarily
+                    // the originally focused one — an ancestor's table posts to the
+                    // ancestor, just as the global table posts to whatever container
+                    // was focused (see _accelTablesForContainer()).
                     wakaPAC.sendMessage(pacId, MSG_ACCEL, entry.cmdId, 0);
                     return true;
                 }
