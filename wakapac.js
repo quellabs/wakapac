@@ -2039,27 +2039,16 @@
 
             // Listen for wheel input at the document level
             document.addEventListener("wheel", function(event) {
-                // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
-                const modifiers = self.getModifierState(event);
-                const wParam = self.buildWheelWParam(event.deltaY, modifiers, event.deltaMode);
-                const lParam = self.buildMouseLParam(event, container);
 
-                // MOUSEWHEEL is capture-affected (see getContainerForEvent()), so `container`
-                // may not contain event.target. Address the capturing container itself, as in
-                // the dispatchMouseMessage() fallback for CONTROL_TARGET_MESSAGES types.
-                const rawTarget = self.normalizeToElement(event.target);
-                const targetOverride = (container && !container.contains(rawTarget)) ? container : null;
-
-                // Wrap DOM wheel event with raw delta metadata for downstream consumers
-                const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
+                // dispatchMouseMessage() handles wParam/lParam encoding, control-target
+                // resolution, and the mouse-capture target fallback — same as every
+                // other mouse message.
+                self.dispatchMouseMessage(MSG_MOUSEWHEEL, event, container, null, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
                     wheelDeltaX: event.deltaX,  // Horizontal scroll delta (if supported)
                     deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
-                }, targetOverride);
-
-                // Dispatch normalized wheel message
-                self.dispatchToContainer(container, customEvent);
+                });
             }, {
                 passive: true
             });
@@ -3274,7 +3263,7 @@
         /**
          * Dispatches mouse messages with proper wParam/lParam encoding.
          * @param {number} msgType
-         * @param {MouseEvent | TouchEvent} domEvent
+         * @param {MouseEvent | TouchEvent | WheelEvent} domEvent
          * @param {HTMLElement} container
          * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
          *   the specific descendant entered/left. Required for LEAVE because it cannot
@@ -3283,7 +3272,11 @@
          * @param {Object} extended
          */
         dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}) {
-            const wParam = this.getModifierState(domEvent);
+            // MSG_MOUSEWHEEL encodes scroll delta into wParam alongside the modifier
+            // state, unlike every other mouse message where wParam is modifiers alone.
+            const wParam = msgType === MSG_MOUSEWHEEL
+                ? this.buildWheelWParam(domEvent.deltaY, this.getModifierState(domEvent), domEvent.deltaMode)
+                : this.getModifierState(domEvent);
             const lParam = this.buildMouseLParam(domEvent, container);
 
             let targetOverride;
@@ -3292,13 +3285,14 @@
                 targetOverride = container;
             } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
                 targetOverride = descendantOverride;
-            } else if (CONTROL_TARGET_MESSAGES.has(msgType) || msgType === MSG_MOUSEMOVE) {
-                // MSG_MOUSEMOVE shares this resolution so that `target` agrees with
-                // MSG_MOUSEENTER_DESCENDANT/MSG_MOUSELEAVE_DESCENDANT while hovering
-                // the same control — those already address a decorative descendant's
-                // owning control (e.g. an icon inside a button reports the button),
-                // and a continuous move over that same descendant should not report
-                // something more specific than the enter/leave pair bracketing it.
+            } else if (CONTROL_TARGET_MESSAGES.has(msgType) || msgType === MSG_MOUSEMOVE || msgType === MSG_MOUSEWHEEL) {
+                // MSG_MOUSEMOVE and MSG_MOUSEWHEEL share this resolution so that
+                // `target` agrees with MSG_MOUSEENTER_DESCENDANT/MSG_MOUSELEAVE_DESCENDANT
+                // while hovering the same control — those already address a decorative
+                // descendant's owning control (e.g. an icon inside a button reports the
+                // button), and neither a continuous move nor a scroll over that same
+                // descendant should report something more specific than the enter/leave
+                // pair bracketing it.
                 const rawTarget = this.normalizeToElement(domEvent.target);
 
                 // Resolve to the nearest control, if any is present.

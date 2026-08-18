@@ -352,6 +352,45 @@
                 c.destroy();
             });
 
+            await test('MSG_MOUSEWHEEL over a decorative descendant resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="wheelBtn"><span id="wheelIcon">*</span></button>',
+                    {
+                        wheelTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_MOUSEWHEEL) {
+                                this.wheelTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                c.container.querySelector('#wheelIcon').dispatchEvent(
+                    new WheelEvent('wheel', { bubbles: true, deltaY: 10 })
+                );
+                await tick();
+                assertEqual(c.abstraction.wheelTargets, ['wheelBtn']);
+                c.destroy();
+            });
+
+            await test('MSG_MOUSEWHEEL over plain content reports the literal element', async function () {
+                const c = mount('<div id="wheelContent">plain</div>', {
+                    wheelTargets: [],
+                    msgProc(message) {
+                        if (message.message === wakaPAC.MSG_MOUSEWHEEL) {
+                            this.wheelTargets.push(message.target.id);
+                        }
+                    }
+                });
+                await tick();
+                c.container.querySelector('#wheelContent').dispatchEvent(
+                    new WheelEvent('wheel', { bubbles: true, deltaY: 10 })
+                );
+                await tick();
+                assertEqual(c.abstraction.wheelTargets, ['wheelContent']);
+                c.destroy();
+            });
+
             suite('Component lifecycle');
 
             await test('component is registered under its pacId while mounted', async function () {
