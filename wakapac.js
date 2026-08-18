@@ -262,17 +262,23 @@
     const MSG_PLUGIN = 0x2000;
 
     /**
-     * Click/button-family message types whose target should resolve to the
-     * nearest control via DomUpdateTracker.findInteractiveDescendant(),
-     * mirroring Win32's behavior of addressing mouse button messages to
-     * controls rather than content painted inside them.
+     * Mouse message types whose target should resolve to the nearest control
+     * via DomUpdateTracker.findInteractiveDescendant(), mirroring Win32's
+     * behavior of addressing mouse messages to controls rather than content
+     * painted inside them. Covers the discrete click/button family, the two
+     * continuous pointer streams (move, wheel), and HTML5 drag-and-drop —
+     * every message type dispatched through dispatchMouseMessage() except
+     * MOUSEENTER/LEAVE (always the container) and ENTER/LEAVE_DESCENDANT
+     * (resolved by the caller, not here).
      */
     const CONTROL_TARGET_MESSAGES = new Set([
         MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
         MSG_RBUTTONDOWN, MSG_RBUTTONUP,
         MSG_MBUTTONDOWN, MSG_MBUTTONUP,
         MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
-        MSG_CONTEXTMENU
+        MSG_CONTEXTMENU,
+        MSG_MOUSEMOVE, MSG_MOUSEWHEEL,
+        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP
     ]);
 
     /**
@@ -2188,18 +2194,9 @@
                     return;
                 }
 
-                // Create the event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGENTER, event, wParam, lParam, {
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch the event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGENTER, event, container, null, {
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2230,18 +2227,9 @@
                     return;
                 }
 
-                // Create event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGLEAVE, event, wParam, lParam, {
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGLEAVE, event, container, null, {
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2288,23 +2276,10 @@
                 // Store the new dropzone
                 self._dropzoneTarget = dropTarget;
 
-                // Create the event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGOVER,
-                    event,
-                    wParam,
-                    lParam,
-                    {
-                        dropTarget: dropTarget,
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch the event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGOVER, event, container, null, {
+                    dropTarget: dropTarget,
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2337,24 +2312,16 @@
                 // Drag sequence complete — clean up tracking state
                 self._enterDepths.delete(container);
 
-                // Create the event
                 const transfer = event.dataTransfer;
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
 
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DROP, event, wParam, lParam, {
-                        dropTarget: dropTarget,
-                        text: transfer.getData('text/plain'),
-                        html: transfer.getData('text/html'),
-                        uri: transfer.getData('text/uri-list'),
-                        files: self._extractFileMetadata(transfer.files),
-                        rawFiles: transfer.files
-                    }
-                );
-
-                // Dispatch event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DROP, event, container, null, {
+                    dropTarget: dropTarget,
+                    text: transfer.getData('text/plain'),
+                    html: transfer.getData('text/html'),
+                    uri: transfer.getData('text/uri-list'),
+                    files: self._extractFileMetadata(transfer.files),
+                    rawFiles: transfer.files
+                });
             });
         },
 
@@ -3263,7 +3230,7 @@
         /**
          * Dispatches mouse messages with proper wParam/lParam encoding.
          * @param {number} msgType
-         * @param {MouseEvent | TouchEvent | WheelEvent} domEvent
+         * @param {MouseEvent | TouchEvent | WheelEvent | DragEvent} domEvent
          * @param {HTMLElement} container
          * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
          *   the specific descendant entered/left. Required for LEAVE because it cannot
@@ -3285,14 +3252,7 @@
                 targetOverride = container;
             } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
                 targetOverride = descendantOverride;
-            } else if (CONTROL_TARGET_MESSAGES.has(msgType) || msgType === MSG_MOUSEMOVE || msgType === MSG_MOUSEWHEEL) {
-                // MSG_MOUSEMOVE and MSG_MOUSEWHEEL share this resolution so that
-                // `target` agrees with MSG_MOUSEENTER_DESCENDANT/MSG_MOUSELEAVE_DESCENDANT
-                // while hovering the same control — those already address a decorative
-                // descendant's owning control (e.g. an icon inside a button reports the
-                // button), and neither a continuous move nor a scroll over that same
-                // descendant should report something more specific than the enter/leave
-                // pair bracketing it.
+            } else if (CONTROL_TARGET_MESSAGES.has(msgType)) {
                 const rawTarget = this.normalizeToElement(domEvent.target);
 
                 // Resolve to the nearest control, if any is present.

@@ -391,6 +391,48 @@
                 c.destroy();
             });
 
+            await test('MSG_DRAGENTER over a decorative descendant resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="dragBtn"><span id="dragIcon">*</span></button>',
+                    {
+                        enterTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_DRAGENTER) {
+                                this.enterTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                c.container.querySelector('#dragIcon').dispatchEvent(
+                    new DragEvent('dragenter', { bubbles: true, dataTransfer: new DataTransfer() })
+                );
+                await tick();
+                assertEqual(c.abstraction.enterTargets, ['dragBtn']);
+                c.destroy();
+            });
+
+            await test('MSG_DROP over a decorative descendant resolves target to the owning control', async function () {
+                const c = mount(
+                    '<button id="dropBtn" data-pac-drop-target="copy"><span id="dropIcon">*</span></button>',
+                    {
+                        dropTargets: [],
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_DROP) {
+                                this.dropTargets.push(message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+                c.container.querySelector('#dropIcon').dispatchEvent(
+                    new DragEvent('drop', { bubbles: true, dataTransfer: new DataTransfer() })
+                );
+                await tick();
+                assertEqual(c.abstraction.dropTargets, ['dropBtn']);
+                c.destroy();
+            });
+
             suite('Component lifecycle');
 
             await test('component is registered under its pacId while mounted', async function () {
