@@ -273,6 +273,68 @@
                 c.destroy();
             });
 
+            await test('function call with item argument in interpolation does not warn on initial render (issue #196)', async function () {
+                const originalWarn = console.warn;
+                const warnings = [];
+                console.warn = function () { warnings.push(Array.prototype.join.call(arguments, ' ')); };
+
+                let c;
+                try {
+                    c = mount(
+                        '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                        '<li>{{format(item)}}</li></ul>',
+                        {
+                            items: [{ name: 'chair', value: 14 }, { name: 'painting', value: 260 }],
+                            format(item) { return item.name + ' = ' + item.value; }
+                        }
+                    );
+                    await tick();
+                } finally {
+                    console.warn = originalWarn;
+                }
+
+                const interpolationWarnings = warnings.filter(function (w) {
+                    return w.indexOf('Error in text interpolation') !== -1;
+                });
+
+                assertEqual(interpolationWarnings, [], 'no interpolation warnings during initial foreach render');
+
+                const lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2);
+                assertEqual(lis[0].textContent, 'chair = 14');
+                assertEqual(lis[1].textContent, 'painting = 260');
+                c.destroy();
+            });
+
+            await test('function call with item argument in interpolation does not warn on an empty array (issue #196)', async function () {
+                const originalWarn = console.warn;
+                const warnings = [];
+                console.warn = function () { warnings.push(Array.prototype.join.call(arguments, ' ')); };
+
+                let c;
+                try {
+                    c = mount(
+                        '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                        '<li>{{format(item)}}</li></ul>',
+                        {
+                            items: [],
+                            format(item) { return item.name + ' = ' + item.value; }
+                        }
+                    );
+                    await tick();
+                } finally {
+                    console.warn = originalWarn;
+                }
+
+                const interpolationWarnings = warnings.filter(function (w) {
+                    return w.indexOf('Error in text interpolation') !== -1;
+                });
+
+                assertEqual(interpolationWarnings, [], 'no interpolation warnings when the foreach array is empty');
+                assertEqual(c.container.querySelectorAll('li').length, 0);
+                c.destroy();
+            });
+
             suite('Click bindings & msgProc');
 
             await test('click binding invokes the bound method', async function () {

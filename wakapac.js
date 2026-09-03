@@ -6124,8 +6124,26 @@
             self.updateCommentConditional(commentNode, mappingData);
         });
 
+        // Elements in this batch that declare a `foreach` binding are still showing
+        // their static template content — the per-item clones (with `item`/`$index`
+        // bound) don't exist until renderForeach runs below. Bindings and
+        // interpolations found inside that template describe scope that isn't
+        // available yet: a plain property read resolves the missing loop variable
+        // to undefined and fails silently, but a function call that dereferences
+        // its argument throws. Skip that content here — renderForeach's own
+        // scanAndRegisterNewElements() call evaluates it correctly once the real,
+        // scoped clones exist.
+        const pendingForeachElements = this.getPendingForeachElements(newBindings, parentElement);
+
         // Apply initial bindings to new elements
         newBindings.forEach((mappingData, element) => {
+            // Only skip bindings that live *inside* an unrendered foreach template —
+            // the foreach element's own other bindings (e.g. a class binding
+            // alongside `foreach:`) still apply to the real, non-templated element.
+            if (self.isInsidePendingForeachTemplate(element.parentElement, pendingForeachElements)) {
+                return;
+            }
+
             Object.keys(mappingData.bindings).forEach(bindingType => {
                 // Skip event bindings — they are never evaluated eagerly, only on user interaction.
                 if (bindingType === 'click' || bindingType === 'submit') {
@@ -6141,6 +6159,12 @@
 
         // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
+            const owner = textNode.nodeType === Node.ATTRIBUTE_NODE ? textNode.ownerElement : textNode.parentElement;
+
+            if (self.isInsidePendingForeachTemplate(owner, pendingForeachElements)) {
+                return;
+            }
+
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
@@ -8342,6 +8366,51 @@
 
         return null;
     }
+
+    /**
+     * Builds the set of elements in a scan batch that declare a `foreach`
+     * binding but haven't been rendered yet — their descendant content is
+     * still the static template, not per-item clones with `item`/`$index`
+     * bound. Used by scanAndRegisterNewElements() to defer eager binding
+     * evaluation for that content until renderForeach() has produced the
+     * real, scoped clones.
+     * @param {Map<Element, Object>} newBindings - Bindings map from scanBindings()
+     * @param {Element} parentElement - The container currently being scanned
+     * @returns {Set<Element>}
+     */
+    Runtime.prototype.getPendingForeachElements = function(newBindings, parentElement) {
+        const pendingForeachElements = new Set();
+
+        newBindings.forEach((mappingData, element) => {
+            if (mappingData.bindings.foreach && element !== parentElement) {
+                pendingForeachElements.add(element);
+            }
+        });
+
+        return pendingForeachElements;
+    };
+
+    /**
+     * Checks whether startElement is, or descends from, one of the elements
+     * in pendingForeachElements — i.e. whether it lives inside a foreach
+     * template that hasn't been rendered into scoped per-item clones yet.
+     * @param {Element|null} startElement - Element to start the ancestor walk from
+     * @param {Set<Element>} pendingForeachElements - From getPendingForeachElements()
+     * @returns {boolean}
+     */
+    Runtime.prototype.isInsidePendingForeachTemplate = function(startElement, pendingForeachElements) {
+        let el = startElement;
+
+        while (el) {
+            if (pendingForeachElements.has(el)) {
+                return true;
+            }
+
+            el = el.parentElement;
+        }
+
+        return false;
+    };
 
     // =============================================================================
     // FOREACH RENDERING (Array → DOM List Generation)
