@@ -335,6 +335,54 @@
                 c.destroy();
             });
 
+            await test('foreach on a computed array built via .map() binds item to the transformed value, not the source array (issue #198)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: gadgets">' +
+                    '<li>{{item.name}}</li></ul>',
+                    {
+                        items: [1, 2],
+                        computed: {
+                            gadgets() {
+                                return this.items.map(function (item) {
+                                    return { name: 'Gadget #' + item };
+                                });
+                            }
+                        }
+                    }
+                );
+                await tick();
+                const lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2);
+                assertEqual(lis[0].textContent, 'Gadget #1');
+                assertEqual(lis[1].textContent, 'Gadget #2');
+                c.destroy();
+            });
+
+            await test('foreach on a computed array built via .filter() still maps item back to the source array', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: visible">' +
+                    '<li>{{item.label}}</li></ul>',
+                    {
+                        todos: [
+                            { label: 'a', done: false },
+                            { label: 'b', done: true },
+                            { label: 'c', done: false }
+                        ],
+                        computed: {
+                            visible() {
+                                return this.todos.filter(function (t) { return !t.done; });
+                            }
+                        }
+                    }
+                );
+                await tick();
+                const lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2);
+                assertEqual(lis[0].textContent, 'a');
+                assertEqual(lis[1].textContent, 'c');
+                c.destroy();
+            });
+
             suite('Click bindings & msgProc');
 
             await test('click binding invokes the bound method', async function () {
