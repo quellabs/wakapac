@@ -6301,7 +6301,22 @@
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
     Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
+        // Whether a computed derives its array identity-preservingly is a property
+        // of its implementation, not of the current data, so the answer is safe to
+        // cache for the component's lifetime. That matters because a foreach nested
+        // inside another foreach's items gets fresh, unregistered DOM elements on
+        // every rebuild (renderForeach replaces innerHTML wholesale) — without this
+        // cache, the identity check below would otherwise re-run, and re-evaluate
+        // the computed itself, once per outer item on every outer re-render.
+        const cache = this._arrayRootCache || (this._arrayRootCache = new Map());
+
+        if (cache.has(computedName)) {
+            return cache.get(computedName);
+        }
+
         // Step 1: Try dependency map (cheap and reliable if set up correctly).
+        let result = computedName; // Fallback if nothing matches below
+
         for (const [rootProperty, dependentList] of this.dependencies) {
             const rootValue = this.abstraction[rootProperty];
             const isArrayRoot = Array.isArray(rootValue);
@@ -6315,17 +6330,21 @@
                     continue;
                 }
 
+                // A Set gives O(1) membership checks instead of Array.includes()'s
+                // O(m) scan, so the overall check is O(n + m) rather than O(n * m).
+                const rootSet = new Set(rootValue);
                 const isIdentityPreserving = Array.isArray(computedValue) &&
-                    computedValue.every((item) => rootValue.includes(item));
+                    computedValue.every((item) => rootSet.has(item));
 
                 if (isIdentityPreserving) {
-                    return rootProperty; // e.g. "todos"
+                    result = rootProperty; // e.g. "todos"
+                    break;
                 }
             }
         }
 
-        // Nothing matched
-        return computedName;
+        cache.set(computedName, result);
+        return result;
     };
 
     /**
