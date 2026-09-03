@@ -6288,6 +6288,15 @@
     /**
      * Try to infer which array property in the abstraction is the "source" array
      * behind a given computed property (for example, linking `filteredTodos` back to `todos`).
+     *
+     * Only matches when the computed value's elements are the *same object
+     * references* as elements of the candidate root array — true for
+     * identity-preserving derivations like `.filter()`/`.sort()`/`.slice()`,
+     * where mapping a foreach item back to its root-array index lets edits
+     * flow through to the original item. A transform like `.map()` produces
+     * brand-new elements that aren't part of the root array at all, so
+     * treating the root as the source there would bind `item` to the wrong
+     * (untransformed) value — see issue #198.
      * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`).
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
@@ -6298,7 +6307,20 @@
             const isArrayRoot = Array.isArray(rootValue);
 
             if (dependentList.has(computedName) && isArrayRoot) {
-                return rootProperty; // e.g. "todos"
+                let computedValue;
+
+                try {
+                    computedValue = this.abstraction[computedName];
+                } catch (error) {
+                    continue;
+                }
+
+                const isIdentityPreserving = Array.isArray(computedValue) &&
+                    computedValue.every((item) => rootValue.includes(item));
+
+                if (isIdentityPreserving) {
+                    return rootProperty; // e.g. "todos"
+                }
             }
         }
 
