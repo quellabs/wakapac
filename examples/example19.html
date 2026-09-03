@@ -196,7 +196,7 @@
                 activeTab() { return this.tabs[this.activeTabIndex] || this.tabs[0]; }
             },
 
-            selectTab(tab, tabIndex) {
+            selectTab(event, tab, tabIndex) {
                 console.log('selectTab:', { tabIndex });
                 this.activeTabIndex = tabIndex;
             },
@@ -207,7 +207,7 @@
                 this.activeTabIndex = this.tabs.length - 1;
             },
 
-            toggleImportant(item) {
+            toggleImportant(event, item) {
                 console.log('toggleImportant:', { item });
                 item.important = !item.important;
             }

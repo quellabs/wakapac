@@ -24,6 +24,9 @@
         #summary { margin-top: 2rem; font-size: 1rem; padding: 0.75rem 1rem; background: #111; border: 1px solid #333; }
         .summary-pass { color: #5cb85c; }
         .summary-fail { color: #d9534f; }
+        /* Machine-readable status for automated runners (see tests/html-suites.spec.js) */
+        #summary.all-pass { border-color: #5cb85c; }
+        #summary.has-fail { border-color: #d9534f; }
 
         /* PAC containers — hidden until the router shows them */
         .pac-view { display: none; padding: 0.75rem 1rem; background: #111; border: 1px solid #444; margin-bottom: 0.5rem; font-size: 0.875rem; }
@@ -326,6 +329,7 @@
     summary.innerHTML = _failed === 0
         ? `<span class="summary-pass">All ${total} tests passed.</span>`
         : `<span class="summary-fail">${_failed} of ${total} tests failed.</span>`;
+    summary.className = _failed === 0 ? 'all-pass' : 'has-fail';
 
     // Navigate to / on load so a view is visible
     wakaRoute.navigate('/');

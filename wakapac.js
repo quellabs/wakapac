@@ -124,6 +124,22 @@
     const WP_ELSE_IF_COMMENT_REGEX = /^\s*wp-else-if:\s*(.+?)\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
+    /**
+     * Builds the opaque group entry a wp-if branch's node list uses to
+     * represent a nested wp-if as one atomic unit — see scanCommentBindings
+     * and updateCommentConditional's buried-comment handling, the two
+     * places that ever create one of these: a nested wp-if found as a
+     * direct comment sibling, and one found buried inside a descendant
+     * element respectively. Both need the identical shape, so both call
+     * this rather than each building the object literal itself.
+     * @param {Comment} openMarker
+     * @param {Comment} closeMarker
+     * @returns {{__wpGroup: true, openMarker: Comment, closeMarker: Comment}}
+     */
+    function makeWpIfGroup(openMarker, closeMarker) {
+        return { __wpGroup: true, openMarker, closeMarker };
+    }
+
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
 
@@ -244,6 +260,27 @@
     const MSG_FOREACH_REBUILT = 0x0400;
     const MSG_USER = 0x1000;
     const MSG_PLUGIN = 0x2000;
+
+    /**
+     * Mouse message types whose target should resolve to the nearest control
+     * via DomUpdateTracker.findInteractiveDescendant(), mirroring Win32's
+     * behavior of addressing mouse messages to controls rather than content
+     * painted inside them. Covers the discrete click/button family, the two
+     * continuous pointer streams (move, wheel), HTML5 drag-and-drop, and
+     * gesture recognition — every message type dispatched through
+     * dispatchMouseMessage() except MOUSEENTER/LEAVE (always the container)
+     * and ENTER/LEAVE_DESCENDANT (resolved by the caller, not here).
+     */
+    const CONTROL_TARGET_MESSAGES = new Set([
+        MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
+        MSG_RBUTTONDOWN, MSG_RBUTTONUP,
+        MSG_MBUTTONDOWN, MSG_MBUTTONUP,
+        MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
+        MSG_CONTEXTMENU,
+        MSG_MOUSEMOVE, MSG_MOUSEWHEEL,
+        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP,
+        MSG_GESTURE
+    ]);
 
     /**
      * Mouse and keyboard modifier key state flags
@@ -614,6 +651,24 @@
      * @namespace Utils
      */
     const Utils = {
+
+        /**
+         * Escapes the five HTML-significant characters in a string so it can
+         * be safely inserted into an HTML string being built for innerHTML
+         * assignment (e.g. a data-pac-placeholder value). Not a general
+         * sanitizer -- just enough to stop the text from breaking out of the
+         * <option> tag it's placed into.
+         * @param {string} value
+         * @returns {string}
+         */
+        escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        },
 
         /**
          * Generates a unique identifier string based on current timestamp and optional random component
@@ -1929,7 +1984,7 @@
                             if (self._hoveredContainer) {
                                 // Clean up any lingering descendant hover first
                                 if (self._hoveredDescendant) {
-                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer);
+                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
                                 }
 
                                 self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
@@ -1950,17 +2005,19 @@
                     // changes, enabling per-element hover effects without requiring
                     // each child to register its own listeners.
                     if (currentContainer && !captured) {
+                        const rawTarget = self.normalizeToElement(event.target);
+
                         // Resolve the descendant: any element other than the
                         // container root itself is a hovered child
-                        const currentDescendant = self.findInteractiveDescendant(event.target, currentContainer);
+                        const currentDescendant = self.findInteractiveDescendant(rawTarget, currentContainer);
 
                         if (self._hoveredDescendant !== currentDescendant) {
                             if (self._hoveredDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer);
+                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer, self._hoveredDescendant);
                             }
 
                             if (currentDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer);
+                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer, currentDescendant);
                             }
 
                             self._hoveredDescendant = currentDescendant;
@@ -1989,21 +2046,23 @@
 
             // Listen for wheel input at the document level
             document.addEventListener("wheel", function(event) {
-                // Fetch all data
                 const container = self.getContainerForEvent(MSG_MOUSEWHEEL, event);
-                const modifiers = self.getModifierState(event);
-                const wParam = self.buildWheelWParam(event.deltaY, modifiers, event.deltaMode);
-                const lParam = self.buildMouseLParam(event, container);
 
-                // Wrap DOM wheel event with raw delta metadata for downstream consumers
-                const customEvent = self.wrapDomEventAsMessage(MSG_MOUSEWHEEL, event, wParam, lParam, {
+                // MSG_MOUSEWHEEL encodes scroll delta into wParam alongside the
+                // modifier state, unlike every other mouse message where wParam is
+                // modifiers alone — computed here and passed as an override, the
+                // same way MSG_GESTURE supplies its own non-standard wParam/lParam
+                // (see dispatchMouseMessage()).
+                const wParam = self.buildWheelWParam(event.deltaY, self.getModifierState(event), event.deltaMode);
+
+                // dispatchMouseMessage() handles lParam encoding, control-target
+                // resolution, and the mouse-capture target fallback — same as every
+                // other mouse message.
+                self.dispatchMouseMessage(MSG_MOUSEWHEEL, event, container, null, {
                     wheelDelta: event.deltaY,   // Primary vertical scroll delta
                     wheelDeltaX: event.deltaX,  // Horizontal scroll delta (if supported)
                     deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
-                });
-
-                // Dispatch normalized wheel message
-                self.dispatchToContainer(container, customEvent);
+                }, wParam);
             }, {
                 passive: true
             });
@@ -2143,18 +2202,9 @@
                     return;
                 }
 
-                // Create the event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGENTER, event, wParam, lParam, {
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch the event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGENTER, event, container, null, {
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2185,18 +2235,9 @@
                     return;
                 }
 
-                // Create event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGLEAVE, event, wParam, lParam, {
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGLEAVE, event, container, null, {
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2243,23 +2284,10 @@
                 // Store the new dropzone
                 self._dropzoneTarget = dropTarget;
 
-                // Create the event
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
-
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DRAGOVER,
-                    event,
-                    wParam,
-                    lParam,
-                    {
-                        dropTarget: dropTarget,
-                        types: Array.from(event.dataTransfer.types)
-                    }
-                );
-
-                // Dispatch the event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DRAGOVER, event, container, null, {
+                    dropTarget: dropTarget,
+                    types: Array.from(event.dataTransfer.types)
+                });
             });
         },
 
@@ -2292,24 +2320,16 @@
                 // Drag sequence complete — clean up tracking state
                 self._enterDepths.delete(container);
 
-                // Create the event
                 const transfer = event.dataTransfer;
-                const lParam = self.buildMouseLParam(event, container);
-                const wParam = self.getModifierState(event);
 
-                const customEvent = self.wrapDomEventAsMessage(
-                    MSG_DROP, event, wParam, lParam, {
-                        dropTarget: dropTarget,
-                        text: transfer.getData('text/plain'),
-                        html: transfer.getData('text/html'),
-                        uri: transfer.getData('text/uri-list'),
-                        files: self._extractFileMetadata(transfer.files),
-                        rawFiles: transfer.files
-                    }
-                );
-
-                // Dispatch event
-                self.dispatchToContainer(container, customEvent);
+                self.dispatchMouseMessage(MSG_DROP, event, container, null, {
+                    dropTarget: dropTarget,
+                    text: transfer.getData('text/plain'),
+                    html: transfer.getData('text/html'),
+                    uri: transfer.getData('text/uri-list'),
+                    files: self._extractFileMetadata(transfer.files),
+                    rawFiles: transfer.files
+                });
             });
         },
 
@@ -2351,7 +2371,7 @@
                 if (self._hoveredContainer) {
                     // Clean up any lingering descendant hover first
                     if (self._hoveredDescendant) {
-                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer);
+                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
                         self._hoveredDescendant = null;
                     }
 
@@ -3001,6 +3021,7 @@
                 // Standard tracking fields
                 timestamp: { value: Date.now(), enumerable: true, configurable: true },
                 target: { value: targetOverride ?? originalEvent?.target, enumerable: true, configurable: true },
+                realTarget: { value: originalEvent?.target, enumerable: true, configurable: true },
 
                 // Reference to the original DOM event for debugging/advanced usage
                 originalEvent: { value: originalEvent, enumerable: true, configurable: true }
@@ -3036,18 +3057,25 @@
         },
 
         /**
+         * Normalizes a DOM event/hit-test target to the nearest Element. Event
+         * targets can be a TextNode when the cursor is over bare text content;
+         * TextNode has no closest()/hasAttribute(), so callers that walk the
+         * DOM from a target need an Element to start from.
+         * @param {Node|null|undefined} node
+         * @returns {Element|null}
+         */
+        normalizeToElement(node) {
+            return node instanceof Element ? node : (node?.parentElement ?? null);
+        },
+
+        /**
          * Returns the container the event will be dispatched to
          * @param {number} msgType
          * @param {Event} originalEvent
          * @returns {HTMLElement|*}
          */
         getContainerForEvent(msgType, originalEvent) {
-            // originalEvent.target can be a TextNode when the cursor is over bare text content.
-            // TextNode does not implement Element and has no closest() — normalise to the
-            // nearest Element ancestor before querying the PAC container hierarchy.
-            const target = originalEvent.target instanceof Element
-                ? originalEvent.target
-                : originalEvent.target?.parentElement;
+            const target = this.normalizeToElement(originalEvent.target);
 
             // Walk up the DOM to find the nearest [data-pac-id] ancestor (or self).
             // Returns null if the event originated outside any registered container.
@@ -3068,31 +3096,75 @@
         },
 
         /**
-         * Walks up from a target element to find the nearest interactive
-         * descendant within a container, mimicking Win32's child window
-         * hit-testing. Returns null if the target is plain content (text
-         * nodes, layout divs, etc.) that wouldn't be a "control".
+         * True if el is inherently interactive — independent of any click
+         * binding. Shared by findInteractiveDescendant() and
+         * Runtime.prototype.findClickBindingElement() so both walks agree on
+         * what counts as "a control" a click can't pass through.
+         * @param {Element} el
+         * @returns {boolean}
+         * @private
+         */
+        isInherentlyInteractive(el) {
+            return INTERACTIVE_TAGS.has(el.tagName?.toUpperCase()) ||
+                el.hasAttribute('data-pac-control') ||
+                el.hasAttribute('data-pac-hoverable') ||
+                el.hasAttribute('tabindex') ||
+                el.isContentEditable;
+        },
+
+        /**
+         * Returns true if the element carries a data-pac-bind="click: ..."
+         * binding, i.e. it's a control by virtue of the declarative binding
+         * system rather than its tag or an explicit control attribute.
+         * Reads the DOM attribute directly and parses it via ExpressionCache
+         * (already memoized), so this has no dependency on any Runtime
+         * instance or its interpolationMap.
+         * @param {Element} el - The element to check
+         * @returns {boolean} True if el has a click binding
+         * @private
+         */
+        hasClickBinding(el) {
+            const bindingString = el.getAttribute('data-pac-bind');
+
+            if (!bindingString) {
+                return false;
+            }
+
+            return ExpressionCache.parseBindingString(bindingString)
+                .some(binding => binding.type === 'click');
+        },
+
+        /**
+         * Finds the nearest interactive element from `target` within `container`,
+         * mirroring Win32 child-window hit-testing. Returns null for plain content.
+         * A control is accepted by isInherentlyInteractive() or has a
+         * data-pac-bind="click: ..." binding, matching findClickBindingElement().
          *
-         * An element is considered interactive if it:
-         * - Is a native form/link element (input, button, select, etc.)
-         * - Has a [data-pac-hoverable] attribute
-         * - Has a tabindex (making it focusable/interactive by convention)
+         * Requires `container` to actually contain `target` (checked up front).
+         * Without this, a `target` from outside `container` — e.g. a raw click
+         * point during mouse capture, which redirects messages to the capturing
+         * container regardless of where the cursor actually is — would never
+         * reach the `el !== container` stop condition while climbing `target`'s
+         * real ancestor chain, and could walk into and return an unrelated
+         * control from a completely different part of the document.
          *
-         * @param {Element} target - The DOM element that received the event
-         * @param {Element} container - The container root to stop walking at
-         * @returns {Element|null} The nearest interactive ancestor of target, or null
+         * @param {Element} target - Element that received the event
+         * @param {Element} container - Container root to stop at
+         * @returns {Element|null} Nearest interactive ancestor, or null
          * @private
          */
         findInteractiveDescendant(target, container) {
+            if (container && !container.contains(target)) {
+                return null;
+            }
+
             let el = target;
 
             // Walk up the DOM tree from the event target, stopping at
-            // the container boundary. The first interactive element we
-            // encounter is the logical "child window" being hovered.
+            // the container boundary. The first control we encounter is
+            // the logical "child window" being hovered or clicked.
             while (el && el !== container) {
-                if (INTERACTIVE_TAGS.has(el.tagName) ||
-                    el.hasAttribute('data-pac-hoverable') ||
-                    el.hasAttribute('tabindex')) {
+                if (this.isInherentlyInteractive(el) || this.hasClickBinding(el)) {
                     return el;
                 }
 
@@ -3164,16 +3236,55 @@
         },
 
         /**
-         * Helper to dispatch mouse messages with proper wParam/lParam encoding
+         * Dispatches mouse messages with proper wParam/lParam encoding.
          * @param {number} msgType
-         * @param {MouseEvent | TouchEvent} domEvent
+         * @param {MouseEvent | TouchEvent | WheelEvent | DragEvent} domEvent
          * @param {HTMLElement} container
-         * @param {Object} extended
+         * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
+         *   the specific descendant entered/left. Required for LEAVE because it cannot
+         *   be derived from the event after the cursor moves; for ENTER it reuses the
+         *   caller's computed descendant. Ignored for other message types.
+         * @param {Object} [extended]
+         * @param {number|null} [wParamOverride] - Bypasses the default wParam
+         *   encoding (modifier state) with a caller-supplied value, for message
+         *   types whose wParam means something else entirely. Used by
+         *   MSG_MOUSEWHEEL (scroll delta + modifiers, via buildWheelWParam())
+         *   and MSG_GESTURE (always 0 — a gesture carries no modifier-state
+         *   semantics of its own).
+         * @param {number|null} [lParamOverride] - Bypasses buildMouseLParam()
+         *   with a caller-supplied value. Used by MSG_GESTURE, whose lParam
+         *   packs the gesture path's bounding-box center rather than a single
+         *   event position.
          */
-        dispatchMouseMessage(msgType, domEvent, container, extended = {}) {
-            const wParam = this.getModifierState(domEvent);
-            const lParam = this.buildMouseLParam(domEvent, container);
-            const targetOverride = (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) ? container : null;
+        dispatchMouseMessage(msgType, domEvent, container, descendantOverride = null, extended = {}, wParamOverride = null, lParamOverride = null) {
+            const wParam = wParamOverride !== null ? wParamOverride : this.getModifierState(domEvent);
+            const lParam = lParamOverride !== null ? lParamOverride : this.buildMouseLParam(domEvent, container);
+
+            let targetOverride;
+
+            if (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) {
+                targetOverride = container;
+            } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
+                targetOverride = descendantOverride;
+            } else if (CONTROL_TARGET_MESSAGES.has(msgType)) {
+                const rawTarget = this.normalizeToElement(domEvent.target);
+
+                // Resolve to the nearest control, if any is present.
+                targetOverride = this.findInteractiveDescendant(rawTarget, container);
+
+                if (!targetOverride) {
+                    // Under mouse capture, rawTarget may lie outside container
+                    // (capture redirects regardless of cursor position); address
+                    // the capturing container itself rather than a foreign node —
+                    // Win32 addresses a captured message with no more specific hit
+                    // to the capturing window. Otherwise report rawTarget directly
+                    // (already normalized, so never a bare TextNode).
+                    targetOverride = (container && !container.contains(rawTarget)) ? container : rawTarget;
+                }
+            } else {
+                targetOverride = null;
+            }
+
             const customEvent = this.wrapDomEventAsMessage(msgType, domEvent, wParam, lParam, extended, targetOverride);
 
             this.dispatchToContainer(container, customEvent);
@@ -5117,6 +5228,35 @@
     };
 
     /**
+     * Keeps a <select>'s synthetic placeholder <option> (created by
+     * renderForeach during the first foreach rebuild) in sync. Unlike
+     * renderForeach, this runs on every reactive update, so placeholder
+     * expressions depending on unrelated state (e.g. a loading flag) still
+     * update even when the bound array is unchanged. A no-op until the
+     * placeholder option exists.
+     * @param {Runtime} context - The PAC component context
+     * @param {Element} element - The <select> element
+     * @param {*} value - The evaluated placeholder text
+     */
+    BindingHandlers.placeholder = function(context, element, value) {
+        if (element.tagName !== 'SELECT') {
+            return;
+        }
+
+        const placeholderOption = element.querySelector('option[data-pac-placeholder-option]');
+
+        if (!placeholderOption) {
+            return;
+        }
+
+        const text = value != null ? String(value) : '';
+
+        if (placeholderOption.textContent !== text) {
+            placeholderOption.textContent = text;
+        }
+    };
+
+    /**
      * If binding — conditionally renders an element's child content.
      * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
@@ -5984,8 +6124,26 @@
             self.updateCommentConditional(commentNode, mappingData);
         });
 
+        // Elements in this batch that declare a `foreach` binding are still showing
+        // their static template content — the per-item clones (with `item`/`$index`
+        // bound) don't exist until renderForeach runs below. Bindings and
+        // interpolations found inside that template describe scope that isn't
+        // available yet: a plain property read resolves the missing loop variable
+        // to undefined and fails silently, but a function call that dereferences
+        // its argument throws. Skip that content here — renderForeach's own
+        // scanAndRegisterNewElements() call evaluates it correctly once the real,
+        // scoped clones exist.
+        const pendingForeachElements = this.getPendingForeachElements(newBindings, parentElement);
+
         // Apply initial bindings to new elements
         newBindings.forEach((mappingData, element) => {
+            // Only skip bindings that live *inside* an unrendered foreach template —
+            // the foreach element's own other bindings (e.g. a class binding
+            // alongside `foreach:`) still apply to the real, non-templated element.
+            if (self.isInsidePendingForeachTemplate(element.parentElement, pendingForeachElements)) {
+                return;
+            }
+
             Object.keys(mappingData.bindings).forEach(bindingType => {
                 // Skip event bindings — they are never evaluated eagerly, only on user interaction.
                 if (bindingType === 'click' || bindingType === 'submit') {
@@ -6001,6 +6159,12 @@
 
         // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
+            const owner = textNode.nodeType === Node.ATTRIBUTE_NODE ? textNode.ownerElement : textNode.parentElement;
+
+            if (self.isInsidePendingForeachTemplate(owner, pendingForeachElements)) {
+                return;
+            }
+
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
@@ -6124,6 +6288,15 @@
     /**
      * Try to infer which array property in the abstraction is the "source" array
      * behind a given computed property (for example, linking `filteredTodos` back to `todos`).
+     *
+     * Only matches when the computed value's elements are the *same object
+     * references* as elements of the candidate root array — true for
+     * identity-preserving derivations like `.filter()`/`.sort()`/`.slice()`,
+     * where mapping a foreach item back to its root-array index lets edits
+     * flow through to the original item. A transform like `.map()` produces
+     * brand-new elements that aren't part of the root array at all, so
+     * treating the root as the source there would bind `item` to the wrong
+     * (untransformed) value — see issue #198.
      * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`).
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
@@ -6134,7 +6307,20 @@
             const isArrayRoot = Array.isArray(rootValue);
 
             if (dependentList.has(computedName) && isArrayRoot) {
-                return rootProperty; // e.g. "todos"
+                let computedValue;
+
+                try {
+                    computedValue = this.abstraction[computedName];
+                } catch (error) {
+                    continue;
+                }
+
+                const isIdentityPreserving = Array.isArray(computedValue) &&
+                    computedValue.every((item) => rootValue.includes(item));
+
+                if (isIdentityPreserving) {
+                    return rootProperty; // e.g. "todos"
+                }
             }
         }
 
@@ -6427,19 +6613,87 @@
     };
 
     /**
+     * Walks up from `event.realTarget` to the nearest ancestor with a click
+     * binding, stopping at the container boundary.
+     *
+     * Takes `event.realTarget`, not `event.target` — `target` on a click
+     * message may already be control-resolved by findInteractiveDescendant()
+     * (see dispatchMouseMessage()). That walk currently agrees with this one
+     * node-for-node (both defer to the shared isInherentlyInteractive(), and
+     * hasClickBinding() mirrors mappingData.bindings.click), with one
+     * exception: under mouse capture, `target` can be forced all the way to
+     * `container` itself when the literal click lands outside it, which is
+     * not an ancestor of the real click point at all. Resolving from
+     * `realTarget` keeps this walk correct independent of that raw-layer
+     * override, and independent of the two resolvers ever being changed
+     * out of sync with each other. `realTarget` is unaffected by any of
+     * this and always holds the literal DOM node.
+     *
+     * This handles clicks on non-interactive descendants (e.g. an icon
+     * inside a click-bound button), where the literal click point is not
+     * the bound element. The search stops at the first element
+     * isInherentlyInteractive() accepts, since such elements are their own
+     * controls and must not inherit an ancestor's click handler (e.g. an
+     * unbound `<button>` inside a click-bound `<div>`).
+     *
+     * @param {Element|Node} target - The element that was clicked (`event.realTarget`)
+     * @returns {Element|null} The nearest element with a click binding, or null
+     */
+    Runtime.prototype.findClickBindingElement = function(target) {
+        let el = DomUpdateTracker.normalizeToElement(target);
+
+        while (el) {
+            const mappingData = this.interpolationMap.get(el);
+
+            if (mappingData?.bindings?.click) {
+                return el;
+            }
+
+            if (DomUpdateTracker.isInherentlyInteractive(el)) {
+                return null;
+            }
+
+            if (el === this.container) {
+                return null;
+            }
+
+            el = el.parentElement;
+        }
+
+        return null;
+    };
+
+    /**
      * Handles DOM click events by executing bound abstraction methods.
      * Supports both regular click handlers and foreach context-aware handlers.
      * @param {CustomEvent} event - Custom event containing click details
-     * @param {Element} event.target - The DOM element that was clicked
+     * @param {Element} event.realTarget - The literal DOM element that was clicked
      * @throws {Error} Logs errors if method execution fails
      */
     Runtime.prototype.handleDomClicks = function(event) {
-        // Get interpolation data for the clicked element
-        const mappingData = this.interpolationMap.get(event.target);
-        if (!mappingData?.bindings?.click) {
+        // Resolve the element the click binding actually lives on, from the
+        // literal click point (event.realTarget) — see
+        // findClickBindingElement()'s own docblock for why this stays
+        // decoupled from the raw-layer's event.target resolution, and why
+        // it can't be a plain interpolationMap.get(event.realTarget) lookup
+        // either.
+        const clickElement = this.findClickBindingElement(event.realTarget);
+
+        if (!clickElement) {
             return;
         }
 
+        // If the click lands on a decorative child (e.g. an icon inside a
+        // button), treat the control as the target. This shadows the native
+        // Event.target getter so handlers consistently see the bound control
+        // rather than the clicked descendant.
+        Object.defineProperty(event, 'target', {
+            value: clickElement,
+            enumerable: true,
+            configurable: true
+        });
+
+        const mappingData = this.interpolationMap.get(clickElement);
         const bindingTarget = mappingData.bindings.click.target;
 
         try {
@@ -6465,12 +6719,14 @@
                         $event: event
                     });
 
-                    // Fallback (if bindingTarget is a bare method name): call with (item, index, event)
+                    // Fallback (if bindingTarget is a bare method name): call with (event, item, index).
+                    // event goes first so a handler written for the plain (non-foreach) case still
+                    // receives it correctly if reused inside a foreach without change.
                     this.evaluateHandlerExpression(
                         bindingTarget,
                         scopedAbstraction,
                         scopeResolver,
-                        [array[contextInfo.index], contextInfo.index, event]
+                        [event, array[contextInfo.index], contextInfo.index]
                     );
 
                     return;
@@ -6580,9 +6836,9 @@
      * syncSelectAfterForeach (a <select>'s value settling after its
      * <option>s are rebuilt by a foreach) — kept as one function
      * specifically so behavior like the <select multiple> case below
-     * can't drift between the two call sites the way it previously did
-     * (syncSelectAfterForeach used to read element.value unconditionally,
-     * which only ever returns a multi-select's first selected option).
+     * can't drift between the two call sites: reading element.value
+     * unconditionally only ever returns a multi-select's first selected
+     * option.
      * A no-op if $mappingData has no "value" binding at all.
      * @param {Element} element - The value-bound element to read from
      * @param {{bindings: {value?: {target: string}}}} mappingData - Its registered binding data
@@ -7499,35 +7755,33 @@
             // pop comment off array
             const { comment: openComment, expression } = openComments.pop();
 
+            // Skip if this wp-if is already registered. scanElementNodes can re-scan a
+            // subtree when an ancestor wp-if becomes visible, after this wp-if has already
+            // collapsed its content to a placeholder. Rebuilding from that modified DOM
+            // would overwrite the original node references and lose the real content.
+            // Keeping the existing registration preserves those references;
+            // updateCommentConditional's buried wp-if handling re-evaluates them correctly.
+            if (this.commentBindingMap.has(openComment)) {
+                continue;
+            }
+
             // Build a unified branches array so updateCommentConditional can
             // iterate a single list regardless of how many wp-else-if clauses exist.
             const branches = [{ expression, nodes: [], scanned: false }];
             let activeBucket = branches[0].nodes;
+            let activeBranch = branches[0];
 
-            // Walks the direct sibling span between this open comment and its
-            // matching close, building the branch node list(s). Uses a plain
-            // `while` (not a `for`) because the nested-wp-if case below needs
-            // to advance `node` by more than one sibling per iteration.
+            // Walk sibling nodes between this open comment and its matching close,
+            // building the branch node list. A `while` loop is required because
+            // nested `wp-if` groups advance `node` by multiple siblings.
             //
-            // A nested, independent <!-- wp-if: ... --> found in this span
-            // (as opposed to a wp-else-if/wp-else continuation of *this*
-            // branch) is captured as a single opaque group — its entire
-            // span, open comment through its own matching close, inclusive —
-            // rather than as flat individual nodes. Previously, individual
-            // nodes belonging to a nested wp-if (e.g. the div it controls)
-            // ended up in *both* this branch's own node list and the nested
-            // binding's node list. Since toggleNodeVisibility's "show" path
-            // restores any node carrying a pending hide-placeholder
-            // regardless of which binding put it there, whichever binding's
-            // update ran second would silently undo whatever the other one
-            // had just done to that same node — the nested wp-if would get
-            // shown again the moment the outer one re-evaluated, or vice
-            // versa. Grouping means this branch only ever toggles the
-            // nested span as one atomic unit (see toggleNodeVisibility's
-            // group handling) and never inspects or touches its interior;
-            // the nested binding — discovered independently by this same
-            // scanCommentBindings walk — remains the only thing that ever
-            // manages its own content.
+            // Nested, independent `<!-- wp-if: ... -->` blocks are recorded as a
+            // single opaque group (open through matching close, inclusive) rather
+            // than flattened into this branch. This prevents the outer and nested
+            // bindings from both managing the same DOM nodes, which would cause
+            // their visibility updates to interfere. The outer binding only toggles
+            // the nested span as an atomic group; the nested binding exclusively
+            // manages its own contents.
             let node = openComment.nextSibling;
 
             while (node && node !== commentNode) {
@@ -7538,6 +7792,7 @@
                         const branch = { expression: elseIfMatch[1].trim(), nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        activeBranch = branch;
                         node = node.nextSibling;
                         continue;
                     }
@@ -7546,6 +7801,7 @@
                         const branch = { expression: null, nodes: [], scanned: false };
                         branches.push(branch);
                         activeBucket = branch.nodes;
+                        activeBranch = branch;
                         node = node.nextSibling;
                         continue;
                     }
@@ -7582,8 +7838,21 @@
                             node = node.nextSibling;
                         } while (node && depth > 0);
 
-                        activeBucket.push({ __wpGroup: true, openMarker, closeMarker });
+                        activeBucket.push(makeWpIfGroup(openMarker, closeMarker));
                         continue;
+                    }
+                }
+
+                // A normal element may contain nested `wp-if` blocks that aren't visible
+                // to this sibling-only walk. Cache any already-registered nested bindings
+                // found in its subtree so later updates can use them directly instead of
+                // rescanning. Bindings not yet registered are ignored and handled when
+                // they are discovered.
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const buried = findRegisteredWpIfComments([node], commentBindingMap);
+
+                    if (buried.length > 0) {
+                        activeBranch.buriedWpIfs = (activeBranch.buriedWpIfs || []).concat(buried);
                     }
                 }
 
@@ -7680,6 +7949,20 @@
                 branches[winningBranch].scanned = true;
             }
 
+            // Wrapped (non-sibling) nested `wp-if`s are treated as normal nodes during
+            // scanning, so reconcile them explicitly when revealing this branch. The
+            // cached `buriedWpIfs` list is computed once during scanning since this
+            // structural relationship is static.
+            if (winningBranch !== -1 && branches[winningBranch].buriedWpIfs) {
+                const buriedOpenMarkers = branches[winningBranch].buriedWpIfs;
+
+                for (let i = 0; i < buriedOpenMarkers.length; i++) {
+                    const openMarker = buriedOpenMarkers[i];
+                    const buriedMapping = this.commentBindingMap.get(openMarker);
+                    revealedGroups.push(makeWpIfGroup(openMarker, buriedMapping.closingComment));
+                }
+            }
+
             if (revealedGroups.length > 0) {
                 this.reconcileRevealedGroups(revealedGroups);
             }
@@ -7687,6 +7970,38 @@
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
         }
     };
+
+    /**
+     * Finds registered `wp-if` open comments buried inside descendant
+     * elements rather than appearing as direct comment siblings. A comment
+     * is identified as a `wp-if` by its presence in `map`; unregistered
+     * bindings are ignored and discovered by the normal scan.
+     * @param {Node[]} nodes
+     * @param {Map<Comment, Object>} map
+     * @returns {Comment[]}
+     */
+    function findRegisteredWpIfComments(nodes, map) {
+        const found = [];
+
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+
+            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+                continue;
+            }
+
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
+            let commentNode;
+
+            while ((commentNode = walker.nextNode())) {
+                if (map.has(commentNode)) {
+                    found.push(commentNode);
+                }
+            }
+        }
+
+        return found;
+    }
 
     /**
      * Reconciles bindings inside wp-if groups that have just become visible.
@@ -8074,6 +8389,51 @@
         return null;
     }
 
+    /**
+     * Builds the set of elements in a scan batch that declare a `foreach`
+     * binding but haven't been rendered yet — their descendant content is
+     * still the static template, not per-item clones with `item`/`$index`
+     * bound. Used by scanAndRegisterNewElements() to defer eager binding
+     * evaluation for that content until renderForeach() has produced the
+     * real, scoped clones.
+     * @param {Map<Element, Object>} newBindings - Bindings map from scanBindings()
+     * @param {Element} parentElement - The container currently being scanned
+     * @returns {Set<Element>}
+     */
+    Runtime.prototype.getPendingForeachElements = function(newBindings, parentElement) {
+        const pendingForeachElements = new Set();
+
+        newBindings.forEach((mappingData, element) => {
+            if (mappingData.bindings.foreach && element !== parentElement) {
+                pendingForeachElements.add(element);
+            }
+        });
+
+        return pendingForeachElements;
+    };
+
+    /**
+     * Checks whether startElement is, or descends from, one of the elements
+     * in pendingForeachElements — i.e. whether it lives inside a foreach
+     * template that hasn't been rendered into scoped per-item clones yet.
+     * @param {Element|null} startElement - Element to start the ancestor walk from
+     * @param {Set<Element>} pendingForeachElements - From getPendingForeachElements()
+     * @returns {boolean}
+     */
+    Runtime.prototype.isInsidePendingForeachTemplate = function(startElement, pendingForeachElements) {
+        let el = startElement;
+
+        while (el) {
+            if (pendingForeachElements.has(el)) {
+                return true;
+            }
+
+            el = el.parentElement;
+        }
+
+        return false;
+    };
+
     // =============================================================================
     // FOREACH RENDERING (Array → DOM List Generation)
     // =============================================================================
@@ -8165,6 +8525,26 @@
                     mappingData.foreachId, expandedTemplate, originalIndex, renderIndex
                 );
             });
+
+            // A <select> with foreach on itself is the only way to render real sibling
+            // <option> elements; foreach on an <option> only updates that option's
+            // contents. data-pac-placeholder injects an evaluated default/empty option
+            // during the rebuild, avoiding a separate static <option> (which would be
+            // replaced by innerHTML) or an <optgroup>. The placeholder expression is
+            // re-evaluated whenever the options are rebuilt, so it stays reactive.
+            if (foreachElement.tagName === 'SELECT' && mappingData.bindings.placeholder) {
+                const placeholderExpr = mappingData.bindings.placeholder.target;
+                let placeholderText = '';
+
+                try {
+                    const evaluated = self.evalInScope(placeholderExpr, foreachElement);
+                    placeholderText = evaluated != null ? String(evaluated) : '';
+                } catch (error) {
+                    console.warn(`Error evaluating placeholder binding "${placeholderExpr}":`, error);
+                }
+
+                completeHTML = `<option value="" data-pac-placeholder-option>${Utils.escapeHtml(placeholderText)}</option>` + completeHTML;
+            }
 
             // Set the complete HTML at once - this preserves comment structure
             foreachElement.innerHTML = completeHTML;
@@ -9295,29 +9675,24 @@
         },
 
         /**
-         * Finds the containing PAC component for an element
-         * Walks up the DOM tree to find a registered PAC container
+         * Finds the containing PAC component for an element. Walks the
+         * [data-pac-id] ancestor chain (skipping non-container nodes in one
+         * closest() step) rather than every DOM node, and keeps walking past
+         * an ancestor whose pacId is no longer in the registry — destroy()
+         * deregisters a component without stripping its container's
+         * data-pac-id, so a stale attribute can still be in the DOM.
          * @param {HTMLElement} element - Starting element (typically event.target)
          * @returns {HTMLElement|null} The PAC container element or null if not found
          */
         findContainer(element) {
-            // Ensure we start with an actual Element node
-            if (!element || element.nodeType !== Node.ELEMENT_NODE) {
-                element = element?.parentElement;
-            }
+            const start = DomUpdateTracker.normalizeToElement(element);
 
-            while (element && element !== document.body) {
-                const pacId = element.getAttribute('data-pac-id');
+            for (let el = start?.closest(CONTAINER_SEL); el; el = el.parentElement?.closest(CONTAINER_SEL)) {
+                const context = window.PACRegistry.get(el.getAttribute('data-pac-id'));
 
-                if (pacId) {
-                    const context = window.PACRegistry.get(pacId);
-
-                    if (context) {
-                        return context.container;
-                    }
+                if (context) {
+                    return context.container;
                 }
-
-                element = element.parentElement;
             }
 
             return null;
@@ -9372,11 +9747,16 @@
             const width = maxX - minX;  // Width/height are same in both coordinate systems
             const height = maxY - minY;
 
-            // lParam data: packed center coordinates (Y high word, X low word)
+            // lParam data: packed center coordinates (Y high word, X low word) —
+            // the gesture path's bounding-box center, not the terminating event's
+            // raw position, so this bypasses dispatchMouseMessage()'s own
+            // buildMouseLParam() via lParamOverride. wParam is likewise overridden
+            // to 0: a gesture carries no modifier-state semantics of its own.
             const lParam = (centerY << 16) | centerX; //
 
-            // Build the event using the standard factory
-            const customEvent = DomUpdateTracker.wrapDomEventAsMessage(MSG_GESTURE, originalEvent, 0, lParam, {
+            // Dispatch through the shared mouse-message path so `target` resolves
+            // to the nearest control the same way every other mouse message does.
+            DomUpdateTracker.dispatchMouseMessage(MSG_GESTURE, originalEvent, this.gestureContainer, null, {
                 pattern,      // Matched pattern name (e.g. 'back') or raw direction string if unregistered
                 directions,   // Array of direction codes used in matching: ['R', 'D', 'L']
                 pointCount,   // Number of recorded points along the gesture path
@@ -9395,10 +9775,7 @@
                     width,
                     height,
                 },
-            });
-
-            // Dispatch to the container where gesture was initiated
-            DomUpdateTracker.dispatchToContainer(this.gestureContainer, customEvent);
+            }, 0, lParam);
         }
     };
 
@@ -9620,12 +9997,19 @@
     /**
      * Returns the ordered list of accelerator tables to search for a container,
      * walking up the hierarchy innermost-first with the global table as fallback.
+     * Each entry pairs a table with the pacId that owns it, so a match against
+     * an ancestor's table can be delivered to that ancestor rather than the
+     * originally focused container — mirroring Win32, where a window's own
+     * accelerator table posts WM_COMMAND to that window. The global table isn't
+     * tied to any container, so it pairs with the originally focused container's
+     * pacId instead.
      * @param {HTMLElement} container
-     * @returns {Array}
+     * @returns {Array<{pacId: string, table: Array}>}
      * @private
      */
     function _accelTablesForContainer(container) {
         const tables = [];
+        const focusedPacId = Utils.getPacId(container);
 
         // Walk up the container hierarchy, innermost first.
         // Uses closest() on parentElement to skip non-container ancestors in one step.
@@ -9638,7 +10022,7 @@
                 const table = _accelTables.get(id);
 
                 if (table) {
-                    tables.push(table);
+                    tables.push({ pacId: id, table });
                 }
             }
         }
@@ -9647,7 +10031,7 @@
         const global = _accelTables.get(ACCEL_GLOBAL_KEY);
 
         if (global) {
-            tables.push(global);
+            tables.push({ pacId: focusedPacId, table: global });
         }
 
         return tables;
@@ -9678,14 +10062,12 @@
         // extended key flag, etc. and must not affect the comparison.
         const modifiers = pacEvent.lParam & (KM_SHIFT | KM_CONTROL | KM_ALT);
 
-        // Fetch the pacId from the container
-        const pacId = Utils.getPacId(container);
-
-        // Fetch accelerator tables of this container and parent containers
+        // Fetch accelerator tables of this container and parent containers,
+        // each paired with the pacId that owns it.
         const tables = _accelTablesForContainer(container);
 
         // Walk them to map accelerators
-        for (const table of tables) {
+        for (const { pacId, table } of tables) {
             if (!table) {
                 continue;
             }
@@ -9695,6 +10077,10 @@
                 // Partial modifier matches are intentionally rejected — Ctrl+Shift+S
                 // must not trigger a Ctrl+S entry.
                 if (entry.vk === vk && entry.modifiers === modifiers) {
+                    // Deliver to the container whose table matched, not necessarily
+                    // the originally focused one — an ancestor's table posts to the
+                    // ancestor, just as the global table posts to whatever container
+                    // was focused (see _accelTablesForContainer()).
                     wakaPAC.sendMessage(pacId, MSG_ACCEL, entry.cmdId, 0);
                     return true;
                 }

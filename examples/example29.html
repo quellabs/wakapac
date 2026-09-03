@@ -42,14 +42,14 @@
         addRow() {
             this.rows.push({ cells: [1] });
         },
-        removeRow(row) {
+        removeRow(event, row) {
             const i = this.rows.indexOf(row);
             if (i !== -1) this.rows.splice(i, 1);
         },
-        addCol(row) {
+        addCol(event, row) {
             row.cells.push(row.cells.length + 1);
         },
-        removeCol(row) {
+        removeCol(event, row) {
             if (row.cells.length > 1) row.cells.pop();
         }
     });

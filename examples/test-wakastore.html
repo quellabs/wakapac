@@ -299,6 +299,7 @@
             await test('store is updated with latest server data on each cycle', async function () {
                 const store = wakaStore.createStore({ name: null });
                 let cycle = 0;
+                const original = window.fetch;
 
                 window.fetch = function () {
                     cycle++;
@@ -318,7 +319,7 @@
                 const nameAfterSecond = store.name;
 
                 store.stopPoll();
-                window.fetch = undefined;
+                window.fetch = original;
 
                 assert(nameAfterFirst === 'User 1', 'first cycle: ' + nameAfterFirst);
                 assert(nameAfterSecond === 'User 2', 'second cycle: ' + nameAfterSecond);

@@ -1,5 +1,7 @@
 {
   "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed --project=chromium",
     "minify:wakapac": "terser wakapac.js -c passes=3,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o wakapac.min.js --ecma 2020",
     "minify:wakacanvas": "terser plugins/wakacanvas.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o plugins/wakacanvas.min.js --ecma 2020",
     "minify:wakaddraw": "terser plugins/wakaddraw.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o plugins/wakaddraw.min.js --ecma 2020",
@@ -35,9 +37,9 @@
     "minify:wakaescapeutils": "terser units/waka-unit-escapeutils.js -c passes=3,drop_console=true,unsafe=true,unsafe_arrows=true,pure_getters=true -m toplevel=true,keep_fnames=false -o units/waka-unit-escapeutils.min.js --ecma 2020",
     "minify": "npm run minify:wakapac && npm run minify:wakacanvas && npm run minify:wakaboxpack && npm run minify:wakaddraw && npm run minify:wakad3d && npm run minify:wakadsound && npm run minify:wakasync && npm run minify:wakastore && npm run minify:wakamotion && npm run minify:wakaroute && npm run minify:wakaform && npm run minify:wakamath && npm run minify:wakamath3d && npm run minify:wakastringutils && npm run minify:wakadateutils && npm run minify:wakatypeutils  && npm run minify:wakaphputils  && npm run minify:wakanumberutils && npm run minify:wakacollectionutils && npm run minify:wakaregexutils && npm run minify:wakachart && npm run minify:wakacolorutils && npm run minify:wakaescapeutils && npm run minify:wakavideo && npm run minify:wakayoutube && npm run minify:wakavimeo && npm run minify:wakackeditor4 && npm run minify:wakackeditor5 && npm run minify:wakatinymce && npm run minify:wakajodit && npm run minify:wakacolorpicker && npm run minify:wakalightgallery && npm run minify:wakamask"
   },
-  "dependencies": {},
   "devDependencies": {
     "@eslint/js": "^9.34.0",
+    "@playwright/test": "^1.62.1",
     "eslint": "^9.34.0",
     "globals": "^16.3.0",
     "jslint": "^0.12.1",

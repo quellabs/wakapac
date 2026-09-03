@@ -372,7 +372,7 @@
      * @param {WebGLContextEvent} e
      * @returns {void}
      */
-    function _handleContextRestored(pacId, e) {
+    function _handleContextRestored(pacId, _e) {
         const entry = _canvases.get(pacId);
 
         if (!entry) {
@@ -498,7 +498,7 @@
          *   onComponentDestroyed: function(string): void
          * }}
          */
-        createPacPlugin(pac) {
+        createPacPlugin(_pac) {
             return {
                 name: 'WakaD3D',
                 ..._createLifecycleHooks()

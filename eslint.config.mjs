@@ -4,6 +4,9 @@ import {defineConfig} from "eslint/config";
 
 export default defineConfig([
     {
+        ignores: ["**/*.min.js"]
+    },
+    {
         files: ["**/*.{js,mjs,cjs}"],
         plugins: {js},
         extends: ["js/recommended"],
@@ -21,5 +24,16 @@ export default defineConfig([
     {
         files: ["**/*.js"],
         languageOptions: {sourceType: "script"}
+    },
+    {
+        files: ["plugins/**/*.js"],
+        languageOptions: {
+            globals: {
+                wakaPAC: "readonly",
+                CKEDITOR: "readonly",
+                Vimeo: "readonly",
+                YT: "readonly"
+            }
+        }
     }
 ]);
