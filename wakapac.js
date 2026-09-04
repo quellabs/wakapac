@@ -5795,6 +5795,7 @@
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
         this.commentBindingMap = new Map();
+        this._arrayRootCache = new Map();
         this.readyCalled = false;
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
@@ -6310,7 +6311,7 @@
         // rebuild within the same pass (renderForeach replaces innerHTML wholesale)
         // — without this cache, the identity check below would otherwise re-run,
         // and re-evaluate the computed itself, once per outer item per outer render.
-        const cache = this._arrayRootCache || (this._arrayRootCache = new Map());
+        const cache = this._arrayRootCache;
 
         if (cache.has(computedName)) {
             return cache.get(computedName);
@@ -7005,7 +7006,7 @@
         // inferArrayRoot()'s cache is only valid for the current data snapshot — a
         // computed's identity-preservingness can depend on its inputs — so clear it
         // before each pass rather than letting it persist across data changes.
-        this._arrayRootCache = null;
+        this._arrayRootCache.clear();
         this.updateElementBindings();
         this.updateTextInterpolations();
         this.updateCommentConditionals();
