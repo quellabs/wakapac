@@ -6108,33 +6108,47 @@
         const newTextBindings = this.scanTextBindings(parentElement);
         const newCommentBindings = this.scanCommentBindings(parentElement);
 
-        // Add new bindings to main maps
-        newBindings.forEach((mappingData, element) => {
-            if (element !== parentElement) {
-                this.interpolationMap.set(element, mappingData);
-            }
-        });
-
-        newTextBindings.forEach((mappingData, textNode) => {
-            this.textInterpolationMap.set(textNode, mappingData);
-        });
-
-        // Store comment bindings
-        newCommentBindings.forEach((mappingData, commentNode) => {
-            this.commentBindingMap.set(commentNode, mappingData);
-            self.updateCommentConditional(commentNode, mappingData);
-        });
-
         // Elements in this batch that declare a `foreach` binding are still showing
         // their static template content — the per-item clones (with `item`/`$index`
         // bound) don't exist until renderForeach runs below. Bindings and
         // interpolations found inside that template describe scope that isn't
         // available yet: a plain property read resolves the missing loop variable
         // to undefined and fails silently, but a function call that dereferences
-        // its argument throws. Skip that content here — renderForeach's own
-        // scanAndRegisterNewElements() call evaluates it correctly once the real,
-        // scoped clones exist.
+        // its argument throws. Skip *registering* that content here, not just its
+        // eager evaluation — a reactive change dispatched before this foreach
+        // renders (e.g. a sibling foreach's own render touching container scroll
+        // state) runs a full updateTextInterpolations()/updateElementBindings()
+        // sweep over every already-registered entry, so a stale registration here
+        // would still get evaluated against the missing scope and throw, even
+        // though this function never evaluates it itself. renderForeach's own
+        // scanAndRegisterNewElements() call registers and evaluates it correctly
+        // once the real, scoped clones exist.
         const pendingForeachElements = this.getPendingForeachElements(newBindings, parentElement);
+
+        // Add new bindings to main maps
+        newBindings.forEach((mappingData, element) => {
+            if (element !== parentElement && !self.isInsidePendingForeachTemplate(element.parentElement, pendingForeachElements)) {
+                this.interpolationMap.set(element, mappingData);
+            }
+        });
+
+        newTextBindings.forEach((mappingData, textNode) => {
+            const owner = textNode.nodeType === Node.ATTRIBUTE_NODE ? textNode.ownerElement : textNode.parentElement;
+
+            if (!self.isInsidePendingForeachTemplate(owner, pendingForeachElements)) {
+                this.textInterpolationMap.set(textNode, mappingData);
+            }
+        });
+
+        // Store comment bindings
+        newCommentBindings.forEach((mappingData, commentNode) => {
+            if (self.isInsidePendingForeachTemplate(commentNode.parentElement, pendingForeachElements)) {
+                return;
+            }
+
+            this.commentBindingMap.set(commentNode, mappingData);
+            self.updateCommentConditional(commentNode, mappingData);
+        });
 
         // Apply initial bindings to new elements
         newBindings.forEach((mappingData, element) => {
