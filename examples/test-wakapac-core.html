@@ -383,6 +383,47 @@
                 c.destroy();
             });
 
+            await test('foreach on a computed that branches between .filter() (identity-preserving) and .map() (not) rebinds correctly after the branch flips (regression: inferArrayRoot cache must not survive a data change)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: display">' +
+                    '<li>{{item.label}}</li></ul>',
+                    {
+                        todos: [
+                            { label: 'a', done: false },
+                            { label: 'b', done: true }
+                        ],
+                        grouped: false,
+                        computed: {
+                            display() {
+                                return this.grouped
+                                    ? this.todos.map(function (t) { return { label: 'grouped-' + t.label }; })
+                                    : this.todos.filter(function (t) { return !t.done; });
+                            }
+                        }
+                    }
+                );
+                await tick();
+
+                // Initial render takes the .filter() branch: its output is
+                // identity-preserving, so inferArrayRoot() resolves and caches
+                // "todos" as the source root.
+                let lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 1, 'filter branch renders one visible todo');
+                assertEqual(lis[0].textContent, 'a');
+
+                // Flip to the .map() branch: the computed's output is no longer
+                // identity-preserving. If the cache from the filter branch were
+                // reused instead of being recomputed, foreach would map "item"
+                // back to the raw todo object instead of the transformed one.
+                c.abstraction.grouped = true;
+                await tick();
+                lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2, 'map branch renders both transformed items');
+                assertEqual(lis[0].textContent, 'grouped-a');
+                assertEqual(lis[1].textContent, 'grouped-b');
+                c.destroy();
+            });
+
             suite('Click bindings & msgProc');
 
             await test('click binding invokes the bound method', async function () {

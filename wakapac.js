@@ -6301,13 +6301,15 @@
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
     Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
-        // Whether a computed derives its array identity-preservingly is a property
-        // of its implementation, not of the current data, so the answer is safe to
-        // cache for the component's lifetime. That matters because a foreach nested
-        // inside another foreach's items gets fresh, unregistered DOM elements on
-        // every rebuild (renderForeach replaces innerHTML wholesale) — without this
-        // cache, the identity check below would otherwise re-run, and re-evaluate
-        // the computed itself, once per outer item on every outer re-render.
+        // Whether a computed's current output is identity-preserving can depend on
+        // its data (e.g. a computed that branches between .map() and .filter()), so
+        // the answer is only safe to cache within a single reactive-update pass, not
+        // for the component's lifetime — handleReactiveChange() clears this cache
+        // before each pass. That still matters because a foreach nested inside
+        // another foreach's items gets fresh, unregistered DOM elements on every
+        // rebuild within the same pass (renderForeach replaces innerHTML wholesale)
+        // — without this cache, the identity check below would otherwise re-run,
+        // and re-evaluate the computed itself, once per outer item per outer render.
         const cache = this._arrayRootCache || (this._arrayRootCache = new Map());
 
         if (cache.has(computedName)) {
@@ -7000,6 +7002,10 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Runtime.prototype.handleReactiveChange = function(event) {
+        // inferArrayRoot()'s cache is only valid for the current data snapshot — a
+        // computed's identity-preservingness can depend on its inputs — so clear it
+        // before each pass rather than letting it persist across data changes.
+        this._arrayRootCache = null;
         this.updateElementBindings();
         this.updateTextInterpolations();
         this.updateCommentConditionals();
@@ -8513,10 +8519,18 @@
         this.cleanupForeachMaps(foreachElement);
 
         try {
-            // Resolve the source array for index mapping.
+            // Resolve the source array for index mapping. Recomputed on every render
+            // (not just read from mappingData.sourceArray) because a computed's
+            // identity-preservingness can depend on its data — a computed that
+            // branches between .map() and .filter() needs a fresh answer each time,
+            // not whatever was true the first time this element was scanned. The
+            // per-pass cache in inferArrayRoot() keeps this cheap. The result is
+            // written back so other consumers of mappingData.sourceArray (scope
+            // resolution, change-detection matching) see the same fresh value.
             // For filtered/sorted expressions the foreach may render a subset of a larger
             // array — fall back to the evaluated array itself when no root can be found.
-            const sourceRootName = mappingData.sourceArray || this.inferArrayRoot(mappingData.foreachExpr);
+            const sourceRootName = this.inferArrayRoot(mappingData.foreachExpr);
+            mappingData.sourceArray = sourceRootName;
             const sourceRootArray = sourceRootName && this.abstraction[sourceRootName];
             const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;
 
