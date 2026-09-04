@@ -238,9 +238,10 @@
     const MSG_CONTEXTMENU = 0x007B;
     const MSG_CAPTURECHANGED = 0x0215;
     const MSG_DRAGENTER = 0x0231;
-    const MSG_DRAGOVER = 0x0232;
+    const MSG_DROPTARGET_ENTER = 0x0232;
     const MSG_DRAGLEAVE = 0x0233;
     const MSG_DROP = 0x0234;
+    const MSG_DROPTARGET_LEAVE = 0x0235;
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
@@ -266,10 +267,11 @@
      * via DomUpdateTracker.findInteractiveDescendant(), mirroring Win32's
      * behavior of addressing mouse messages to controls rather than content
      * painted inside them. Covers the discrete click/button family, the two
-     * continuous pointer streams (move, wheel), HTML5 drag-and-drop, and
-     * gesture recognition — every message type dispatched through
-     * dispatchMouseMessage() except MOUSEENTER/LEAVE (always the container)
-     * and ENTER/LEAVE_DESCENDANT (resolved by the caller, not here).
+     * continuous pointer streams (move, wheel), HTML5 drag-and-drop
+     * (container-level enter/leave and drop), and gesture recognition —
+     * every message type dispatched through dispatchMouseMessage() except
+     * MOUSEENTER/LEAVE (always the container) and ENTER/LEAVE_DESCENDANT
+     * and DROPTARGET_ENTER/LEAVE (resolved by the caller, not here).
      */
     const CONTROL_TARGET_MESSAGES = new Set([
         MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
@@ -278,7 +280,7 @@
         MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
         MSG_CONTEXTMENU,
         MSG_MOUSEMOVE, MSG_MOUSEWHEEL,
-        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP,
+        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DROP,
         MSG_GESTURE
     ]);
 
@@ -2235,6 +2237,9 @@
                     return;
                 }
 
+                // Fully exiting the container also exits any active dropzone
+                self._leaveDropzone(event, container);
+
                 self.dispatchMouseMessage(MSG_DRAGLEAVE, event, container, null, {
                     types: Array.from(event.dataTransfer.types)
                 });
@@ -2242,9 +2247,35 @@
         },
 
         /**
+         * Dispatches MSG_DROPTARGET_LEAVE for the currently tracked dropzone,
+         * if any, and clears tracking state. Shared by every path that can end
+         * a hover over a drop target: moving off it, switching to another one,
+         * exiting the container, and dropping.
+         * @private
+         * @param {DragEvent} event
+         * @param {HTMLElement} container
+         */
+        _leaveDropzone(event, container) {
+            if (!this._dropzoneTarget) {
+                return;
+            }
+
+            const leftTarget = this._dropzoneTarget;
+            this._dropzoneTarget = null;
+
+            this.dispatchMouseMessage(MSG_DROPTARGET_LEAVE, event, container, leftTarget, {
+                dropTarget: leftTarget,
+                types: Array.from(event.dataTransfer.types)
+            });
+        },
+
+        /**
          * Coalesces high-frequency dragover events into a single dispatch
-         * per animation frame.  Only fires for valid drop targets whose
-         * element has actually changed.
+         * per animation frame. Dispatches MSG_DROPTARGET_ENTER when the
+         * hovered drop target changes, and MSG_DROPTARGET_LEAVE when the
+         * cursor moves off it (onto non-drop-target space, or to another
+         * drop target — leave-old-then-enter-new, mirroring
+         * MOUSEENTER_DESCENDANT/MOUSELEAVE_DESCENDANT).
          * @private
          */
         _onDragOver() {
@@ -2252,7 +2283,7 @@
 
             document.addEventListener('dragover', function(event) {
                 // Fetch the container
-                const container = self.getContainerForEvent(MSG_DRAGOVER, event);
+                const container = self.getContainerForEvent(MSG_DROPTARGET_ENTER, event);
 
                 // If none found, abort
                 if (!container) {
@@ -2262,9 +2293,10 @@
                 // Find the drop target
                 const dropTarget = event.target.closest(DROP_TARGET_SEL);
 
-                // If none found, abort
+                // If none found, we've moved off any active dropzone
                 if (!dropTarget) {
                     event.dataTransfer.dropEffect = 'none';
+                    self._leaveDropzone(event, container);
                     return;
                 }
 
@@ -2273,9 +2305,12 @@
                 event.preventDefault();
 
                 // If we are already hovering over the drop target, do not send new 'over' event
-                if (event.target === self._dropzoneTarget) {
+                if (dropTarget === self._dropzoneTarget) {
                     return;
                 }
+
+                // Switching straight from one drop target to another — leave the old one first
+                self._leaveDropzone(event, container);
 
                 // Update the effect (mouse pointer)
                 const effect = dropTarget.getAttribute('data-pac-drop-target');
@@ -2284,7 +2319,7 @@
                 // Store the new dropzone
                 self._dropzoneTarget = dropTarget;
 
-                self.dispatchMouseMessage(MSG_DRAGOVER, event, container, null, {
+                self.dispatchMouseMessage(MSG_DROPTARGET_ENTER, event, container, dropTarget, {
                     dropTarget: dropTarget,
                     types: Array.from(event.dataTransfer.types)
                 });
@@ -2310,15 +2345,17 @@
                 // Check if this is a valid drop target
                 const dropTarget = event.target.closest(DROP_TARGET_SEL);
 
+                // Drag sequence complete — clean up tracking state regardless
+                // of whether this specific drop lands on a valid target
+                self._enterDepths.delete(container);
+                self._dropzoneTarget = null;
+
                 if (!dropTarget) {
                     return;
                 }
 
                 // Mark the target as valid by calling preventDefault on it
                 event.preventDefault();
-
-                // Drag sequence complete — clean up tracking state
-                self._enterDepths.delete(container);
 
                 const transfer = event.dataTransfer;
 
@@ -3240,10 +3277,11 @@
          * @param {number} msgType
          * @param {MouseEvent | TouchEvent | WheelEvent | DragEvent} domEvent
          * @param {HTMLElement} container
-         * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
-         *   the specific descendant entered/left. Required for LEAVE because it cannot
-         *   be derived from the event after the cursor moves; for ENTER it reuses the
-         *   caller's computed descendant. Ignored for other message types.
+         * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT and
+         *   DROPTARGET_ENTER/LEAVE, the specific descendant/drop-target entered/left.
+         *   Required for the LEAVE variants because they cannot be derived from the
+         *   event after the cursor moves; for the ENTER variants it reuses the
+         *   caller's computed element. Ignored for other message types.
          * @param {Object} [extended]
          * @param {number|null} [wParamOverride] - Bypasses the default wParam
          *   encoding (modifier state) with a caller-supplied value, for message
@@ -3264,7 +3302,8 @@
 
             if (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) {
                 targetOverride = container;
-            } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
+            } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT ||
+                msgType === MSG_DROPTARGET_ENTER || msgType === MSG_DROPTARGET_LEAVE) {
                 targetOverride = descendantOverride;
             } else if (CONTROL_TARGET_MESSAGES.has(msgType)) {
                 const rawTarget = this.normalizeToElement(domEvent.target);
@@ -12123,8 +12162,8 @@
         MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
         MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE,
         MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
-        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
-        MSG_DPR_CHANGE,
+        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DROPTARGET_ENTER, MSG_DRAGLEAVE, MSG_DROP,
+        MSG_DROPTARGET_LEAVE, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
