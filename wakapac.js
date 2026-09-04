@@ -7483,10 +7483,6 @@
             Object.assign(mappingData, {
                 foreachId: foreachId,
                 foreachExpr: foreachExpr,
-                // sourceArray is left unset here: scanAndRegisterNewElements() always
-                // calls renderForeach() synchronously right after scanning, and that
-                // call unconditionally recomputes and overwrites sourceArray — so
-                // computing it here would only be thrown away moments later.
                 template: element.innerHTML, // Capture clean template
                 itemVar: itemVar,
                 indexVar: indexVar,
