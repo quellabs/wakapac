@@ -335,6 +335,49 @@
                 c.destroy();
             });
 
+            await test('function call with item argument in one foreach is unaffected by a sibling foreach in the same container (issue #201)', async function () {
+                const originalWarn = console.warn;
+                const warnings = [];
+                console.warn = function () { warnings.push(Array.prototype.join.call(arguments, ' ')); };
+
+                let c;
+                try {
+                    c = mount(
+                        '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                        '<li>{{item.n}}</li></ul>' +
+                        '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                        '<li>{{format(item)}}</li></ul>',
+                        {
+                            items: [{ n: 1 }, { n: 2 }],
+                            format(item) { return 'Item: ' + item.n; }
+                        }
+                    );
+                    await tick();
+                } finally {
+                    console.warn = originalWarn;
+                }
+
+                const interpolationWarnings = warnings.filter(function (w) {
+                    return w.indexOf('interpolation') !== -1;
+                });
+
+                assertEqual(interpolationWarnings, [], 'no interpolation warnings from the sibling foreach with a function call');
+
+                const lists = c.container.querySelectorAll('ul');
+                const firstLis = lists[0].querySelectorAll('li');
+                const secondLis = lists[1].querySelectorAll('li');
+
+                assertEqual(firstLis.length, 2);
+                assertEqual(firstLis[0].textContent, '1');
+                assertEqual(firstLis[1].textContent, '2');
+
+                assertEqual(secondLis.length, 2);
+                assertEqual(secondLis[0].textContent, 'Item: 1');
+                assertEqual(secondLis[1].textContent, 'Item: 2');
+
+                c.destroy();
+            });
+
             await test('foreach on a computed array built via .map() binds item to the transformed value, not the source array (issue #198)', async function () {
                 const c = mount(
                     '<ul data-pac-bind="foreach: gadgets">' +
