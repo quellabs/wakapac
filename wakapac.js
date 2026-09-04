@@ -6142,91 +6142,100 @@
         // is visible to scanBindings and scanTextBindings
         expandPartials(parentElement);
 
-        // Scan for new bound elements within this container
+        // Stage 1: scan for new bound content within this container
         const newBindings = this.scanBindings(parentElement);
         const newTextBindings = this.scanTextBindings(parentElement);
         const newCommentBindings = this.scanCommentBindings(parentElement);
 
-        // Add new bindings to main maps
-        newBindings.forEach((mappingData, element) => {
-            if (element !== parentElement) {
-                this.interpolationMap.set(element, mappingData);
-            }
-        });
-
-        newTextBindings.forEach((mappingData, textNode) => {
-            this.textInterpolationMap.set(textNode, mappingData);
-        });
-
-        // Store comment bindings
-        newCommentBindings.forEach((mappingData, commentNode) => {
-            this.commentBindingMap.set(commentNode, mappingData);
-            self.updateCommentConditional(commentNode, mappingData);
-        });
-
-        // Elements in this batch that declare a `foreach` binding are still showing
-        // their static template content — the per-item clones (with `item`/`$index`
-        // bound) don't exist until renderForeach runs below. Bindings and
-        // interpolations found inside that template describe scope that isn't
-        // available yet: a plain property read resolves the missing loop variable
-        // to undefined and fails silently, but a function call that dereferences
-        // its argument throws. Skip that content here — renderForeach's own
-        // scanAndRegisterNewElements() call evaluates it correctly once the real,
-        // scoped clones exist.
+        // Stage 2: content inside a pending (not-yet-rendered) foreach template
+        // has no item/$index scope yet, so it must be skipped below — not just
+        // its evaluation, but its registration too, or a reactive change fired
+        // before renderForeach runs (e.g. a sibling foreach's own render) can
+        // sweep over the stale entry and evaluate it anyway. renderForeach()
+        // re-registers it correctly once real, scoped clones exist.
         const pendingForeachElements = this.getPendingForeachElements(newBindings, parentElement);
+        const isPending = ownerElement => self.isInsidePendingForeachTemplate(ownerElement, pendingForeachElements);
+        const ownerOf = node => node.nodeType === Node.ATTRIBUTE_NODE ? node.ownerElement : node.parentElement;
 
-        // Apply initial bindings to new elements
+        // Stage 3: for everything not pending, register it into the live maps
+        // and apply it to the DOM in the same pass — registration and
+        // evaluation never need to be separate sweeps here.
         newBindings.forEach((mappingData, element) => {
-            // Only skip bindings that live *inside* an unrendered foreach template —
-            // the foreach element's own other bindings (e.g. a class binding
-            // alongside `foreach:`) still apply to the real, non-templated element.
-            if (self.isInsidePendingForeachTemplate(element.parentElement, pendingForeachElements)) {
+            if (element === parentElement || isPending(element.parentElement)) {
                 return;
             }
 
-            Object.keys(mappingData.bindings).forEach(bindingType => {
-                // Skip event bindings — they are never evaluated eagerly, only on user interaction.
-                if (bindingType === 'click' || bindingType === 'submit') {
-                    return;
-                }
-
-                // Evaluate the expression and set the binding
-                const bindingData = mappingData.bindings[bindingType];
-                const value = self.evalInScope(bindingData.target, element);
-                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
-            });
+            self.interpolationMap.set(element, mappingData);
+            self.applyElementBindings(element, mappingData);
         });
 
-        // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
-            const owner = textNode.nodeType === Node.ATTRIBUTE_NODE ? textNode.ownerElement : textNode.parentElement;
-
-            if (self.isInsidePendingForeachTemplate(owner, pendingForeachElements)) {
+            if (isPending(ownerOf(textNode))) {
                 return;
             }
 
+            self.textInterpolationMap.set(textNode, mappingData);
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
-        // Handle nested foreach rendering (sort by depth, deepest first)
-        Array.from(newBindings.entries())
-            .filter(([element, mappingData]) =>
-                mappingData.bindings.foreach && element !== parentElement
-            )
-            .sort(([, mappingDataA], [, mappingDataB]) => {
-                const depthA = mappingDataA.depth;
-                const depthB = mappingDataB.depth;
-                return depthB - depthA; // deepest first
-            })
-            .forEach(([element]) => {
-                this.renderForeach(element, this.evaluateForeachArray(element));
-            });
+        newCommentBindings.forEach((mappingData, commentNode) => {
+            if (isPending(commentNode.parentElement)) {
+                return;
+            }
+
+            self.commentBindingMap.set(commentNode, mappingData);
+            self.updateCommentConditional(commentNode, mappingData);
+        });
+
+        // Stage 4: recurse into nested/pending foreach blocks, then finalize.
+        self.renderPendingForeachBlocks(newBindings, parentElement);
 
         // Content just changed as a result of this scan (new bindings applied,
         // foreach items rendered, etc.) — recompute scroll metrics now, tied to
         // the actual DOM mutation rather than an independently-timed check that
         // could fire before or after rendering completes.
-        this.updateContainerScrollState();
+        self.updateContainerScrollState();
+    };
+
+    /**
+     * Evaluates and applies every non-event attribute binding on a single
+     * element (class, style, value, foreach, etc.). Event bindings (click,
+     * submit) are never evaluated eagerly, only on user interaction.
+     * @param {Element} element - The bound element
+     * @param {Object} mappingData - This element's entry from scanBindings()
+     */
+    Runtime.prototype.applyElementBindings = function(element, mappingData) {
+        const self = this;
+
+        Object.keys(mappingData.bindings).forEach(bindingType => {
+            if (bindingType === 'click' || bindingType === 'submit') {
+                return;
+            }
+
+            const bindingData = mappingData.bindings[bindingType];
+            const value = self.evalInScope(bindingData.target, element);
+            self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
+        });
+    };
+
+    /**
+     * Renders every foreach element found in this scan batch — the pending
+     * elements skipped by the registration stage above — deepest first, so
+     * inner foreach blocks resolve before the outer ones that contain them.
+     * @param {Map<Element, Object>} newBindings - Bindings map from scanBindings()
+     * @param {Element} parentElement - The container currently being scanned
+     */
+    Runtime.prototype.renderPendingForeachBlocks = function(newBindings, parentElement) {
+        const self = this;
+
+        Array.from(newBindings.entries())
+            .filter(([element, mappingData]) =>
+                mappingData.bindings.foreach && element !== parentElement
+            )
+            .sort(([, mappingDataA], [, mappingDataB]) => mappingDataB.depth - mappingDataA.depth) // deepest first
+            .forEach(([element]) => {
+                self.renderForeach(element, self.evaluateForeachArray(element));
+            });
     };
 
     /**
