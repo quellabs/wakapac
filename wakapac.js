@@ -6108,21 +6108,12 @@
         const newTextBindings = this.scanTextBindings(parentElement);
         const newCommentBindings = this.scanCommentBindings(parentElement);
 
-        // Elements in this batch that declare a `foreach` binding are still showing
-        // their static template content — the per-item clones (with `item`/`$index`
-        // bound) don't exist until renderForeach runs below. Bindings and
-        // interpolations found inside that template describe scope that isn't
-        // available yet: a plain property read resolves the missing loop variable
-        // to undefined and fails silently, but a function call that dereferences
-        // its argument throws. Skip *registering* that content here, not just its
-        // eager evaluation — a reactive change dispatched before this foreach
-        // renders (e.g. a sibling foreach's own render touching container scroll
-        // state) runs a full updateTextInterpolations()/updateElementBindings()
-        // sweep over every already-registered entry, so a stale registration here
-        // would still get evaluated against the missing scope and throw, even
-        // though this function never evaluates it itself. renderForeach's own
-        // scanAndRegisterNewElements() call registers and evaluates it correctly
-        // once the real, scoped clones exist.
+        // Content inside a pending (not-yet-rendered) foreach template has no
+        // item/$index scope yet, so skip *registering* it here — not just
+        // evaluating it — or a reactive change fired before renderForeach runs
+        // (e.g. a sibling foreach's own render) can sweep over the stale entry
+        // and evaluate it anyway. renderForeach() re-registers it correctly
+        // once real, scoped clones exist.
         const pendingForeachElements = this.getPendingForeachElements(newBindings, parentElement);
 
         // Add new bindings to main maps
