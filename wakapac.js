@@ -2238,7 +2238,9 @@
                 }
 
                 // Fully exiting the container also exits any active dropzone
-                self._leaveDropzone(event, container);
+                if (self._dropzoneTarget) {
+                    self._leaveDropzone(event, container);
+                }
 
                 self.dispatchMouseMessage(MSG_DRAGLEAVE, event, container, null, {
                     types: Array.from(event.dataTransfer.types)
@@ -2247,19 +2249,16 @@
         },
 
         /**
-         * Dispatches MSG_DROPTARGET_LEAVE for the currently tracked dropzone,
-         * if any, and clears tracking state. Shared by every path that can end
-         * a hover over a drop target: moving off it, switching to another one,
-         * exiting the container, and dropping.
+         * Dispatches MSG_DROPTARGET_LEAVE for the currently tracked dropzone
+         * and clears tracking state. Shared by every path that can end a
+         * hover over a drop target: moving off it, switching to another one,
+         * and exiting the container. Callers must check _dropzoneTarget is
+         * set before calling.
          * @private
          * @param {DragEvent} event
          * @param {HTMLElement} container
          */
         _leaveDropzone(event, container) {
-            if (!this._dropzoneTarget) {
-                return;
-            }
-
             const leftTarget = this._dropzoneTarget;
             this._dropzoneTarget = null;
 
@@ -2296,7 +2295,9 @@
                 // If none found, we've moved off any active dropzone
                 if (!dropTarget) {
                     event.dataTransfer.dropEffect = 'none';
-                    self._leaveDropzone(event, container);
+                    if (self._dropzoneTarget) {
+                        self._leaveDropzone(event, container);
+                    }
                     return;
                 }
 
@@ -2310,7 +2311,9 @@
                 }
 
                 // Switching straight from one drop target to another — leave the old one first
-                self._leaveDropzone(event, container);
+                if (self._dropzoneTarget) {
+                    self._leaveDropzone(event, container);
+                }
 
                 // Update the effect (mouse pointer)
                 const effect = dropTarget.getAttribute('data-pac-drop-target');
