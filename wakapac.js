@@ -6380,7 +6380,7 @@
 
                 try {
                     computedValue = this.abstraction[computedName];
-                } catch (error) {
+                } catch (_error) {
                     continue;
                 }
 
