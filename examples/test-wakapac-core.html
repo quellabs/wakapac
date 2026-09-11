@@ -467,6 +467,63 @@
                 c.destroy();
             });
 
+            await test('foreach on a nested path rebuilds render length when the parent object is reassigned (issue #204)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: data.items" data-pac-item="item">' +
+                    '<li>{{item.name}}</li></ul>',
+                    { data: { items: [{ name: '1' }] } }
+                );
+                await tick();
+                assertEqual(c.container.querySelectorAll('li').length, 1, 'initial render');
+
+                // Reassign the parent — "data" changed, not "data.items" directly.
+                c.abstraction.data = { items: [{ name: '1' }, { name: '2' }] };
+                await tick();
+                let lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2, 'grows to match the new array after parent reassignment');
+                assertEqual(lis[0].textContent, '1');
+                assertEqual(lis[1].textContent, '2');
+
+                c.abstraction.data.items = [{ name: '3' }, { name: '4' }, { name: '5' }];
+                await tick();
+                lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 3, 'direct nested-array replacement still resizes correctly');
+
+                // Reassign the parent again, shrinking the array.
+                c.abstraction.data = { items: [{ name: '6' }, { name: '7' }] };
+                await tick();
+                lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2, 'shrinks to match the new array after a second parent reassignment');
+                assertEqual(lis[0].textContent, '6');
+                assertEqual(lis[1].textContent, '7');
+
+                c.abstraction.data = { items: [] };
+                await tick();
+                assertEqual(c.container.querySelectorAll('li').length, 0, 'shrinks to zero for an empty array');
+
+                c.destroy();
+            });
+
+            await test('foreach is not rebuilt when an unrelated sibling property changes (regression guard for issue #204 fix)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: data.items" data-pac-item="item">' +
+                    '<li>{{item.name}}</li></ul>',
+                    { data: { items: [{ name: 'a' }], other: 1 } }
+                );
+                await tick();
+
+                const list = c.container.querySelector('ul');
+                const firstLi = list.querySelector('li');
+
+                c.abstraction.data.other = 2;
+                await tick();
+
+                assertEqual(c.container.querySelectorAll('li').length, 1, 'render length unaffected');
+                assert(c.container.querySelector('li') === firstLi, 'rendered <li> node was not rebuilt');
+
+                c.destroy();
+            });
+
             suite('Click bindings & msgProc');
 
             await test('click binding invokes the bound method', async function () {
