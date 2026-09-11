@@ -7250,18 +7250,27 @@
                 continue;
             }
 
+            // Rule 1: bound array path equals, is nested under, or is an
+            // ancestor of the changed path.
             const directMatch = directMatches.has(element);
 
             let computedMatch = false;
             let bracketMatch = false;
 
+            // Rules 2 and 3 only apply when a single top-level property
+            // changed (changedProp is null for deeper paths — see above).
             if (changedProp) {
                 const expr = mappingData.foreachExpr;
                 const source = mappingData.sourceArray;
+
+                // Rule 2: foreach expression is a computed that reads changedProp.
                 computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+
+                // Rule 3: changedProp is used as a dynamic bracket key in the expression.
                 bracketMatch = bracketPattern.test(expr);
             }
 
+            // No rule matched — this foreach is unaffected by the change.
             if (!directMatch && !computedMatch && !bracketMatch) {
                 continue;
             }
