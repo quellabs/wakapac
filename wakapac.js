@@ -7254,11 +7254,11 @@
             // ancestor of the changed path.
             const directMatch = directMatches.has(element);
 
+            // Rules 2 and 3 only apply when a single top-level property
+            // changed (changedProp is null for deeper paths — see above).
             let computedMatch = false;
             let bracketMatch = false;
 
-            // Rules 2 and 3 only apply when a single top-level property
-            // changed (changedProp is null for deeper paths — see above).
             if (changedProp) {
                 const expr = mappingData.foreachExpr;
                 const source = mappingData.sourceArray;
