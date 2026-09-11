@@ -7245,9 +7245,11 @@
     /**
      * Handles foreach rebuilds triggered by reactive property changes.
      * A foreach element needs rebuilding when any of the following holds:
-     *   1. Its bound array is exactly the array path that changed, or a path
-     *      nested under it (e.g. `foreach: todos` when `todos` itself was
-     *      mutated, or `foreach: rows[1].cells` when `rows[1].cells[3]` changed).
+     *   1. Its bound array is exactly the array path that changed, is nested
+     *      under it (e.g. `foreach: todos` when `todos` was mutated, or
+     *      `foreach: rows[1].cells` when `rows[1].cells[3]` changed), or is
+     *      an ancestor of it (e.g. `foreach: data.items` when `data` itself
+     *      was reassigned, replacing the array wholesale).
      *   2. Its foreach expression is a computed property that depends on the
      *      changed property (e.g. changing `filter` — or mutating `todos`,
      *      which `filteredTodos` reads — rebuilds `foreach: filteredTodos`).
@@ -7265,7 +7267,6 @@
     Runtime.prototype.handleForeachRebuildForChange = function(event) {
         const path = event.detail.path;
         const pathString = Utils.pathArrayToString(path);
-        const changedIsArray = Array.isArray(event.detail.newValue);
 
         // Rules 2 and 3 (computed dependency / bracket key) only apply to a
         // single top-level property change (e.g. ['filter'], not
@@ -7276,13 +7277,11 @@
         const dependents = changedProp ? this.dependencies.get(changedProp) : null;
         const bracketPattern = changedProp ? new RegExp('\\[' + changedProp + '\\]') : null;
 
-        // Rule 1 candidates: elements whose foreach is bound directly to (or
-        // nested under) the array path that changed. Reuses the same
-        // path/expression matching (including scoped-expression resolution)
-        // as a direct array mutation would use on its own.
-        const directMatches = changedIsArray
-            ? new Set(this.findForeachElementsByArrayPath(pathString))
-            : null;
+        // Rule 1 candidates. Matching is driven entirely by the changed path,
+        // not by whether the new value is an array — an ancestor reassignment
+        // (e.g. `data = {...}`) replaces the bound array without the new
+        // value at the changed path itself being one.
+        const directMatches = new Set(this.findForeachElementsByArrayPath(pathString));
 
         // Single-pass scan of interpolationMap, checking all three rules per
         // element instead of running separate passes that could both match
@@ -7293,18 +7292,27 @@
                 continue;
             }
 
-            const directMatch = directMatches !== null && directMatches.has(element);
+            // Rule 1: bound array path equals, is nested under, or is an
+            // ancestor of the changed path.
+            const directMatch = directMatches.has(element);
 
+            // Rules 2 and 3 only apply when a single top-level property
+            // changed (changedProp is null for deeper paths — see above).
             let computedMatch = false;
             let bracketMatch = false;
 
             if (changedProp) {
                 const expr = mappingData.foreachExpr;
                 const source = mappingData.sourceArray;
+
+                // Rule 2: foreach expression is a computed that reads changedProp.
                 computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+
+                // Rule 3: changedProp is used as a dynamic bracket key in the expression.
                 bracketMatch = bracketPattern.test(expr);
             }
 
+            // No rule matched — this foreach is unaffected by the change.
             if (!directMatch && !computedMatch && !bracketMatch) {
                 continue;
             }
@@ -9025,9 +9033,15 @@
             // Fetch the foreach expression and source array
             const { foreachExpr, sourceArray } = mappingData;
 
-            // Check whether arrayPath is or descends from the bound expression.
-            // e.g. "rows[1].cells[3]" should match a foreach bound to "rows[1].cells".
-            const matches = (expr) => expr === arrayPath || arrayPath.startsWith(expr + '[');
+            // A genuine descendant path always starts with base + '.' (property)
+            // or base + '[' (index) — see Utils.pathArrayToString.
+            const isDescendant = (base, candidate) =>
+                candidate === base || candidate.startsWith(base + '.') || candidate.startsWith(base + '[');
+
+            // Matches if the changed path is the bound path, nested under it
+            // (e.g. an item mutated), or an ancestor of it (e.g. its parent
+            // object was reassigned, replacing the array).
+            const matches = (expr) => !!expr && (isDescendant(expr, arrayPath) || isDescendant(arrayPath, expr));
 
             // Try the raw expressions first — no allocation needed
             if (matches(foreachExpr) || matches(sourceArray)) {
