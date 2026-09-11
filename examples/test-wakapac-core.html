@@ -335,6 +335,49 @@
                 c.destroy();
             });
 
+            await test('function call with item argument in one foreach is unaffected by a sibling foreach in the same container (issue #201)', async function () {
+                const originalWarn = console.warn;
+                const warnings = [];
+                console.warn = function () { warnings.push(Array.prototype.join.call(arguments, ' ')); };
+
+                let c;
+                try {
+                    c = mount(
+                        '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                        '<li>{{item.n}}</li></ul>' +
+                        '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                        '<li>{{format(item)}}</li></ul>',
+                        {
+                            items: [{ n: 1 }, { n: 2 }],
+                            format(item) { return 'Item: ' + item.n; }
+                        }
+                    );
+                    await tick();
+                } finally {
+                    console.warn = originalWarn;
+                }
+
+                const interpolationWarnings = warnings.filter(function (w) {
+                    return w.indexOf('interpolation') !== -1;
+                });
+
+                assertEqual(interpolationWarnings, [], 'no interpolation warnings from the sibling foreach with a function call');
+
+                const lists = c.container.querySelectorAll('ul');
+                const firstLis = lists[0].querySelectorAll('li');
+                const secondLis = lists[1].querySelectorAll('li');
+
+                assertEqual(firstLis.length, 2);
+                assertEqual(firstLis[0].textContent, '1');
+                assertEqual(firstLis[1].textContent, '2');
+
+                assertEqual(secondLis.length, 2);
+                assertEqual(secondLis[0].textContent, 'Item: 1');
+                assertEqual(secondLis[1].textContent, 'Item: 2');
+
+                c.destroy();
+            });
+
             await test('foreach on a computed array built via .map() binds item to the transformed value, not the source array (issue #198)', async function () {
                 const c = mount(
                     '<ul data-pac-bind="foreach: gadgets">' +
@@ -380,6 +423,104 @@
                 assertEqual(lis.length, 2);
                 assertEqual(lis[0].textContent, 'a');
                 assertEqual(lis[1].textContent, 'c');
+                c.destroy();
+            });
+
+            await test('foreach on a computed that branches between .filter() (identity-preserving) and .map() (not) rebinds correctly after the branch flips (regression: inferArrayRoot cache must not survive a data change)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: display">' +
+                    '<li>{{item.label}}</li></ul>',
+                    {
+                        todos: [
+                            { label: 'a', done: false },
+                            { label: 'b', done: true }
+                        ],
+                        grouped: false,
+                        computed: {
+                            display() {
+                                return this.grouped
+                                    ? this.todos.map(function (t) { return { label: 'grouped-' + t.label }; })
+                                    : this.todos.filter(function (t) { return !t.done; });
+                            }
+                        }
+                    }
+                );
+                await tick();
+
+                // Initial render takes the .filter() branch: its output is
+                // identity-preserving, so inferArrayRoot() resolves and caches
+                // "todos" as the source root.
+                let lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 1, 'filter branch renders one visible todo');
+                assertEqual(lis[0].textContent, 'a');
+
+                // Flip to the .map() branch: the computed's output is no longer
+                // identity-preserving. If the cache from the filter branch were
+                // reused instead of being recomputed, foreach would map "item"
+                // back to the raw todo object instead of the transformed one.
+                c.abstraction.grouped = true;
+                await tick();
+                lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2, 'map branch renders both transformed items');
+                assertEqual(lis[0].textContent, 'grouped-a');
+                assertEqual(lis[1].textContent, 'grouped-b');
+                c.destroy();
+            });
+
+            await test('foreach on a nested path rebuilds render length when the parent object is reassigned (issue #204)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: data.items" data-pac-item="item">' +
+                    '<li>{{item.name}}</li></ul>',
+                    { data: { items: [{ name: '1' }] } }
+                );
+                await tick();
+                assertEqual(c.container.querySelectorAll('li').length, 1, 'initial render');
+
+                // Reassign the parent — "data" changed, not "data.items" directly.
+                c.abstraction.data = { items: [{ name: '1' }, { name: '2' }] };
+                await tick();
+                let lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2, 'grows to match the new array after parent reassignment');
+                assertEqual(lis[0].textContent, '1');
+                assertEqual(lis[1].textContent, '2');
+
+                c.abstraction.data.items = [{ name: '3' }, { name: '4' }, { name: '5' }];
+                await tick();
+                lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 3, 'direct nested-array replacement still resizes correctly');
+
+                // Reassign the parent again, shrinking the array.
+                c.abstraction.data = { items: [{ name: '6' }, { name: '7' }] };
+                await tick();
+                lis = c.container.querySelectorAll('li');
+                assertEqual(lis.length, 2, 'shrinks to match the new array after a second parent reassignment');
+                assertEqual(lis[0].textContent, '6');
+                assertEqual(lis[1].textContent, '7');
+
+                c.abstraction.data = { items: [] };
+                await tick();
+                assertEqual(c.container.querySelectorAll('li').length, 0, 'shrinks to zero for an empty array');
+
+                c.destroy();
+            });
+
+            await test('foreach is not rebuilt when an unrelated sibling property changes (regression guard for issue #204 fix)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: data.items" data-pac-item="item">' +
+                    '<li>{{item.name}}</li></ul>',
+                    { data: { items: [{ name: 'a' }], other: 1 } }
+                );
+                await tick();
+
+                const list = c.container.querySelector('ul');
+                const firstLi = list.querySelector('li');
+
+                c.abstraction.data.other = 2;
+                await tick();
+
+                assertEqual(c.container.querySelectorAll('li').length, 1, 'render length unaffected');
+                assert(c.container.querySelector('li') === firstLi, 'rendered <li> node was not rebuilt');
+
                 c.destroy();
             });
 

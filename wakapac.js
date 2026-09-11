@@ -5795,6 +5795,7 @@
         this.interpolationMap = new Map();
         this.textInterpolationMap = new Map();
         this.commentBindingMap = new Map();
+        this.arrayRootCache = new Map();
         this.readyCalled = false;
         this.abstraction = this.createReactiveAbstraction();
         this.domUpdater = new DomUpdater(this);
@@ -6102,91 +6103,100 @@
         // is visible to scanBindings and scanTextBindings
         expandPartials(parentElement);
 
-        // Scan for new bound elements within this container
+        // Stage 1: scan for new bound content within this container
         const newBindings = this.scanBindings(parentElement);
         const newTextBindings = this.scanTextBindings(parentElement);
         const newCommentBindings = this.scanCommentBindings(parentElement);
 
-        // Add new bindings to main maps
-        newBindings.forEach((mappingData, element) => {
-            if (element !== parentElement) {
-                this.interpolationMap.set(element, mappingData);
-            }
-        });
-
-        newTextBindings.forEach((mappingData, textNode) => {
-            this.textInterpolationMap.set(textNode, mappingData);
-        });
-
-        // Store comment bindings
-        newCommentBindings.forEach((mappingData, commentNode) => {
-            this.commentBindingMap.set(commentNode, mappingData);
-            self.updateCommentConditional(commentNode, mappingData);
-        });
-
-        // Elements in this batch that declare a `foreach` binding are still showing
-        // their static template content — the per-item clones (with `item`/`$index`
-        // bound) don't exist until renderForeach runs below. Bindings and
-        // interpolations found inside that template describe scope that isn't
-        // available yet: a plain property read resolves the missing loop variable
-        // to undefined and fails silently, but a function call that dereferences
-        // its argument throws. Skip that content here — renderForeach's own
-        // scanAndRegisterNewElements() call evaluates it correctly once the real,
-        // scoped clones exist.
+        // Stage 2: content inside a pending (not-yet-rendered) foreach template
+        // has no item/$index scope yet, so it must be skipped below — not just
+        // its evaluation, but its registration too, or a reactive change fired
+        // before renderForeach runs (e.g. a sibling foreach's own render) can
+        // sweep over the stale entry and evaluate it anyway. renderForeach()
+        // re-registers it correctly once real, scoped clones exist.
         const pendingForeachElements = this.getPendingForeachElements(newBindings, parentElement);
+        const isPending = ownerElement => self.isInsidePendingForeachTemplate(ownerElement, pendingForeachElements);
+        const ownerOf = node => node.nodeType === Node.ATTRIBUTE_NODE ? node.ownerElement : node.parentElement;
 
-        // Apply initial bindings to new elements
+        // Stage 3: for everything not pending, register it into the live maps
+        // and apply it to the DOM in the same pass — registration and
+        // evaluation never need to be separate sweeps here.
         newBindings.forEach((mappingData, element) => {
-            // Only skip bindings that live *inside* an unrendered foreach template —
-            // the foreach element's own other bindings (e.g. a class binding
-            // alongside `foreach:`) still apply to the real, non-templated element.
-            if (self.isInsidePendingForeachTemplate(element.parentElement, pendingForeachElements)) {
+            if (element === parentElement || isPending(element.parentElement)) {
                 return;
             }
 
-            Object.keys(mappingData.bindings).forEach(bindingType => {
-                // Skip event bindings — they are never evaluated eagerly, only on user interaction.
-                if (bindingType === 'click' || bindingType === 'submit') {
-                    return;
-                }
-
-                // Evaluate the expression and set the binding
-                const bindingData = mappingData.bindings[bindingType];
-                const value = self.evalInScope(bindingData.target, element);
-                self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
-            });
+            self.interpolationMap.set(element, mappingData);
+            self.applyElementBindings(element, mappingData);
         });
 
-        // Apply text interpolations
         newTextBindings.forEach((mappingData, textNode) => {
-            const owner = textNode.nodeType === Node.ATTRIBUTE_NODE ? textNode.ownerElement : textNode.parentElement;
-
-            if (self.isInsidePendingForeachTemplate(owner, pendingForeachElements)) {
+            if (isPending(ownerOf(textNode))) {
                 return;
             }
 
+            self.textInterpolationMap.set(textNode, mappingData);
             self.domUpdater.updateTextNode(textNode, mappingData.template);
         });
 
-        // Handle nested foreach rendering (sort by depth, deepest first)
-        Array.from(newBindings.entries())
-            .filter(([element, mappingData]) =>
-                mappingData.bindings.foreach && element !== parentElement
-            )
-            .sort(([, mappingDataA], [, mappingDataB]) => {
-                const depthA = mappingDataA.depth;
-                const depthB = mappingDataB.depth;
-                return depthB - depthA; // deepest first
-            })
-            .forEach(([element]) => {
-                this.renderForeach(element, this.evaluateForeachArray(element));
-            });
+        newCommentBindings.forEach((mappingData, commentNode) => {
+            if (isPending(commentNode.parentElement)) {
+                return;
+            }
+
+            self.commentBindingMap.set(commentNode, mappingData);
+            self.updateCommentConditional(commentNode, mappingData);
+        });
+
+        // Stage 4: recurse into nested/pending foreach blocks, then finalize.
+        self.renderPendingForeachBlocks(newBindings, parentElement);
 
         // Content just changed as a result of this scan (new bindings applied,
         // foreach items rendered, etc.) — recompute scroll metrics now, tied to
         // the actual DOM mutation rather than an independently-timed check that
         // could fire before or after rendering completes.
-        this.updateContainerScrollState();
+        self.updateContainerScrollState();
+    };
+
+    /**
+     * Evaluates and applies every non-event attribute binding on a single
+     * element (class, style, value, foreach, etc.). Event bindings (click,
+     * submit) are never evaluated eagerly, only on user interaction.
+     * @param {Element} element - The bound element
+     * @param {Object} mappingData - This element's entry from scanBindings()
+     */
+    Runtime.prototype.applyElementBindings = function(element, mappingData) {
+        const self = this;
+
+        Object.keys(mappingData.bindings).forEach(bindingType => {
+            if (bindingType === 'click' || bindingType === 'submit') {
+                return;
+            }
+
+            const bindingData = mappingData.bindings[bindingType];
+            const value = self.evalInScope(bindingData.target, element);
+            self.domUpdater.updateAttributeBinding(element, bindingType, bindingData, value);
+        });
+    };
+
+    /**
+     * Renders every foreach element found in this scan batch — the pending
+     * elements skipped by the registration stage above — deepest first, so
+     * inner foreach blocks resolve before the outer ones that contain them.
+     * @param {Map<Element, Object>} newBindings - Bindings map from scanBindings()
+     * @param {Element} parentElement - The container currently being scanned
+     */
+    Runtime.prototype.renderPendingForeachBlocks = function(newBindings, parentElement) {
+        const self = this;
+
+        Array.from(newBindings.entries())
+            .filter(([element, mappingData]) =>
+                mappingData.bindings.foreach && element !== parentElement
+            )
+            .sort(([, mappingDataA], [, mappingDataB]) => mappingDataB.depth - mappingDataA.depth) // deepest first
+            .forEach(([element]) => {
+                self.renderForeach(element, self.evaluateForeachArray(element));
+            });
     };
 
     /**
@@ -6301,7 +6311,24 @@
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
     Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
+        // Whether a computed's current output is identity-preserving can depend on
+        // its data (e.g. a computed that branches between .map() and .filter()), so
+        // the answer is only safe to cache within a single reactive-update pass, not
+        // for the component's lifetime — handleReactiveChange() clears this cache
+        // before each pass. That still matters because a foreach nested inside
+        // another foreach's items gets fresh, unregistered DOM elements on every
+        // rebuild within the same pass (renderForeach replaces innerHTML wholesale)
+        // — without this cache, the identity check below would otherwise re-run,
+        // and re-evaluate the computed itself, once per outer item per outer render.
+        const cache = this.arrayRootCache;
+
+        if (cache.has(computedName)) {
+            return cache.get(computedName);
+        }
+
         // Step 1: Try dependency map (cheap and reliable if set up correctly).
+        let result = computedName; // Fallback if nothing matches below
+
         for (const [rootProperty, dependentList] of this.dependencies) {
             const rootValue = this.abstraction[rootProperty];
             const isArrayRoot = Array.isArray(rootValue);
@@ -6311,21 +6338,25 @@
 
                 try {
                     computedValue = this.abstraction[computedName];
-                } catch (error) {
+                } catch (_error) {
                     continue;
                 }
 
+                // A Set gives O(1) membership checks instead of Array.includes()'s
+                // O(m) scan, so the overall check is O(n + m) rather than O(n * m).
+                const rootSet = new Set(rootValue);
                 const isIdentityPreserving = Array.isArray(computedValue) &&
-                    computedValue.every((item) => rootValue.includes(item));
+                    computedValue.every((item) => rootSet.has(item));
 
                 if (isIdentityPreserving) {
-                    return rootProperty; // e.g. "todos"
+                    result = rootProperty; // e.g. "todos"
+                    break;
                 }
             }
         }
 
-        // Nothing matched
-        return computedName;
+        cache.set(computedName, result);
+        return result;
     };
 
     /**
@@ -6981,6 +7012,10 @@
      * @param {*} event.detail.newValue - The new value after the change
      */
     Runtime.prototype.handleReactiveChange = function(event) {
+        // inferArrayRoot()'s cache is only valid for the current data snapshot — a
+        // computed's identity-preservingness can depend on its inputs — so clear it
+        // before each pass rather than letting it persist across data changes.
+        this.arrayRootCache.clear();
         this.updateElementBindings();
         this.updateTextInterpolations();
         this.updateCommentConditionals();
@@ -7168,9 +7203,11 @@
     /**
      * Handles foreach rebuilds triggered by reactive property changes.
      * A foreach element needs rebuilding when any of the following holds:
-     *   1. Its bound array is exactly the array path that changed, or a path
-     *      nested under it (e.g. `foreach: todos` when `todos` itself was
-     *      mutated, or `foreach: rows[1].cells` when `rows[1].cells[3]` changed).
+     *   1. Its bound array is exactly the array path that changed, is nested
+     *      under it (e.g. `foreach: todos` when `todos` was mutated, or
+     *      `foreach: rows[1].cells` when `rows[1].cells[3]` changed), or is
+     *      an ancestor of it (e.g. `foreach: data.items` when `data` itself
+     *      was reassigned, replacing the array wholesale).
      *   2. Its foreach expression is a computed property that depends on the
      *      changed property (e.g. changing `filter` — or mutating `todos`,
      *      which `filteredTodos` reads — rebuilds `foreach: filteredTodos`).
@@ -7188,7 +7225,6 @@
     Runtime.prototype.handleForeachRebuildForChange = function(event) {
         const path = event.detail.path;
         const pathString = Utils.pathArrayToString(path);
-        const changedIsArray = Array.isArray(event.detail.newValue);
 
         // Rules 2 and 3 (computed dependency / bracket key) only apply to a
         // single top-level property change (e.g. ['filter'], not
@@ -7199,13 +7235,11 @@
         const dependents = changedProp ? this.dependencies.get(changedProp) : null;
         const bracketPattern = changedProp ? new RegExp('\\[' + changedProp + '\\]') : null;
 
-        // Rule 1 candidates: elements whose foreach is bound directly to (or
-        // nested under) the array path that changed. Reuses the same
-        // path/expression matching (including scoped-expression resolution)
-        // as a direct array mutation would use on its own.
-        const directMatches = changedIsArray
-            ? new Set(this.findForeachElementsByArrayPath(pathString))
-            : null;
+        // Rule 1 candidates. Matching is driven entirely by the changed path,
+        // not by whether the new value is an array — an ancestor reassignment
+        // (e.g. `data = {...}`) replaces the bound array without the new
+        // value at the changed path itself being one.
+        const directMatches = new Set(this.findForeachElementsByArrayPath(pathString));
 
         // Single-pass scan of interpolationMap, checking all three rules per
         // element instead of running separate passes that could both match
@@ -7216,18 +7250,27 @@
                 continue;
             }
 
-            const directMatch = directMatches !== null && directMatches.has(element);
+            // Rule 1: bound array path equals, is nested under, or is an
+            // ancestor of the changed path.
+            const directMatch = directMatches.has(element);
 
+            // Rules 2 and 3 only apply when a single top-level property
+            // changed (changedProp is null for deeper paths — see above).
             let computedMatch = false;
             let bracketMatch = false;
 
             if (changedProp) {
                 const expr = mappingData.foreachExpr;
                 const source = mappingData.sourceArray;
+
+                // Rule 2: foreach expression is a computed that reads changedProp.
                 computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+
+                // Rule 3: changedProp is used as a dynamic bracket key in the expression.
                 bracketMatch = bracketPattern.test(expr);
             }
 
+            // No rule matched — this foreach is unaffected by the change.
             if (!directMatch && !computedMatch && !bracketMatch) {
                 continue;
             }
@@ -7458,7 +7501,6 @@
             Object.assign(mappingData, {
                 foreachId: foreachId,
                 foreachExpr: foreachExpr,
-                sourceArray: this.inferArrayRoot(foreachExpr),
                 template: element.innerHTML, // Capture clean template
                 itemVar: itemVar,
                 indexVar: indexVar,
@@ -8494,10 +8536,18 @@
         this.cleanupForeachMaps(foreachElement);
 
         try {
-            // Resolve the source array for index mapping.
+            // Resolve the source array for index mapping. Recomputed on every render
+            // (not just read from mappingData.sourceArray) because a computed's
+            // identity-preservingness can depend on its data — a computed that
+            // branches between .map() and .filter() needs a fresh answer each time,
+            // not whatever was true the first time this element was scanned. The
+            // per-pass cache in inferArrayRoot() keeps this cheap. The result is
+            // written back so other consumers of mappingData.sourceArray (scope
+            // resolution, change-detection matching) see the same fresh value.
             // For filtered/sorted expressions the foreach may render a subset of a larger
             // array — fall back to the evaluated array itself when no root can be found.
-            const sourceRootName = mappingData.sourceArray || this.inferArrayRoot(mappingData.foreachExpr);
+            const sourceRootName = this.inferArrayRoot(mappingData.foreachExpr);
+            mappingData.sourceArray = sourceRootName;
             const sourceRootArray = sourceRootName && this.abstraction[sourceRootName];
             const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;
 
@@ -8941,9 +8991,15 @@
             // Fetch the foreach expression and source array
             const { foreachExpr, sourceArray } = mappingData;
 
-            // Check whether arrayPath is or descends from the bound expression.
-            // e.g. "rows[1].cells[3]" should match a foreach bound to "rows[1].cells".
-            const matches = (expr) => expr === arrayPath || arrayPath.startsWith(expr + '[');
+            // A genuine descendant path always starts with base + '.' (property)
+            // or base + '[' (index) — see Utils.pathArrayToString.
+            const isDescendant = (base, candidate) =>
+                candidate === base || candidate.startsWith(base + '.') || candidate.startsWith(base + '[');
+
+            // Matches if the changed path is the bound path, nested under it
+            // (e.g. an item mutated), or an ancestor of it (e.g. its parent
+            // object was reassigned, replacing the array).
+            const matches = (expr) => !!expr && (isDescendant(expr, arrayPath) || isDescendant(arrayPath, expr));
 
             // Try the raw expressions first — no allocation needed
             if (matches(foreachExpr) || matches(sourceArray)) {
