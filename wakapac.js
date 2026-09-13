@@ -2077,12 +2077,9 @@
                     deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
                 }, wParam);
             }, {
-                // Explicit passive: false — required, not just "omit the option".
-                // Chrome's scrolling-performance intervention defaults wheel/mousewheel
-                // listeners on document/window to passive when no option is given at
-                // all, silently breaking preventDefault(). msgProc must be able to
-                // call it on MSG_MOUSEWHEEL to block page scrolling (the documented
-                // Ctrl+Wheel-to-zoom pattern), so passive has to be explicitly opted out.
+                // Explicit passive: false is required. Chrome defaults document/window wheel
+                // listeners to passive when omitted, preventing preventDefault(). msgProc uses
+                // preventDefault() for MSG_MOUSEWHEEL to block page scrolling (e.g. Ctrl+Wheel zoom).
                 passive: false
             });
         },
