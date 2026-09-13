@@ -721,6 +721,51 @@
                 c.destroy();
             });
 
+            await test('nested mouseenter/mouseleave bindings hold independent hover state (issue: outer must not leave when the pointer enters a bound descendant)', async function () {
+                // Unlike the css:-bound icon above, the button has its own real
+                // mouseenter/mouseleave binding — both elements must track hover independently.
+                const c = mount(
+                    '<div id="outerHover" data-pac-bind="mouseenter: outerEnter, mouseleave: outerLeave">outer' +
+                    '<button id="innerHover" data-pac-bind="mouseenter: innerEnter, mouseleave: innerLeave">inner</button>' +
+                    '</div>',
+                    {
+                        outerEnters: 0, outerLeaves: 0, innerEnters: 0, innerLeaves: 0,
+                        outerEnter() { this.outerEnters++; },
+                        outerLeave() { this.outerLeaves++; },
+                        innerEnter() { this.innerEnters++; },
+                        innerLeave() { this.innerLeaves++; }
+                    }
+                );
+                await tick();
+
+                // Enter the outer div, off the button.
+                moveOver(c.container.querySelector('#outerHover'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.outerEnters, 1, 'outer mouseenter fires once entering the div');
+                assertEqual(c.abstraction.innerEnters, 0, 'inner has not been entered yet');
+
+                // Move onto the nested button — must not fire the outer's mouseleave.
+                moveOver(c.container.querySelector('#innerHover'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.outerEnters, 1, 'outer mouseenter does not re-fire moving onto the nested button');
+                assertEqual(c.abstraction.outerLeaves, 0, 'outer mouseleave must not fire — the pointer is still within the div, just over the nested button');
+                assertEqual(c.abstraction.innerEnters, 1, 'inner mouseenter fires once entering the button');
+
+                // Back onto the div, off the button.
+                moveOver(c.container.querySelector('#outerHover'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.outerEnters, 1, 'outer mouseenter still fired only once overall');
+                assertEqual(c.abstraction.innerLeaves, 1, 'inner mouseleave fires once when the pointer leaves the button back onto the div');
+
+                // Leave the component entirely.
+                moveOver(fixtures);
+                await flushMouseMove();
+                assertEqual(c.abstraction.outerLeaves, 1, 'outer mouseleave fires once when the pointer actually leaves the div');
+                assertEqual(c.abstraction.innerLeaves, 1, 'inner mouseleave still fired only once overall');
+
+                c.destroy();
+            });
+
             suite('Additional named event bindings (dblclick/mousedown/mouseup/contextmenu/wheel/keydown/...)');
 
             await test('dblclick binding invokes the bound method on a real dblclick, not on mount or unrelated changes', async function () {
@@ -885,6 +930,50 @@
                     c.abstraction.moveTargets.every(function (id) { return id === 'btn'; }),
                     'every MSG_MOUSEMOVE target resolved to the button while hovering its icon, got ' + JSON.stringify(c.abstraction.moveTargets)
                 );
+                c.destroy();
+            });
+
+            await test('MSG_MOUSEENTER_DESCENDANT/MSG_MOUSELEAVE_DESCENDANT fire for every nested interactive ancestor, not just the nearest one', async function () {
+                // Three levels deep; lvl3 is inherently interactive (<button>) with no
+                // mouseenter binding of its own — chain tracking is msgProc-visible regardless.
+                const c = mount(
+                    '<div id="lvl1" data-pac-bind="mouseenter: enter1, mouseleave: leave1">' +
+                    '<div id="lvl2" data-pac-bind="mouseenter: enter2, mouseleave: leave2">' +
+                    '<button id="lvl3">deep</button>' +
+                    '</div></div>',
+                    {
+                        events: [],
+                        enter1() {}, leave1() {}, enter2() {}, leave2() {},
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_MOUSEENTER_DESCENDANT) {
+                                this.events.push('enter:' + message.target.id);
+                            }
+                            if (message.message === wakaPAC.MSG_MOUSELEAVE_DESCENDANT) {
+                                this.events.push('leave:' + message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+
+                // Jump straight from outside onto the innermost element in one move.
+                moveOver(c.container.querySelector('#lvl3'));
+                await flushMouseMove();
+                assertEqual(
+                    c.abstraction.events,
+                    ['enter:lvl1', 'enter:lvl2', 'enter:lvl3'],
+                    'landing directly on the deepest element fires every ancestor mouseenter, outermost first, in the same move'
+                );
+
+                // Jump straight back out to unrelated content in one move.
+                moveOver(fixtures);
+                await flushMouseMove();
+                assertEqual(
+                    c.abstraction.events,
+                    ['enter:lvl1', 'enter:lvl2', 'enter:lvl3', 'leave:lvl3', 'leave:lvl2', 'leave:lvl1'],
+                    'leaving directly fires every ancestor mouseleave, innermost first'
+                );
+
                 c.destroy();
             });
 

@@ -1690,8 +1690,13 @@
         /** @private {HTMLElement|null} The container that currently has the pointer inside it */
         _hoveredContainer: null,
 
-        /** @private {HTMLElement|null} The descendant element that currently has the pointer inside it */
-        _hoveredDescendant: null,
+        /**
+         * @private {Element[]} Interactive elements the pointer is currently
+         * over, outermost-first. Tracking the whole chain, not just the
+         * nearest match, lets a bound ancestor and a bound descendant hold
+         * independent hover state — see findInteractiveChain()/syncHoveredChain().
+         */
+        _hoveredChain: [],
 
         /** @private {HTMLElement|null} The container element that has captured mouse input */
         _capturedContainer: null,
@@ -2068,10 +2073,8 @@
                         if (!captured) {
                             // Leaving old container
                             if (self._hoveredContainer) {
-                                // Clean up any lingering descendant hover first
-                                if (self._hoveredDescendant) {
-                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
-                                }
+                                // Clean up any lingering hover chain first
+                                self.syncHoveredChain(self._hoveredContainer, event, []);
 
                                 self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
                             }
@@ -2083,31 +2086,17 @@
                         }
 
                         self._hoveredContainer = currentContainer;
-                        self._hoveredDescendant = null;
+                        self._hoveredChain = [];
                     }
 
-                    // Within the current container, track which child element the
-                    // cursor is over. Fires enter/leave events when that element
-                    // changes, enabling per-element hover effects without requiring
-                    // each child to register its own listeners.
+                    // Track the whole chain of interactive elements under the
+                    // cursor, not just the nearest one, so nested bound
+                    // elements hold independent hover state.
                     if (currentContainer && !captured) {
                         const rawTarget = self.normalizeToElement(event.target);
+                        const newChain = self.findInteractiveChain(rawTarget, currentContainer);
 
-                        // Resolve the descendant: any element other than the
-                        // container root itself is a hovered child
-                        const currentDescendant = self.findInteractiveDescendant(rawTarget, currentContainer);
-
-                        if (self._hoveredDescendant !== currentDescendant) {
-                            if (self._hoveredDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer, self._hoveredDescendant);
-                            }
-
-                            if (currentDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer, currentDescendant);
-                            }
-
-                            self._hoveredDescendant = currentDescendant;
-                        }
+                        self.syncHoveredChain(currentContainer, event, newChain);
                     }
 
                     // Unconditionally dispatch the move event to the current
@@ -2458,11 +2447,8 @@
 
                 // Dispatch leave to whatever container was last hovered
                 if (self._hoveredContainer) {
-                    // Clean up any lingering descendant hover first
-                    if (self._hoveredDescendant) {
-                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
-                        self._hoveredDescendant = null;
-                    }
+                    // Clean up any lingering hover chain first
+                    self.syncHoveredChain(self._hoveredContainer, event, []);
 
                     // Dispatch mouse leave event
                     self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
@@ -3261,6 +3247,69 @@
         },
 
         /**
+         * Like findInteractiveDescendant(), but collects every match up to
+         * `container` instead of stopping at the nearest one — outermost-first.
+         * Used only by hover-chain tracking, so nested bound elements each get
+         * their own mouseenter/mouseleave transitions.
+         * @param {Element} target - Element that received the event
+         * @param {Element} container - Container root to stop at
+         * @returns {Element[]} Interactive ancestors, outermost-first; empty
+         *   if `target` is outside `container` or no control is found.
+         * @private
+         */
+        findInteractiveChain(target, container) {
+            if (container && !container.contains(target)) {
+                return [];
+            }
+
+            const chain = [];
+            let el = target;
+
+            while (el && el !== container) {
+                if (this.isInherentlyInteractive(el) || this.hasBoundInteraction(el)) {
+                    chain.push(el);
+                }
+
+                el = el.parentElement;
+            }
+
+            // Walked innermost-first; reverse to outermost-first for callers.
+            return chain.reverse();
+        },
+
+        /**
+         * Diffs `this._hoveredChain` against `newChain`, dispatching
+         * MSG_MOUSELEAVE_DESCENDANT for elements that fell off (innermost
+         * first) and MSG_MOUSEENTER_DESCENDANT for elements newly on it
+         * (outermost first) — matching native mouseover/mouseout bubbling
+         * order, so a move landing directly on a deeply nested element still
+         * fires every ancestor's enter outside-in in one go. Stores
+         * `newChain` as the new tracked state.
+         * @param {HTMLElement} container - Container to address the messages to
+         * @param {Event} event - Original DOM event, forwarded into the dispatched messages
+         * @param {Element[]} newChain - Outermost-first chain from findInteractiveChain(),
+         *   or [] to flush the entire current chain
+         * @private
+         */
+        syncHoveredChain(container, event, newChain) {
+            const oldChain = this._hoveredChain;
+
+            for (let i = oldChain.length - 1; i >= 0; i--) {
+                if (!newChain.includes(oldChain[i])) {
+                    this.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, container, oldChain[i]);
+                }
+            }
+
+            for (let i = 0; i < newChain.length; i++) {
+                if (!oldChain.includes(newChain[i])) {
+                    this.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, container, newChain[i]);
+                }
+            }
+
+            this._hoveredChain = newChain;
+        },
+
+        /**
          * Dispatches a PAC message to its target container, running it through the
          * installed message hook chain before delivery to the container's msgProc.
          * Equivalent to the Win32 DispatchMessage() path with WH_CALLWNDPROC hooks active.
@@ -3325,9 +3374,9 @@
          * @param {MouseEvent | TouchEvent | WheelEvent | DragEvent} domEvent
          * @param {HTMLElement} container
          * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
-         *   the specific descendant entered/left. Required for LEAVE because it cannot
-         *   be derived from the event after the cursor moves; for ENTER it reuses the
-         *   caller's computed descendant. Ignored for other message types.
+         *   the one chain element that entered/left (syncHoveredChain() calls this
+         *   once per element). Required for LEAVE since it can't be derived from the
+         *   event after the cursor moves. Ignored for other message types.
          * @param {Object} [extended]
          * @param {number|null} [wParamOverride] - Bypasses the default wParam
          *   encoding (modifier state) with a caller-supplied value, for message
