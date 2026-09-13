@@ -325,15 +325,28 @@
     const BESPOKE_EVENT_BINDING_TYPES = new Set(['submit', 'change', 'mouseenter', 'mouseleave']);
 
     /**
+     * Every binding type that represents an actual interaction rather than a
+     * passive reactive attribute (css, text, class, value, ...): the bespoke
+     * types above plus every event name GENERIC_EVENT_BINDING_MESSAGES
+     * dispatches. Used by DomUpdateTracker.hasBoundInteraction() to decide
+     * whether an element is its own hit-test boundary — an element bound only
+     * via, say, `css:` must NOT count as one, or it would shadow an
+     * interactive ancestor (e.g. a mouseenter-bound button) from ever being
+     * resolved as the hover/click target once the pointer reaches it.
+     */
+    const INTERACTIVE_BINDING_TYPES = new Set([
+        ...BESPOKE_EVENT_BINDING_TYPES,
+        ...GENERIC_EVENT_BINDING_MESSAGES.values()
+    ]);
+
+    /**
      * Binding types handled only for actual DOM/PAC events, never eagerly
-     * during render or reactive updates: the bespoke types above, every event
-     * name GENERIC_EVENT_BINDING_MESSAGES dispatches, and 'foreach' — included
-     * because its own rendering pipeline must bypass generic attribute-binding
-     * paths.
+     * during render or reactive updates: every interactive type above, plus
+     * 'foreach' — included because its own rendering pipeline must bypass
+     * generic attribute-binding paths.
      */
     const NON_ATTRIBUTE_BINDING_TYPES = new Set([
-        ...BESPOKE_EVENT_BINDING_TYPES,
-        ...GENERIC_EVENT_BINDING_MESSAGES.values(),
+        ...INTERACTIVE_BINDING_TYPES,
         'foreach'
     ]);
 
@@ -3189,20 +3202,35 @@
         },
 
         /**
-         * Returns true if the element participates in the declarative binding system
-         * via data-pac-bind, regardless of binding type or tag.
+         * Returns true if the element carries a data-pac-bind binding of an
+         * interactive type (click, mouseenter/leave, submit, keydown, ...) —
+         * see INTERACTIVE_BINDING_TYPES. A passive reactive binding (css,
+         * text, class, value, ...) does NOT count: an icon bound only via
+         * `data-pac-bind="css: ..."` inside a mouseenter-bound button must
+         * not shadow that button as the hit-test boundary, or the button's
+         * mouseenter/mouseleave would spuriously toggle as the pointer
+         * crosses onto the icon.
          * @param {Element} el - The element to check
-         * @returns {boolean} True if el has a data-pac-bind attribute
+         * @returns {boolean} True if el has an interactive data-pac-bind binding
          * @private
          */
         hasBoundInteraction(el) {
-            return el.hasAttribute('data-pac-bind');
+            const bindingString = el.getAttribute('data-pac-bind');
+
+            if (!bindingString) {
+                return false;
+            }
+
+            return ExpressionCache.parseBindingString(bindingString)
+                .some(binding => INTERACTIVE_BINDING_TYPES.has(binding.type));
         },
 
         /**
          * Finds the nearest interactive element from `target` within `container`,
          * mirroring Win32 child-window hit-testing. Controls are inherently
-         * interactive or carry any data-pac-bind attribute.
+         * interactive or carry an interactive data-pac-bind binding (see
+         * hasBoundInteraction()) — a purely reactive binding like `css:` is
+         * transparent to this walk and does not stop it.
          * Returns null if `target` is outside `container` or no control is found.
          * @param {Element} target - Element that received the event
          * @param {Element} container - Container root to stop at

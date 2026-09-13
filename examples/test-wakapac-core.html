@@ -683,6 +683,44 @@
                 c.destroy();
             });
 
+            await test('a nested reactive-attribute binding (e.g. css) does not shadow an ancestor mouseenter/mouseleave binding', async function () {
+                // The icon is bound via a plain reactive attribute, not an event
+                // binding. It must be transparent to hover hit-testing so the
+                // button underneath it keeps tracking as the hovered descendant
+                // instead of the icon spuriously becoming its own boundary.
+                const c = mount(
+                    '<div id="outer">outer' +
+                    '<button id="hoverbtn" data-pac-bind="mouseenter: enter, mouseleave: leave">' +
+                    '<span id="hovericon" data-pac-bind="css: iconClass"></span>' +
+                    '</button></div>',
+                    {
+                        enters: 0,
+                        leaves: 0,
+                        iconClass: 'icon',
+                        enter() { this.enters++; },
+                        leave() { this.leaves++; }
+                    }
+                );
+                await tick();
+
+                moveOver(c.container.querySelector('#hoverbtn'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter fires once when the pointer enters the button');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave has not fired yet');
+
+                moveOver(c.container.querySelector('#hovericon'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter does not re-fire when moving onto the nested css-bound icon');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave must not fire when the pointer is still over the button, just on the icon');
+
+                moveOver(c.container.querySelector('#outer'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter still fired only once overall');
+                assertEqual(c.abstraction.leaves, 1, 'mouseleave fires once when the pointer actually leaves the button');
+
+                c.destroy();
+            });
+
             suite('Additional named event bindings (dblclick/mousedown/mouseup/contextmenu/wheel/keydown/...)');
 
             await test('dblclick binding invokes the bound method on a real dblclick, not on mount or unrelated changes', async function () {
