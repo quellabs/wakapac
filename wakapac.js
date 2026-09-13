@@ -296,6 +296,31 @@
     ]);
 
     /**
+     * Message types with no dedicated handler (unlike click/submit/change/
+     * mouseenter/mouseleave, each of which has its own extra pre/post
+     * processing) map here to the data-pac-bind event name they dispatch
+     * through Runtime.prototype.handleGenericEventBinding() — see the
+     * `default` case in handlePacEvent(). Several button messages collapse
+     * onto the same name because native mousedown/mouseup fire for every
+     * button, unlike click, which only fires for the left one.
+     */
+    const GENERIC_EVENT_BINDING_MESSAGES = new Map([
+        [MSG_LBUTTONDBLCLK, 'dblclick'],
+        [MSG_LBUTTONDOWN, 'mousedown'], [MSG_MBUTTONDOWN, 'mousedown'], [MSG_RBUTTONDOWN, 'mousedown'],
+        [MSG_LBUTTONUP, 'mouseup'], [MSG_MBUTTONUP, 'mouseup'], [MSG_RBUTTONUP, 'mouseup'],
+        [MSG_CONTEXTMENU, 'contextmenu'],
+        [MSG_MOUSEWHEEL, 'wheel'],
+        [MSG_DRAGENTER, 'dragenter'],
+        [MSG_DRAGLEAVE, 'dragleave'],
+        [MSG_DRAGOVER, 'dragover'],
+        [MSG_DROP, 'drop'],
+        [MSG_KEYDOWN, 'keydown'],
+        [MSG_KEYUP, 'keyup'],
+        [MSG_COPY, 'copy'],
+        [MSG_PASTE, 'paste']
+    ]);
+
+    /**
      * Mouse and keyboard modifier key state flags
      * Used as bitmask - multiple flags can be OR'd together
      */
@@ -6598,66 +6623,20 @@
                 this.handleDomMouseHover('mouseleave', event);
                 break;
 
-            case MSG_LBUTTONDBLCLK:
-                this.handleGenericEventBinding('dblclick', event);
-                break;
-
-            case MSG_LBUTTONDOWN:
-            case MSG_MBUTTONDOWN:
-            case MSG_RBUTTONDOWN:
-                this.handleGenericEventBinding('mousedown', event);
-                break;
-
-            case MSG_LBUTTONUP:
-            case MSG_MBUTTONUP:
-            case MSG_RBUTTONUP:
-                this.handleGenericEventBinding('mouseup', event);
-                break;
-
-            case MSG_CONTEXTMENU:
-                this.handleGenericEventBinding('contextmenu', event);
-                break;
-
-            case MSG_MOUSEWHEEL:
-                this.handleGenericEventBinding('wheel', event);
-                break;
-
-            case MSG_DRAGENTER:
-                this.handleGenericEventBinding('dragenter', event);
-                break;
-
-            case MSG_DRAGLEAVE:
-                this.handleGenericEventBinding('dragleave', event);
-                break;
-
-            case MSG_DRAGOVER:
-                this.handleGenericEventBinding('dragover', event);
-                break;
-
-            case MSG_DROP:
-                this.handleGenericEventBinding('drop', event);
-                break;
-
-            case MSG_KEYDOWN:
-                this.handleGenericEventBinding('keydown', event);
-                break;
-
-            case MSG_KEYUP:
-                this.handleGenericEventBinding('keyup', event);
-                break;
-
-            case MSG_COPY:
-                this.handleGenericEventBinding('copy', event);
-                break;
-
-            case MSG_PASTE:
-                this.handleGenericEventBinding('paste', event);
-                break;
-
             case MSG_INPUT_COMPLETE:
                 // Post-mutation input (input event - value is updated)
                 this.handleDomInputComplete(event);
                 break;
+
+            default: {
+                // dblclick, mousedown/up, contextmenu, wheel, the drag family,
+                // keydown/up, copy/paste — see GENERIC_EVENT_BINDING_MESSAGES.
+                const eventName = GENERIC_EVENT_BINDING_MESSAGES.get(event.message);
+
+                if (eventName) {
+                    this.handleGenericEventBinding(eventName, event);
+                }
+            }
         }
     }
 
