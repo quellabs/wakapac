@@ -1691,12 +1691,10 @@
         _hoveredContainer: null,
 
         /**
-         * @private {Element[]} The chain of interactive elements the pointer
-         * is currently over, outermost-first, from directly inside the
-         * hovered container down to the innermost interactive element under
-         * the cursor. Tracking the whole chain (not just the nearest match)
-         * lets a bound ancestor and a bound descendant hold independent
-         * hover state — see findInteractiveChain() and syncHoveredChain().
+         * @private {Element[]} Interactive elements the pointer is currently
+         * over, outermost-first. Tracking the whole chain, not just the
+         * nearest match, lets a bound ancestor and a bound descendant hold
+         * independent hover state — see findInteractiveChain()/syncHoveredChain().
          */
         _hoveredChain: [],
 
@@ -2091,13 +2089,9 @@
                         self._hoveredChain = [];
                     }
 
-                    // Within the current container, track the whole chain of
-                    // interactive elements the cursor is over (not just the
-                    // nearest one), so a bound ancestor and a bound descendant
-                    // can hold independent hover state. Fires enter/leave
-                    // events for whatever entered/left the chain, enabling
-                    // per-element hover effects without requiring each child
-                    // to register its own listeners.
+                    // Track the whole chain of interactive elements under the
+                    // cursor, not just the nearest one, so nested bound
+                    // elements hold independent hover state.
                     if (currentContainer && !captured) {
                         const rawTarget = self.normalizeToElement(event.target);
                         const newChain = self.findInteractiveChain(rawTarget, currentContainer);
@@ -3254,22 +3248,17 @@
 
         /**
          * Finds every interactive element from `target` up to `container`,
-         * outermost-first. Used only by hover-chain tracking (see
-         * syncHoveredChain()) — unlike findInteractiveDescendant(), which
-         * stops at the nearest match for single-owner hit-testing (click,
-         * wheel, drag), this walk keeps going so a bound ancestor and a
-         * bound descendant can each hold independent mouseenter/mouseleave
-         * state, matching how native mouseenter/mouseleave doesn't fire a
-         * false leave on an ancestor when the pointer moves onto a nested
-         * child. Same "is this a hover stop" predicate as
-         * findInteractiveDescendant() (isInherentlyInteractive() or
-         * hasBoundInteraction()); a purely reactive binding like `css:` is
-         * still transparent and never appears in the returned chain.
+         * outermost-first. Used only by hover-chain tracking; unlike
+         * findInteractiveDescendant() (which stops at the nearest match for
+         * single-owner hit-testing — click, wheel, drag), this keeps walking
+         * so nested bound elements each get their own mouseenter/mouseleave
+         * transitions instead of the ancestor's firing a false leave when the
+         * pointer moves onto a nested child. Same hover-stop predicate as
+         * findInteractiveDescendant().
          * @param {Element} target - Element that received the event
          * @param {Element} container - Container root to stop at
-         * @returns {Element[]} Interactive ancestors from just inside
-         *   `container` down to `target`'s nearest match, outermost-first;
-         *   empty if `target` is outside `container` or no control is found.
+         * @returns {Element[]} Interactive ancestors, outermost-first; empty
+         *   if `target` is outside `container` or no control is found.
          * @private
          */
         findInteractiveChain(target, container) {
@@ -3288,27 +3277,22 @@
                 el = el.parentElement;
             }
 
-            // Collected innermost-first while walking up — reverse so callers
-            // get outermost-first, the order native enter/leave dispatch uses.
+            // Walked innermost-first; reverse to outermost-first for callers.
             return chain.reverse();
         },
 
         /**
-         * Reconciles the tracked hover chain (this._hoveredChain) against
-         * `newChain`, firing MSG_MOUSELEAVE_DESCENDANT for elements that fell
-         * off the chain and MSG_MOUSEENTER_DESCENDANT for elements newly on
-         * it, then stores `newChain` as the new tracked state. Dispatch order
-         * mirrors native mouseover/mouseout bubbling: leaves fire
-         * innermost-first (deepest element leaves before its ancestors do),
-         * enters fire outermost-first (an ancestor's enter is observable
-         * before its descendant's) — so a single pointer move that jumps
-         * straight onto a deeply nested interactive element still fires
-         * every ancestor's enter in the same outside-in order a real mouse
-         * traversal would produce.
+         * Diffs `this._hoveredChain` against `newChain`, dispatching
+         * MSG_MOUSELEAVE_DESCENDANT for elements that fell off (innermost
+         * first) and MSG_MOUSEENTER_DESCENDANT for elements newly on it
+         * (outermost first) — matching native mouseover/mouseout bubbling
+         * order, so a move landing directly on a deeply nested element still
+         * fires every ancestor's enter outside-in in one go. Stores
+         * `newChain` as the new tracked state.
          * @param {HTMLElement} container - Container to address the messages to
          * @param {Event} event - Original DOM event, forwarded into the dispatched messages
          * @param {Element[]} newChain - Outermost-first chain from findInteractiveChain(),
-         *   or [] to flush the entire current chain (container change, pointer left the document)
+         *   or [] to flush the entire current chain
          * @private
          */
         syncHoveredChain(container, event, newChain) {
@@ -3394,10 +3378,9 @@
          * @param {MouseEvent | TouchEvent | WheelEvent | DragEvent} domEvent
          * @param {HTMLElement} container
          * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
-         *   the one chain element that entered/left. syncHoveredChain() calls this
-         *   once per element when several interactive ancestors enter/leave in the
-         *   same pointer move; required for LEAVE because it cannot be derived from
-         *   the event after the cursor moves. Ignored for other message types.
+         *   the one chain element that entered/left (syncHoveredChain() calls this
+         *   once per element). Required for LEAVE since it can't be derived from the
+         *   event after the cursor moves. Ignored for other message types.
          * @param {Object} [extended]
          * @param {number|null} [wParamOverride] - Bypasses the default wParam
          *   encoding (modifier state) with a caller-supplied value, for message

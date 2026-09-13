@@ -722,11 +722,8 @@
             });
 
             await test('nested mouseenter/mouseleave bindings hold independent hover state (issue: outer must not leave when the pointer enters a bound descendant)', async function () {
-                // Unlike the css:-bound icon above, the button here has its own
-                // real mouseenter/mouseleave binding. Both the div and the
-                // button must track their own hover state independently,
-                // matching how native (non-bubbling) mouseenter/mouseleave
-                // behaves for nested elements.
+                // Unlike the css:-bound icon above, the button has its own real
+                // mouseenter/mouseleave binding — both elements must track hover independently.
                 const c = mount(
                     '<div id="outerHover" data-pac-bind="mouseenter: outerEnter, mouseleave: outerLeave">outer' +
                     '<button id="innerHover" data-pac-bind="mouseenter: innerEnter, mouseleave: innerLeave">inner</button>' +
@@ -754,8 +751,7 @@
                 assertEqual(c.abstraction.outerLeaves, 0, 'outer mouseleave must not fire — the pointer is still within the div, just over the nested button');
                 assertEqual(c.abstraction.innerEnters, 1, 'inner mouseenter fires once entering the button');
 
-                // Move back onto the div, off the button — must fire the inner's
-                // mouseleave without re-firing the outer's mouseenter.
+                // Back onto the div, off the button.
                 moveOver(c.container.querySelector('#outerHover'));
                 await flushMouseMove();
                 assertEqual(c.abstraction.outerEnters, 1, 'outer mouseenter still fired only once overall');
@@ -938,12 +934,8 @@
             });
 
             await test('MSG_MOUSEENTER_DESCENDANT/MSG_MOUSELEAVE_DESCENDANT fire for every nested interactive ancestor, not just the nearest one', async function () {
-                // Three levels deep, none of them decorative: lvl1 and lvl2 are
-                // bound to mouseenter/mouseleave, lvl3 is inherently interactive
-                // (a <button>). A pointer move landing directly on lvl3 must
-                // still surface all three as independent chain transitions —
-                // this is msgProc-visible even without a mouseenter binding on
-                // the innermost element.
+                // Three levels deep; lvl3 is inherently interactive (<button>) with no
+                // mouseenter binding of its own — chain tracking is msgProc-visible regardless.
                 const c = mount(
                     '<div id="lvl1" data-pac-bind="mouseenter: enter1, mouseleave: leave1">' +
                     '<div id="lvl2" data-pac-bind="mouseenter: enter2, mouseleave: leave2">' +
