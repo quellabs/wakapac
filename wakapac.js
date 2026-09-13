@@ -6857,16 +6857,27 @@
      * @returns {void}
      */
     Runtime.prototype.handleGenericEventBinding = function(bindingType, event) {
+        // Resolve the element the binding actually lives on, from the literal
+        // event point (event.realTarget) — see findEventBindingElement()'s own
+        // docblock for why this stays decoupled from the raw-layer's
+        // event.target resolution.
         const boundElement = this.findEventBindingElement(event.realTarget, bindingType);
 
         if (!boundElement) {
             return;
         }
 
+        // If the event lands on a decorative child (e.g. an icon inside a
+        // button), treat the control as the target. This shadows the native
+        // Event.target getter so handlers consistently see the bound control
+        // rather than the literal descendant. Skipped when already equal, to
+        // avoid an unnecessary defineProperty call on the common case.
         if (event.target !== boundElement) {
             Object.defineProperty(event, 'target', { value: boundElement, enumerable: true, configurable: true });
         }
 
+        // Fetch binding target and invoke — invokeEventBinding() handles
+        // $event scope, foreach context, and the bare-method-reference fallback.
         const bindingTarget = this.interpolationMap.get(boundElement).bindings[bindingType].target;
         this.invokeEventBinding(bindingType, bindingTarget, event);
     };
