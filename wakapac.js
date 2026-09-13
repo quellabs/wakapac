@@ -3247,14 +3247,10 @@
         },
 
         /**
-         * Finds every interactive element from `target` up to `container`,
-         * outermost-first. Used only by hover-chain tracking; unlike
-         * findInteractiveDescendant() (which stops at the nearest match for
-         * single-owner hit-testing — click, wheel, drag), this keeps walking
-         * so nested bound elements each get their own mouseenter/mouseleave
-         * transitions instead of the ancestor's firing a false leave when the
-         * pointer moves onto a nested child. Same hover-stop predicate as
-         * findInteractiveDescendant().
+         * Like findInteractiveDescendant(), but collects every match up to
+         * `container` instead of stopping at the nearest one — outermost-first.
+         * Used only by hover-chain tracking, so nested bound elements each get
+         * their own mouseenter/mouseleave transitions.
          * @param {Element} target - Element that received the event
          * @param {Element} container - Container root to stop at
          * @returns {Element[]} Interactive ancestors, outermost-first; empty
