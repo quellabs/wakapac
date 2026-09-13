@@ -191,13 +191,9 @@
     const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
 
     /**
-     * Binding types dispatched to their handler only in response to an actual
-     * DOM/PAC event (click, submit, mouseenter, ...), never evaluated eagerly
-     * during a render or reactive-change pass. Evaluating one of these outside
-     * that dispatch would invoke the bound method as a side effect of unrelated
-     * state changes rather than the real interaction it's meant to respond to.
-     * 'foreach' is grouped in here too since it has its own rendering pipeline
-     * and must likewise be skipped by the generic attribute-binding paths.
+     * Binding types handled only for actual DOM/PAC events, never eagerly during
+     * render or reactive updates. 'foreach' is included because its own rendering
+     * pipeline must bypass generic attribute-binding paths.
      */
     const NON_ATTRIBUTE_BINDING_TYPES = new Set(['click', 'submit', 'mouseenter', 'mouseleave', 'foreach']);
 
@@ -3124,13 +3120,8 @@
         },
 
         /**
-         * Returns true if the element carries a data-pac-bind attribute at
-         * all, i.e. it's a control by virtue of participating in the
-         * declarative binding system rather than its tag or an explicit
-         * control attribute. Not click-specific: an element bound only via
-         * mouseenter/mouseleave (or any other binding type) still needs to
-         * count as its own "window" here, otherwise MSG_MOUSEENTER_DESCENDANT
-         * and MSG_MOUSELEAVE_DESCENDANT could never be addressed to it.
+         * Returns true if the element participates in the declarative binding system
+         * via data-pac-bind, regardless of binding type or tag.
          * @param {Element} el - The element to check
          * @returns {boolean} True if el has a data-pac-bind attribute
          * @private
@@ -3141,18 +3132,9 @@
 
         /**
          * Finds the nearest interactive element from `target` within `container`,
-         * mirroring Win32 child-window hit-testing. Returns null for plain content.
-         * A control is accepted by isInherentlyInteractive() or by carrying any
-         * data-pac-bind attribute (see hasBoundInteraction()).
-         *
-         * Requires `container` to actually contain `target` (checked up front).
-         * Without this, a `target` from outside `container` — e.g. a raw click
-         * point during mouse capture, which redirects messages to the capturing
-         * container regardless of where the cursor actually is — would never
-         * reach the `el !== container` stop condition while climbing `target`'s
-         * real ancestor chain, and could walk into and return an unrelated
-         * control from a completely different part of the document.
-         *
+         * mirroring Win32 child-window hit-testing. Controls are inherently
+         * interactive or carry any data-pac-bind attribute.
+         * Returns null if `target` is outside `container` or no control is found.
          * @param {Element} target - Element that received the event
          * @param {Element} container - Container root to stop at
          * @returns {Element|null} Nearest interactive ancestor, or null
@@ -6174,13 +6156,13 @@
         const self = this;
 
         Object.keys(mappingData.bindings).forEach(bindingType => {
-            // 'foreach' is left out of this list on purpose (unlike the other
-            // event-style bindings) — leave its existing evaluate-then-discard
-            // behavior below untouched, since updateAttributeBinding() already
-            // no-ops for it and the actual rendering happens elsewhere, via
-            // renderPendingForeachBlocks().
-            if (bindingType === 'click' || bindingType === 'submit' ||
-                bindingType === 'mouseenter' || bindingType === 'mouseleave') {
+            // 'foreach' is intentionally excluded. Its existing evaluate-then-discard
+            // behavior remains unchanged; updateAttributeBinding() already no-ops for it,
+            // and rendering is handled separately by renderPendingForeachBlocks().
+            if (
+                bindingType === 'click' || bindingType === 'submit' ||
+                bindingType === 'mouseenter' || bindingType === 'mouseleave'
+            ) {
                 return;
             }
 
@@ -6666,32 +6648,15 @@
     };
 
     /**
-     * Walks up from `event.realTarget` to the nearest ancestor with a click
-     * binding, stopping at the container boundary.
+     * Finds the nearest click-bound ancestor from `event.realTarget`, stopping at
+     * the container boundary or the first inherently interactive element.
      *
-     * Takes `event.realTarget`, not `event.target` — `target` on a click
-     * message may already be control-resolved by findInteractiveDescendant()
-     * (see dispatchMouseMessage()). That walk can stop short of this one:
-     * findInteractiveDescendant() treats any data-pac-bind-carrying element
-     * as its own control boundary (hasBoundInteraction()), so a click
-     * bubbling up through an intervening mouseenter/mouseleave-only bound
-     * element resolves `target` to that element, not the actual click-bound
-     * ancestor found here. There's also the pre-existing mouse-capture case:
-     * `target` can be forced all the way to `container` itself when the
-     * literal click lands outside it, which is not an ancestor of the real
-     * click point at all. Resolving from `realTarget` keeps this walk
-     * correct independent of either divergence, and independent of the two
-     * resolvers ever being changed out of sync with each other. `realTarget`
-     * is unaffected by any of this and always holds the literal DOM node.
+     * Uses realTarget rather than target because target may already be resolved
+     * by findInteractiveDescendant(), especially with other bindings or capture.
+     * This ensures clicks on non-interactive descendants can reach their bound
+     * ancestor without inheriting handlers past an interactive control.
      *
-     * This handles clicks on non-interactive descendants (e.g. an icon
-     * inside a click-bound button), where the literal click point is not
-     * the bound element. The search stops at the first element
-     * isInherentlyInteractive() accepts, since such elements are their own
-     * controls and must not inherit an ancestor's click handler (e.g. an
-     * unbound `<button>` inside a click-bound `<div>`).
-     *
-     * @param {Element|Node} target - The element that was clicked (`event.realTarget`)
+     * @param {Element|Node} target - The element that was clicked (event.realTarget)
      * @returns {Element|null} The nearest element with a click binding, or null
      */
     Runtime.prototype.findClickBindingElement = function(target) {
@@ -6824,14 +6789,11 @@
     };
 
     /**
-     * Handles MSG_MOUSEENTER_DESCENDANT / MSG_MOUSELEAVE_DESCENDANT messages by
-     * executing the data-pac-bind="mouseenter: ..." / "mouseleave: ..." handler
-     * declared on the hovered descendant. event.target is already resolved to
-     * that specific descendant by dispatchMouseMessage() (see its
-     * descendantOverride parameter), mirroring how MSG_LCLICK's target is
-     * resolved before reaching handleDomClicks().
+     * Handles mouseenter/mouseleave messages by executing the corresponding
+     * data-pac-bind handler on the hovered descendant. event.target is already
+     * resolved to that descendant by dispatchMouseMessage().
      * @param {string} kind - 'mouseenter' or 'mouseleave'
-     * @param {CustomEvent} event - The PAC message event; event.target is the hovered descendant
+     * @param {CustomEvent} event - The PAC message event
      * @returns {void}
      */
     Runtime.prototype.handleDomMouseHover = function(kind, event) {
