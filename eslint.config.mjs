@@ -35,5 +35,9 @@ export default defineConfig([
                 YT: "readonly"
             }
         }
+    },
+    {
+        files: ["playwright.config.js", "tests/**/*.js"],
+        languageOptions: {globals: globals.node}
     }
 ]);

@@ -627,6 +627,62 @@
                 container.parentNode.removeChild(container);
             });
 
+            suite('Mouse hover bindings (mouseenter/mouseleave)');
+
+            await test('mouseenter/mouseleave bindings invoke bound methods on real hover, not on mount (issue #206)', async function () {
+                const c = mount(
+                    '<div id="outer">outer<div id="hoverme" data-pac-bind="mouseenter: enter, mouseleave: leave">hover me</div></div>',
+                    {
+                        enters: 0,
+                        leaves: 0,
+                        enter() { this.enters++; },
+                        leave() { this.leaves++; }
+                    }
+                );
+                await tick();
+                assertEqual(c.abstraction.enters, 0, 'mouseenter must not fire on mount');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave must not fire on mount');
+
+                moveOver(c.container.querySelector('#hoverme'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter fires once when the pointer enters the element');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave has not fired yet');
+
+                moveOver(c.container.querySelector('#outer'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter does not re-fire on an unrelated move');
+                assertEqual(c.abstraction.leaves, 1, 'mouseleave fires once when the pointer leaves the element');
+
+                c.destroy();
+            });
+
+            await test('mouseenter binding supports a bare method reference without parentheses (issue #206)', async function () {
+                const c = mount(
+                    '<div id="hoverme2" data-pac-bind="mouseenter: enter">hover</div>',
+                    {
+                        enters: 0,
+                        enter() { this.enters++; }
+                    }
+                );
+                await tick();
+                moveOver(c.container.querySelector('#hoverme2'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'a bare method reference (no parentheses) is still invoked on mouseenter');
+                c.destroy();
+            });
+
+            await test('mouseenter/mouseleave bindings are not applied to the DOM as literal attributes', async function () {
+                const c = mount(
+                    '<div id="hoverme3" data-pac-bind="mouseenter: enter, mouseleave: leave">hover</div>',
+                    { enter() {}, leave() {} }
+                );
+                await tick();
+                const el = c.container.querySelector('#hoverme3');
+                assert(!el.hasAttribute('mouseenter'), 'mouseenter must not be set as a literal DOM attribute');
+                assert(!el.hasAttribute('mouseleave'), 'mouseleave must not be set as a literal DOM attribute');
+                c.destroy();
+            });
+
             suite('Mouse target resolution');
 
             await test('MSG_MOUSEMOVE over a decorative descendant resolves target to the owning control', async function () {

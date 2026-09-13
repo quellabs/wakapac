@@ -191,6 +191,17 @@
     const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
 
     /**
+     * Binding types dispatched to their handler only in response to an actual
+     * DOM/PAC event (click, submit, mouseenter, ...), never evaluated eagerly
+     * during a render or reactive-change pass. Evaluating one of these outside
+     * that dispatch would invoke the bound method as a side effect of unrelated
+     * state changes rather than the real interaction it's meant to respond to.
+     * 'foreach' is grouped in here too since it has its own rendering pipeline
+     * and must likewise be skipped by the generic attribute-binding paths.
+     */
+    const NON_ATTRIBUTE_BINDING_TYPES = new Set(['click', 'submit', 'mouseenter', 'mouseleave', 'foreach']);
+
+    /**
      * List of tags that are interactive. Used primarily for MSG_MOUSEENTER_DESCENDANT and MSG_MOUSELEAVE_DESCENDANT
      */
     const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'DETAILS', 'INPUT', 'LABEL', 'SELECT', 'SUMMARY', 'TEXTAREA',]);
@@ -3113,32 +3124,26 @@
         },
 
         /**
-         * Returns true if the element carries a data-pac-bind="click: ..."
-         * binding, i.e. it's a control by virtue of the declarative binding
-         * system rather than its tag or an explicit control attribute.
-         * Reads the DOM attribute directly and parses it via ExpressionCache
-         * (already memoized), so this has no dependency on any Runtime
-         * instance or its interpolationMap.
+         * Returns true if the element carries a data-pac-bind attribute at
+         * all, i.e. it's a control by virtue of participating in the
+         * declarative binding system rather than its tag or an explicit
+         * control attribute. Not click-specific: an element bound only via
+         * mouseenter/mouseleave (or any other binding type) still needs to
+         * count as its own "window" here, otherwise MSG_MOUSEENTER_DESCENDANT
+         * and MSG_MOUSELEAVE_DESCENDANT could never be addressed to it.
          * @param {Element} el - The element to check
-         * @returns {boolean} True if el has a click binding
+         * @returns {boolean} True if el has a data-pac-bind attribute
          * @private
          */
-        hasClickBinding(el) {
-            const bindingString = el.getAttribute('data-pac-bind');
-
-            if (!bindingString) {
-                return false;
-            }
-
-            return ExpressionCache.parseBindingString(bindingString)
-                .some(binding => binding.type === 'click');
+        hasBoundInteraction(el) {
+            return el.hasAttribute('data-pac-bind');
         },
 
         /**
          * Finds the nearest interactive element from `target` within `container`,
          * mirroring Win32 child-window hit-testing. Returns null for plain content.
-         * A control is accepted by isInherentlyInteractive() or has a
-         * data-pac-bind="click: ..." binding, matching findClickBindingElement().
+         * A control is accepted by isInherentlyInteractive() or by carrying any
+         * data-pac-bind attribute (see hasBoundInteraction()).
          *
          * Requires `container` to actually contain `target` (checked up front).
          * Without this, a `target` from outside `container` — e.g. a raw click
@@ -3164,7 +3169,7 @@
             // the container boundary. The first control we encounter is
             // the logical "child window" being hovered or clicked.
             while (el && el !== container) {
-                if (this.isInherentlyInteractive(el) || this.hasClickBinding(el)) {
+                if (this.isInherentlyInteractive(el) || this.hasBoundInteraction(el)) {
                     return el;
                 }
 
@@ -5488,8 +5493,8 @@
                 return;
             }
 
-            // Click and foreach handled elsewhere
-            if (bindingType === 'click' || bindingType === 'foreach') {
+            // Event and foreach bindings are handled elsewhere, never as attributes
+            if (NON_ATTRIBUTE_BINDING_TYPES.has(bindingType)) {
                 return;
             }
 
@@ -6169,7 +6174,13 @@
         const self = this;
 
         Object.keys(mappingData.bindings).forEach(bindingType => {
-            if (bindingType === 'click' || bindingType === 'submit') {
+            // 'foreach' is left out of this list on purpose (unlike the other
+            // event-style bindings) — leave its existing evaluate-then-discard
+            // behavior below untouched, since updateAttributeBinding() already
+            // no-ops for it and the actual rendering happens elsewhere, via
+            // renderPendingForeachBlocks().
+            if (bindingType === 'click' || bindingType === 'submit' ||
+                bindingType === 'mouseenter' || bindingType === 'mouseleave') {
                 return;
             }
 
@@ -6540,7 +6551,8 @@
                 MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
                 MSG_LCLICK, MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU,
                 MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE, MSG_CHAR,
-                MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP
+                MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP,
+                MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
@@ -6578,6 +6590,16 @@
             case MSG_CHANGE:
                 // DOM change event
                 this.handleDomChange(event);
+                break;
+
+            case MSG_MOUSEENTER_DESCENDANT:
+                // Pointer entered a descendant control - fire its mouseenter binding
+                this.handleDomMouseHover('mouseenter', event);
+                break;
+
+            case MSG_MOUSELEAVE_DESCENDANT:
+                // Pointer left a descendant control - fire its mouseleave binding
+                this.handleDomMouseHover('mouseleave', event);
                 break;
 
             case MSG_INPUT_COMPLETE:
@@ -6649,16 +6671,18 @@
      *
      * Takes `event.realTarget`, not `event.target` — `target` on a click
      * message may already be control-resolved by findInteractiveDescendant()
-     * (see dispatchMouseMessage()). That walk currently agrees with this one
-     * node-for-node (both defer to the shared isInherentlyInteractive(), and
-     * hasClickBinding() mirrors mappingData.bindings.click), with one
-     * exception: under mouse capture, `target` can be forced all the way to
-     * `container` itself when the literal click lands outside it, which is
-     * not an ancestor of the real click point at all. Resolving from
-     * `realTarget` keeps this walk correct independent of that raw-layer
-     * override, and independent of the two resolvers ever being changed
-     * out of sync with each other. `realTarget` is unaffected by any of
-     * this and always holds the literal DOM node.
+     * (see dispatchMouseMessage()). That walk can stop short of this one:
+     * findInteractiveDescendant() treats any data-pac-bind-carrying element
+     * as its own control boundary (hasBoundInteraction()), so a click
+     * bubbling up through an intervening mouseenter/mouseleave-only bound
+     * element resolves `target` to that element, not the actual click-bound
+     * ancestor found here. There's also the pre-existing mouse-capture case:
+     * `target` can be forced all the way to `container` itself when the
+     * literal click lands outside it, which is not an ancestor of the real
+     * click point at all. Resolving from `realTarget` keeps this walk
+     * correct independent of either divergence, and independent of the two
+     * resolvers ever being changed out of sync with each other. `realTarget`
+     * is unaffected by any of this and always holds the literal DOM node.
      *
      * This handles clicks on non-interactive descendants (e.g. an icon
      * inside a click-bound button), where the literal click point is not
@@ -6797,6 +6821,28 @@
         const bindingTarget = mappingData.bindings.submit.target;
 
         this.invokeEventBinding('submit', bindingTarget, event);
+    };
+
+    /**
+     * Handles MSG_MOUSEENTER_DESCENDANT / MSG_MOUSELEAVE_DESCENDANT messages by
+     * executing the data-pac-bind="mouseenter: ..." / "mouseleave: ..." handler
+     * declared on the hovered descendant. event.target is already resolved to
+     * that specific descendant by dispatchMouseMessage() (see its
+     * descendantOverride parameter), mirroring how MSG_LCLICK's target is
+     * resolved before reaching handleDomClicks().
+     * @param {string} kind - 'mouseenter' or 'mouseleave'
+     * @param {CustomEvent} event - The PAC message event; event.target is the hovered descendant
+     * @returns {void}
+     */
+    Runtime.prototype.handleDomMouseHover = function(kind, event) {
+        const mappingData = this.interpolationMap.get(event.target);
+        const binding = mappingData?.bindings?.[kind];
+
+        if (!binding) {
+            return;
+        }
+
+        this.invokeEventBinding(kind, binding.target, event);
     };
 
     /**
@@ -7064,10 +7110,10 @@
                 // Fetch the binding type
                 const bindingType = keys[i];
 
-                // Skip foreach and click binds — they are handled elsewhere.
-                // Uses direct equality checks instead of Array.includes() to
-                // avoid array allocation and linear scan on every iteration.
-                if (bindingType === 'foreach' || bindingType === 'click') {
+                // Skip foreach and event binds (click, submit, mouseenter,
+                // mouseleave) — they run only in response to their own DOM/PAC
+                // event, never as a side effect of an unrelated reactive change.
+                if (NON_ATTRIBUTE_BINDING_TYPES.has(bindingType)) {
                     continue;
                 }
 
