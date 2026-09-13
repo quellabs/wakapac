@@ -195,7 +195,13 @@
      * render or reactive updates. 'foreach' is included because its own rendering
      * pipeline must bypass generic attribute-binding paths.
      */
-    const NON_ATTRIBUTE_BINDING_TYPES = new Set(['click', 'submit', 'mouseenter', 'mouseleave', 'foreach']);
+    const NON_ATTRIBUTE_BINDING_TYPES = new Set([
+        'click', 'submit', 'change', 'mouseenter', 'mouseleave',
+        'dblclick', 'mousedown', 'mouseup', 'contextmenu', 'wheel',
+        'dragenter', 'dragleave', 'dragover', 'drop',
+        'keydown', 'keyup', 'copy', 'paste',
+        'foreach'
+    ]);
 
     /**
      * List of tags that are interactive. Used primarily for MSG_MOUSEENTER_DESCENDANT and MSG_MOUSELEAVE_DESCENDANT
@@ -2071,7 +2077,13 @@
                     deltaMode: event.deltaMode  // Unit mode (pixels, lines, pages)
                 }, wParam);
             }, {
-                passive: true
+                // Explicit passive: false — required, not just "omit the option".
+                // Chrome's scrolling-performance intervention defaults wheel/mousewheel
+                // listeners on document/window to passive when no option is given at
+                // all, silently breaking preventDefault(). msgProc must be able to
+                // call it on MSG_MOUSEWHEEL to block page scrolling (the documented
+                // Ctrl+Wheel-to-zoom pattern), so passive has to be explicitly opted out.
+                passive: false
             });
         },
 
@@ -6156,13 +6168,11 @@
         const self = this;
 
         Object.keys(mappingData.bindings).forEach(bindingType => {
-            // 'foreach' is intentionally excluded. Its existing evaluate-then-discard
-            // behavior remains unchanged; updateAttributeBinding() already no-ops for it,
-            // and rendering is handled separately by renderPendingForeachBlocks().
-            if (
-                bindingType === 'click' || bindingType === 'submit' ||
-                bindingType === 'mouseenter' || bindingType === 'mouseleave'
-            ) {
+            // 'foreach' is intentionally excluded from this exclusion. Its existing
+            // evaluate-then-discard behavior remains unchanged; updateAttributeBinding()
+            // already no-ops for it, and rendering is handled separately by
+            // renderPendingForeachBlocks().
+            if (bindingType !== 'foreach' && NON_ATTRIBUTE_BINDING_TYPES.has(bindingType)) {
                 return;
             }
 
@@ -6529,12 +6539,19 @@
 
             // Certain message types can prevent framework's default behavior by returning false
             // Similar to Win32: returning 0 from WndProc means "I handled this, skip default processing"
+            // The drag family (MSG_DRAGENTER/DRAGLEAVE/DRAGOVER/DROP) is deliberately
+            // absent: per the msgProc drag-and-drop docs, these are documented as not
+            // cancellable — WakaPAC already prevents the browser's built-in drag
+            // handling internally, so a msgProc-driven cancellation here would be
+            // meaningless and contradict that documented contract.
             const cancellableEvents = [
-                MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP,
+                MSG_LBUTTONDOWN, MSG_MBUTTONDOWN, MSG_RBUTTONDOWN,
+                MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP, MSG_LBUTTONDBLCLK,
                 MSG_LCLICK, MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU,
                 MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE, MSG_CHAR,
                 MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP,
-                MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT
+                MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
+                MSG_MOUSEWHEEL
             ];
 
             if (cancellableEvents.includes(event.message) && msgProcResult === false) {
@@ -6582,6 +6599,62 @@
             case MSG_MOUSELEAVE_DESCENDANT:
                 // Pointer left a descendant control - fire its mouseleave binding
                 this.handleDomMouseHover('mouseleave', event);
+                break;
+
+            case MSG_LBUTTONDBLCLK:
+                this.handleGenericEventBinding('dblclick', event);
+                break;
+
+            case MSG_LBUTTONDOWN:
+            case MSG_MBUTTONDOWN:
+            case MSG_RBUTTONDOWN:
+                this.handleGenericEventBinding('mousedown', event);
+                break;
+
+            case MSG_LBUTTONUP:
+            case MSG_MBUTTONUP:
+            case MSG_RBUTTONUP:
+                this.handleGenericEventBinding('mouseup', event);
+                break;
+
+            case MSG_CONTEXTMENU:
+                this.handleGenericEventBinding('contextmenu', event);
+                break;
+
+            case MSG_MOUSEWHEEL:
+                this.handleGenericEventBinding('wheel', event);
+                break;
+
+            case MSG_DRAGENTER:
+                this.handleGenericEventBinding('dragenter', event);
+                break;
+
+            case MSG_DRAGLEAVE:
+                this.handleGenericEventBinding('dragleave', event);
+                break;
+
+            case MSG_DRAGOVER:
+                this.handleGenericEventBinding('dragover', event);
+                break;
+
+            case MSG_DROP:
+                this.handleGenericEventBinding('drop', event);
+                break;
+
+            case MSG_KEYDOWN:
+                this.handleGenericEventBinding('keydown', event);
+                break;
+
+            case MSG_KEYUP:
+                this.handleGenericEventBinding('keyup', event);
+                break;
+
+            case MSG_COPY:
+                this.handleGenericEventBinding('copy', event);
+                break;
+
+            case MSG_PASTE:
+                this.handleGenericEventBinding('paste', event);
                 break;
 
             case MSG_INPUT_COMPLETE:
@@ -6648,24 +6721,30 @@
     };
 
     /**
-     * Finds the nearest click-bound ancestor from `event.realTarget`, stopping at
-     * the container boundary or the first inherently interactive element.
+     * Finds the nearest ancestor (inclusive) bound for `bindingType` from
+     * `target`, stopping at the container boundary or the first inherently
+     * interactive element. Shared by every event binding — click and the
+     * generic mechanism for dblclick/mousedown/mouseup/contextmenu/wheel/
+     * the drag family/keydown/keyup/copy/paste alike — so a decorative descendant
+     * (e.g. an icon inside a bound button) still resolves to its owning
+     * control, without ever inheriting a handler belonging to some other,
+     * unrelated control further up the tree.
      *
-     * Uses realTarget rather than target because target may already be resolved
-     * by findInteractiveDescendant(), especially with other bindings or capture.
-     * This ensures clicks on non-interactive descendants can reach their bound
-     * ancestor without inheriting handlers past an interactive control.
+     * Callers pass `event.realTarget` rather than `event.target` because
+     * target may already be resolved by findInteractiveDescendant() for
+     * mouse messages, especially with other bindings or capture active.
      *
-     * @param {Element|Node} target - The element that was clicked (event.realTarget)
-     * @returns {Element|null} The nearest element with a click binding, or null
+     * @param {Element|Node} target - The literal element the event originated from
+     * @param {string} bindingType - The binding type to look for, e.g. 'click', 'dblclick'
+     * @returns {Element|null} The nearest element bound for bindingType, or null
      */
-    Runtime.prototype.findClickBindingElement = function(target) {
+    Runtime.prototype.findEventBindingElement = function(target, bindingType) {
         let el = DomUpdateTracker.normalizeToElement(target);
 
         while (el) {
             const mappingData = this.interpolationMap.get(el);
 
-            if (mappingData?.bindings?.click) {
+            if (mappingData?.bindings?.[bindingType]) {
                 return el;
             }
 
@@ -6681,6 +6760,15 @@
         }
 
         return null;
+    };
+
+    /**
+     * Finds the nearest click-bound ancestor from `event.realTarget`.
+     * @param {Element|Node} target - The element that was clicked (event.realTarget)
+     * @returns {Element|null} The nearest element with a click binding, or null
+     */
+    Runtime.prototype.findClickBindingElement = function(target) {
+        return this.findEventBindingElement(target, 'click');
     };
 
     /**
@@ -6805,6 +6893,38 @@
         }
 
         this.invokeEventBinding(kind, binding.target, event);
+    };
+
+    /**
+     * Handles every other named event binding type — dblclick, mousedown,
+     * mouseup, contextmenu, wheel, the drag family, keydown, keyup, copy,
+     * paste — by executing the corresponding data-pac-bind handler on its
+     * bound element. Reuses the framework's existing listener and target
+     * resolution for these message types (see CONTROL_TARGET_MESSAGES and
+     * the keyboard/clipboard setup); no separate DOM listener is registered
+     * for any of them, so this can never fire twice for the same event.
+     *
+     * Walks from event.realTarget via findEventBindingElement(), exactly
+     * like click, so a decorative descendant (e.g. an icon inside a bound
+     * button) still resolves to its owning control, and shadows $event.target
+     * to that control the same way click does.
+     * @param {string} bindingType - e.g. 'dblclick', 'keydown', 'wheel'
+     * @param {CustomEvent} event - The PAC message event
+     * @returns {void}
+     */
+    Runtime.prototype.handleGenericEventBinding = function(bindingType, event) {
+        const boundElement = this.findEventBindingElement(event.realTarget, bindingType);
+
+        if (!boundElement) {
+            return;
+        }
+
+        if (event.target !== boundElement) {
+            Object.defineProperty(event, 'target', { value: boundElement, enumerable: true, configurable: true });
+        }
+
+        const bindingTarget = this.interpolationMap.get(boundElement).bindings[bindingType].target;
+        this.invokeEventBinding(bindingType, bindingTarget, event);
     };
 
     /**
