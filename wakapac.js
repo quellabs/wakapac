@@ -283,13 +283,16 @@
     ]);
 
     /**
-     * Message types with no dedicated handler (unlike click/submit/change/
+     * Message types with no dedicated handler (unlike submit/change/
      * mouseenter/mouseleave, each of which has its own extra pre/post
      * processing) map here to the data-pac-bind event name they dispatch
      * through Runtime.prototype.handleGenericEventBinding() — see the
-     * `default` case in handlePacEvent(). Several button messages collapse
-     * onto the same name because native mousedown/mouseup fire for every
-     * button, unlike click, which only fires for the left one.
+     * `default` case in handlePacEvent(). Click is included here too: once
+     * target-shadowing and foreach-context injection moved into the shared
+     * invokeEventBinding(), click's dispatch is identical to every other
+     * entry, so it needs no dedicated handler of its own. Several button
+     * messages collapse onto the same name because native mousedown/mouseup
+     * fire for every button, unlike click, which only fires for the left one.
      *
      * The drag family (MSG_DRAGENTER/DRAGLEAVE/DRAGOVER/DROP) is deliberately
      * NOT included: drag-and-drop is an inherently multi-message, stateful
@@ -301,6 +304,7 @@
      * working with msgProc. Kept as a msgProc-only feature.
      */
     const GENERIC_EVENT_BINDING_MESSAGES = new Map([
+        [MSG_LCLICK, 'click'],
         [MSG_LBUTTONDBLCLK, 'dblclick'],
         [MSG_LBUTTONDOWN, 'mousedown'], [MSG_MBUTTONDOWN, 'mousedown'], [MSG_RBUTTONDOWN, 'mousedown'],
         [MSG_LBUTTONUP, 'mouseup'], [MSG_MBUTTONUP, 'mouseup'], [MSG_RBUTTONUP, 'mouseup'],
@@ -314,11 +318,11 @@
 
     /**
      * Event binding types with their own dedicated dispatch (extra pre/post
-     * processing beyond a plain invoke: click's foreach-context injection and
-     * target-shadowing, submit's preventDefault, change's value-commit
-     * ordering, mouseenter/mouseleave's descendant-hover tracking).
+     * processing beyond a plain invoke: submit's preventDefault, change's
+     * value-commit ordering, mouseenter/mouseleave's descendant-hover
+     * tracking). Click used to belong here too — see GENERIC_EVENT_BINDING_MESSAGES.
      */
-    const BESPOKE_EVENT_BINDING_TYPES = new Set(['click', 'submit', 'change', 'mouseenter', 'mouseleave']);
+    const BESPOKE_EVENT_BINDING_TYPES = new Set(['submit', 'change', 'mouseenter', 'mouseleave']);
 
     /**
      * Binding types handled only for actual DOM/PAC events, never eagerly
@@ -3170,7 +3174,7 @@
         /**
          * True if el is inherently interactive — independent of any click
          * binding. Shared by findInteractiveDescendant() and
-         * Runtime.prototype.findClickBindingElement() so both walks agree on
+         * Runtime.prototype.findEventBindingElement() so both walks agree on
          * what counts as "a control" a click can't pass through.
          * @param {Element} el
          * @returns {boolean}
@@ -6615,11 +6619,6 @@
                 this.handleDomBlur(event);
                 break;
 
-            case MSG_LCLICK:
-                // Mouse button up events - handle DOM clicks
-                this.handleDomClicks(event);
-                break;
-
             case MSG_SUBMIT:
                 // Form submission events
                 this.handleDomSubmit(event);
@@ -6646,8 +6645,8 @@
                 break;
 
             default: {
-                // dblclick, mousedown/up, contextmenu, wheel, the drag family,
-                // keydown/up, copy/paste — see GENERIC_EVENT_BINDING_MESSAGES.
+                // click, dblclick, mousedown/up, contextmenu, wheel, the drag
+                // family, keydown/up, copy/paste — see GENERIC_EVENT_BINDING_MESSAGES.
                 const eventName = GENERIC_EVENT_BINDING_MESSAGES.get(event.message);
 
                 if (eventName) {
@@ -6688,9 +6687,15 @@
     };
 
     /**
-     * Evaluates a handler binding with $event in scope, resolving paths against the
-     * event target, and reports failures instead of propagating them. Shared by the
-     * click, submit and change bindings, which differ only in the name reported on error.
+     * Evaluates a handler binding with $event (and, inside a foreach, $item/$index)
+     * in scope, resolving paths against the event target, and reports failures
+     * instead of propagating them. Shared by every named event binding — click,
+     * submit, change, and the dblclick/mousedown/mouseup/contextmenu/wheel/
+     * keyboard/clipboard family — which differ only in the name reported on error.
+     *
+     * A failure while resolving foreach context aborts the handler — it does not
+     * fall through to the plain (non-foreach) evaluation below, since both live
+     * in the same try.
      * @param {string} kind - Binding name used in the failure message, e.g. 'click'
      * @param {string} bindingTarget - The binding expression to evaluate
      * @param {CustomEvent} event - The event being handled; its target anchors path resolution
@@ -6698,10 +6703,44 @@
      */
     Runtime.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
         try {
-            // Build scope resolver, shared across the evaluation below
+            // Build scope resolver once, shared across every evaluation below
             const scopeResolver = this.makeScopeResolverFor(event.target);
 
-            // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
+            // Check if the event occurred within a foreach loop context
+            const contextInfo = this.extractClosestForeachContext(event.target);
+
+            if (contextInfo) {
+                // Find the foreach element that contains this event's target
+                const foreachElement = Array.from(this.interpolationMap.entries())
+                    .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
+
+                if (foreachElement) {
+                    // Evaluate the foreach expression to get the source array
+                    const foreachData = this.interpolationMap.get(foreachElement);
+                    const array = this.evaluateExpression(foreachData.foreachExpr, this.abstraction, scopeResolver);
+
+                    // Inject foreach context into scope so expressions can reference $item, $index, $event
+                    const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                        $item: array[contextInfo.index],
+                        $index: contextInfo.index,
+                        $event: event
+                    });
+
+                    // Fallback (if bindingTarget is a bare method name): call with (event, item, index).
+                    // event goes first so a handler written for the plain (non-foreach) case still
+                    // receives it correctly if reused inside a foreach without change.
+                    this.evaluateHandlerExpression(
+                        bindingTarget,
+                        scopedAbstraction,
+                        scopeResolver,
+                        [event, array[contextInfo.index], contextInfo.index]
+                    );
+
+                    return;
+                }
+            }
+
+            // Plain case: evaluate expression with $event in scope
             const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
                 $event: event
             });
@@ -6716,12 +6755,12 @@
     /**
      * Finds the nearest ancestor (inclusive) bound for `bindingType` from
      * `target`, stopping at the container boundary or the first inherently
-     * interactive element. Shared by every event binding — click and the
-     * generic mechanism for dblclick/mousedown/mouseup/contextmenu/wheel/
-     * the drag family/keydown/keyup/copy/paste alike — so a decorative descendant
-     * (e.g. an icon inside a bound button) still resolves to its owning
-     * control, without ever inheriting a handler belonging to some other,
-     * unrelated control further up the tree.
+     * interactive element. Shared by every event binding — click, dblclick,
+     * mousedown/mouseup, contextmenu, wheel, the drag family, keydown/keyup,
+     * copy/paste alike — so a decorative descendant (e.g. an icon inside a
+     * bound button) still resolves to its owning control, without ever
+     * inheriting a handler belonging to some other, unrelated control
+     * further up the tree.
      *
      * Callers pass `event.realTarget` rather than `event.target` because
      * target may already be resolved by findInteractiveDescendant() for
@@ -6754,96 +6793,6 @@
 
         return null;
     };
-
-    /**
-     * Finds the nearest click-bound ancestor from `event.realTarget`.
-     * @param {Element|Node} target - The element that was clicked (event.realTarget)
-     * @returns {Element|null} The nearest element with a click binding, or null
-     */
-    Runtime.prototype.findClickBindingElement = function(target) {
-        return this.findEventBindingElement(target, 'click');
-    };
-
-    /**
-     * Handles DOM click events by executing bound abstraction methods.
-     * Supports both regular click handlers and foreach context-aware handlers.
-     * @param {CustomEvent} event - Custom event containing click details
-     * @param {Element} event.realTarget - The literal DOM element that was clicked
-     * @throws {Error} Logs errors if method execution fails
-     */
-    Runtime.prototype.handleDomClicks = function(event) {
-        // Resolve the element the click binding actually lives on, from the
-        // literal click point (event.realTarget) — see
-        // findClickBindingElement()'s own docblock for why this stays
-        // decoupled from the raw-layer's event.target resolution, and why
-        // it can't be a plain interpolationMap.get(event.realTarget) lookup
-        // either.
-        const clickElement = this.findClickBindingElement(event.realTarget);
-
-        if (!clickElement) {
-            return;
-        }
-
-        // If the click lands on a decorative child (e.g. an icon inside a
-        // button), treat the control as the target. This shadows the native
-        // Event.target getter so handlers consistently see the bound control
-        // rather than the clicked descendant.
-        Object.defineProperty(event, 'target', {
-            value: clickElement,
-            enumerable: true,
-            configurable: true
-        });
-
-        const mappingData = this.interpolationMap.get(clickElement);
-        const bindingTarget = mappingData.bindings.click.target;
-
-        try {
-            // Check if click occurred within a foreach loop context
-            const contextInfo = this.extractClosestForeachContext(event.target);
-
-            if (contextInfo) {
-                // Find the foreach element that contains this click target
-                const foreachElement = Array.from(this.interpolationMap.entries())
-                    .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
-
-                if (foreachElement) {
-                    // Build scope resolver once, shared across all evaluations below
-                    // and evaluate the foreach expression to get the source array
-                    const scopeResolver = this.makeScopeResolverFor(event.target);
-                    const foreachData = this.interpolationMap.get(foreachElement);
-                    const array = this.evaluateExpression(foreachData.foreachExpr, this.abstraction, scopeResolver);
-
-                    // Inject foreach context into scope so expressions can reference $item, $index, $event
-                    const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                        $item: array[contextInfo.index],
-                        $index: contextInfo.index,
-                        $event: event
-                    });
-
-                    // Fallback (if bindingTarget is a bare method name): call with (event, item, index).
-                    // event goes first so a handler written for the plain (non-foreach) case still
-                    // receives it correctly if reused inside a foreach without change.
-                    this.evaluateHandlerExpression(
-                        bindingTarget,
-                        scopedAbstraction,
-                        scopeResolver,
-                        [event, array[contextInfo.index], contextInfo.index]
-                    );
-
-                    return;
-                }
-            }
-        } catch (error) {
-            console.warn(`Error executing click binding '${bindingTarget}':`, error);
-
-            // A failure while resolving foreach context aborts the handler — it does
-            // not fall through to the simple case, matching the original behaviour
-            return;
-        }
-
-        // Simple case: evaluate expression with $event in scope
-        this.invokeEventBinding('click', bindingTarget, event);
-    }
 
     /**
      * Handles DOM submit events by executing bound abstraction methods.
@@ -6889,19 +6838,21 @@
     };
 
     /**
-     * Handles every other named event binding type — dblclick, mousedown,
-     * mouseup, contextmenu, wheel, the drag family, keydown, keyup, copy,
-     * paste — by executing the corresponding data-pac-bind handler on its
-     * bound element. Reuses the framework's existing listener and target
-     * resolution for these message types (see CONTROL_TARGET_MESSAGES and
-     * the keyboard/clipboard setup); no separate DOM listener is registered
-     * for any of them, so this can never fire twice for the same event.
+     * Handles every named event binding type with no bespoke pre/post
+     * processing of its own — click, dblclick, mousedown, mouseup,
+     * contextmenu, wheel, keydown, keyup, copy, paste — by executing the
+     * corresponding data-pac-bind handler on its bound element. Reuses the
+     * framework's existing listener and target resolution for these message
+     * types (see CONTROL_TARGET_MESSAGES and the keyboard/clipboard setup);
+     * no separate DOM listener is registered for any of them, so this can
+     * never fire twice for the same event.
      *
-     * Walks from event.realTarget via findEventBindingElement(), exactly
-     * like click, so a decorative descendant (e.g. an icon inside a bound
-     * button) still resolves to its owning control, and shadows $event.target
-     * to that control the same way click does.
-     * @param {string} bindingType - e.g. 'dblclick', 'keydown', 'wheel'
+     * Walks from event.realTarget via findEventBindingElement() so a
+     * decorative descendant (e.g. an icon inside a bound button) still
+     * resolves to its owning control, and shadows $event.target to that
+     * control. invokeEventBinding() also injects foreach context ($item/
+     * $index) when the bound element sits inside a foreach.
+     * @param {string} bindingType - e.g. 'click', 'dblclick', 'keydown', 'wheel'
      * @param {CustomEvent} event - The PAC message event
      * @returns {void}
      */
