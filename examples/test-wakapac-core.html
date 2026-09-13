@@ -732,6 +732,40 @@
                 c.destroy();
             });
 
+            await test('dblclick binding inside a foreach receives $item/$index, matching click', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li data-pac-bind="dblclick: onDblClick($item, $index)">{{item.label}}</li></ul>',
+                    {
+                        items: [{ label: 'a' }, { label: 'b' }],
+                        seen: null,
+                        onDblClick(item, index) { this.seen = `${item.label}:${index}`; }
+                    }
+                );
+                await tick();
+                c.container.querySelectorAll('li')[1].dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.seen, 'b:1', '$item and $index resolve to the clicked row, not the outer scope');
+                c.destroy();
+            });
+
+            await test('dblclick binding inside a foreach falls back to (event, item, index) for a bare method reference', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li data-pac-bind="dblclick: onDblClick">{{item.label}}</li></ul>',
+                    {
+                        items: [{ label: 'a' }, { label: 'b' }],
+                        seen: null,
+                        onDblClick(event, item, index) { this.seen = `${event.originalEvent.type}:${item.label}:${index}`; }
+                    }
+                );
+                await tick();
+                c.container.querySelectorAll('li')[0].dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.seen, 'dblclick:a:0', 'bare method reference receives (event, item, index) inside a foreach');
+                c.destroy();
+            });
+
             await test('mousedown and mouseup bindings invoke their bound methods on real events', async function () {
                 const c = mount(
                     '<button id="md" data-pac-bind="mousedown: onDown(), mouseup: onUp()">button</button>',
