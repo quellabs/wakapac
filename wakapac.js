@@ -290,6 +290,15 @@
      * `default` case in handlePacEvent(). Several button messages collapse
      * onto the same name because native mousedown/mouseup fire for every
      * button, unlike click, which only fires for the left one.
+     *
+     * The drag family (MSG_DRAGENTER/DRAGLEAVE/DRAGOVER/DROP) is deliberately
+     * NOT included: drag-and-drop is an inherently multi-message, stateful
+     * interaction (enter -> repeated over -> drop, typically tracking state
+     * like a highlight flag across all of them, as the msgProc drag-and-drop
+     * docs' own example does) that a flat, single-event declarative binding
+     * doesn't model well, and it already requires the separate
+     * data-pac-drop-target attribute to opt in — anyone using it is already
+     * working with msgProc. Kept as a msgProc-only feature.
      */
     const GENERIC_EVENT_BINDING_MESSAGES = new Map([
         [MSG_LBUTTONDBLCLK, 'dblclick'],
@@ -297,10 +306,6 @@
         [MSG_LBUTTONUP, 'mouseup'], [MSG_MBUTTONUP, 'mouseup'], [MSG_RBUTTONUP, 'mouseup'],
         [MSG_CONTEXTMENU, 'contextmenu'],
         [MSG_MOUSEWHEEL, 'wheel'],
-        [MSG_DRAGENTER, 'dragenter'],
-        [MSG_DRAGLEAVE, 'dragleave'],
-        [MSG_DRAGOVER, 'dragover'],
-        [MSG_DROP, 'drop'],
         [MSG_KEYDOWN, 'keydown'],
         [MSG_KEYUP, 'keyup'],
         [MSG_COPY, 'copy'],
@@ -329,26 +334,21 @@
     ]);
 
     /**
-     * Message types the msgProc drag-and-drop docs (MsgProcDragDrop) document
-     * as NOT cancellable — WakaPAC already prevents the browser's built-in
-     * drag handling internally, regardless of what msgProc returns.
-     */
-    const NON_CANCELLABLE_GENERIC_MESSAGES = new Set([MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP]);
-
-    /**
      * Message types cancellable via msgProc returning false — mirrors Win32's
      * "return 0 from WndProc to skip default processing." Combines every
-     * message GENERIC_EVENT_BINDING_MESSAGES dispatches (minus the drag
-     * family — see NON_CANCELLABLE_GENERIC_MESSAGES) with the messages
+     * message GENERIC_EVENT_BINDING_MESSAGES dispatches with the messages
      * handled by their own dedicated case in handlePacEvent (the click
      * family, submit, change, gesture, char, and the mouseenter/mouseleave
-     * descendant-hover messages).
+     * descendant-hover messages). The drag family is deliberately absent:
+     * per the msgProc drag-and-drop docs, those are documented as NOT
+     * cancellable — WakaPAC already prevents the browser's built-in drag
+     * handling internally, regardless of what msgProc returns.
      */
     const CANCELLABLE_MESSAGES = new Set([
         MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
         MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE, MSG_CHAR,
         MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
-        ...[...GENERIC_EVENT_BINDING_MESSAGES.keys()].filter(msg => !NON_CANCELLABLE_GENERIC_MESSAGES.has(msg))
+        ...GENERIC_EVENT_BINDING_MESSAGES.keys()
     ]);
 
     /**
