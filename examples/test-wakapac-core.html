@@ -627,6 +627,165 @@
                 container.parentNode.removeChild(container);
             });
 
+            suite('Mouse hover bindings (mouseenter/mouseleave)');
+
+            await test('mouseenter/mouseleave bindings invoke bound methods on real hover, not on mount (issue #206)', async function () {
+                const c = mount(
+                    '<div id="outer">outer<div id="hoverme" data-pac-bind="mouseenter: enter, mouseleave: leave">hover me</div></div>',
+                    {
+                        enters: 0,
+                        leaves: 0,
+                        enter() { this.enters++; },
+                        leave() { this.leaves++; }
+                    }
+                );
+                await tick();
+                assertEqual(c.abstraction.enters, 0, 'mouseenter must not fire on mount');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave must not fire on mount');
+
+                moveOver(c.container.querySelector('#hoverme'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter fires once when the pointer enters the element');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave has not fired yet');
+
+                moveOver(c.container.querySelector('#outer'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter does not re-fire on an unrelated move');
+                assertEqual(c.abstraction.leaves, 1, 'mouseleave fires once when the pointer leaves the element');
+
+                c.destroy();
+            });
+
+            await test('mouseenter binding supports a bare method reference without parentheses (issue #206)', async function () {
+                const c = mount(
+                    '<div id="hoverme2" data-pac-bind="mouseenter: enter">hover</div>',
+                    {
+                        enters: 0,
+                        enter() { this.enters++; }
+                    }
+                );
+                await tick();
+                moveOver(c.container.querySelector('#hoverme2'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'a bare method reference (no parentheses) is still invoked on mouseenter');
+                c.destroy();
+            });
+
+            await test('mouseenter/mouseleave bindings are not applied to the DOM as literal attributes', async function () {
+                const c = mount(
+                    '<div id="hoverme3" data-pac-bind="mouseenter: enter, mouseleave: leave">hover</div>',
+                    { enter() {}, leave() {} }
+                );
+                await tick();
+                const el = c.container.querySelector('#hoverme3');
+                assert(!el.hasAttribute('mouseenter'), 'mouseenter must not be set as a literal DOM attribute');
+                assert(!el.hasAttribute('mouseleave'), 'mouseleave must not be set as a literal DOM attribute');
+                c.destroy();
+            });
+
+            suite('Additional named event bindings (dblclick/mousedown/mouseup/contextmenu/wheel/keydown/...)');
+
+            await test('dblclick binding invokes the bound method on a real dblclick, not on mount or unrelated changes', async function () {
+                const c = mount(
+                    '<span>{{counter}}</span><button id="dbl" data-pac-bind="dblclick: onDblClick()">button</button>',
+                    {
+                        counter: 0,
+                        calls: 0,
+                        onDblClick() { this.calls++; }
+                    }
+                );
+                await tick();
+                assertEqual(c.abstraction.calls, 0, 'must not fire on mount');
+
+                c.abstraction.counter++;
+                c.abstraction.counter++;
+                await tick();
+                assertEqual(c.abstraction.calls, 0, 'must not fire from an unrelated reactive change');
+
+                c.container.querySelector('#dbl').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.calls, 1, 'fires exactly once on a real dblclick');
+                c.destroy();
+            });
+
+            await test('dblclick binding supports a bare method reference without parentheses', async function () {
+                const c = mount(
+                    '<button id="dblBare" data-pac-bind="dblclick: onDblClick">button</button>',
+                    { calls: 0, onDblClick() { this.calls++; } }
+                );
+                await tick();
+                c.container.querySelector('#dblBare').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.calls, 1, 'a bare method reference is still invoked on a real dblclick');
+                c.destroy();
+            });
+
+            await test('dblclick binding on an icon-wrapping button shadows $event.target to the bound button', async function () {
+                const c = mount(
+                    '<button id="dblIcon" data-pac-bind="dblclick: onDblClick($event)"><span id="icon">*</span></button>',
+                    { seenId: null, onDblClick(event) { this.seenId = event.target.id; } }
+                );
+                await tick();
+                c.container.querySelector('#icon').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.seenId, 'dblIcon', '$event.target resolves to the bound button, not the decorative icon');
+                c.destroy();
+            });
+
+            await test('mousedown and mouseup bindings invoke their bound methods on real events', async function () {
+                const c = mount(
+                    '<button id="md" data-pac-bind="mousedown: onDown(), mouseup: onUp()">button</button>',
+                    { downCalls: 0, upCalls: 0, onDown() { this.downCalls++; }, onUp() { this.upCalls++; } }
+                );
+                await tick();
+                const btn = c.container.querySelector('#md');
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.downCalls, 1, 'mousedown fires once');
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.upCalls, 1, 'mouseup fires once');
+                c.destroy();
+            });
+
+            await test('contextmenu and wheel bindings invoke their bound methods on real events', async function () {
+                const c = mount(
+                    '<div id="cw" data-pac-bind="contextmenu: onContext(), wheel: onWheel()">area</div>',
+                    { contextCalls: 0, wheelCalls: 0, onContext() { this.contextCalls++; }, onWheel() { this.wheelCalls++; } }
+                );
+                await tick();
+                const el = c.container.querySelector('#cw');
+                el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+                await tick();
+                assertEqual(c.abstraction.contextCalls, 1, 'contextmenu fires once');
+                el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 10 }));
+                await tick();
+                assertEqual(c.abstraction.wheelCalls, 1, 'wheel fires once');
+                c.destroy();
+            });
+
+            await test('keydown binding invokes the bound method on a real keydown, with the native key reachable via $event.originalEvent', async function () {
+                const c = mount(
+                    '<input id="kd" data-pac-bind="keydown: onKeyDown($event)">',
+                    { seenKey: null, onKeyDown(event) { this.seenKey = event.originalEvent.key; } }
+                );
+                await tick();
+                c.container.querySelector('#kd').dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
+                await tick();
+                assertEqual(c.abstraction.seenKey, 'a', 'keydown binding can reach the native KeyboardEvent via $event.originalEvent');
+                c.destroy();
+            });
+
+            await test('keydown binding is not applied to the DOM as a literal attribute', async function () {
+                const c = mount(
+                    '<input id="kdAttr" data-pac-bind="keydown: onKeyDown()">',
+                    { onKeyDown() {} }
+                );
+                await tick();
+                assert(!c.container.querySelector('#kdAttr').hasAttribute('keydown'), 'keydown must not be set as a literal DOM attribute');
+                c.destroy();
+            });
+
             suite('Mouse target resolution');
 
             await test('MSG_MOUSEMOVE over a decorative descendant resolves target to the owning control', async function () {
