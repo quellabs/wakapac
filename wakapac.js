@@ -191,19 +191,6 @@
     const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
 
     /**
-     * Binding types handled only for actual DOM/PAC events, never eagerly during
-     * render or reactive updates. 'foreach' is included because its own rendering
-     * pipeline must bypass generic attribute-binding paths.
-     */
-    const NON_ATTRIBUTE_BINDING_TYPES = new Set([
-        'click', 'submit', 'change', 'mouseenter', 'mouseleave',
-        'dblclick', 'mousedown', 'mouseup', 'contextmenu', 'wheel',
-        'dragenter', 'dragleave', 'dragover', 'drop',
-        'keydown', 'keyup', 'copy', 'paste',
-        'foreach'
-    ]);
-
-    /**
      * List of tags that are interactive. Used primarily for MSG_MOUSEENTER_DESCENDANT and MSG_MOUSELEAVE_DESCENDANT
      */
     const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'DETAILS', 'INPUT', 'LABEL', 'SELECT', 'SUMMARY', 'TEXTAREA',]);
@@ -318,6 +305,50 @@
         [MSG_KEYUP, 'keyup'],
         [MSG_COPY, 'copy'],
         [MSG_PASTE, 'paste']
+    ]);
+
+    /**
+     * Event binding types with their own dedicated dispatch (extra pre/post
+     * processing beyond a plain invoke: click's foreach-context injection and
+     * target-shadowing, submit's preventDefault, change's value-commit
+     * ordering, mouseenter/mouseleave's descendant-hover tracking).
+     */
+    const BESPOKE_EVENT_BINDING_TYPES = new Set(['click', 'submit', 'change', 'mouseenter', 'mouseleave']);
+
+    /**
+     * Binding types handled only for actual DOM/PAC events, never eagerly
+     * during render or reactive updates: the bespoke types above, every event
+     * name GENERIC_EVENT_BINDING_MESSAGES dispatches, and 'foreach' — included
+     * because its own rendering pipeline must bypass generic attribute-binding
+     * paths.
+     */
+    const NON_ATTRIBUTE_BINDING_TYPES = new Set([
+        ...BESPOKE_EVENT_BINDING_TYPES,
+        ...GENERIC_EVENT_BINDING_MESSAGES.values(),
+        'foreach'
+    ]);
+
+    /**
+     * Message types the msgProc drag-and-drop docs (MsgProcDragDrop) document
+     * as NOT cancellable — WakaPAC already prevents the browser's built-in
+     * drag handling internally, regardless of what msgProc returns.
+     */
+    const NON_CANCELLABLE_GENERIC_MESSAGES = new Set([MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP]);
+
+    /**
+     * Message types cancellable via msgProc returning false — mirrors Win32's
+     * "return 0 from WndProc to skip default processing." Combines every
+     * message GENERIC_EVENT_BINDING_MESSAGES dispatches (minus the drag
+     * family — see NON_CANCELLABLE_GENERIC_MESSAGES) with the messages
+     * handled by their own dedicated case in handlePacEvent (the click
+     * family, submit, change, gesture, char, and the mouseenter/mouseleave
+     * descendant-hover messages).
+     */
+    const CANCELLABLE_MESSAGES = new Set([
+        MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
+        MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE, MSG_CHAR,
+        MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
+        ...[...GENERIC_EVENT_BINDING_MESSAGES.keys()].filter(msg => !NON_CANCELLABLE_GENERIC_MESSAGES.has(msg))
     ]);
 
     /**
@@ -6559,24 +6590,10 @@
         if (this.originalAbstraction.msgProc && typeof this.originalAbstraction.msgProc === 'function') {
             const msgProcResult = this.originalAbstraction.msgProc.call(this.abstraction, event);
 
-            // Certain message types can prevent framework's default behavior by returning false
-            // Similar to Win32: returning 0 from WndProc means "I handled this, skip default processing"
-            // The drag family (MSG_DRAGENTER/DRAGLEAVE/DRAGOVER/DROP) is deliberately
-            // absent: per the msgProc drag-and-drop docs, these are documented as not
-            // cancellable — WakaPAC already prevents the browser's built-in drag
-            // handling internally, so a msgProc-driven cancellation here would be
-            // meaningless and contradict that documented contract.
-            const cancellableEvents = [
-                MSG_LBUTTONDOWN, MSG_MBUTTONDOWN, MSG_RBUTTONDOWN,
-                MSG_LBUTTONUP, MSG_MBUTTONUP, MSG_RBUTTONUP, MSG_LBUTTONDBLCLK,
-                MSG_LCLICK, MSG_MCLICK, MSG_RCLICK, MSG_CONTEXTMENU,
-                MSG_SUBMIT, MSG_CHANGE, MSG_GESTURE, MSG_CHAR,
-                MSG_COPY, MSG_PASTE, MSG_KEYDOWN, MSG_KEYUP,
-                MSG_MOUSEENTER_DESCENDANT, MSG_MOUSELEAVE_DESCENDANT,
-                MSG_MOUSEWHEEL
-            ];
-
-            if (cancellableEvents.includes(event.message) && msgProcResult === false) {
+            // Certain message types can prevent framework's default behavior by returning
+            // false — similar to Win32: returning 0 from WndProc means "I handled this,
+            // skip default processing." See CANCELLABLE_MESSAGES for which ones and why.
+            if (CANCELLABLE_MESSAGES.has(event.message) && msgProcResult === false) {
                 preventDefault = true;
             }
         }
