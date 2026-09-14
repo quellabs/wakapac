@@ -7442,8 +7442,21 @@
             // result actually differs before doing any work.
             const array = directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
 
+            // event.detail.oldValue is only meaningful as "this foreach's own
+            // bound array, as it looked before this change" when the changed
+            // path *is* that array itself — a mutator method call (push/
+            // splice/sort/...), a length truncation, or a direct reassignment
+            // all report their own path as the change, with the prior array
+            // as oldValue. For an ancestor reassignment or a computed/bracket
+            // dependency, oldValue belongs to a different property entirely,
+            // so it's only passed through in that one safe case — see
+            // renderForeach/captureForeachFocus for how it's used.
+            const previousArray = (pathString === mappingData.foreachExpr || pathString === mappingData.sourceArray)
+                ? event.detail.oldValue
+                : undefined;
+
             // Perform the rendering
-            this.renderForeach(element, array);
+            this.renderForeach(element, array, previousArray);
         }
     };
 
@@ -8705,11 +8718,16 @@
      * an `<input>` the user is still typing into when editing that same item
      * (through its own two-way binding) triggers the rebuild.
      * @param {Element} foreachElement - The foreach container about to be rebuilt
-     * @returns {{foreachId: string, index: number, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}|null}
+     * @param {Array} [previousArray] - The bound array's contents as of the
+     *   last render, if the caller has a genuine pre-mutation snapshot of it
+     *   (see handleForeachRebuildForChange). Used to resolve the focused
+     *   item by object identity so restoreForeachFocus can find it again
+     *   even if something else in the list shifted its position.
+     * @returns {{foreachId: string, index: number, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}|null}
      *   A snapshot to hand to restoreForeachFocus, or null if nothing inside
      *   foreachElement currently has focus.
      */
-    Runtime.prototype.captureForeachFocus = function(foreachElement) {
+    Runtime.prototype.captureForeachFocus = function(foreachElement, previousArray) {
         const active = document.activeElement;
 
         if (!active || active === foreachElement || !foreachElement.contains(active)) {
@@ -8747,9 +8765,19 @@
             node = parent;
         }
 
+        // When a genuine pre-mutation snapshot is available, resolve the
+        // focused element's actual item by object identity — the same
+        // technique buildIndexMap already uses to track filtered/sorted
+        // views back to their source. That lets restoreForeachFocus find
+        // the item again by reference even if it moved (e.g. another item
+        // was inserted or removed earlier in the same list), rather than
+        // only by this now-stale index.
+        const item = Array.isArray(previousArray) ? previousArray[context.index] : undefined;
+
         return {
             foreachId: context.foreachId,
             index: context.index,
+            item: item,
             path: path,
             selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
             selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
@@ -8758,18 +8786,38 @@
 
     /**
      * Restores focus captured by captureForeachFocus once a foreach rebuild
-     * has finished. A no-op if nothing was captured, or if the same slot no
-     * longer exists (e.g. the item itself was removed by the rebuild).
+     * has finished. A no-op if nothing was captured, or if the same item no
+     * longer exists (e.g. it was removed by the change that triggered this
+     * rebuild).
      * @param {Element} foreachElement - The just-rebuilt foreach container
-     * @param {?{foreachId: string, index: number, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}} snapshot
+     * @param {?{foreachId: string, index: number, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}} snapshot
      *   The value returned by captureForeachFocus, or null.
+     * @param {Array} [sourceArray] - The bound array's current contents,
+     *   used to relocate a captured item by identity (see captureForeachFocus).
+     *   Falls back to the captured (possibly stale) index without it.
      */
-    Runtime.prototype.restoreForeachFocus = function(foreachElement, snapshot) {
+    Runtime.prototype.restoreForeachFocus = function(foreachElement, snapshot, sourceArray) {
         if (!snapshot) {
             return;
         }
 
-        const itemRoot = this.findForeachItemElement(foreachElement, snapshot.foreachId, snapshot.index);
+        let index = snapshot.index;
+
+        // Prefer relocating the captured item by identity so focus follows
+        // it even if its position moved — falling back to the captured
+        // (possibly now-stale) position when no identity was captured.
+        if (snapshot.item !== undefined && Array.isArray(sourceArray)) {
+            const resolvedIndex = sourceArray.indexOf(snapshot.item);
+
+            if (resolvedIndex === -1) {
+                // The item itself is gone — nothing sensible to refocus.
+                return;
+            }
+
+            index = resolvedIndex;
+        }
+
+        const itemRoot = this.findForeachItemElement(foreachElement, snapshot.foreachId, index);
 
         if (!itemRoot) {
             return;
@@ -8805,9 +8853,15 @@
      * whatever array it's handed, or does nothing if not handed one.
      * @param {Element} foreachElement - DOM element with foreach binding
      * @param {Array} array - The array to render; if falsy, this is a no-op
+     * @param {Array} [previousArray] - The bound array's contents as of the
+     *   last render, if the caller has a genuine pre-mutation snapshot of it
+     *   (see handleForeachRebuildForChange) — passed through to
+     *   captureForeachFocus so a focused item can be found again by identity
+     *   even if it moved. Omit when no such snapshot is available (e.g. an
+     *   initial render); focus is then only preserved by position.
      * @returns {void}
      */
-    Runtime.prototype.renderForeach = function(foreachElement, array) {
+    Runtime.prototype.renderForeach = function(foreachElement, array, previousArray) {
         const self = this;
         const mappingData = this.interpolationMap.get(foreachElement);
 
@@ -8827,7 +8881,7 @@
 
         // Snapshot which element (if any) currently has focus inside this
         // foreach, before its DOM is torn down below — see captureForeachFocus.
-        const focusSnapshot = this.captureForeachFocus(foreachElement);
+        const focusSnapshot = this.captureForeachFocus(foreachElement, previousArray);
 
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
@@ -8907,8 +8961,11 @@
 
             // Hand focus back to the equivalent element in the freshly
             // rendered item, if something inside this foreach had it before
-            // the rebuild — see captureForeachFocus.
-            this.restoreForeachFocus(foreachElement, focusSnapshot);
+            // the rebuild — see captureForeachFocus. sourceArray (not array)
+            // matches the indexing scheme buildIndexMap just used above, so
+            // an identity-resolved index means the same thing here as it did
+            // when the comment markers were written.
+            this.restoreForeachFocus(foreachElement, focusSnapshot, sourceArray);
 
             // After rebuilding children, sync <select> DOM state back to the model.
             // When a foreach replaces <option> elements inside a <select>, the browser

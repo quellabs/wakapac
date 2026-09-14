@@ -551,6 +551,32 @@
                 c.destroy();
             });
 
+            await test('focus follows the edited item across an unrelated insert elsewhere in the same list (issue #211 follow-up)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li><input class="name-input" data-pac-bind="value: item.name">' +
+                    '<span class="name-echo">{{item.name}}</span></li></ul>',
+                    { items: [{ name: 'One' }, { name: 'Two' }, { name: 'Three' }] }
+                );
+                await tick();
+
+                // Focus "Two"'s input, at index 1.
+                const inputs = c.container.querySelectorAll('.name-input');
+                inputs[1].focus();
+                assertEqual(document.activeElement, inputs[1], 'sanity check: focus is on "Two"\'s input');
+
+                // Insert a new item at the front — "Two" is now at index 2, not 1.
+                c.abstraction.items.unshift({ name: 'Zero' });
+                await tick();
+
+                const newInputs = c.container.querySelectorAll('.name-input');
+                assertEqual(newInputs.length, 4, 'list grew by the inserted item');
+                assertEqual(document.activeElement, newInputs[2], 'focus followed "Two" to its new position');
+                assertEqual(document.activeElement.value, 'Two', 'the refocused input still belongs to "Two", not whichever item now sits at the old index');
+
+                c.destroy();
+            });
+
             suite('Click bindings & msgProc');
 
             await test('click binding invokes the bound method', async function () {
