@@ -8665,6 +8665,140 @@
     }
 
     /**
+     * Finds the root element of a single foreach item by its original array
+     * index — the first element following that item's opening boundary
+     * comment (see buildForeachItemHTML / FOREACH_INDEX_REGEX).
+     * @param {Element} foreachElement - The foreach container
+     * @param {string} foreachId - The foreach's own id
+     * @param {number} index - The item's original array index
+     * @returns {Element|null} The item's root element, or null if not found
+     */
+    Runtime.prototype.findForeachItemElement = function(foreachElement, foreachId, index) {
+        let node = foreachElement.firstChild;
+
+        while (node) {
+            if (node.nodeType === Node.COMMENT_NODE) {
+                const context = Runtime.parseForeachComment(node);
+
+                if (context && context.foreachId === foreachId && context.index === index) {
+                    let sibling = node.nextSibling;
+
+                    while (sibling && sibling.nodeType !== Node.ELEMENT_NODE) {
+                        sibling = sibling.nextSibling;
+                    }
+
+                    return sibling;
+                }
+            }
+
+            node = node.nextSibling;
+        }
+
+        return null;
+    };
+
+    /**
+     * Captures which element inside a foreach item currently has focus, if
+     * any, so renderForeach's innerHTML rebuild — which unavoidably destroys
+     * and recreates every item's DOM — can hand focus back to the equivalent
+     * element afterward instead of silently dropping it. The common case is
+     * an `<input>` the user is still typing into when editing that same item
+     * (through its own two-way binding) triggers the rebuild.
+     * @param {Element} foreachElement - The foreach container about to be rebuilt
+     * @returns {{foreachId: string, index: number, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}|null}
+     *   A snapshot to hand to restoreForeachFocus, or null if nothing inside
+     *   foreachElement currently has focus.
+     */
+    Runtime.prototype.captureForeachFocus = function(foreachElement) {
+        const active = document.activeElement;
+
+        if (!active || active === foreachElement || !foreachElement.contains(active)) {
+            return null;
+        }
+
+        const context = this.extractClosestForeachContext(active);
+
+        if (!context) {
+            return null;
+        }
+
+        const itemRoot = this.findForeachItemElement(foreachElement, context.foreachId, context.index);
+
+        if (!itemRoot) {
+            return null;
+        }
+
+        // Path of element-child indices from the item's root down to the
+        // focused element. The item's template markup is static — only the
+        // bound values inside it differ between renders — so this position
+        // reliably identifies "the same slot in the item" in whatever gets
+        // rendered in its place.
+        const path = [];
+        let node = active;
+
+        while (node && node !== itemRoot) {
+            const parent = node.parentElement;
+
+            if (!parent) {
+                return null;
+            }
+
+            path.unshift(Array.prototype.indexOf.call(parent.children, node));
+            node = parent;
+        }
+
+        return {
+            foreachId: context.foreachId,
+            index: context.index,
+            path: path,
+            selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+            selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+        };
+    };
+
+    /**
+     * Restores focus captured by captureForeachFocus once a foreach rebuild
+     * has finished. A no-op if nothing was captured, or if the same slot no
+     * longer exists (e.g. the item itself was removed by the rebuild).
+     * @param {Element} foreachElement - The just-rebuilt foreach container
+     * @param {?{foreachId: string, index: number, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}} snapshot
+     *   The value returned by captureForeachFocus, or null.
+     */
+    Runtime.prototype.restoreForeachFocus = function(foreachElement, snapshot) {
+        if (!snapshot) {
+            return;
+        }
+
+        const itemRoot = this.findForeachItemElement(foreachElement, snapshot.foreachId, snapshot.index);
+
+        if (!itemRoot) {
+            return;
+        }
+
+        let target = itemRoot;
+
+        for (let i = 0; i < snapshot.path.length && target; i++) {
+            target = target.children[snapshot.path[i]] || null;
+        }
+
+        if (!target || typeof target.focus !== 'function') {
+            return;
+        }
+
+        target.focus();
+
+        if (snapshot.selectionStart !== null && typeof target.setSelectionRange === 'function') {
+            try {
+                target.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+            } catch (_e) {
+                // Throws for input types that don't support a selection range
+                // (e.g. type="number") — focus is already restored, which is
+                // the part that matters.
+            }
+        }
+    };
+
+    /**
      * Renders a foreach loop's DOM content from an already-evaluated array.
      * Evaluating and validating the foreach expression is the caller's job (see
      * evaluateForeachArray / getChangedForeachArray) — this function only renders
@@ -8690,6 +8824,10 @@
         if (!array) {
             return;
         }
+
+        // Snapshot which element (if any) currently has focus inside this
+        // foreach, before its DOM is torn down below — see captureForeachFocus.
+        const focusSnapshot = this.captureForeachFocus(foreachElement);
 
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
@@ -8766,6 +8904,11 @@
             // This is where the "natural retry" happens - nested foreach elements found here
             // will now have proper parent context available for successful rendering
             this.scanAndRegisterNewElements(foreachElement);
+
+            // Hand focus back to the equivalent element in the freshly
+            // rendered item, if something inside this foreach had it before
+            // the rebuild — see captureForeachFocus.
+            this.restoreForeachFocus(foreachElement, focusSnapshot);
 
             // After rebuilding children, sync <select> DOM state back to the model.
             // When a foreach replaces <option> elements inside a <select>, the browser

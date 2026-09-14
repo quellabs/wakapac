@@ -524,6 +524,33 @@
                 c.destroy();
             });
 
+            await test('typing in a two-way-bound input inside a foreach item keeps focus (and cursor position) across the resulting rebuild (issue #211)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li><input class="name-input" data-pac-bind="value: item.name">' +
+                    '<span class="name-echo">{{item.name}}</span></li></ul>',
+                    { items: [{ name: 'One' }, { name: 'Two' }] }
+                );
+                await tick();
+
+                const input = c.container.querySelectorAll('.name-input')[0];
+                input.focus();
+                input.value = 'On3';
+                input.setSelectionRange(3, 3);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await tick();
+
+                assertEqual(c.abstraction.items[0].name, 'On3', 'two-way binding writes back to the correct array item');
+
+                const newInput = c.container.querySelectorAll('.name-input')[0];
+                assertEqual(newInput.value, 'On3', 'rebuilt input reflects the typed value');
+                assertEqual(document.activeElement, newInput, 'focus was restored to the equivalent input after the rebuild');
+                assertEqual(newInput.selectionStart, 3, 'cursor position was restored too');
+                assertEqual(c.container.querySelectorAll('.name-echo')[0].textContent, 'On3', 'sibling interpolation for the same item still updates');
+
+                c.destroy();
+            });
+
             suite('Click bindings & msgProc');
 
             await test('click binding invokes the bound method', async function () {
