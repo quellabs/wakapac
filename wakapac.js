@@ -8727,23 +8727,32 @@
             return null;
         }
 
-        const context = this.extractClosestForeachContext(active);
+        // Walk up to the direct child of foreachElement that owns `active` —
+        // the item's root element, however deeply active is nested inside it
+        // (including inside a foreach of its own). Resolving context from
+        // this element rather than from `active` directly means an inner
+        // foreach's own context can never be mistaken for this (outer) one.
+        let itemRoot = active;
 
-        if (!context) {
-            return null;
+        while (itemRoot && itemRoot.parentElement !== foreachElement) {
+            itemRoot = itemRoot.parentElement;
         }
-
-        const itemRoot = this.findForeachItemElement(foreachElement, context.foreachId, context.index);
 
         if (!itemRoot) {
             return null;
         }
 
-        // Path of element-child indices from the item's root down to the
-        // focused element. The item's template markup is static — only the
-        // bound values inside it differ between renders — so this position
-        // reliably identifies "the same slot in the item" in whatever gets
-        // rendered in its place.
+        const context = this.extractClosestForeachContext(itemRoot);
+
+        if (!context) {
+            return null;
+        }
+
+        // Path of child-node indices (not just elements — see restoreForeachFocus)
+        // from the item's root down to the focused element. The item's template
+        // markup is static — only the bound values inside it differ between
+        // renders — so this position reliably identifies "the same slot in the
+        // item" in whatever gets rendered in its place.
         const path = [];
         let node = active;
 
@@ -8754,19 +8763,23 @@
                 return null;
             }
 
-            path.unshift(Array.prototype.indexOf.call(parent.children, node));
+            path.unshift(Array.prototype.indexOf.call(parent.childNodes, node));
             node = parent;
         }
 
         // Resolve the focused item by object identity (same technique
         // buildIndexMap uses for filtered/sorted views) so it can be found
         // again even if an insert/removal elsewhere shifts its position.
-        const item = Array.isArray(previousArray) ? previousArray[context.index] : undefined;
+        // hasItem is tracked separately from item's value so a legitimately
+        // undefined item (e.g. a foreach over primitives) isn't mistaken for
+        // "no snapshot was available" in restoreForeachFocus.
+        const hasItem = Array.isArray(previousArray) && context.index < previousArray.length;
 
         return {
             foreachId: context.foreachId,
             index: context.index,
-            item: item,
+            hasItem: hasItem,
+            item: hasItem ? previousArray[context.index] : undefined,
             path: path,
             selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
             selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
@@ -8779,7 +8792,7 @@
      * longer exists (e.g. it was removed by the change that triggered this
      * rebuild).
      * @param {Element} foreachElement - The just-rebuilt foreach container
-     * @param {?{foreachId: string, index: number, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}} snapshot
+     * @param {?{foreachId: string, index: number, hasItem: boolean, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}} snapshot
      *   The value returned by captureForeachFocus, or null.
      * @param {Array} [sourceArray] - The bound array's current contents, used
      *   to relocate a captured item by identity; falls back to the captured
@@ -8793,7 +8806,7 @@
         let index = snapshot.index;
 
         // Prefer relocating by identity; fall back to the captured position.
-        if (snapshot.item !== undefined && Array.isArray(sourceArray)) {
+        if (snapshot.hasItem && Array.isArray(sourceArray)) {
             const resolvedIndex = sourceArray.indexOf(snapshot.item);
 
             if (resolvedIndex === -1) {
@@ -8810,10 +8823,15 @@
             return;
         }
 
+        // childNodes, not children: a wp-if sibling toggles by swapping its
+        // node for a same-position placeholder comment (see DomUpdater
+        // hideNode/showNode) rather than removing it, so childNodes indices
+        // stay stable across the toggle while children (elements-only)
+        // indices would shift — matching how the path was built.
         let target = itemRoot;
 
         for (let i = 0; i < snapshot.path.length && target; i++) {
-            target = target.children[snapshot.path[i]] || null;
+            target = target.childNodes[snapshot.path[i]] || null;
         }
 
         if (!target || typeof target.focus !== 'function') {
