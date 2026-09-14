@@ -971,14 +971,26 @@
         },
 
         /**
+         * Computes the viewport-relative bounding rect and window dimensions
+         * for an element, shared by isElementVisible/isElementFullyVisible.
+         * @param {HTMLElement} element - The element to measure
+         * @returns {{rect: DOMRect, viewHeight: number, viewWidth: number}}
+         */
+        getViewportMetrics(element) {
+            return {
+                rect: element.getBoundingClientRect(),
+                viewHeight: window.innerHeight,
+                viewWidth: window.innerWidth
+            };
+        },
+
+        /**
          * Checks if an element is at least partially visible in the viewport
          * @param {HTMLElement} element - The element to check
          * @returns {boolean} True if element intersects with viewport
          */
         isElementVisible(element) {
-            const rect = element.getBoundingClientRect();
-            const viewHeight = window.innerHeight;
-            const viewWidth = window.innerWidth;
+            const { rect, viewHeight, viewWidth } = this.getViewportMetrics(element);
 
             return (
                 rect.top < viewHeight &&
@@ -994,9 +1006,7 @@
          * @returns {boolean} True if entire element is within viewport bounds
          */
         isElementFullyVisible(element) {
-            const rect = element.getBoundingClientRect();
-            const viewHeight = window.innerHeight;
-            const viewWidth = window.innerWidth;
+            const { rect, viewHeight, viewWidth } = this.getViewportMetrics(element);
 
             return (
                 rect.top >= 0 &&
@@ -1021,7 +1031,7 @@
          * @returns {boolean} True if focus is within the element's boundaries
          */
         isElementFocusWithin(element) {
-            return element === document.activeElement || element.contains(document.activeElement);
+            return this.isElementDirectlyFocused(element) || element.contains(document.activeElement);
         },
 
         /**
