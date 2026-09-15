@@ -3865,18 +3865,14 @@
          * @returns {void}
          */
         invalidateRect(pacId, rect) {
-            // Fetch the container
-            const container = wakaPAC.getContainerByPacId(pacId);
+            // Fetch the canvas container; bail if not found or not a canvas
+            const target = wakaPAC._resolveCanvasTarget(pacId);
 
-            // If not found, bail
-            if (!container) {
+            if (!target) {
                 return;
             }
 
-            // Do nothing if the container is not a canvas
-            if (!(container instanceof HTMLCanvasElement)) {
-                return;
-            }
+            const container = target.container;
 
             // Normalize: null rect means the whole canvas
             const fullRect = {
@@ -4468,20 +4464,30 @@
         },
 
         /**
+         * Parses a comma-separated list of expressions up to (not including) the
+         * given closing token type. Shared by argument lists and array literals.
+         * @param {string} closingType - Token type that ends the list (not consumed)
+         * @returns {Array} Array of parsed expressions
+         */
+        parseCommaSeparatedList(closingType) {
+            const items = [];
+
+            if (!this.check(closingType)) {
+                do {
+                    items.push(this.parseTernary());
+                } while (this.match('COMMA') && !this.check(closingType));
+            }
+
+            return items;
+        },
+
+        /**
          * Parses a comma-separated list of function arguments.
          * Continues parsing until reaching a closing parenthesis or end of input.
          * @returns {Array} Array of parsed argument expressions
          */
         parseArgumentList() {
-            const args = [];
-
-            if (!this.check('RPAREN')) {
-                do {
-                    args.push(this.parseTernary());
-                } while (this.match('COMMA') && !this.check('RPAREN'));
-            }
-
-            return args;
+            return this.parseCommaSeparatedList('RPAREN');
         },
 
         /**
@@ -4494,13 +4500,7 @@
          * @example
          */
         parseArrayLiteral() {
-            const elements = [];
-
-            if (!this.check('RBRACKET')) {
-                do {
-                    elements.push(this.parseTernary());
-                } while (this.match('COMMA') && !this.check('RBRACKET'));
-            }
+            const elements = this.parseCommaSeparatedList('RBRACKET');
 
             this.consume('RBRACKET', 'Expected closing bracket');
 
@@ -4981,15 +4981,11 @@
          * @returns {Array<*>} The evaluated array, or an empty array if no elements are defined.
          */
         evaluateArrayLiteral(arrayExpr, context, resolverContext = null) {
-            const self = this;
-
             if (!arrayExpr.elements) {
                 return [];
             }
 
-            return arrayExpr.elements.map(function(element) {
-                return self.evaluate(element, context, resolverContext);
-            });
+            return arrayExpr.elements.map(element => this.evaluate(element, context, resolverContext));
         },
 
         /**
@@ -5002,12 +4998,11 @@
          * @returns {Object} The evaluated plain object, or an empty object if no pairs are defined.
          */
         evaluateObjectLiteral: function(node, context, scope) {
-            const self = this;
             const result = {};
 
             if (node.pairs) {
-                node.pairs.forEach(function({ key, value }) {
-                    result[key] = self.evaluate(value, context, scope);
+                node.pairs.forEach(({ key, value }) => {
+                    result[key] = this.evaluate(value, context, scope);
                 });
             }
 
@@ -11880,13 +11875,13 @@
      * @param {number} height - New backing store height in pixels
      */
     wakaPAC.resizeCanvas = function(pacId, width, height) {
-        // Fetch the container
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        // resizeCanvas is only meaningful for canvas containers
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return;
         }
+
+        const { container, contextType } = target;
 
         // Skip if dimensions are unchanged — assigning to width/height clears the
         // backing store even when the value is the same, so avoid it entirely
@@ -11901,8 +11896,6 @@
         // Schedule a repaint for 2D canvases — the canvas content is invalid after
         // every resize. Non-2D canvases (e.g. WebGL, via a plugin) drive their own
         // render loop and do not use the dirty rect / MSG_PAINT mechanism.
-        const contextType = container.dataset.pacContext || '2d';
-
         if (contextType === '2d') {
             DomUpdateTracker.invalidateRect(pacId, null);
         }
@@ -11917,15 +11910,15 @@
      * @returns {{width:number, height:number}|null}
      */
     wakaPAC.getCanvasSize = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return null;
         }
 
         return {
-            width: container.width,
-            height: container.height
+            width: target.container.width,
+            height: target.container.height
         };
     };
 
