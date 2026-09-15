@@ -4528,6 +4528,35 @@
         },
 
         /**
+         * True if this AST node can be losslessly round-tripped through
+         * astToPath and scoped getProperty resolution. Only identifier,
+         * literal, member, and index nodes are supported. Complex nodes
+         * (calls, ternaries, arithmetic) must use recursive evaluation.
+         * @param {Object} node - AST node to check.
+         * @returns {boolean}
+         */
+        isFlattenablePath(node) {
+            if (!node) {
+                return true;
+            }
+
+            switch (node.type) {
+                case 'identifier':
+                case 'literal':
+                    return true;
+
+                case 'member':
+                    return this.isFlattenablePath(node.object);
+
+                case 'index':
+                    return this.isFlattenablePath(node.object) && this.isFlattenablePath(node.index);
+
+                default:
+                    return false;
+            }
+        },
+
+        /**
          * Checks if current token matches any of the given types
          * @param {...string} types - Token types to match
          * @returns {boolean} True if current token matches any type
@@ -4656,7 +4685,7 @@
                     return this.evaluateObjectLiteral(node, context, scope);
 
                 case 'index': {
-                    if (scope) {
+                    if (scope && this.isFlattenablePath(node)) {
                         return this.getProperty(this.astToPath(node), context, scope);
                     }
 
@@ -4711,7 +4740,7 @@
                 }
 
                 case 'member': {
-                    if (scope) {
+                    if (scope && this.isFlattenablePath(node)) {
                         return this.getProperty(this.astToPath(node), context, scope);
                     }
 
