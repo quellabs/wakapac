@@ -20,7 +20,6 @@
             --cell-bg: #fff;
             --select-border: #1a73e8;
             --select-fill: rgba(26, 115, 232, 0.08);
-            --select-border-width: 3px;
             --edit-shadow: 0 1px 4px rgba(0,0,0,0.18), 0 0 0 2px var(--select-border);
             --formula-bar-height: 34px;
             --toolbar-height: 38px;
@@ -128,25 +127,10 @@
             user-select: none;
         }
 
-        /* ── Corner header (top-left intersection) ── */
-        .corner-header {
+        /* ── Column headers (A, B, C, ...) and the corner cell ── */
+        .col-header, .corner-header {
             position: sticky;
             top: 0;
-            left: 0;
-            z-index: 12;
-            width: var(--row-header-width);
-            min-width: var(--row-header-width);
-            height: var(--cell-height);
-            background: var(--header-bg);
-            border-right: 1px solid var(--grid-border);
-            border-bottom: 2px solid #c7c7cc;
-        }
-
-        /* ── Column headers (A, B, C, ...) ── */
-        .col-header {
-            position: sticky;
-            top: 0;
-            z-index: 10;
             height: var(--cell-height);
             min-width: var(--cell-min-width);
             background: var(--header-bg);
@@ -159,6 +143,13 @@
             padding: 0 4px;
             vertical-align: middle;
             overflow: hidden;
+        }
+        .col-header { z-index: 10; }
+        .corner-header {
+            left: 0;
+            z-index: 12;
+            width: var(--row-header-width);
+            min-width: var(--row-header-width);
         }
         .col-header.active {
             background: var(--header-bg-active);
@@ -209,34 +200,17 @@
 
         td.cell.numeric { text-align: right; }
 
-        /* ── Active cell selection overlay ── */
-        .selection-highlight {
-            position: absolute;
-            pointer-events: none;
-            z-index: 5;
-            border: 2px solid var(--select-border);
-            background: transparent;
-            display: none;
-        }
+        /* Active cell and range selection are plain per-cell state now — no
+           overlay elements to keep positioned in JS. */
+        td.cell.selected { box-shadow: inset 0 0 0 2px var(--select-border); z-index: 1; }
+        td.cell.in-range { background: var(--select-fill); }
 
-        .selection-highlight.visible { display: block; }
-
-        /* ── Range selection overlay ── */
-        .range-highlight {
-            position: absolute;
-            pointer-events: none;
-            z-index: 4;
-            background: var(--select-fill);
-            border: 1px solid var(--select-border);
-            display: none;
-        }
-        .range-highlight.visible { display: block; }
-
-        /* ── Inline cell editor ── */
+        /* ── Inline cell editor — a single floating <input>, positioned via
+             a bound `style` (see editorStyle computed) rather than
+             getBoundingClientRect measurements. ── */
         .cell-editor {
             position: absolute;
             z-index: 20;
-            display: none;
             border: none;
             outline: none;
             padding: 0 4px;
@@ -245,9 +219,7 @@
             color: #202124;
             background: #fff;
             box-shadow: var(--edit-shadow);
-            min-width: var(--cell-min-width);
         }
-        .cell-editor.active { display: block; }
 
         /* ── Status bar ── */
         .status-bar {
@@ -291,21 +263,58 @@
 
 <!--
     Single PAC container. The formula bar, scrollable grid, cell editor,
-    and selection overlays all live inside it. All interaction flows
-    through msgProc — zero addEventListener calls.
+    and status bar all live inside it. All interaction flows through
+    msgProc — zero addEventListener calls. Grid rendering itself, though, is entirely
+    declarative: nested `foreach` builds the table body, `class`/`style`
+    bindings drive selection highlighting and the editor's position, and
+    `computed` properties drive the formula bar / status bar text. No
+    createElement, no querySelector-and-mutate render loop.
 -->
 <div class="spreadsheet-outer" id="spreadsheet" data-pac-id="spreadsheet" tabindex="0">
     <div class="formula-bar">
-        <div class="cell-name-box" id="cellNameBox">A1</div>
-        <input class="formula-input" id="formulaInput" type="text" spellcheck="false" />
+        <div class="cell-name-box">{{activeCellRef}}</div>
+        <input class="formula-input" id="formulaInput" type="text" spellcheck="false"
+               data-pac-bind="value: formulaValue">
     </div>
-    <div class="grid-scroll-area" id="gridScrollArea"></div>
-</div>
+    <div class="grid-scroll-area" id="gridScrollArea">
+        <table class="grid-table">
+            <thead>
+                <!-- headerCells[0] is the corner cell; the rest are columns A..Z -->
+                <tr data-pac-bind="foreach: headerCells" data-pac-item="hcell" data-pac-index="colIndex">
+                    <th data-pac-bind="class: {
+                            'corner-header': hcell.isCorner,
+                            'col-header': !hcell.isCorner,
+                            active: !hcell.isCorner && isColActive(colIndex - 1)
+                        }">{{hcell.display}}</th>
+                </tr>
+            </thead>
+            <tbody data-pac-bind="foreach: grid" data-pac-item="row" data-pac-index="rowIndex">
+                <!-- row.slots[0] is the row-header; the rest are the row's 26 data cells -->
+                <tr data-pac-bind="foreach: row.slots" data-pac-item="slot" data-pac-index="colIndex">
+                    <td data-pac-bind="class: {
+                            'row-header': slot.isHeader,
+                            cell: !slot.isHeader,
+                            numeric: !slot.isHeader && slot.numeric,
+                            active: slot.isHeader && isRowActive(rowIndex),
+                            selected: !slot.isHeader && isCellSelected(rowIndex, colIndex - 1),
+                            'in-range': !slot.isHeader && isCellInRange(rowIndex, colIndex - 1)
+                        }, 'data-row': rowIndex, 'data-col': colIndex - 1"
+                    >{{ slot.isHeader ? slot.display : slot.value }}</td>
+                </tr>
+            </tbody>
+        </table>
 
-<!-- Status bar (outside PAC — updated via direct DOM ref) -->
-<div class="status-bar">
-    <div class="status-section" id="statusInfo">Ready</div>
-    <div class="status-section" id="statusAgg"></div>
+        <input class="cell-editor" id="cellEditor" type="text" spellcheck="false" autocomplete="off"
+               data-pac-bind="visible: editing, value: editorValue, style: editorStyle">
+    </div>
+
+    <!-- Status bar — nested inside the PAC container so {{ }} interpolation
+         can reach statusText/aggregateText. position:fixed keeps it pinned
+         to the viewport regardless of DOM nesting. -->
+    <div class="status-bar">
+        <div class="status-section">{{statusText}}</div>
+        <div class="status-section">{{aggregateText}}</div>
+    </div>
 </div>
 
 <script src="../wakapac.js"></script>
@@ -322,6 +331,16 @@
 
         /** Number of rows */
         const NUM_ROWS = 50;
+
+        /**
+         * Cell geometry, mirroring the --cell-height / --cell-min-width /
+         * --row-header-width CSS custom properties above. Needed in JS only
+         * because the floating editor's position is computed from these
+         * (grid column/row math), not measured off the DOM.
+         */
+        const CELL_WIDTH = 100;
+        const CELL_HEIGHT = 28;
+        const ROW_HEADER_WIDTH = 46;
 
         // =====================================================================
         // UTILITY FUNCTIONS
@@ -347,21 +366,6 @@
         }
 
         /**
-         * Parses a cell reference string back into column/row indices.
-         * @param {string} ref - Cell reference (e.g. "B3").
-         * @returns {{ col: number, row: number }|null} Parsed result, or null if invalid.
-         */
-        function parseCellRef(ref) {
-            const m = ref.match(/^([A-Z])(\d+)$/);
-
-            if (!m) {
-                return null;
-            }
-
-            return { col: m[1].charCodeAt(0) - 65, row: parseInt(m[2], 10) - 1 };
-        }
-
-        /**
          * Clamps a value to an inclusive range.
          * @param {number} v - Input value.
          * @param {number} lo - Minimum.
@@ -382,85 +386,45 @@
         }
 
         // =====================================================================
-        // DOM CONSTRUCTION
+        // GRID DATA MODEL
         // =====================================================================
 
         /**
-         * Builds the grid table, selection overlays, and cell editor inside
-         * the given scroll container. Called once during init().
-         * @param {HTMLElement} scrollArea - The scrollable container element.
-         * @returns {{ table: HTMLTableElement, selDiv: HTMLDivElement, rangeDiv: HTMLDivElement, editor: HTMLInputElement }}
+         * Builds the header row's data: a leading corner marker followed by
+         * one entry per column letter. Rendered by the thead's foreach.
+         * @returns {Array<{isCorner: boolean, display: string}>}
          */
-        function buildGrid(scrollArea) {
-            // Active cell selection overlay
-            const selDiv = document.createElement("div");
-            selDiv.className = "selection-highlight";
-            scrollArea.appendChild(selDiv);
-
-            // Range selection overlay (multi-cell)
-            const rangeDiv = document.createElement("div");
-            rangeDiv.className = "range-highlight";
-            scrollArea.appendChild(rangeDiv);
-
-            // Inline cell editor — a single <input> repositioned over the active cell
-            const editor = document.createElement("input");
-            editor.className = "cell-editor";
-            editor.type = "text";
-            editor.spellcheck = false;
-            editor.setAttribute("autocomplete", "off");
-            scrollArea.appendChild(editor);
-
-            // Grid table
-            const table = document.createElement("table");
-            table.className = "grid-table";
-
-            // Column headers
-            const thead = document.createElement("thead");
-            const headRow = document.createElement("tr");
-
-            // Corner cell (intersection of row and column headers)
-            const corner = document.createElement("th");
-            corner.className = "corner-header";
-            headRow.appendChild(corner);
+        function buildHeaderCells() {
+            const cells = [{ isCorner: true, display: "" }];
 
             for (let c = 0; c < NUM_COLS; c++) {
-                const th = document.createElement("th");
-                th.className = "col-header";
-                th.textContent = colToLetter(c);
-                th.dataset.col = c;
-                headRow.appendChild(th);
+                cells.push({ isCorner: false, display: colToLetter(c) });
             }
 
-            thead.appendChild(headRow);
-            table.appendChild(thead);
+            return cells;
+        }
 
-            // Data rows with row headers
-            const tbody = document.createElement("tbody");
+        /**
+         * Builds the reactive grid: one entry per row, each holding a leading
+         * row-header slot followed by NUM_COLS data-cell slots. Cells are
+         * mutated in place (see _setCellData) — WakaPAC's deep reactivity
+         * means the bound <td> updates itself, no manual render call needed.
+         * @returns {Array<{slots: Array}>}
+         */
+        function buildGrid() {
+            const rows = [];
 
             for (let r = 0; r < NUM_ROWS; r++) {
-                const tr = document.createElement("tr");
-                const rh = document.createElement("td");
-
-                rh.className = "row-header";
-                rh.textContent = r + 1;
-                rh.dataset.row = r;
-                tr.appendChild(rh);
+                const slots = [{ isHeader: true, display: r + 1 }];
 
                 for (let c = 0; c < NUM_COLS; c++) {
-                    const td = document.createElement("td");
-                    td.className = "cell";
-                    td.dataset.col = c;
-                    td.dataset.row = r;
-                    tr.appendChild(td);
+                    slots.push({ isHeader: false, raw: "", value: "", numeric: false });
                 }
 
-                tbody.appendChild(tr);
+                rows.push({ slots });
             }
 
-            table.appendChild(tbody);
-            scrollArea.appendChild(table);
-
-            return { table, selDiv, rangeDiv, editor };
+            return rows;
         }
 
         // =====================================================================
@@ -473,8 +437,11 @@
             // State
             // -----------------------------------------------------------------
 
-            /** Sparse cell storage keyed by reference string (e.g. "A1") */
-            cells: {},
+            /** Header row: corner marker + 26 column-letter cells */
+            headerCells: buildHeaderCells(),
+
+            /** Dense reactive grid: NUM_ROWS entries, each with 27 slots */
+            grid: buildGrid(),
 
             /** Active cell column (zero-based) */
             selCol: 0,
@@ -491,6 +458,12 @@
             /** True when the inline cell editor is open */
             editing: false,
 
+            /** Two-way bound to the floating cell editor <input> */
+            editorValue: "",
+
+            /** Two-way bound to the formula bar <input> — mirrors the active cell's raw text */
+            formulaValue: "",
+
             /** True when the formula bar has focus and is being edited */
             _editingFormulaBar: false,
 
@@ -504,43 +477,87 @@
             _wasDrag: false,
 
             // -----------------------------------------------------------------
-            // DOM references (assigned in init)
+            // DOM references (assigned in init) — only for focus handling and
+            // scrollIntoView; rendering itself needs none of these.
             // -----------------------------------------------------------------
 
-            _table: null,
             _scrollArea: null,
-            _selDiv: null,
-            _rangeDiv: null,
-            _editor: null,
-            _formulaInput: null,
-            _cellNameBox: null,
-            _statusInfo: null,
-            _statusAgg: null,
+            _editorInput: null,
+            _formulaInputEl: null,
+
+            // =================================================================
+            // COMPUTED
+            // =================================================================
+
+            computed: {
+                /** "A1"-style reference for the active cell, shown in the cell-name box. */
+                activeCellRef() {
+                    return cellRef(this.selCol, this.selRow);
+                },
+
+                /** Status-bar left segment. */
+                statusText() {
+                    return this.editing ? "Edit" : "Ready";
+                },
+
+                /**
+                 * Status-bar right segment: Sum/Avg/Count over numeric cells
+                 * in the current selection. Recomputes automatically whenever
+                 * the selection or any cell value changes.
+                 */
+                aggregateText() {
+                    const b = this._rangeBounds();
+                    const values = [];
+
+                    for (let r = b.minRow; r <= b.maxRow; r++) {
+                        for (let c = b.minCol; c <= b.maxCol; c++) {
+                            const slot = this._cellSlot(r, c);
+
+                            if (slot.numeric) {
+                                values.push(slot.value);
+                            }
+                        }
+                    }
+
+                    if (values.length > 1) {
+                        const sum = values.reduce((a, x) => a + x, 0);
+                        return `Sum: ${sum}   Avg: ${(sum / values.length).toFixed(2)}   Count: ${values.length}`;
+                    }
+
+                    return "";
+                },
+
+                /**
+                 * Floating editor's position/size, in the grid's own
+                 * (scroll-independent) coordinate space — see the CELL_*
+                 * constants. Replaces the old getBoundingClientRect-based
+                 * positioning entirely.
+                 */
+                editorStyle() {
+                    return {
+                        left: (ROW_HEADER_WIDTH + this.selCol * CELL_WIDTH) + "px",
+                        top: ((this.selRow + 1) * CELL_HEIGHT) + "px",
+                        width: CELL_WIDTH + "px",
+                        height: CELL_HEIGHT + "px"
+                    };
+                }
+            },
 
             // =================================================================
             // LIFECYCLE
             // =================================================================
 
             /**
-             * Initializes the spreadsheet. Builds the grid DOM, stores element
-             * references, renders the initial selection, and focuses the grid.
-             * No addEventListener calls — all interaction routes through msgProc.
+             * Grabs the DOM references still needed for focus handling and
+             * scrollIntoView, then focuses the grid. The grid itself is
+             * already fully rendered by the foreach/class/style bindings —
+             * no construction step required here.
              */
             init() {
-                this._scrollArea   = document.getElementById("gridScrollArea");
+                this._scrollArea = document.getElementById("gridScrollArea");
+                this._editorInput = document.getElementById("cellEditor");
+                this._formulaInputEl = document.getElementById("formulaInput");
 
-                const dom          = buildGrid(this._scrollArea);
-
-                this._table        = dom.table;
-                this._selDiv       = dom.selDiv;
-                this._rangeDiv     = dom.rangeDiv;
-                this._editor       = dom.editor;
-                this._formulaInput = document.getElementById("formulaInput");
-                this._cellNameBox  = document.getElementById("cellNameBox");
-                this._statusInfo   = document.getElementById("statusInfo");
-                this._statusAgg    = document.getElementById("statusAgg");
-
-                this._updateSelectionUI();
                 this._focusGrid();
             },
 
@@ -555,9 +572,9 @@
             _focusedElement() {
                 const active = document.activeElement;
 
-                if (active === this._editor) {
+                if (active === this._editorInput) {
                     return "editor";
-                } else if (active === this._formulaInput) {
+                } else if (active === this._formulaInputEl) {
                     return "formulaBar";
                 } else {
                     return "grid";
@@ -623,7 +640,7 @@
                             this.selEndRow = null;
                         }
 
-                        this._updateSelectionUI();
+                        this._syncFormulaBar();
                         this._focusGrid();
                         return false;
                     }
@@ -674,7 +691,7 @@
                         this.selEndRow = null;
                         this._dragging = true;
                         wakaPAC.setCapture(this.pacId);
-                        this._updateSelectionUI();
+                        this._syncFormulaBar();
                         break;
                     }
 
@@ -697,7 +714,6 @@
                         if (hit && (this.selEndCol !== hit.col || this.selEndRow !== hit.row)) {
                             this.selEndCol = hit.col;
                             this.selEndRow = hit.row;
-                            this._updateSelectionUI();
                         }
 
                         break;
@@ -725,7 +741,6 @@
                             this._wasDrag = true;
                         }
 
-                        this._updateSelectionUI();
                         break;
                     }
 
@@ -767,7 +782,7 @@
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_INPUT_COMPLETE: {
                         if (this._focusedElement() === "editor") {
-                            this._formulaInput.value = this._editor.value;
+                            this.formulaValue = this.editorValue;
                         }
 
                         break;
@@ -777,7 +792,7 @@
                     // Focus gained: track when the formula bar becomes active
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_SETFOCUS: {
-                        if (event.target === this._formulaInput) {
+                        if (event.target === this._formulaInputEl) {
                             this._editingFormulaBar = true;
                         }
 
@@ -788,7 +803,7 @@
                     // Focus lost: clear formula bar editing state
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_KILLFOCUS: {
-                        if (event.target === this._formulaInput) {
+                        if (event.target === this._formulaInputEl) {
                             this._editingFormulaBar = false;
                         }
 
@@ -800,7 +815,8 @@
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_PASTE: {
                         if (this._focusedElement() === 'grid') {
-                            this._setCellData(this.selCol, this.selRow, event.detail.text);
+                            this._setCellData(this.selRow, this.selCol, event.detail.text);
+                            this._syncFormulaBar();
                             return false;
                         }
 
@@ -831,7 +847,7 @@
                         case wakaPAC.VK_RETURN: {
                             this._commitEdit();
                             this._moveSelection(0, shift ? -1 : 1);
-                            this._updateSelectionUI();
+                            this._syncFormulaBar();
                             this._focusGrid();
                             event.preventDefault();
                             break;
@@ -840,7 +856,7 @@
                         case wakaPAC.VK_TAB: {
                             this._commitEdit();
                             this._moveSelection(shift ? -1 : 1, 0);
-                            this._updateSelectionUI();
+                            this._syncFormulaBar();
                             this._focusGrid();
                             event.preventDefault();
                             break;
@@ -868,7 +884,7 @@
                         }
 
                         case wakaPAC.VK_ESCAPE: {
-                            this._formulaInput.value = this._getRawValue();
+                            this._syncFormulaBar();
                             this._editingFormulaBar = false;
                             this._focusGrid();
                             event.preventDefault();
@@ -898,7 +914,7 @@
                             this._moveSelection(dc, dr);
                         }
 
-                        this._updateSelectionUI();
+                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -906,7 +922,7 @@
 
                     case wakaPAC.VK_TAB: {
                         this._moveSelection(shift ? -1 : 1, 0);
-                        this._updateSelectionUI();
+                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -914,7 +930,7 @@
 
                     case wakaPAC.VK_RETURN: {
                         this._moveSelection(0, shift ? -1 : 1);
-                        this._updateSelectionUI();
+                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -943,7 +959,7 @@
 
                         this.selEndCol = null;
                         this.selEndRow = null;
-                        this._updateSelectionUI();
+                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -959,7 +975,7 @@
 
                         this.selEndCol = null;
                         this.selEndRow = null;
-                        this._updateSelectionUI();
+                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -971,7 +987,6 @@
                             this.selRow = 0;
                             this.selEndCol = NUM_COLS - 1;
                             this.selEndRow = NUM_ROWS - 1;
-                            this._updateSelectionUI();
                             event.preventDefault();
                         }
 
@@ -985,80 +1000,55 @@
             // =================================================================
 
             /**
-             * Retrieves cell data for the given position.
-             * @param {number} col - Column index.
+             * Returns the reactive slot object for a data cell.
              * @param {number} row - Row index.
-             * @returns {{ raw: string, value: string|number }|null}
+             * @param {number} col - Column index.
+             * @returns {{raw: string, value: (string|number), numeric: boolean}}
              */
-            _getCellData(col, row) {
-                return this.cells[cellRef(col, row)] || null;
+            _cellSlot(row, col) {
+                return this.grid[row].slots[col + 1];
             },
 
             /**
-             * Stores or clears cell data and updates the DOM.
-             * @param {number} col - Column index.
+             * Mutates a cell's slot in place. WakaPAC's deep reactivity means
+             * the bound <td> (text + numeric class) updates itself — no
+             * manual render call needed.
              * @param {number} row - Row index.
+             * @param {number} col - Column index.
              * @param {string} raw - Raw input string (empty to clear).
              */
-            _setCellData(col, row, raw) {
-                const ref = cellRef(col, row);
+            _setCellData(row, col, raw) {
+                const slot = this._cellSlot(row, col);
                 const trimmed = (raw || "").trim();
 
                 if (trimmed === "") {
-                    delete this.cells[ref];
+                    slot.raw = "";
+                    slot.value = "";
+                    slot.numeric = false;
                 } else {
-                    const value = isNumeric(trimmed) ? parseFloat(trimmed) : trimmed;
-                    this.cells[ref] = { raw: trimmed, value: value };
+                    const numeric = isNumeric(trimmed);
+                    slot.raw = trimmed;
+                    slot.value = numeric ? parseFloat(trimmed) : trimmed;
+                    slot.numeric = numeric;
                 }
-
-                this._renderCell(col, row);
-                this._updateAggregates();
             },
 
             /**
-             * Returns the raw input string for the currently selected cell.
+             * Returns the raw input string for a cell.
+             * @param {number} row - Row index.
+             * @param {number} col - Column index.
              * @returns {string}
              */
-            _getRawValue() {
-                const data = this._getCellData(this.selCol, this.selRow);
-                return data ? data.raw : "";
-            },
-
-            // =================================================================
-            // CELL RENDERING
-            // =================================================================
-
-            /**
-             * Finds the <td> DOM element for a given cell position.
-             * @param {number} col - Column index.
-             * @param {number} row - Row index.
-             * @returns {HTMLTableCellElement|null}
-             */
-            _getCellElement(col, row) {
-                return this._table.querySelector(`td.cell[data-col="${col}"][data-row="${row}"]`);
+            _getRawValue(row, col) {
+                return this._cellSlot(row, col).raw;
             },
 
             /**
-             * Updates a single cell's displayed text and numeric alignment.
-             * @param {number} col - Column index.
-             * @param {number} row - Row index.
+             * Copies the active cell's raw value into the formula bar.
+             * Call after any change to selCol/selRow.
              */
-            _renderCell(col, row) {
-                const el = this._getCellElement(col, row);
-
-                if (!el) {
-                    return;
-                }
-
-                const data = this._getCellData(col, row);
-
-                if (data) {
-                    el.textContent = data.value;
-                    el.classList.toggle("numeric", typeof data.value === "number");
-                } else {
-                    el.textContent = "";
-                    el.classList.remove("numeric");
-                }
+            _syncFormulaBar() {
+                this.formulaValue = this._getRawValue(this.selRow, this.selCol);
             },
 
             // =================================================================
@@ -1082,7 +1072,7 @@
              * Works for both single cells and multi-cell ranges.
              * @returns {{ minCol: number, maxCol: number, minRow: number, maxRow: number }}
              */
-            _getSelectionRange() {
+            _rangeBounds() {
                 const c2 = this.selEndCol !== null ? this.selEndCol : this.selCol;
                 const r2 = this.selEndRow !== null ? this.selEndRow : this.selRow;
 
@@ -1105,84 +1095,58 @@
             },
 
             /**
-             * Synchronizes all visual selection state: the active cell highlight,
-             * the range overlay, the cell name box, the formula bar contents,
-             * and the column/row header highlights.
+             * Per-cell binding helper: is (row, col) the active cell?
+             * @param {number} row
+             * @param {number} col
+             * @returns {boolean}
              */
-            _updateSelectionUI() {
-                const sa = this._scrollArea;
-                const activeCell = this._getCellElement(this.selCol, this.selRow);
+            isCellSelected(row, col) {
+                return row === this.selRow && col === this.selCol;
+            },
 
-                if (!activeCell) {
-                    return;
+            /**
+             * Per-cell binding helper: is (row, col) inside the current range
+             * (when one is active)?
+             * @param {number} row
+             * @param {number} col
+             * @returns {boolean}
+             */
+            isCellInRange(row, col) {
+                if (!this._isRangeSelection()) {
+                    return false;
                 }
 
-                // Update formula bar
-                this._cellNameBox.textContent = cellRef(this.selCol, this.selRow);
-                this._formulaInput.value = this._getRawValue();
+                const b = this._rangeBounds();
+                return row >= b.minRow && row <= b.maxRow && col >= b.minCol && col <= b.maxCol;
+            },
 
-                // Position the active cell highlight overlay
-                const areaRect = sa.getBoundingClientRect();
-                const cellRect = activeCell.getBoundingClientRect();
-                const bw = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--select-border-width'));
+            /**
+             * Column-header binding helper: does the current selection span this column?
+             * @param {number} col
+             * @returns {boolean}
+             */
+            isColActive(col) {
+                const b = this._rangeBounds();
+                return col >= b.minCol && col <= b.maxCol;
+            },
 
-                this._selDiv.style.left   = (cellRect.left - areaRect.left + sa.scrollLeft - bw) + "px";
-                this._selDiv.style.top    = (cellRect.top - areaRect.top + sa.scrollTop - bw) + "px";
-                this._selDiv.style.width  = (cellRect.width + bw) + "px";
-                this._selDiv.style.height = (cellRect.height + bw) + "px";
-                this._selDiv.classList.add("visible");
-
-                // Position the range highlight overlay (multi-cell selection)
-                if (this._isRangeSelection()) {
-                    const range = this._getSelectionRange();
-                    const tl = this._getCellElement(range.minCol, range.minRow);
-                    const br = this._getCellElement(range.maxCol, range.maxRow);
-
-                    if (tl && br) {
-                        const tlR = tl.getBoundingClientRect();
-                        const brR = br.getBoundingClientRect();
-
-                        this._rangeDiv.style.left   = (tlR.left - areaRect.left + sa.scrollLeft) + "px";
-                        this._rangeDiv.style.top    = (tlR.top - areaRect.top + sa.scrollTop) + "px";
-                        this._rangeDiv.style.width  = (brR.right - tlR.left) + "px";
-                        this._rangeDiv.style.height = (brR.bottom - tlR.top) + "px";
-                        this._rangeDiv.classList.add("visible");
-                    }
-                } else {
-                    this._rangeDiv.classList.remove("visible");
-                }
-
-                // Highlight active column and row headers
-                this._table.querySelectorAll(".col-header.active, .row-header.active").forEach(
-                    function (el) { el.classList.remove("active"); }
-                );
-
-                const range = this._getSelectionRange();
-
-                for (let c = range.minCol; c <= range.maxCol; c++) {
-                    const h = this._table.querySelector(`.col-header[data-col="${c}"]`);
-
-                    if (h) {
-                        h.classList.add("active");
-                    }
-                }
-
-                for (let r = range.minRow; r <= range.maxRow; r++) {
-                    const h = this._table.querySelector(`.row-header[data-row="${r}"]`);
-
-                    if (h) {
-                        h.classList.add("active");
-                    }
-                }
-
-                this._updateAggregates();
+            /**
+             * Row-header binding helper: does the current selection span this row?
+             * @param {number} row
+             * @returns {boolean}
+             */
+            isRowActive(row) {
+                const b = this._rangeBounds();
+                return row >= b.minRow && row <= b.maxRow;
             },
 
             /**
              * Scrolls the grid so the active cell is visible.
              */
             _scrollToSelection() {
-                const cell = this._getCellElement(this.selCol, this.selRow);
+                const cell = this._scrollArea.querySelector(
+                    `.cell[data-row="${this.selRow}"][data-col="${this.selCol}"]`
+                );
 
                 if (cell) {
                     cell.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -1194,38 +1158,23 @@
             // =================================================================
 
             /**
-             * Opens the inline cell editor over the active cell.
+             * Opens the inline cell editor over the active cell. Position
+             * comes from the editorStyle computed; only focus/cursor
+             * placement stay imperative here. This must happen
+             * synchronously (no rAF/setTimeout deferral): when opened from
+             * MSG_CHAR, the physical keypress that opens the editor is what
+             * types the first character, and it only lands in the editor
+             * because focus moves there before that keypress's native
+             * character-insertion fires.
              */
             _enterEditMode() {
                 this.editing = true;
+                this.editorValue = this._getRawValue(this.selRow, this.selCol);
+                this.formulaValue = this.editorValue;
 
-                const cell = this._getCellElement(this.selCol, this.selRow);
-
-                if (!cell) {
-                    return;
-                }
-
-                // Position the editor input directly over the cell
-                const sa = this._scrollArea;
-                const areaRect = sa.getBoundingClientRect();
-                const cellRect = cell.getBoundingClientRect();
-
-                this._editor.style.left   = (cellRect.left - areaRect.left + sa.scrollLeft) + "px";
-                this._editor.style.top    = (cellRect.top - areaRect.top + sa.scrollTop) + "px";
-                this._editor.style.width  = cellRect.width + "px";
-                this._editor.style.height = cellRect.height + "px";
-
-                this._editor.value = this._getRawValue();
-
-                this._editor.classList.add("active");
-                this._editor.focus();
-
-                // Place cursor at end of text
-                const len = this._editor.value.length;
-                this._editor.setSelectionRange(len, len);
-
-                this._formulaInput.value = this._editor.value;
-                this._statusInfo.textContent = "Edit";
+                this._editorInput.focus();
+                const len = this._editorInput.value.length;
+                this._editorInput.setSelectionRange(len, len);
             },
 
             /**
@@ -1236,20 +1185,17 @@
                     return;
                 }
 
-                this._editor.classList.remove("active");
                 this.editing = false;
-                this._setCellData(this.selCol, this.selRow, this._editor.value);
-                this._statusInfo.textContent = "Ready";
+                this._setCellData(this.selRow, this.selCol, this.editorValue);
+                this._syncFormulaBar();
             },
 
             /**
              * Discards the cell editor's value and closes it without saving.
              */
             _cancelEdit() {
-                this._editor.classList.remove("active");
                 this.editing = false;
-                this._formulaInput.value = this._getRawValue();
-                this._statusInfo.textContent = "Ready";
+                this._syncFormulaBar();
             },
 
             /**
@@ -1257,8 +1203,8 @@
              */
             _commitFormulaBar() {
                 this._editingFormulaBar = false;
-                this._setCellData(this.selCol, this.selRow, this._formulaInput.value);
-                this._updateSelectionUI();
+                this._setCellData(this.selRow, this.selCol, this.formulaValue);
+                this._syncFormulaBar();
             },
 
             // =================================================================
@@ -1312,46 +1258,15 @@
              * Clears all cells within the current selection range.
              */
             _clearSelectedCells() {
-                const range = this._getSelectionRange();
+                const b = this._rangeBounds();
 
-                for (let r = range.minRow; r <= range.maxRow; r++) {
-                    for (let c = range.minCol; c <= range.maxCol; c++) {
-                        this._setCellData(c, r, "");
+                for (let r = b.minRow; r <= b.maxRow; r++) {
+                    for (let c = b.minCol; c <= b.maxCol; c++) {
+                        this._setCellData(r, c, "");
                     }
                 }
 
-                this._updateSelectionUI();
-            },
-
-            // =================================================================
-            // STATUS BAR AGGREGATES
-            // =================================================================
-
-            /**
-             * Computes Sum / Avg / Count for numeric cells in the current
-             * selection and updates the status bar. Only shown when two or
-             * more numeric values are selected.
-             */
-            _updateAggregates() {
-                const range = this._getSelectionRange();
-                const values = [];
-
-                for (let r = range.minRow; r <= range.maxRow; r++) {
-                    for (let c = range.minCol; c <= range.maxCol; c++) {
-                        const data = this._getCellData(c, r);
-
-                        if (data && typeof data.value === "number") {
-                            values.push(data.value);
-                        }
-                    }
-                }
-
-                if (values.length > 1) {
-                    const sum = values.reduce((a, b) => a + b, 0);
-                    this._statusAgg.textContent = `Sum: ${sum}   Avg: ${(sum / values.length).toFixed(2)}   Count: ${values.length}`;
-                } else {
-                    this._statusAgg.textContent = "";
-                }
+                this._syncFormulaBar();
             },
 
             /**
@@ -1359,16 +1274,15 @@
              * @returns {number} Zero-based row index.
              */
             _getLastUsedRow() {
-                let maxRow = 0;
-
-                Object.keys(this.cells).forEach(function (ref) {
-                    const parsed = parseCellRef(ref);
-                    if (parsed && parsed.row > maxRow) {
-                        maxRow = parsed.row;
+                for (let r = this.grid.length - 1; r >= 0; r--) {
+                    for (let c = 0; c < NUM_COLS; c++) {
+                        if (this._cellSlot(r, c).raw !== "") {
+                            return r;
+                        }
                     }
-                });
+                }
 
-                return maxRow;
+                return 0;
             }
         });
 
