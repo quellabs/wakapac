@@ -5815,6 +5815,7 @@
         this.initializeImportedUnits();
         this.setupContainerScrollTracking();
         this.initializeUpdateQueue();
+        this.initializeChangeBatch();
         this.registerPacEventListeners();
 
         DomUpdateTracker.observeContainer(this.container);
@@ -6286,6 +6287,16 @@
     }
 
     /**
+     * Initializes the pending-change batch used to coalesce reactive `pac:change`
+     * events dispatched within the same synchronous job into a single reactive
+     * pass, flushed on the microtask queue (see handleEvent / flushReactiveChanges).
+     */
+    Runtime.prototype.initializeChangeBatch = function() {
+        this._pendingChanges = [];
+        this._flushScheduled = false;
+    }
+
+    /**
      * Registers DOM event listeners used to receive runtime events for this
      * context.
      */
@@ -6353,6 +6364,11 @@
      * @returns {void}
      */
     Runtime.prototype.destroy = function() {
+        // A microtask flush already scheduled via queueMicrotask can't be
+        // cancelled — this flag lets flushReactiveChanges() bail out instead
+        // of touching maps that the rest of this method is about to clear/null.
+        this._destroyed = true;
+
         // Release mouse capture if this container had it
         DomUpdateTracker.releaseCaptureIfOwnedBy(this.container);
 
@@ -6405,6 +6421,7 @@
         this.textInterpolationMap.clear();
         this.commentBindingMap.clear();
         this.updateQueue.clear();
+        this._pendingChanges = [];
 
         // Capture identifiers needed for MSG_DESTROYED before nullification
         const destroyedPacId = this.abstraction.pacId || null;
@@ -6743,7 +6760,7 @@
         // Whether a computed's current output is identity-preserving can depend on
         // its data (e.g. a computed that branches between .map() and .filter()), so
         // the answer is only safe to cache within a single reactive-update pass, not
-        // for the component's lifetime — handleReactiveChange() clears this cache
+        // for the component's lifetime — flushReactiveChanges() clears this cache
         // before each pass. That still matters because a foreach nested inside
         // another foreach's items gets fresh, unregistered DOM elements on every
         // rebuild within the same pass (renderForeach replaces innerHTML wholesale)
@@ -6930,9 +6947,18 @@
                 this.handlePacEvent(event);
                 break;
 
-            // Handle reactive data binding changes (property updates, computed value changes)
+            // Handle reactive data binding changes (property updates, computed value changes).
+            // Batched rather than processed immediately: a burst of synchronous writes
+            // (e.g. several `this.x = ...` lines in one event handler) each dispatch their
+            // own `pac:change`, but only need one full reactive pass between them — see
+            // flushReactiveChanges().
             case 'pac:change':
-                this.handleReactiveChange(event);
+                this._pendingChanges.push(event.detail);
+
+                if (!this._flushScheduled) {
+                    this._flushScheduled = true;
+                    queueMicrotask(() => this.flushReactiveChanges());
+                }
                 break;
 
             // Handle browser state changes (navigation, history, URL changes)
@@ -7454,25 +7480,55 @@
     };
 
     /**
-     * Handles reactive data binding changes triggered by property updates
+     * Flushes the batch of `pac:change` events accumulated since the last flush,
+     * running one full reactive pass for the whole batch instead of one pass per
+     * individual property write. Scheduled via queueMicrotask from handleEvent so
+     * that a burst of synchronous writes within the same task (e.g. several
+     * `this.x = ...` lines in one click handler) coalesces into a single pass,
+     * flushed before the browser can paint or run any other task.
      * Orchestrates updates to all binding types: element attributes, text interpolations,
-     * comment conditionals, watchers, and foreach loops
-     * @param {CustomEvent} event - The pac:change event containing change details
-     * @param {Object} event.detail - Event payload
-     * @param {string[]} event.detail.path - Array representing the property path that changed (e.g., ['todos', '0', 'completed'])
-     * @param {*} event.detail.oldValue - The previous value before the change
-     * @param {*} event.detail.newValue - The new value after the change
+     * comment conditionals, watchers, and foreach loops.
      */
-    Runtime.prototype.handleReactiveChange = function(event) {
-        // inferArrayRoot()'s cache is only valid for the current data snapshot — a
-        // computed's identity-preservingness can depend on its inputs — so clear it
-        // before each pass rather than letting it persist across data changes.
-        this.arrayRootCache.clear();
-        this.updateElementBindings();
-        this.updateTextInterpolations();
-        this.updateCommentConditionals();
-        this.handleWatchersForChange(event);
-        this.handleForeachRebuildForChange(event);
+    Runtime.prototype.flushReactiveChanges = function() {
+        // The microtask can't be cancelled once scheduled — if destroy() ran
+        // first, bail out before touching maps it may have already cleared.
+        if (this._destroyed) {
+            this._pendingChanges = [];
+            this._flushScheduled = false;
+            return;
+        }
+
+        try {
+            // Drain in rounds rather than snapshotting once: a watcher (or, in
+            // principle, a foreach rebuild) can itself write a reactive property
+            // synchronously, which enqueues another change into this._pendingChanges
+            // while this loop is running. Swapping in a fresh array before each
+            // round means that follow-up change gets its own full binding pass
+            // instead of silently landing after updateElementBindings() already ran.
+            while (this._pendingChanges.length > 0) {
+                const batch = this._pendingChanges;
+                this._pendingChanges = [];
+
+                // inferArrayRoot()'s cache is only valid for the current data snapshot — a
+                // computed's identity-preservingness can depend on its inputs — so clear it
+                // before each pass rather than letting it persist across data changes.
+                this.arrayRootCache.clear();
+                this.updateElementBindings();
+                this.updateTextInterpolations();
+                this.updateCommentConditionals();
+
+                for (const change of batch) {
+                    this.handleWatchersForChange(change);
+                }
+
+                this.rebuildForeachesForBatch(batch);
+            }
+        } finally {
+            // Cleared even if a watcher/handler above threw, so a single bad
+            // callback can't wedge the batch and silently stop future flushes.
+            this._pendingChanges = [];
+            this._flushScheduled = false;
+        }
     };
 
     // =============================================================================
@@ -7601,16 +7657,19 @@
      * Triggers watchers for property changes
      * Handles both root-level and nested property changes, passing appropriate before/after values
      * Note: Does not trigger for array element changes - arrays are handled by foreach rebuilds
-     * @param {CustomEvent} event - The pac:change event with change details
+     * @param {Object} change - A single queued change (formerly a pac:change event's `detail`)
+     * @param {string[]} change.path - Array representing the property path that changed
+     * @param {*} change.oldValue - The previous value before the change
+     * @param {*} change.newValue - The new value after the change
      */
-    Runtime.prototype.handleWatchersForChange = function(event) {
+    Runtime.prototype.handleWatchersForChange = function(change) {
         // Root-level change (e.g., this.count = 5)
         // Pass the actual primitive or object values directly
-        const path = event.detail.path;
+        const path = change.path;
         const rootProperty = path[0];
 
         if (path.length === 1) {
-            this.triggerWatcher(rootProperty, event.detail.newValue, event.detail.oldValue);
+            this.triggerWatcher(rootProperty, change.newValue, change.oldValue);
             return;
         }
 
@@ -7645,7 +7704,7 @@
         // Set the old value at the final property
         // This reconstructs the object as it was before the change
         const lastProperty = path[path.length - 1];
-        target[lastProperty] = event.detail.oldValue;
+        target[lastProperty] = change.oldValue;
 
         // Trigger watcher with complete before/after objects
         // newParentObject has the changed value, oldParentObject has the old value
@@ -7653,8 +7712,9 @@
     };
 
     /**
-     * Handles foreach rebuilds triggered by reactive property changes.
-     * A foreach element needs rebuilding when any of the following holds:
+     * Handles foreach rebuilds triggered by a batch of reactive property changes
+     * flushed together (see flushReactiveChanges). A foreach element needs
+     * rebuilding when any change in the batch satisfies any of the following:
      *   1. Its bound array is exactly the array path that changed, is nested
      *      under it (e.g. `foreach: todos` when `todos` was mutated, or
      *      `foreach: rows[1].cells` when `rows[1].cells[3]` changed), or is
@@ -7666,84 +7726,109 @@
      *   3. The changed property is used as a dynamic bracket key inside the
      *      foreach expression (e.g. changing `region` rebuilds
      *      `foreach: cities[country][region]`).
-     * Each matching element is rebuilt exactly once per event, even when more
-     * than one rule matches it — which happens routinely for a computed
-     * foreach over an array that was itself directly mutated (rules 1 and 2
-     * both match the same element in that case).
-     * @param {CustomEvent} event - The pac:change event containing change details
-     * @param {string[]} event.detail.path - Property path that changed
-     * @param {*} event.detail.newValue - The new value after the change
+     * Each matching element is rebuilt exactly once per batch, no matter how
+     * many changes or rules matched it — which happens routinely for a
+     * computed foreach over an array that was itself directly mutated (rules
+     * 1 and 2 both match the same element in that case), and now also for
+     * two unrelated changes in the same batch that both happen to touch the
+     * same foreach.
+     * @param {Object[]} changes - The batch's queued changes (each a former
+     *   pac:change event's `detail`: {path, oldValue, newValue})
      */
-    Runtime.prototype.handleForeachRebuildForChange = function(event) {
-        const path = event.detail.path;
-        const pathString = Utils.pathArrayToString(path);
+    Runtime.prototype.rebuildForeachesForBatch = function(changes) {
+        // element -> { directMatch: boolean, previousArray, previousArraySet: boolean }
+        const matched = new Map();
 
-        // Rules 2 and 3 (computed dependency / bracket key) only apply to a
-        // single top-level property change (e.g. ['filter'], not
-        // ['todos', '0', 'text']). Rule 1 (direct array path) applies
-        // regardless of path depth, since a nested array can still be
-        // reassigned or mutated wholesale.
-        const changedProp = path.length === 1 ? path[0] : null;
-        const dependents = changedProp ? this.dependencies.get(changedProp) : null;
-        const bracketPattern = changedProp ? new RegExp('\\[' + changedProp + '\\]') : null;
+        for (const change of changes) {
+            const path = change.path;
+            const pathString = Utils.pathArrayToString(path);
 
-        // Rule 1 candidates. Matching is driven entirely by the changed path,
-        // not by whether the new value is an array — an ancestor reassignment
-        // (e.g. `data = {...}`) replaces the bound array without the new
-        // value at the changed path itself being one.
-        const directMatches = new Set(this.findForeachElementsByArrayPath(pathString));
+            // Rules 2 and 3 (computed dependency / bracket key) only apply to a
+            // single top-level property change (e.g. ['filter'], not
+            // ['todos', '0', 'text']). Rule 1 (direct array path) applies
+            // regardless of path depth, since a nested array can still be
+            // reassigned or mutated wholesale.
+            const changedProp = path.length === 1 ? path[0] : null;
+            const dependents = changedProp ? this.dependencies.get(changedProp) : null;
+            const bracketPattern = changedProp ? new RegExp('\\[' + changedProp + '\\]') : null;
 
-        // Single-pass scan of interpolationMap, checking all three rules per
-        // element instead of running separate passes that could both match
-        // (and both rebuild) the same element for the same event.
-        for (const [element, mappingData] of this.interpolationMap) {
-            // Skip non-foreach elements
-            if (!mappingData.bindings || !mappingData.bindings.foreach) {
-                continue;
+            // Rule 1 candidates. Matching is driven entirely by the changed path,
+            // not by whether the new value is an array — an ancestor reassignment
+            // (e.g. `data = {...}`) replaces the bound array without the new
+            // value at the changed path itself being one.
+            const directMatches = new Set(this.findForeachElementsByArrayPath(pathString));
+
+            // Single-pass scan of interpolationMap, checking all three rules per
+            // element instead of running separate passes that could both match
+            // (and both rebuild) the same element for the same change.
+            for (const [element, mappingData] of this.interpolationMap) {
+                // Skip non-foreach elements
+                if (!mappingData.bindings || !mappingData.bindings.foreach) {
+                    continue;
+                }
+
+                // Rule 1: bound array path equals, is nested under, or is an
+                // ancestor of the changed path.
+                const directMatch = directMatches.has(element);
+
+                // Rules 2 and 3 only apply when a single top-level property
+                // changed (changedProp is null for deeper paths — see above).
+                let computedMatch = false;
+                let bracketMatch = false;
+
+                if (changedProp) {
+                    const expr = mappingData.foreachExpr;
+                    const source = mappingData.sourceArray;
+
+                    // Rule 2: foreach expression is a computed that reads changedProp.
+                    computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+
+                    // Rule 3: changedProp is used as a dynamic bracket key in the expression.
+                    bracketMatch = bracketPattern.test(expr);
+                }
+
+                // No rule matched — this foreach is unaffected by this change.
+                if (!directMatch && !computedMatch && !bracketMatch) {
+                    continue;
+                }
+
+                let info = matched.get(element);
+
+                if (!info) {
+                    info = { directMatch: false, previousArray: undefined, previousArraySet: false };
+                    matched.set(element, info);
+                }
+
+                // A direct array-path match means the array itself just changed —
+                // always render its current value, the same way a standalone
+                // array mutation always would. Otherwise (computed/bracket match
+                // only), let getChangedForeachArray decide whether the rendered
+                // result actually differs before doing any work. One directMatch
+                // anywhere in the batch is enough to prefer evaluateForeachArray.
+                if (directMatch) {
+                    info.directMatch = true;
+                }
+
+                // oldValue is only "this array before the change" when the
+                // changed path *is* the array itself (mutator call/reassignment);
+                // for an ancestor or computed/bracket match it belongs to a
+                // different property, so only capture it in that one case. Use
+                // the *first* such change in the batch — by flush time every
+                // change has already landed on the real data, so a later
+                // change's oldValue is an intermediate state, not "the array
+                // before this flush."
+                if (!info.previousArraySet && (pathString === mappingData.foreachExpr || pathString === mappingData.sourceArray)) {
+                    info.previousArray = change.oldValue;
+                    info.previousArraySet = true;
+                }
             }
+        }
 
-            // Rule 1: bound array path equals, is nested under, or is an
-            // ancestor of the changed path.
-            const directMatch = directMatches.has(element);
-
-            // Rules 2 and 3 only apply when a single top-level property
-            // changed (changedProp is null for deeper paths — see above).
-            let computedMatch = false;
-            let bracketMatch = false;
-
-            if (changedProp) {
-                const expr = mappingData.foreachExpr;
-                const source = mappingData.sourceArray;
-
-                // Rule 2: foreach expression is a computed that reads changedProp.
-                computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
-
-                // Rule 3: changedProp is used as a dynamic bracket key in the expression.
-                bracketMatch = bracketPattern.test(expr);
-            }
-
-            // No rule matched — this foreach is unaffected by the change.
-            if (!directMatch && !computedMatch && !bracketMatch) {
-                continue;
-            }
-
-            // A direct array-path match means the array itself just changed —
-            // always render its current value, the same way a standalone
-            // array mutation always would. Otherwise (computed/bracket match
-            // only), let getChangedForeachArray decide whether the rendered
-            // result actually differs before doing any work.
-            const array = directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
-
-            // oldValue is only "this array before the change" when the
-            // changed path *is* the array itself (mutator call/reassignment);
-            // for an ancestor or computed/bracket match it belongs to a
-            // different property, so only pass it through in that one case.
-            const previousArray = (pathString === mappingData.foreachExpr || pathString === mappingData.sourceArray)
-                ? event.detail.oldValue
-                : undefined;
-
-            // Perform the rendering
-            this.renderForeach(element, array, previousArray);
+        // Render each matched element exactly once, after the whole batch has
+        // been scanned.
+        for (const [element, info] of matched) {
+            const array = info.directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
+            this.renderForeach(element, array, info.previousArray);
         }
     };
 
@@ -8824,7 +8909,7 @@
      * (through its own two-way binding) triggers the rebuild.
      * @param {Element} foreachElement - The foreach container about to be rebuilt
      * @param {Array} [previousArray] - Pre-mutation snapshot of the bound array,
-     *   if available (see handleForeachRebuildForChange) — lets the focused
+     *   if available (see rebuildForeachesForBatch) — lets the focused
      *   item be found again by identity even if its position moved.
      * @returns {{foreachId: string, index: number, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}|null}
      *   A snapshot to hand to restoreForeachFocus, or null if nothing inside
@@ -8970,7 +9055,7 @@
      * @param {Array} array - The array to render; if falsy, this is a no-op
      * @param {Array} [previousArray] - Pre-mutation snapshot of the bound
      *   array, if available — passed through to captureForeachFocus (see
-     *   handleForeachRebuildForChange). Omit for an initial render; focus is
+     *   rebuildForeachesForBatch). Omit for an initial render; focus is
      *   then only preserved by position.
      * @returns {void}
      */
