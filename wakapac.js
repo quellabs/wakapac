@@ -4489,16 +4489,8 @@
         },
 
         /**
-         * Depth of a pure "$parent" climb prefix rooted at this node: 1 for
-         * identifier($parent) itself, N+1 for N further ".$parent" member
-         * hops on top of that, or null if node isn't such a prefix.
-         * $parent only means anything combined with the identifier naming
-         * the outer frame's itemVar right after it (normalizePath counts
-         * leading "$parent" tokens to know how many foreach scopes to climb
-         * before resolving the rest) — so the 'member' case below uses this
-         * to fold a climb prefix and its target identifier into one
-         * getProperty/resolveScopedPath call, rather than resolving "$parent"
-         * on its own first the way an ordinary chain segment would be.
+         * Number of leading "$parent" hops in node's chain, or null if it
+         * isn't a pure $parent prefix.
          * @param {Object} node - AST node.
          * @returns {number|null}
          */
