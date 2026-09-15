@@ -2806,6 +2806,18 @@
         },
 
         /**
+         * Resolves the reactive abstraction for the component observing the given
+         * element, shared by the intersection/resize observer callbacks below.
+         * @param {Element} element
+         * @returns {Object|null}
+         * @private
+         */
+        _getObservedAbstraction(element) {
+            const component = window.PACRegistry.getByElement(element);
+            return (component && component.abstraction) ? component.abstraction : null;
+        },
+
+        /**
          * Setup intersection and resize observers
          * @returns {void}
          * @private
@@ -2817,22 +2829,22 @@
             this._intersectionObserver = new IntersectionObserver((entries) => {
                 // Process all intersection updates generated in this observer batch
                 entries.forEach(entry => {
-                    // Resolve the framework component associated with the observed element
-                    const component = window.PACRegistry.getByElement(entry.target);
+                    // Resolve the reactive abstraction for the observed element
+                    const abstraction = self._getObservedAbstraction(entry.target);
 
                     // Only update state when a valid abstraction layer exists
-                    if (component && component.abstraction) {
+                    if (abstraction) {
                         // Snapshot of the element’s client rectangle at the time of intersection
                         const rect = entry.boundingClientRect;
 
                         // Whether any portion of the container is visible in the viewport
-                        component.abstraction.containerVisible = entry.isIntersecting;
+                        abstraction.containerVisible = entry.isIntersecting;
 
                         // Treat near-complete intersection as fully visible (tolerates float precision)
-                        component.abstraction.containerFullyVisible = entry.intersectionRatio >= 0.99;
+                        abstraction.containerFullyVisible = entry.intersectionRatio >= 0.99;
 
                         // Persist simplified geometry for downstream layout/logic consumers
-                        component.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
+                        abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
                     }
                 });
             }, {
@@ -2850,18 +2862,18 @@
                     // The DOM element whose size changed
                     const container = entry.target;
 
-                    // Resolve the framework component associated with this element
-                    const component = window.PACRegistry.getByElement(container);
+                    // Resolve the reactive abstraction for this element
+                    const abstraction = self._getObservedAbstraction(container);
 
                     // Only proceed if a valid abstraction layer exists
-                    if (component && component.abstraction) {
+                    if (abstraction) {
                         // Normalize reported size to integer pixels
                         const width = Math.round(entry.contentRect.width);
                         const height = Math.round(entry.contentRect.height);
 
                         // Persist latest container dimensions on the abstraction
-                        component.abstraction.containerWidth = width;
-                        component.abstraction.containerHeight = height;
+                        abstraction.containerWidth = width;
+                        abstraction.containerHeight = height;
 
                         // Determine logical size state used by the message system
                         let sizeType;
@@ -5265,6 +5277,17 @@
     // =============================================================================
 
     /**
+     * Detects the "object syntax" form shared by the class/style binding handlers
+     * (e.g. { active: true } or { color: 'red' }), as opposed to a plain string
+     * or array of names.
+     * @param {*} value
+     * @returns {boolean}
+     */
+    function isObjectSyntaxValue(value) {
+        return typeof value === 'object' && value !== null && !Array.isArray(value);
+    }
+
+    /**
      * Value binding - Updates form element values
      * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
@@ -5447,7 +5470,7 @@
      */
     BindingHandlers.class = function(context, element, value) {
         // Object syntax: { active: true, disabled: false }
-        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        if (isObjectSyntaxValue(value)) {
             for (const className in value) {
                 if (value[className]) {
                     element.classList.add(className);
@@ -5492,7 +5515,7 @@
      */
     BindingHandlers.style = function(context, element, value) {
         // Object syntax: { color: 'red', fontSize: '16px' }
-        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        if (isObjectSyntaxValue(value)) {
             for (const prop in value) {
                 if (value[prop] != null) {
                     if (prop.startsWith('--')) {
@@ -10362,6 +10385,14 @@
             // Step 2: Build hierarchy map with parent and children for each component
             const hierarchyMap = new Map();
 
+            const getOrCreateEntry = (key) => {
+                if (!hierarchyMap.has(key)) {
+                    hierarchyMap.set(key, { parent: null, children: [] });
+                }
+
+                return hierarchyMap.get(key);
+            };
+
             this.components.forEach(component => {
                 const container = component.container;
 
@@ -10381,22 +10412,11 @@
                 }
 
                 // Initialize hierarchy entry for this component
-                if (!hierarchyMap.has(container)) {
-                    hierarchyMap.set(container, { parent: null, children: [] });
-                }
-
-                const hierarchy = hierarchyMap.get(container);
-                hierarchy.parent = parent;
+                getOrCreateEntry(container).parent = parent;
 
                 // Add this component as child to its parent
                 if (parent) {
-                    // Ensure parent has hierarchy entry
-                    if (!hierarchyMap.has(parent.container)) {
-                        hierarchyMap.set(parent.container, { parent: null, children: [] });
-                    }
-
-                    // Add to parent's children array
-                    hierarchyMap.get(parent.container).children.push(component);
+                    getOrCreateEntry(parent.container).children.push(component);
                 }
             });
 
