@@ -799,6 +799,18 @@
         },
 
         /**
+         * Detects the "object syntax" form shared by the class/style binding handlers
+         * (e.g. { active: true } or { color: 'red' }), as opposed to a plain string
+         * or array of names. Deliberately looser than isPlainObject() — class
+         * instances count as object syntax here too.
+         * @param {*} value
+         * @returns {boolean}
+         */
+        isObjectSyntaxValue(value) {
+            return typeof value === 'object' && value !== null && !Array.isArray(value);
+        },
+
+        /**
          * Gets a nested property value from an object using dot and bracket notation
          * @param {object} obj - The object to read from
          * @param {string} path - The property path (e.g., "configuration[theme]" or "todos[0].completed")
@@ -5277,17 +5289,6 @@
     // =============================================================================
 
     /**
-     * Detects the "object syntax" form shared by the class/style binding handlers
-     * (e.g. { active: true } or { color: 'red' }), as opposed to a plain string
-     * or array of names.
-     * @param {*} value
-     * @returns {boolean}
-     */
-    function isObjectSyntaxValue(value) {
-        return typeof value === 'object' && value !== null && !Array.isArray(value);
-    }
-
-    /**
      * Value binding - Updates form element values
      * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
@@ -5470,7 +5471,7 @@
      */
     BindingHandlers.class = function(context, element, value) {
         // Object syntax: { active: true, disabled: false }
-        if (isObjectSyntaxValue(value)) {
+        if (Utils.isObjectSyntaxValue(value)) {
             for (const className in value) {
                 if (value[className]) {
                     element.classList.add(className);
@@ -5515,7 +5516,7 @@
      */
     BindingHandlers.style = function(context, element, value) {
         // Object syntax: { color: 'red', fontSize: '16px' }
-        if (isObjectSyntaxValue(value)) {
+        if (Utils.isObjectSyntaxValue(value)) {
             for (const prop in value) {
                 if (value[prop] != null) {
                     if (prop.startsWith('--')) {
