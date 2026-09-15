@@ -9288,7 +9288,7 @@
 
     /**
      * Normalize a scoped path to a fully-qualified global data path.
-     * Counts leading "parent" tokens to determine how many foreach scopes to
+     * Counts leading "$parent" tokens to determine how many foreach scopes to
      * climb, selects the remaining frames, builds a scope map, and resolves
      * the path through it.
      * @param {string|Array<string|number>} pathSegments - Local path expression.
@@ -9304,9 +9304,9 @@
             return "";
         }
 
-        // Count consecutive leading "parent" tokens — each one climbs one foreach scope
+        // Count consecutive leading "$parent" tokens — each one climbs one foreach scope
         let climbs = 0;
-        while (climbs < path.length && path[climbs] === "parent") {
+        while (climbs < path.length && path[climbs] === "$parent") {
             climbs++;
         }
 

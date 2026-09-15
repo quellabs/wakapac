@@ -643,6 +643,40 @@
                 c.destroy();
             });
 
+            await test('$parent climbs one nesting level, resolving the rest of the path against the enclosing foreach scope', async function () {
+                // $parent doesn't itself evaluate to the outer item (unlike, e.g.,
+                // Knockout's $parent) — it drops the innermost foreach frame from
+                // scope resolution, so what follows it still has to name the outer
+                // frame's itemVar to reach that item: $parent.item.name, not
+                // $parent.name.
+                const c = mount(
+                    '<ul data-pac-bind="foreach: categories">' +
+                    '<li><ul data-pac-bind="foreach: item.products">' +
+                    '<li class="prod">{{$parent.item.name}} / {{item.name}}</li>' +
+                    '</ul></li></ul>',
+                    {
+                        categories: [
+                            { name: 'Electronics', products: [{ name: 'Laptop' }, { name: 'Mouse' }] },
+                            { name: 'Books', products: [{ name: 'JavaScript Guide' }] }
+                        ]
+                    }
+                );
+                await tick();
+
+                const prods = c.container.querySelectorAll('.prod');
+                assertEqual(prods.length, 3);
+                assertEqual(prods[0].textContent, 'Electronics / Laptop', '$parent.item resolves to the enclosing category, not the inner product');
+                assertEqual(prods[1].textContent, 'Electronics / Mouse');
+                assertEqual(prods[2].textContent, 'Books / JavaScript Guide', '$parent.item tracks the correct outer item across foreach instances');
+
+                c.abstraction.categories[0].name = 'Electronics (sale)';
+                await tick();
+
+                assertEqual(c.container.querySelectorAll('.prod')[0].textContent, 'Electronics (sale) / Laptop', '$parent.item binding updates reactively when the outer item changes');
+
+                c.destroy();
+            });
+
             await test('nested foreach with default item/$index names does not log "No foreach binding found" on a normal initial render (issue #214)', async function () {
                 const originalWarn = console.warn;
                 const warnings = [];
