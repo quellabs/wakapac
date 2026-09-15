@@ -611,6 +611,133 @@
                 c.destroy();
             });
 
+            await test('nested foreach using the default item/$index names on both levels shadows the outer scope correctly (issue #214)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: categories">' +
+                    '<li><strong class="cat">{{item.name}} (#{{$index}})</strong>' +
+                    '<ul data-pac-bind="foreach: item.products">' +
+                    '<li class="prod">{{$index}}: {{item.name}} - {{item.price}}</li>' +
+                    '</ul></li></ul>',
+                    {
+                        categories: [
+                            { name: 'Electronics', products: [{ name: 'Laptop', price: 999 }, { name: 'Mouse', price: 25 }] },
+                            { name: 'Books', products: [{ name: 'JavaScript Guide', price: 39 }, { name: 'Design Patterns', price: 45 }] }
+                        ]
+                    }
+                );
+                await tick();
+
+                const cats = c.container.querySelectorAll('.cat');
+                assertEqual(cats[0].textContent, 'Electronics (#0)');
+                assertEqual(cats[1].textContent, 'Books (#1)');
+
+                const electronicsProducts = c.container.querySelectorAll('ul ul')[0].querySelectorAll('.prod');
+                assertEqual(electronicsProducts.length, 2, 'inner foreach renders its own array\'s length, not the outer\'s');
+                assertEqual(electronicsProducts[0].textContent, '0: Laptop - 999', 'inner item/$index resolve to the inner array, not the outer item');
+                assertEqual(electronicsProducts[1].textContent, '1: Mouse - 25');
+
+                const booksProducts = c.container.querySelectorAll('ul ul')[1].querySelectorAll('.prod');
+                assertEqual(booksProducts[0].textContent, '0: JavaScript Guide - 39');
+                assertEqual(booksProducts[1].textContent, '1: Design Patterns - 45');
+
+                c.destroy();
+            });
+
+            await test('nested foreach with default item/$index names does not log "No foreach binding found" on a normal initial render (issue #214)', async function () {
+                const originalWarn = console.warn;
+                const warnings = [];
+                console.warn = function () { warnings.push(Array.prototype.join.call(arguments, ' ')); };
+
+                let c;
+                try {
+                    c = mount(
+                        '<ul data-pac-bind="foreach: categories">' +
+                        '<li>{{item.name}}' +
+                        '<ul data-pac-bind="foreach: item.products">' +
+                        '<li>{{item.name}}</li></ul></li></ul>',
+                        {
+                            categories: [
+                                { name: 'Electronics', products: [{ name: 'Laptop' }] }
+                            ]
+                        }
+                    );
+                    await tick();
+                } finally {
+                    console.warn = originalWarn;
+                }
+
+                const bindingWarnings = warnings.filter(function (w) {
+                    return w.indexOf('No foreach binding found for element') !== -1;
+                });
+
+                assertEqual(bindingWarnings, [], 'no spurious "no foreach binding" warning while a nested foreach is waiting on its parent context');
+                c.destroy();
+            });
+
+            await test('a non-identifier index expression (e.g. arithmetic) inside a nested foreach scope resolves correctly', async function () {
+                // Regression test: evaluate()'s scoped 'index'/'member' cases used to
+                // flatten the whole node to a path string (astToPath) and resolve it
+                // via getProperty, regardless of what the index/object actually was.
+                // That's fine for a bare identifier ("items[i]") but silently breaks
+                // for anything astToPath can't stringify into something getProperty
+                // can re-parse — e.g. "items[i - 1]", where the bracket segment ends
+                // up as the literal text "i - 1" instead of a resolved number.
+                const c = mount(
+                    '<div data-pac-bind="foreach: rows" data-pac-item="row" data-pac-index="rowIndex">' +
+                    '<div data-pac-bind="foreach: row.cols" data-pac-item="col" data-pac-index="colIndex">' +
+                    '<span class="cell">{{ data[rowIndex][colIndex - 1] }}</span>' +
+                    '</div></div>',
+                    {
+                        rows: [{ cols: [{}, {}] }],
+                        data: [['first', 'second']]
+                    }
+                );
+                await tick();
+
+                const cells = c.container.querySelectorAll('.cell');
+                assertEqual(cells[0].textContent, '', 'colIndex 0 maps to data[0][-1] — out of range, correctly blank');
+                assertEqual(cells[1].textContent, 'first', 'colIndex 1 maps to data[0][0] via the arithmetic index');
+
+                c.abstraction.data[0][0] = 'changed';
+                await tick();
+
+                assertEqual(c.container.querySelectorAll('.cell')[1].textContent, 'changed', 'reactive update also resolves the arithmetic index correctly');
+
+                c.destroy();
+            });
+
+            await test('member access chained onto a method-call result inside a nested foreach scope resolves correctly', async function () {
+                // Same root cause as the arithmetic-index test above: astToPath has
+                // no case for a 'call' node, so a scoped "fn(...).prop" expression
+                // used to flatten to a garbage path (just ".prop") instead of
+                // evaluating the call and reading the property off its result.
+                const c = mount(
+                    '<div data-pac-bind="foreach: rows" data-pac-item="row" data-pac-index="rowIndex">' +
+                    '<div data-pac-bind="foreach: row.cols" data-pac-item="col" data-pac-index="colIndex">' +
+                    '<span class="cell">{{ cellAt(rowIndex, colIndex).value }}</span>' +
+                    '</div></div>',
+                    {
+                        rows: [{ cols: [{}, {}] }],
+                        data: [[{ value: 'first' }, { value: 'second' }]],
+                        cellAt(row, col) {
+                            return this.data[row][col];
+                        }
+                    }
+                );
+                await tick();
+
+                const cells = c.container.querySelectorAll('.cell');
+                assertEqual(cells[0].textContent, 'first');
+                assertEqual(cells[1].textContent, 'second');
+
+                c.abstraction.data[0][1] = { value: 'changed' };
+                await tick();
+
+                assertEqual(c.container.querySelectorAll('.cell')[1].textContent, 'changed', 'reactive update also resolves the chained member access correctly');
+
+                c.destroy();
+            });
+
             await test('identity-tracking distinguishes a genuinely undefined item from "no snapshot available" (issue #211 follow-up)', async function () {
                 const c = mount(
                     '<ul data-pac-bind="foreach: items" data-pac-item="item">' +

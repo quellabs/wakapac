@@ -4571,6 +4571,35 @@
         },
 
         /**
+         * True if this AST node can be losslessly round-tripped through
+         * astToPath and scoped getProperty resolution. Only identifier,
+         * literal, member, and index nodes are supported. Complex nodes
+         * (calls, ternaries, arithmetic) must use recursive evaluation.
+         * @param {Object} node - AST node to check.
+         * @returns {boolean}
+         */
+        isFlattenablePath(node) {
+            if (!node) {
+                return true;
+            }
+
+            switch (node.type) {
+                case 'identifier':
+                case 'literal':
+                    return true;
+
+                case 'member':
+                    return this.isFlattenablePath(node.object);
+
+                case 'index':
+                    return this.isFlattenablePath(node.object) && this.isFlattenablePath(node.index);
+
+                default:
+                    return false;
+            }
+        },
+
+        /**
          * Checks if current token matches any of the given types
          * @param {...string} types - Token types to match
          * @returns {boolean} True if current token matches any type
@@ -4699,7 +4728,7 @@
                     return this.evaluateObjectLiteral(node, context, scope);
 
                 case 'index': {
-                    if (scope) {
+                    if (scope && this.isFlattenablePath(node)) {
                         return this.getProperty(this.astToPath(node), context, scope);
                     }
 
@@ -4754,7 +4783,7 @@
                 }
 
                 case 'member': {
-                    if (scope) {
+                    if (scope && this.isFlattenablePath(node)) {
                         return this.getProperty(this.astToPath(node), context, scope);
                     }
 
@@ -6582,7 +6611,7 @@
         });
 
         // Stage 4: recurse into nested/pending foreach blocks, then finalize.
-        self.renderPendingForeachBlocks(newBindings, parentElement);
+        self.renderPendingForeachBlocks(newBindings, parentElement, isPending);
 
         // Content just changed as a result of this scan (new bindings applied,
         // foreach items rendered, etc.) — recompute scroll metrics now, tied to
@@ -6617,18 +6646,24 @@
     };
 
     /**
-     * Renders every foreach element found in this scan batch — the pending
-     * elements skipped by the registration stage above — deepest first, so
-     * inner foreach blocks resolve before the outer ones that contain them.
+     * Renders every foreach element found in this scan batch that isn't itself
+     * nested inside another not-yet-rendered foreach from this same batch —
+     * deepest-first among what's left, so inner foreach blocks resolve before
+     * the outer ones that contain them. A still-pending ancestor foreach's
+     * children were never registered into interpolationMap (Stage 3), so
+     * rendering one here would always fail; it renders once the ancestor's
+     * own renderForeach() rescans its freshly built per-item clones instead.
      * @param {Map<Element, Object>} newBindings - Bindings map from scanBindings()
      * @param {Element} parentElement - The container currently being scanned
+     * @param {function(Element): boolean} isPending - Whether an element lives
+     *   inside a foreach template from this batch that hasn't rendered yet
      */
-    Runtime.prototype.renderPendingForeachBlocks = function(newBindings, parentElement) {
+    Runtime.prototype.renderPendingForeachBlocks = function(newBindings, parentElement, isPending) {
         const self = this;
 
         Array.from(newBindings.entries())
             .filter(([element, mappingData]) =>
-                mappingData.bindings.foreach && element !== parentElement
+                mappingData.bindings.foreach && element !== parentElement && !isPending(element.parentElement)
             )
             .sort(([, mappingDataA], [, mappingDataB]) => mappingDataB.depth - mappingDataA.depth) // deepest first
             .forEach(([element]) => {
@@ -9265,28 +9300,28 @@
         // Stores scoped variable → resolved path/index mappings
         const scope = new Map();
 
-        // Expand each foreach frame into scoped variables
+        // Frames run outer → inner; each assignment below unconditionally overwrites
+        // any existing entry for the same name so a closer frame shadows an outer one.
         for (const f of frames) {
-            // Resolve item variable into a fully-qualified global path
-            if (!scope.has(f.itemVar)) {
-                // Normalize the frame source path into tokens
-                const tokens = Utils.pathStringToArray(f.sourceArray);
+            // Resolve against the scope as it stood before this frame's own
+            // assignment, so a nested source path like "item.products" still
+            // resolves "item" to the outer frame's value.
+            const tokens = Utils.pathStringToArray(f.sourceArray);
 
-                // Resolve tokens against the current scope chain
-                const resolved = this.resolveScopedTokens(tokens, scope);
+            // Resolve tokens against the current scope chain
+            const resolved = this.resolveScopedTokens(tokens, scope);
 
-                // Convert resolved tokens into a normalized base path string
-                const base = Utils.pathArrayToString(resolved);
+            // Convert resolved tokens into a normalized base path string
+            const base = Utils.pathArrayToString(resolved);
 
-                // Append the current index to produce the final scoped path
-                scope.set(
-                    f.itemVar,
-                    `${base}[${f.index}]`
-                );
-            }
+            // Append the current index to produce the final scoped path
+            scope.set(
+                f.itemVar,
+                `${base}[${f.index}]`
+            );
 
             // Map index variable directly to its numeric index
-            if (f.indexVar && !scope.has(f.indexVar)) {
+            if (f.indexVar) {
                 scope.set(f.indexVar, f.index);
             }
         }
