@@ -124,22 +124,6 @@
     const WP_ELSE_IF_COMMENT_REGEX = /^\s*wp-else-if:\s*(.+?)\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
 
-    /**
-     * Builds the opaque group entry a wp-if branch's node list uses to
-     * represent a nested wp-if as one atomic unit — see scanCommentBindings
-     * and updateCommentConditional's buried-comment handling, the two
-     * places that ever create one of these: a nested wp-if found as a
-     * direct comment sibling, and one found buried inside a descendant
-     * element respectively. Both need the identical shape, so both call
-     * this rather than each building the object literal itself.
-     * @param {Comment} openMarker
-     * @param {Comment} closeMarker
-     * @returns {{__wpGroup: true, openMarker: Comment, closeMarker: Comment}}
-     */
-    Runtime.makeWpIfGroup = function(openMarker, closeMarker) {
-        return { __wpGroup: true, openMarker, closeMarker };
-    };
-
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
 
@@ -1431,304 +1415,6 @@
             }
         }
     }
-
-    // ========================================================================
-    // REACTIVE PROXY
-    // ========================================================================
-
-    Runtime.makeDeepReactiveProxy = function(value, container) {
-
-        /**
-         * List of all methods allowed on an array
-         * @type {string[]}
-         */
-        const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
-
-        /**
-         * Determines whether a property should be wrapped in a reactive proxy.
-         * Properties starting with underscore (_) or dollar sign ($) are treated as non-reactive
-         * to avoid performance overhead when storing complex objects, DOM references, or internal state.
-         * @param {string|symbol|number} prop - The property name being accessed or set
-         * @returns {boolean} True if the property should trigger reactivity and DOM updates, false otherwise
-         */
-        function shouldMakeReactive(prop) {
-            return typeof prop === 'string' && !prop.startsWith('_') && !prop.startsWith('$');
-        }
-
-        /**
-         * Creates a wrapped array method that handles reactivity
-         * @param {Array} target - The array being proxied
-         * @param {string} methodName - The array method name (push, pop, etc.)
-         * @param {Array} currentPath - The path to this array in the data structure
-         * @returns {Function} Wrapped array method
-         */
-        function createReactiveArrayMethod(target, methodName, currentPath) {
-            return function() {
-                // Store the old array state before modification
-                const oldArray = Array.prototype.slice.call(target);
-
-                // Apply the array method to get the result
-                const result = Array.prototype[methodName].apply(target, arguments);
-
-                // Get the new array state after modification
-                const newArray = Array.prototype.slice.call(target);
-
-                // Re-proxy all items with correct indices after the operation
-                // This ensures all objects have the proper path references
-                newArray.forEach((item, index) => {
-                    if (item && typeof item === 'object' && !item._isReactive) {
-                        const correctPath = currentPath.concat([index]);
-                        newArray[index] = createProxy(item, correctPath);
-                        newArray[index]._isReactive = true;
-                    }
-                });
-
-                // Update the target array with the newly proxied items
-                // This is necessary because forEach works on a copy
-                for (let i = 0; i < newArray.length; i++) {
-                    target[i] = newArray[i];
-                }
-
-                // Dispatch events for the array change
-                dispatchReactiveChange(currentPath, oldArray, target);
-
-                // Return the result
-                return result;
-            };
-        }
-
-        /**
-         * Handles array length property changes
-         * @param {Array} target - The array being modified
-         * @param {number} newLength - The new length value
-         * @param {Array} currentPath - The path to this array
-         * @returns {boolean} Always returns true
-         */
-        function handleArrayLengthSet(target, newLength, currentPath) {
-            const oldLength = target.length;
-
-            // Only trigger events if length actually changes
-            if (oldLength === newLength) {
-                return true;
-            }
-
-            // Store old array state before truncation
-            const oldArray = Array.prototype.slice.call(target);
-
-            // Perform the truncation
-            target.length = newLength;
-
-            // Dispatch events
-            dispatchReactiveChange(currentPath, oldArray, Array.prototype.slice.call(target));
-
-            return true;
-        }
-
-        /**
-         * Handles scroll property assignments
-         * @param {string} prop - Property name
-         * @param {*} newValue - New scroll value
-         * @param {Array} propertyPath - Full property path
-         */
-        function handleScrollPropertySet(prop, newValue, propertyPath) {
-            // Only handle scroll properties at root level
-            if (propertyPath.length !== 1) {
-                return;
-            }
-
-            if (prop === 'containerScrollX' && container) {
-                container.scrollLeft = newValue;
-            } else if (prop === 'containerScrollY' && container) {
-                container.scrollTop = newValue;
-            } else if (prop === 'browserScrollX') {
-                window.scrollTo(newValue, window.scrollY);
-            } else if (prop === 'browserScrollY') {
-                window.scrollTo(window.scrollX, newValue);
-            }
-        }
-
-        /**
-         * Proxy get trap handler
-         * @param {Object|Array} target - The object being proxied
-         * @param {string|symbol} prop - Property being accessed
-         * @param {Array} currentPath - Current path in the data structure
-         * @returns {*} The property value (potentially wrapped in a proxy)
-         */
-        function proxyGetHandler(target, prop, currentPath) {
-            // Allow proxy.unwrap() to retrieve the unwrapped target
-            if (prop === 'unwrap') {
-                return () => target;
-            }
-
-            const val = target[prop];
-
-            // Handle array methods first
-            if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
-                return createReactiveArrayMethod(target, prop, currentPath);
-            }
-
-            // Check if this property is a getter-only property (computed property)
-            const descriptor = Object.getOwnPropertyDescriptor(target, prop);
-
-            if (descriptor && descriptor.get && !descriptor.set) {
-                // This is a getter-only property (computed), return the value as-is
-                return val;
-            }
-
-            // Don't make functions reactive, just return them as-is
-            if (typeof val === 'function') {
-                return val;
-            }
-
-            // If the value is an object/array and not already reactive, wrap it in a proxy
-            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
-                // Return raw value if the data is already proxied
-                if (val._externalProxy) {
-                    return val;
-                }
-
-                const propertyPath = currentPath.concat([prop]);
-                const proxiedVal = createProxy(val, propertyPath);
-                proxiedVal._isReactive = true;
-
-                // Write directly to target without going through the proxy set trap.
-                // This caches the proxy without firing pac:change.
-                Object.defineProperty(target, prop, {
-                    value: proxiedVal,
-                    writable: true,
-                    enumerable: true,
-                    configurable: true
-                });
-
-                return proxiedVal;
-            }
-
-            return val;
-        }
-
-        /**
-         * Proxy set trap handler
-         * @param {Object|Array} target - The object being proxied
-         * @param {string|symbol} prop - Property being set
-         * @param {*} newValue - New value being assigned
-         * @param {Array} currentPath - Current path in the data structure
-         * @returns {boolean} Always returns true
-         */
-        function proxySetHandler(target, prop, newValue, currentPath) {
-            // Handle array length truncation
-            if (Array.isArray(target) && prop === 'length') {
-                return handleArrayLengthSet(target, newValue, currentPath);
-            }
-
-            // Do nothing when value did not change
-            const oldValue = target[prop];
-            const propertyPath = currentPath.concat([prop]);
-
-            if (oldValue === newValue) {
-                return true;
-            }
-
-            // Special handling for scroll properties
-            handleScrollPropertySet(prop, newValue, propertyPath);
-
-            // Only make reactive and dispatch events for non-underscore properties
-            if (!shouldMakeReactive(prop)) {
-                target[prop] = newValue;
-                return true;
-            }
-
-            // Wrap objects and arrays in proxies when they're assigned
-            if (newValue && typeof newValue === 'object') {
-                target[prop] = createProxy(newValue, propertyPath);
-                target[prop]._isReactive = true;
-            } else {
-                target[prop] = newValue;
-            }
-
-            // Dispatch array-specific event if this is an array assignment
-            dispatchReactiveChange(propertyPath, oldValue, target[prop]);
-
-            return true;
-        }
-
-        /**
-         * Proxy deleteProperty trap handler.
-         * Fires a pac:change event when a reactive property is deleted,
-         * allowing the DOM to update in response.
-         * @param {Object|Array} target - The object being proxied
-         * @param {string|symbol} prop - Property being deleted
-         * @param {Array} currentPath - Current path in the data structure
-         * @returns {boolean} True if deletion succeeded
-         */
-        function proxyDeleteHandler(target, prop, currentPath) {
-            // Property doesn't exist — nothing to do
-            if (!(prop in target)) {
-                return true;
-            }
-
-            // Non-reactive properties: delete silently
-            if (!shouldMakeReactive(prop)) {
-                delete target[prop];
-                return true;
-            }
-
-            // Capture old value before deletion for the change event
-            const oldValue = target[prop];
-            const propertyPath = currentPath.concat([prop]);
-
-            // Perform the actual deletion
-            delete target[prop];
-
-            // Notify the DOM that this property is gone
-            dispatchReactiveChange(propertyPath, oldValue, undefined);
-
-            return true;
-        }
-
-        /**
-         * Creates a reactive proxy for an object or array
-         * @param {Object|Array} obj - The object to make reactive
-         * @param {Array} currentPath - Current path in the data structure
-         * @returns {Object|Array} A proxied version of the object
-         */
-        function createProxy(obj, currentPath) {
-            currentPath = currentPath || [];
-
-            return new Proxy(obj, {
-                get: function(target, prop) {
-                    return proxyGetHandler(target, prop, currentPath);
-                },
-
-                set: function(target, prop, newValue) {
-                    return proxySetHandler(target, prop, newValue, currentPath);
-                },
-
-                deleteProperty: function(target, prop) {
-                    return proxyDeleteHandler(target, prop, currentPath);
-                }
-            });
-        }
-
-        /**
-         * Dispatches a reactive change notification for the specified property path.
-         * This is emitted whenever a reactive property, array, or nested object is
-         * modified, allowing DOM bindings to update in response.
-         * @param {string[]} path - Path to the changed property within the reactive object.
-         * @param {*} oldValue - The property's value before the change.
-         * @param {*} newValue - The property's value after the change.
-         */
-        function dispatchReactiveChange(path, oldValue, newValue) {
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: { path, oldValue, newValue }
-            }));
-        }
-
-        if (!value || typeof value !== 'object') {
-            return value;
-        }
-
-        return createProxy(value, []);
-    };
 
     // ============================================================================
     // Send PAC-events for changed DOM elements
@@ -5541,22 +5227,6 @@
     // ========================================================================
 
     /**
-     * Factory that creates a scopeResolver object for ExpressionParser.evaluate().
-     * All scopeResolver instances share the same shape — this avoids repeating the
-     * object literal at every call site and gives the minifier a single declaration to mangle.
-     * @param {Function} normalizeFn - Bound normalizePath function (already bound to correct `this`)
-     * @param {Element} element - The DOM element to use as path scope anchor
-     * @param importedUnits - List of imported units
-     * @returns {{ resolveScopedPath: function(string): * }}
-     */
-    Runtime.makeScopeResolver = function(normalizeFn, element, importedUnits) {
-        return {
-            resolveScopedPath: (path) => normalizeFn(path, element),
-            importedUnits: importedUnits || {}
-        };
-    };
-
-    /**
      * Builds a scopeResolver anchored to a specific element, using this context's
      * normalizePath and importedUnits. Exposed separately from evalInScope for call
      * sites that need to evaluate more than one expression against the same resolver
@@ -5981,6 +5651,541 @@
 
         DomUpdateTracker.observeContainer(this.container);
     }
+
+    // ========================================================================
+    // RUNTIME STATIC HELPERS
+    // ========================================================================
+
+    /**
+     * Builds the opaque group entry a wp-if branch's node list uses to
+     * represent a nested wp-if as one atomic unit — see scanCommentBindings
+     * and updateCommentConditional's buried-comment handling, the two
+     * places that ever create one of these: a nested wp-if found as a
+     * direct comment sibling, and one found buried inside a descendant
+     * element respectively. Both need the identical shape, so both call
+     * this rather than each building the object literal itself.
+     * @param {Comment} openMarker
+     * @param {Comment} closeMarker
+     * @returns {{__wpGroup: true, openMarker: Comment, closeMarker: Comment}}
+     */
+    Runtime.makeWpIfGroup = function(openMarker, closeMarker) {
+        return { __wpGroup: true, openMarker, closeMarker };
+    };
+
+    // ========================================================================
+    // REACTIVE PROXY
+    // ========================================================================
+
+    Runtime.makeDeepReactiveProxy = function(value, container) {
+
+        /**
+         * List of all methods allowed on an array
+         * @type {string[]}
+         */
+        const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+
+        /**
+         * Determines whether a property should be wrapped in a reactive proxy.
+         * Properties starting with underscore (_) or dollar sign ($) are treated as non-reactive
+         * to avoid performance overhead when storing complex objects, DOM references, or internal state.
+         * @param {string|symbol|number} prop - The property name being accessed or set
+         * @returns {boolean} True if the property should trigger reactivity and DOM updates, false otherwise
+         */
+        function shouldMakeReactive(prop) {
+            return typeof prop === 'string' && !prop.startsWith('_') && !prop.startsWith('$');
+        }
+
+        /**
+         * Creates a wrapped array method that handles reactivity
+         * @param {Array} target - The array being proxied
+         * @param {string} methodName - The array method name (push, pop, etc.)
+         * @param {Array} currentPath - The path to this array in the data structure
+         * @returns {Function} Wrapped array method
+         */
+        function createReactiveArrayMethod(target, methodName, currentPath) {
+            return function() {
+                // Store the old array state before modification
+                const oldArray = Array.prototype.slice.call(target);
+
+                // Apply the array method to get the result
+                const result = Array.prototype[methodName].apply(target, arguments);
+
+                // Get the new array state after modification
+                const newArray = Array.prototype.slice.call(target);
+
+                // Re-proxy all items with correct indices after the operation
+                // This ensures all objects have the proper path references
+                newArray.forEach((item, index) => {
+                    if (item && typeof item === 'object' && !item._isReactive) {
+                        const correctPath = currentPath.concat([index]);
+                        newArray[index] = createProxy(item, correctPath);
+                        newArray[index]._isReactive = true;
+                    }
+                });
+
+                // Update the target array with the newly proxied items
+                // This is necessary because forEach works on a copy
+                for (let i = 0; i < newArray.length; i++) {
+                    target[i] = newArray[i];
+                }
+
+                // Dispatch events for the array change
+                dispatchReactiveChange(currentPath, oldArray, target);
+
+                // Return the result
+                return result;
+            };
+        }
+
+        /**
+         * Handles array length property changes
+         * @param {Array} target - The array being modified
+         * @param {number} newLength - The new length value
+         * @param {Array} currentPath - The path to this array
+         * @returns {boolean} Always returns true
+         */
+        function handleArrayLengthSet(target, newLength, currentPath) {
+            const oldLength = target.length;
+
+            // Only trigger events if length actually changes
+            if (oldLength === newLength) {
+                return true;
+            }
+
+            // Store old array state before truncation
+            const oldArray = Array.prototype.slice.call(target);
+
+            // Perform the truncation
+            target.length = newLength;
+
+            // Dispatch events
+            dispatchReactiveChange(currentPath, oldArray, Array.prototype.slice.call(target));
+
+            return true;
+        }
+
+        /**
+         * Handles scroll property assignments
+         * @param {string} prop - Property name
+         * @param {*} newValue - New scroll value
+         * @param {Array} propertyPath - Full property path
+         */
+        function handleScrollPropertySet(prop, newValue, propertyPath) {
+            // Only handle scroll properties at root level
+            if (propertyPath.length !== 1) {
+                return;
+            }
+
+            if (prop === 'containerScrollX' && container) {
+                container.scrollLeft = newValue;
+            } else if (prop === 'containerScrollY' && container) {
+                container.scrollTop = newValue;
+            } else if (prop === 'browserScrollX') {
+                window.scrollTo(newValue, window.scrollY);
+            } else if (prop === 'browserScrollY') {
+                window.scrollTo(window.scrollX, newValue);
+            }
+        }
+
+        /**
+         * Proxy get trap handler
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being accessed
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {*} The property value (potentially wrapped in a proxy)
+         */
+        function proxyGetHandler(target, prop, currentPath) {
+            // Allow proxy.unwrap() to retrieve the unwrapped target
+            if (prop === 'unwrap') {
+                return () => target;
+            }
+
+            const val = target[prop];
+
+            // Handle array methods first
+            if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
+                return createReactiveArrayMethod(target, prop, currentPath);
+            }
+
+            // Check if this property is a getter-only property (computed property)
+            const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+
+            if (descriptor && descriptor.get && !descriptor.set) {
+                // This is a getter-only property (computed), return the value as-is
+                return val;
+            }
+
+            // Don't make functions reactive, just return them as-is
+            if (typeof val === 'function') {
+                return val;
+            }
+
+            // If the value is an object/array and not already reactive, wrap it in a proxy
+            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+                // Return raw value if the data is already proxied
+                if (val._externalProxy) {
+                    return val;
+                }
+
+                const propertyPath = currentPath.concat([prop]);
+                const proxiedVal = createProxy(val, propertyPath);
+                proxiedVal._isReactive = true;
+
+                // Write directly to target without going through the proxy set trap.
+                // This caches the proxy without firing pac:change.
+                Object.defineProperty(target, prop, {
+                    value: proxiedVal,
+                    writable: true,
+                    enumerable: true,
+                    configurable: true
+                });
+
+                return proxiedVal;
+            }
+
+            return val;
+        }
+
+        /**
+         * Proxy set trap handler
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being set
+         * @param {*} newValue - New value being assigned
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {boolean} Always returns true
+         */
+        function proxySetHandler(target, prop, newValue, currentPath) {
+            // Handle array length truncation
+            if (Array.isArray(target) && prop === 'length') {
+                return handleArrayLengthSet(target, newValue, currentPath);
+            }
+
+            // Do nothing when value did not change
+            const oldValue = target[prop];
+            const propertyPath = currentPath.concat([prop]);
+
+            if (oldValue === newValue) {
+                return true;
+            }
+
+            // Special handling for scroll properties
+            handleScrollPropertySet(prop, newValue, propertyPath);
+
+            // Only make reactive and dispatch events for non-underscore properties
+            if (!shouldMakeReactive(prop)) {
+                target[prop] = newValue;
+                return true;
+            }
+
+            // Wrap objects and arrays in proxies when they're assigned
+            if (newValue && typeof newValue === 'object') {
+                target[prop] = createProxy(newValue, propertyPath);
+                target[prop]._isReactive = true;
+            } else {
+                target[prop] = newValue;
+            }
+
+            // Dispatch array-specific event if this is an array assignment
+            dispatchReactiveChange(propertyPath, oldValue, target[prop]);
+
+            return true;
+        }
+
+        /**
+         * Proxy deleteProperty trap handler.
+         * Fires a pac:change event when a reactive property is deleted,
+         * allowing the DOM to update in response.
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being deleted
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {boolean} True if deletion succeeded
+         */
+        function proxyDeleteHandler(target, prop, currentPath) {
+            // Property doesn't exist — nothing to do
+            if (!(prop in target)) {
+                return true;
+            }
+
+            // Non-reactive properties: delete silently
+            if (!shouldMakeReactive(prop)) {
+                delete target[prop];
+                return true;
+            }
+
+            // Capture old value before deletion for the change event
+            const oldValue = target[prop];
+            const propertyPath = currentPath.concat([prop]);
+
+            // Perform the actual deletion
+            delete target[prop];
+
+            // Notify the DOM that this property is gone
+            dispatchReactiveChange(propertyPath, oldValue, undefined);
+
+            return true;
+        }
+
+        /**
+         * Creates a reactive proxy for an object or array
+         * @param {Object|Array} obj - The object to make reactive
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {Object|Array} A proxied version of the object
+         */
+        function createProxy(obj, currentPath) {
+            currentPath = currentPath || [];
+
+            return new Proxy(obj, {
+                get: function(target, prop) {
+                    return proxyGetHandler(target, prop, currentPath);
+                },
+
+                set: function(target, prop, newValue) {
+                    return proxySetHandler(target, prop, newValue, currentPath);
+                },
+
+                deleteProperty: function(target, prop) {
+                    return proxyDeleteHandler(target, prop, currentPath);
+                }
+            });
+        }
+
+        /**
+         * Dispatches a reactive change notification for the specified property path.
+         * This is emitted whenever a reactive property, array, or nested object is
+         * modified, allowing DOM bindings to update in response.
+         * @param {string[]} path - Path to the changed property within the reactive object.
+         * @param {*} oldValue - The property's value before the change.
+         * @param {*} newValue - The property's value after the change.
+         */
+        function dispatchReactiveChange(path, oldValue, newValue) {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                detail: { path, oldValue, newValue }
+            }));
+        }
+
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+
+        return createProxy(value, []);
+    };
+
+    /**
+     * Factory that creates a scopeResolver object for ExpressionParser.evaluate().
+     * All scopeResolver instances share the same shape — this avoids repeating the
+     * object literal at every call site and gives the minifier a single declaration to mangle.
+     * @param {Function} normalizeFn - Bound normalizePath function (already bound to correct `this`)
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @param importedUnits - List of imported units
+     * @returns {{ resolveScopedPath: function(string): * }}
+     */
+    Runtime.makeScopeResolver = function(normalizeFn, element, importedUnits) {
+        return {
+            resolveScopedPath: (path) => normalizeFn(path, element),
+            importedUnits: importedUnits || {}
+        };
+    };
+
+    /**
+     * Collects <script type="text/template" data-pac-partial="name"> elements into
+     * _partials once on the first wakaPAC() call. Uses textContent so {{> name}}
+     * is never entity-encoded.
+     * @returns {void}
+     */
+    Runtime.collectPartials = function() {
+        if (_partialsCollected) {
+            return;
+        }
+
+        _partialsCollected = true;
+
+        // Find all partials
+        document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
+            // Extract name
+            const name = el.getAttribute(PAC_PARTIAL_ATTR);
+
+            // If none passed, ignore
+            if (!name) {
+                return;
+            }
+
+            // If already defined, warn the user and ignore
+            if (_partials.has(name)) {
+                console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
+                return;
+            }
+
+            // textContent gives the raw unencoded string — > is never encoded
+            // inside a script tag, so {{> name}} injection syntax is preserved
+            _partials.set(name, el.textContent);
+        });
+    };
+
+    /**
+     * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
+     * Normalizes {{&gt; to {{> first to handle strings captured via element.innerHTML.
+     * @param {string} html
+     * @param {number} [depth=0]
+     * @returns {string}
+     */
+    Runtime.expandPartialsInString = function(html, depth) {
+        if (_partials.size === 0) {
+            return html;
+        }
+
+        depth = depth || 0;
+
+        if (depth >= 10) {
+            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
+            return html;
+        }
+
+        // Normalize &gt; encoding from innerHTML-captured templates
+        html = html.replace(/\{\{&gt;/g, '{{>');
+
+        // Quick check before paying regex cost
+        if (html.indexOf('{{>') === -1) {
+            return html;
+        }
+
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name, root) {
+            if (!_partials.has(name)) {
+                console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
+                return match;
+            }
+
+            // Extract the body
+            let body = _partials.get(name);
+
+            // If a root argument was supplied, substitute "$." with "root." throughout
+            // the partial body so property paths resolve against the passed object.
+            if (root) {
+                PARTIAL_PARAM_REGEX.lastIndex = 0;
+                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
+            }
+
+            return body;
+        });
+
+        // Recurse only if something was replaced and depth allows
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        if (expanded !== html && expanded.indexOf('{{>') !== -1) {
+            return Runtime.expandPartialsInString(expanded, depth + 1);
+        }
+
+        return expanded;
+    };
+
+    /**
+     * Expands {{> name}} injections inside a live DOM element by walking its
+     * text nodes (textContent is never entity-encoded, unlike innerHTML).
+     * @param {Element} element
+     * @returns {void}
+     */
+    Runtime.expandPartials = function(element) {
+        if (_partials.size === 0) {
+            return;
+        }
+
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const hits = [];
+
+        let node;
+        while ((node = walker.nextNode())) {
+            if (node.textContent.indexOf('{{>') !== -1) {
+                hits.push(node);
+            }
+        }
+
+        if (hits.length === 0) {
+            return;
+        }
+
+        hits.forEach(function(textNode) {
+            const expanded = Runtime.expandPartialsInString(textNode.textContent, 0);
+
+            if (expanded === textNode.textContent) {
+                return;
+            }
+
+            // Replace the text node with parsed HTML nodes.
+            // Create a temporary container, parse the expanded HTML into it,
+            // then insert its children before the text node and remove it.
+            const temp = document.createElement('template');
+            temp.innerHTML = expanded;
+            const fragment = temp.content;
+            textNode.parentNode.replaceChild(fragment, textNode);
+        });
+    };
+
+    /**
+     * Calls scanAndRegisterNewElements on every Element node in the given array.
+     * Extracted as a module-level helper so it is defined once rather than
+     * recreated as a closure on each updateCommentConditional call.
+     * @param {Runtime} context
+     * @param {Node[]} nodes
+     */
+    Runtime.scanElementNodes = function(context, nodes) {
+        nodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                context.scanAndRegisterNewElements(node);
+            }
+        });
+    };
+
+    /**
+     * Finds registered `wp-if` open comments buried inside descendant
+     * elements rather than appearing as direct comment siblings. A comment
+     * is identified as a `wp-if` by its presence in `map`; unregistered
+     * bindings are ignored and discovered by the normal scan.
+     * @param {Node[]} nodes
+     * @param {Map<Comment, Object>} map
+     * @returns {Comment[]}
+     */
+    Runtime.findRegisteredWpIfComments = function(nodes, map) {
+        const found = [];
+
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+
+            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+                continue;
+            }
+
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
+            let commentNode;
+
+            while ((commentNode = walker.nextNode())) {
+                if (map.has(commentNode)) {
+                    found.push(commentNode);
+                }
+            }
+        }
+
+        return found;
+    };
+
+    /**
+     * Parses a comment node as a foreach item marker.
+     * @param {Comment} commentNode - The DOM comment node to parse
+     * @returns {{foreachId: string, index: number, renderIndex: number}|null}
+     */
+    Runtime.parseForeachComment = function(commentNode) {
+        const match = commentNode.textContent.trim().match(FOREACH_INDEX_REGEX);
+
+        if (!match) {
+            return null;
+        }
+
+        return {
+            foreachId: match[1].trim(),
+            index: parseInt(match[2], 10),
+            renderIndex: parseInt(match[3], 10)
+        };
+    };
 
     // =============================================================================
     // RUNTIME INITIALIZATION METHODS
@@ -7811,156 +8016,6 @@
     };
 
     /**
-     * Collects <script type="text/template" data-pac-partial="name"> elements into
-     * _partials once on the first wakaPAC() call. Uses textContent so {{> name}}
-     * is never entity-encoded.
-     * @returns {void}
-     */
-    Runtime.collectPartials = function() {
-        if (_partialsCollected) {
-            return;
-        }
-
-        _partialsCollected = true;
-
-        // Find all partials
-        document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
-            // Extract name
-            const name = el.getAttribute(PAC_PARTIAL_ATTR);
-
-            // If none passed, ignore
-            if (!name) {
-                return;
-            }
-
-            // If already defined, warn the user and ignore
-            if (_partials.has(name)) {
-                console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
-                return;
-            }
-
-            // textContent gives the raw unencoded string — > is never encoded
-            // inside a script tag, so {{> name}} injection syntax is preserved
-            _partials.set(name, el.textContent);
-        });
-    };
-
-    /**
-     * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
-     * Normalizes {{&gt; to {{> first to handle strings captured via element.innerHTML.
-     * @param {string} html
-     * @param {number} [depth=0]
-     * @returns {string}
-     */
-    Runtime.expandPartialsInString = function(html, depth) {
-        if (_partials.size === 0) {
-            return html;
-        }
-
-        depth = depth || 0;
-
-        if (depth >= 10) {
-            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
-            return html;
-        }
-
-        // Normalize &gt; encoding from innerHTML-captured templates
-        html = html.replace(/\{\{&gt;/g, '{{>');
-
-        // Quick check before paying regex cost
-        if (html.indexOf('{{>') === -1) {
-            return html;
-        }
-
-        PARTIAL_INJECT_REGEX.lastIndex = 0;
-
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name, root) {
-            if (!_partials.has(name)) {
-                console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
-                return match;
-            }
-
-            // Extract the body
-            let body = _partials.get(name);
-
-            // If a root argument was supplied, substitute "$." with "root." throughout
-            // the partial body so property paths resolve against the passed object.
-            if (root) {
-                PARTIAL_PARAM_REGEX.lastIndex = 0;
-                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
-            }
-
-            return body;
-        });
-
-        // Recurse only if something was replaced and depth allows
-        PARTIAL_INJECT_REGEX.lastIndex = 0;
-
-        if (expanded !== html && expanded.indexOf('{{>') !== -1) {
-            return Runtime.expandPartialsInString(expanded, depth + 1);
-        }
-
-        return expanded;
-    };
-
-    /**
-     * Expands {{> name}} injections inside a live DOM element by walking its
-     * text nodes (textContent is never entity-encoded, unlike innerHTML).
-     * @param {Element} element
-     * @returns {void}
-     */
-    Runtime.expandPartials = function(element) {
-        if (_partials.size === 0) {
-            return;
-        }
-
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        const hits = [];
-
-        let node;
-        while ((node = walker.nextNode())) {
-            if (node.textContent.indexOf('{{>') !== -1) {
-                hits.push(node);
-            }
-        }
-
-        if (hits.length === 0) {
-            return;
-        }
-
-        hits.forEach(function(textNode) {
-            const expanded = Runtime.expandPartialsInString(textNode.textContent, 0);
-
-            if (expanded === textNode.textContent) {
-                return;
-            }
-
-            // Replace the text node with parsed HTML nodes.
-            // Create a temporary container, parse the expanded HTML into it,
-            // then insert its children before the text node and remove it.
-            const temp = document.createElement('template');
-            temp.innerHTML = expanded;
-            const fragment = temp.content;
-            textNode.parentNode.replaceChild(fragment, textNode);
-        });
-    };
-
-    /**
-     * Calls scanAndRegisterNewElements on every Element node in the given array.
-     * Extracted as a module-level helper so it is defined once rather than
-     * recreated as a closure on each updateCommentConditional call.
-     * @param {Runtime} context
-     * @param {Node[]} nodes
-     */
-    Runtime.scanElementNodes = function(context, nodes) {
-        nodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-                context.scanAndRegisterNewElements(node);
-            }
-        });
-    };
-
-    /**
      * Scans the container for comment nodes with wp-if conditionals
      * Builds mapping similar to element bindings but for comment-based conditionals
      * @param {Element} parentElement - The parent element to scan
@@ -8219,38 +8274,6 @@
         } catch (error) {
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
         }
-    };
-
-    /**
-     * Finds registered `wp-if` open comments buried inside descendant
-     * elements rather than appearing as direct comment siblings. A comment
-     * is identified as a `wp-if` by its presence in `map`; unregistered
-     * bindings are ignored and discovered by the normal scan.
-     * @param {Node[]} nodes
-     * @param {Map<Comment, Object>} map
-     * @returns {Comment[]}
-     */
-    Runtime.findRegisteredWpIfComments = function(nodes, map) {
-        const found = [];
-
-        for (let i = 0; i < nodes.length; i++) {
-            const node = nodes[i];
-
-            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
-                continue;
-            }
-
-            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
-            let commentNode;
-
-            while ((commentNode = walker.nextNode())) {
-                if (map.has(commentNode)) {
-                    found.push(commentNode);
-                }
-            }
-        }
-
-        return found;
     };
 
     /**
@@ -9422,25 +9445,6 @@
         }
 
         return elementsToUpdate;
-    };
-
-    /**
-     * Parses a comment node as a foreach item marker.
-     * @param {Comment} commentNode - The DOM comment node to parse
-     * @returns {{foreachId: string, index: number, renderIndex: number}|null}
-     */
-    Runtime.parseForeachComment = function(commentNode) {
-        const match = commentNode.textContent.trim().match(FOREACH_INDEX_REGEX);
-
-        if (!match) {
-            return null;
-        }
-
-        return {
-            foreachId: match[1].trim(),
-            index: parseInt(match[2], 10),
-            renderIndex: parseInt(match[3], 10)
-        };
     };
 
     /**
