@@ -6290,8 +6290,8 @@
      * Initializes the pending-change batch (see flushReactiveChanges).
      */
     Runtime.prototype.initializeChangeBatch = function() {
-        this._pendingChanges = [];
-        this._flushScheduled = false;
+        this.pendingChanges = [];
+        this.flushScheduled = false;
     }
 
     /**
@@ -6364,7 +6364,7 @@
     Runtime.prototype.destroy = function() {
         // Lets a microtask flush already in flight bail out instead of touching
         // maps this method is about to clear/null (queueMicrotask can't cancel it).
-        this._destroyed = true;
+        this.destroyed = true;
 
         // Release mouse capture if this container had it
         DomUpdateTracker.releaseCaptureIfOwnedBy(this.container);
@@ -6418,7 +6418,7 @@
         this.textInterpolationMap.clear();
         this.commentBindingMap.clear();
         this.updateQueue.clear();
-        this._pendingChanges = [];
+        this.pendingChanges = [];
 
         // Capture identifiers needed for MSG_DESTROYED before nullification
         const destroyedPacId = this.abstraction.pacId || null;
@@ -6948,10 +6948,10 @@
             // Queued and coalesced into one flush rather than processed immediately —
             // see flushReactiveChanges().
             case 'pac:change':
-                this._pendingChanges.push(event.detail);
+                this.pendingChanges.push(event.detail);
 
-                if (!this._flushScheduled) {
-                    this._flushScheduled = true;
+                if (!this.flushScheduled) {
+                    this.flushScheduled = true;
                     queueMicrotask(() => this.flushReactiveChanges());
                 }
                 break;
@@ -7483,9 +7483,9 @@
      */
     Runtime.prototype.flushReactiveChanges = function() {
         // destroy() may have run first — bail before touching maps it cleared.
-        if (this._destroyed) {
-            this._pendingChanges = [];
-            this._flushScheduled = false;
+        if (this.destroyed) {
+            this.pendingChanges = [];
+            this.flushScheduled = false;
             return;
         }
 
@@ -7493,9 +7493,9 @@
             // Drain in rounds, not one snapshot: a watcher can itself write a
             // reactive property, queuing another change mid-loop. Swapping in a
             // fresh array each round gives that change its own binding pass.
-            while (this._pendingChanges.length > 0) {
-                const batch = this._pendingChanges;
-                this._pendingChanges = [];
+            while (this.pendingChanges.length > 0) {
+                const batch = this.pendingChanges;
+                this.pendingChanges = [];
 
                 // inferArrayRoot()'s cache is only valid for the current data snapshot — a
                 // computed's identity-preservingness can depend on its inputs — so clear it
@@ -7513,8 +7513,8 @@
             }
         } finally {
             // Runs even on a throw, so one bad callback can't wedge the batch.
-            this._pendingChanges = [];
-            this._flushScheduled = false;
+            this.pendingChanges = [];
+            this.flushScheduled = false;
         }
     };
 
