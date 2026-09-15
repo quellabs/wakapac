@@ -4783,7 +4783,7 @@
                     // Handle array methods
                     if (Array.isArray(object)) {
                         return this.evaluateArrayMethod(object, node.method,
-                            node.arguments.map(arg => this.evaluate(arg, context, scope))
+                            this.evaluateArgs(node.arguments, context, scope)
                         );
                     }
 
@@ -4803,7 +4803,7 @@
                             console.warn(`WakaPAC: data property "${node.unit}" is shadowing a registered unit`);
                         }
 
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
 
                         if (Array.isArray(obj)) {
                             return this.evaluateArrayMethod(obj, node.method, args);
@@ -4820,7 +4820,7 @@
                     const unit = _units.get(node.unit);
 
                     if (unit && typeof unit[node.method] === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return unit[node.method](...args);
                     }
 
@@ -4833,7 +4833,7 @@
                     const fn = this.getProperty(node.name, context, scope);
 
                     if (typeof fn === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return fn.call(context, ...args);
                     }
 
@@ -4841,7 +4841,7 @@
                     const importedUnits = scope?.importedUnits;
 
                     if (importedUnits && typeof importedUnits[node.name] === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return importedUnits[node.name](...args);
                     }
 
@@ -4853,6 +4853,17 @@
                 default:
                     return undefined;
             }
+        },
+
+        /**
+         * Evaluates a call node's argument expressions against the given context/scope.
+         * @param {Array} args - AST argument nodes
+         * @param {Object} context - Data context
+         * @param {Object} scope - Local scope (e.g. foreach item/index)
+         * @returns {Array} Evaluated argument values
+         */
+        evaluateArgs(args, context, scope) {
+            return args.map(arg => this.evaluate(arg, context, scope));
         },
 
         /**
@@ -9688,11 +9699,7 @@
             this.isRecording = true;
 
             // Initialize points array with starting position
-            this.gesturePoints = [{
-                x: event.clientX,
-                y: event.clientY,
-                time: Date.now()
-            }];
+            this.gesturePoints = [this._capturePoint(event)];
 
             // Record when gesture started for duration calculation
             this.startTime = Date.now();
@@ -9716,12 +9723,17 @@
             // Only record if moved enough distance to avoid recording jitter
             // This creates a cleaner path with fewer redundant points
             if (distance >= this.MIN_DISTANCE) {
-                this.gesturePoints.push({
-                    x: event.clientX,
-                    y: event.clientY,
-                    time: Date.now()
-                });
+                this.gesturePoints.push(this._capturePoint(event));
             }
+        },
+
+        /**
+         * Captures a gesture point's coordinates and timestamp from a mouse event.
+         * @param {MouseEvent} event
+         * @returns {{x: number, y: number, time: number}}
+         */
+        _capturePoint(event) {
+            return { x: event.clientX, y: event.clientY, time: Date.now() };
         },
 
         /**
@@ -10879,6 +10891,27 @@
     };
 
     /**
+     * Resolves a target container and builds its message object, shared by
+     * postMessage/sendMessage. Returns null if the container doesn't exist,
+     * so the caller can drop the message.
+     * @param {string} pacId - Target container's data-pac-id attribute value
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} extended - Additional data stored in event.detail for custom use cases
+     * @returns {{container: Element, event: CustomEvent}|null}
+     */
+    wakaPAC._prepareMessage = function(pacId, messageId, wParam, lParam, extended) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container) {
+            return null;
+        }
+
+        return { container, event: this.createPacMessage(messageId, wParam, lParam, extended) };
+    };
+
+    /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 PostMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
@@ -10888,23 +10921,17 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.postMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
-        // Resolve the target container from the registry.
-        // If the container does not exist, the message is dropped.
-        const container = this.getContainerByPacId(pacId);
+        const prepared = this._prepareMessage(pacId, messageId, wParam, lParam, extended);
 
-        if (!container) {
+        if (!prepared) {
             return;
         }
-
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not deliver the message by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
 
         // Dispatch the message through the DOM event system.
         // Delivery is asynchronous and follows normal event routing semantics.
         setTimeout(function() {
-            if (container.isConnected) {
-                DomUpdateTracker.dispatchToContainer(container, event);
+            if (prepared.container.isConnected) {
+                DomUpdateTracker.dispatchToContainer(prepared.container, prepared.event);
             }
         }, 0);
     };
@@ -10920,20 +10947,15 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
-        // Resolve the target container. If it does not exist, the message is dropped.
-        const container = this.getContainerByPacId(pacId);
+        const prepared = this._prepareMessage(pacId, messageId, wParam, lParam, extended);
 
-        if (!container) {
+        if (!prepared) {
             return;
         }
 
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not dispatch anything by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
         // Invoke the message procedure directly.
         // This call is synchronous and executes immediately in the current call stack.
-        DomUpdateTracker.dispatchToContainer(container, event);
+        DomUpdateTracker.dispatchToContainer(prepared.container, prepared.event);
     };
 
     /**
@@ -11437,7 +11459,7 @@
         }
 
         // Store the data
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         _accelTables.set(tableKey, parsed);
     };
 
@@ -11446,7 +11468,7 @@
      * @param {string|null} pacId — Container pac-id, or null for global.
      */
     wakaPAC.destroyAcceleratorTable = function(pacId) {
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         _accelTables.delete(tableKey);
     };
 
@@ -11459,7 +11481,7 @@
      * @returns {Array<{key: string, cmdId: number}>|null}
      */
     wakaPAC.getAcceleratorTable = function(pacId) {
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         const table = _accelTables.get(tableKey);
         return table ? table.map(e => ({ key: e.key, cmdId: e.cmdId })) : null;
     };
@@ -11579,17 +11601,28 @@
      * @param {string} pacId
      * @returns {RenderingContext|null}
      */
-    wakaPAC.getDC = function(pacId) {
+    wakaPAC._resolveCanvasTarget = function(pacId) {
         const container = this.getContainerByPacId(pacId);
 
         if (!container || !(container instanceof HTMLCanvasElement)) {
             return null;
         }
 
-        // Resolve context attributes from component config
         const pacContext = window.PACRegistry.get(pacId);
         const contextType = container.dataset.pacContext || '2d';
         const attributes = pacContext?.config?.dcAttributes;
+
+        return { container, contextType, attributes };
+    };
+
+    wakaPAC.getDC = function(pacId) {
+        const target = this._resolveCanvasTarget(pacId);
+
+        if (!target) {
+            return null;
+        }
+
+        const { container, contextType, attributes } = target;
 
         // Delegate context acquisition to getDCFromElement
         const ctx = this.getDCFromElement(container, attributes);
@@ -11668,17 +11701,13 @@
      * @returns {RenderingContext|null}
      */
     wakaPAC.createCompatibleDC = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return null;
         }
 
-        const contextType = container.dataset.pacContext || '2d';
-        const pacContext = window.PACRegistry.get(pacId);
-        const attributes = pacContext?.config?.dcAttributes;
-
-        return _createCanvas(container.width, container.height, contextType, attributes);
+        return _createCanvas(target.container.width, target.container.height, target.contextType, target.attributes);
     };
 
     /**
