@@ -1704,12 +1704,10 @@
              * focus moves there before that keypress's native
              * character-insertion fires.
              *
-             * WakaPAC's reactive DOM updates (the `visible`/`value`/`style`
-             * bindings on `_editorInput`) are flushed on a microtask, not
-             * synchronously inside `_updateSel`, so without forcing a flush
-             * here the input would still be hidden (and hold last edit's
-             * text/position) at the moment `.focus()` below runs. Forcing
-             * it keeps this call's "synchronous" requirement true.
+             * WakaPAC flushes reactive DOM updates on a microtask, so the
+             * `visible`/`value`/`style` bindings on `_editorInput` haven't
+             * applied yet when `_updateSel` returns — forcing a flush here
+             * keeps the synchronous requirement above true.
              * @param {{col: number, row: number}} [position] - Cell to edit;
              *   defaults to the current selection (F2, typing a character).
              */

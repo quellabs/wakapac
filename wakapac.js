@@ -6287,9 +6287,7 @@
     }
 
     /**
-     * Initializes the pending-change batch used to coalesce reactive `pac:change`
-     * events dispatched within the same synchronous job into a single reactive
-     * pass, flushed on the microtask queue (see handleEvent / flushReactiveChanges).
+     * Initializes the pending-change batch (see flushReactiveChanges).
      */
     Runtime.prototype.initializeChangeBatch = function() {
         this._pendingChanges = [];
@@ -6364,9 +6362,8 @@
      * @returns {void}
      */
     Runtime.prototype.destroy = function() {
-        // A microtask flush already scheduled via queueMicrotask can't be
-        // cancelled — this flag lets flushReactiveChanges() bail out instead
-        // of touching maps that the rest of this method is about to clear/null.
+        // Lets a microtask flush already in flight bail out instead of touching
+        // maps this method is about to clear/null (queueMicrotask can't cancel it).
         this._destroyed = true;
 
         // Release mouse capture if this container had it
@@ -6948,10 +6945,8 @@
                 break;
 
             // Handle reactive data binding changes (property updates, computed value changes).
-            // Batched rather than processed immediately: a burst of synchronous writes
-            // (e.g. several `this.x = ...` lines in one event handler) each dispatch their
-            // own `pac:change`, but only need one full reactive pass between them — see
-            // flushReactiveChanges().
+            // Queued and coalesced into one flush rather than processed immediately —
+            // see flushReactiveChanges().
             case 'pac:change':
                 this._pendingChanges.push(event.detail);
 
@@ -7481,17 +7476,13 @@
 
     /**
      * Flushes the batch of `pac:change` events accumulated since the last flush,
-     * running one full reactive pass for the whole batch instead of one pass per
-     * individual property write. Scheduled via queueMicrotask from handleEvent so
-     * that a burst of synchronous writes within the same task (e.g. several
-     * `this.x = ...` lines in one click handler) coalesces into a single pass,
-     * flushed before the browser can paint or run any other task.
-     * Orchestrates updates to all binding types: element attributes, text interpolations,
-     * comment conditionals, watchers, and foreach loops.
+     * running one full reactive pass (element bindings, text interpolations,
+     * comment conditionals, watchers, foreach rebuilds) for the whole batch
+     * instead of one pass per property write. Scheduled via queueMicrotask from
+     * handleEvent so a burst of synchronous writes coalesces into one pass.
      */
     Runtime.prototype.flushReactiveChanges = function() {
-        // The microtask can't be cancelled once scheduled — if destroy() ran
-        // first, bail out before touching maps it may have already cleared.
+        // destroy() may have run first — bail before touching maps it cleared.
         if (this._destroyed) {
             this._pendingChanges = [];
             this._flushScheduled = false;
@@ -7499,12 +7490,9 @@
         }
 
         try {
-            // Drain in rounds rather than snapshotting once: a watcher (or, in
-            // principle, a foreach rebuild) can itself write a reactive property
-            // synchronously, which enqueues another change into this._pendingChanges
-            // while this loop is running. Swapping in a fresh array before each
-            // round means that follow-up change gets its own full binding pass
-            // instead of silently landing after updateElementBindings() already ran.
+            // Drain in rounds, not one snapshot: a watcher can itself write a
+            // reactive property, queuing another change mid-loop. Swapping in a
+            // fresh array each round gives that change its own binding pass.
             while (this._pendingChanges.length > 0) {
                 const batch = this._pendingChanges;
                 this._pendingChanges = [];
@@ -7524,8 +7512,7 @@
                 this.rebuildForeachesForBatch(batch);
             }
         } finally {
-            // Cleared even if a watcher/handler above threw, so a single bad
-            // callback can't wedge the batch and silently stop future flushes.
+            // Runs even on a throw, so one bad callback can't wedge the batch.
             this._pendingChanges = [];
             this._flushScheduled = false;
         }
@@ -7727,11 +7714,9 @@
      *      foreach expression (e.g. changing `region` rebuilds
      *      `foreach: cities[country][region]`).
      * Each matching element is rebuilt exactly once per batch, no matter how
-     * many changes or rules matched it — which happens routinely for a
-     * computed foreach over an array that was itself directly mutated (rules
-     * 1 and 2 both match the same element in that case), and now also for
-     * two unrelated changes in the same batch that both happen to touch the
-     * same foreach.
+     * many changes or rules matched it — e.g. a computed foreach over an array
+     * that was itself directly mutated (rules 1 and 2 both match), or two
+     * unrelated changes in the same batch touching the same foreach.
      * @param {Object[]} changes - The batch's queued changes (each a former
      *   pac:change event's `detail`: {path, oldValue, newValue})
      */
@@ -7800,23 +7785,19 @@
                 }
 
                 // A direct array-path match means the array itself just changed —
-                // always render its current value, the same way a standalone
-                // array mutation always would. Otherwise (computed/bracket match
-                // only), let getChangedForeachArray decide whether the rendered
-                // result actually differs before doing any work. One directMatch
-                // anywhere in the batch is enough to prefer evaluateForeachArray.
+                // always render its current value. Otherwise (computed/bracket
+                // match only), let getChangedForeachArray decide whether the
+                // rendered result actually differs. One directMatch anywhere in
+                // the batch is enough to prefer evaluateForeachArray.
                 if (directMatch) {
                     info.directMatch = true;
                 }
 
                 // oldValue is only "this array before the change" when the
-                // changed path *is* the array itself (mutator call/reassignment);
-                // for an ancestor or computed/bracket match it belongs to a
-                // different property, so only capture it in that one case. Use
-                // the *first* such change in the batch — by flush time every
-                // change has already landed on the real data, so a later
-                // change's oldValue is an intermediate state, not "the array
-                // before this flush."
+                // changed path *is* the array itself; capture the *first* such
+                // change in the batch, since by flush time every change has
+                // already landed and a later oldValue would be an intermediate
+                // state, not "the array before this flush."
                 if (!info.previousArraySet && (pathString === mappingData.foreachExpr || pathString === mappingData.sourceArray)) {
                     info.previousArray = change.oldValue;
                     info.previousArraySet = true;
