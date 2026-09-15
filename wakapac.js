@@ -4489,74 +4489,6 @@
         },
 
         /**
-         * Converts an AST node back to a dot/bracket path string
-         * for the reactive binding system's change tracking.
-         * @param {Object} node - AST node (identifier, member, or index)
-         * @returns {string} Path string (e.g. "foo.bar[0].baz")
-         */
-        astToPath(node) {
-            if (!node) {
-                return '';
-            }
-
-            switch (node.type) {
-                case 'identifier':
-                    return node.name;
-
-                case 'member':
-                    return this.astToPath(node.object) + '.' + node.property;
-
-                case 'index': {
-                    const obj = this.astToPath(node.object);
-
-                    if (node.index.type === 'literal') {
-                        return obj + '[' + JSON.stringify(node.index.value) + ']';
-                    }
-
-                    return obj + '[' + this.astToPath(node.index) + ']';
-                }
-
-                case 'literal':
-                    return JSON.stringify(node.value);
-
-                case 'arithmetic':
-                    return this.astToPath(node.left) + ' ' + node.operator + ' ' + this.astToPath(node.right);
-
-                default:
-                    return '';
-            }
-        },
-
-        /**
-         * True if this AST node can be losslessly round-tripped through
-         * astToPath and scoped getProperty resolution. Only identifier,
-         * literal, member, and index nodes are supported. Complex nodes
-         * (calls, ternaries, arithmetic) must use recursive evaluation.
-         * @param {Object} node - AST node to check.
-         * @returns {boolean}
-         */
-        isFlattenablePath(node) {
-            if (!node) {
-                return true;
-            }
-
-            switch (node.type) {
-                case 'identifier':
-                case 'literal':
-                    return true;
-
-                case 'member':
-                    return this.isFlattenablePath(node.object);
-
-                case 'index':
-                    return this.isFlattenablePath(node.object) && this.isFlattenablePath(node.index);
-
-                default:
-                    return false;
-            }
-        },
-
-        /**
          * Checks if current token matches any of the given types
          * @param {...string} types - Token types to match
          * @returns {boolean} True if current token matches any type
@@ -4685,10 +4617,6 @@
                     return this.evaluateObjectLiteral(node, context, scope);
 
                 case 'index': {
-                    if (scope && this.isFlattenablePath(node)) {
-                        return this.getProperty(this.astToPath(node), context, scope);
-                    }
-
                     const obj = this.evaluate(node.object, context, scope);
                     const key = this.evaluate(node.index, context, scope);
                     return obj && obj[key];
@@ -4740,10 +4668,6 @@
                 }
 
                 case 'member': {
-                    if (scope && this.isFlattenablePath(node)) {
-                        return this.getProperty(this.astToPath(node), context, scope);
-                    }
-
                     const obj = this.evaluate(node.object, context, scope);
                     return obj && obj[node.property];
                 }
