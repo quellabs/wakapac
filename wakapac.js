@@ -6577,12 +6577,10 @@
      * Renders every foreach element found in this scan batch that isn't itself
      * nested inside another not-yet-rendered foreach from this same batch —
      * deepest-first among what's left, so inner foreach blocks resolve before
-     * the outer ones that contain them. A foreach nested inside a still-pending
-     * ancestor foreach has no real item/$index scope yet (see isPending) and
-     * was never registered into interpolationMap by Stage 3 above, so attempting
-     * to render it here would always fail with "No foreach binding found for
-     * element" — it renders successfully instead once the ancestor's own
-     * renderForeach() recursively rescans its freshly built per-item clones.
+     * the outer ones that contain them. A still-pending ancestor foreach's
+     * children were never registered into interpolationMap (Stage 3), so
+     * rendering one here would always fail; it renders once the ancestor's
+     * own renderForeach() rescans its freshly built per-item clones instead.
      * @param {Map<Element, Object>} newBindings - Bindings map from scanBindings()
      * @param {Element} parentElement - The container currently being scanned
      * @param {function(Element): boolean} isPending - Whether an element lives
@@ -9230,15 +9228,12 @@
         // Stores scoped variable → resolved path/index mappings
         const scope = new Map();
 
-        // Expand each foreach frame into scoped variables. Frames run outer → inner,
-        // and each frame's assignment below unconditionally overwrites any existing
-        // entry for the same name — a closer (inner) frame must shadow a same-named
-        // outer one, not be blocked by it (see issue #214).
+        // Frames run outer → inner; each assignment below unconditionally overwrites
+        // any existing entry for the same name so a closer frame shadows an outer one.
         for (const f of frames) {
-            // Resolve item variable into a fully-qualified global path. Token
-            // resolution happens against the scope as it stood before this frame's
-            // own assignment, so a nested source path like "item.products" still
-            // resolves "item" to the outer frame's value first.
+            // Resolve against the scope as it stood before this frame's own
+            // assignment, so a nested source path like "item.products" still
+            // resolves "item" to the outer frame's value.
             const tokens = Utils.pathStringToArray(f.sourceArray);
 
             // Resolve tokens against the current scope chain
