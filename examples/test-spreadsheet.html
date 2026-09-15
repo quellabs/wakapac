@@ -273,23 +273,32 @@
 -->
 <div class="spreadsheet-outer" id="spreadsheet" data-pac-id="spreadsheet" tabindex="0">
     <!--
-        data-pac-update-mode="change" on the two text inputs below: a
-        reactive property write re-evaluates every bound element/text node
-        in the whole component (WakaPAC doesn't scope that pass to actual
-        dependents), so with ~1300 bound cells the default "immediate" mode
-        turns every keystroke into a full-grid pass. "change" defers the
-        write to blur instead. Since nothing here needs the live keystroke
-        value reactively — _commitEdit/_commitFormulaBar read the input's
-        .value directly, and the formula-bar mirror reads it straight off
-        the MSG_INPUT_COMPLETE event — this costs nothing but the
-        already-immediate native typing feel.
+        Two performance notes for the two text inputs below (see the JS for
+        the fuller story):
+
+        data-pac-update-mode="change": a reactive property write
+        re-evaluates every bound element/text node in the whole component
+        (WakaPAC doesn't scope that pass to actual dependents), so with
+        ~1300 bound cells the default "immediate" mode turns every
+        keystroke into a full-grid pass. "change" defers the write to blur
+        instead — nothing here needs the live keystroke value reactively:
+        _commitEdit/_commitFormulaBar read the input's .value directly, and
+        the formula-bar mirror reads it straight off the MSG_INPUT_COMPLETE
+        event.
+
+        sel.editorValue / sel.formulaValue (nested under one `sel` object,
+        not flat top-level properties): every *other* write these two
+        participate in — selecting a cell, opening/closing the editor,
+        committing — is batched into that same single object via
+        _updateSel(), so one user action is one reactive pass, not one per
+        field touched.
     -->
     <div class="formula-bar">
         <div class="cell-name-box">{{activeCellRef}}</div>
         <input class="formula-input" id="formulaInput" type="text" spellcheck="false"
                placeholder="Value, or a formula like =SUM(A1:A10)"
                data-pac-update-mode="change"
-               data-pac-bind="value: formulaValue">
+               data-pac-bind="value: sel.formulaValue">
     </div>
     <div class="grid-scroll-area" id="gridScrollArea">
         <table class="grid-table">
@@ -304,25 +313,33 @@
                 </tr>
             </thead>
             <tbody data-pac-bind="foreach: grid" data-pac-item="row" data-pac-index="rowIndex">
-                <!-- row.slots[0] is the row-header; the rest are the row's 26 data cells -->
+                <!--
+                    row.slots[0] is the row-header; the rest are the row's 26
+                    data cells. slot itself only carries structural info
+                    (isHeader) — actual values come from the separate
+                    cellData array (see buildGrid's docstring for why), read
+                    here via cellData[rowIndex][colIndex - 1]. The `&&`/`?:`
+                    short-circuiting means that lookup is never evaluated
+                    for the header slot (where colIndex-1 would be -1).
+                -->
                 <tr data-pac-bind="foreach: row.slots" data-pac-item="slot" data-pac-index="colIndex">
                     <td data-pac-bind="class: {
                             'row-header': slot.isHeader,
                             cell: !slot.isHeader,
-                            numeric: !slot.isHeader && slot.numeric,
-                            error: !slot.isHeader && slot.formulaError,
+                            numeric: !slot.isHeader && cellData[rowIndex][colIndex - 1].numeric,
+                            error: !slot.isHeader && cellData[rowIndex][colIndex - 1].formulaError,
                             active: slot.isHeader && isRowActive(rowIndex),
                             selected: !slot.isHeader && isCellSelected(rowIndex, colIndex - 1),
                             'in-range': !slot.isHeader && isCellInRange(rowIndex, colIndex - 1)
                         }, 'data-row': rowIndex, 'data-col': colIndex - 1"
-                    >{{ slot.isHeader ? slot.display : slot.value }}</td>
+                    >{{ slot.isHeader ? slot.display : cellData[rowIndex][colIndex - 1].value }}</td>
                 </tr>
             </tbody>
         </table>
 
         <input class="cell-editor" id="cellEditor" type="text" spellcheck="false" autocomplete="off"
                data-pac-update-mode="change"
-               data-pac-bind="visible: editing, value: editorValue, style: editorStyle">
+               data-pac-bind="visible: sel.editing, value: sel.editorValue, style: editorStyle">
     </div>
 
     <!-- Status bar — nested inside the PAC container so {{ }} interpolation
@@ -659,23 +676,23 @@
         }
 
         /**
-         * Recalculates every formula cell in the grid. Each cell is
+         * Recalculates every formula cell in the sheet. Each cell is
          * evaluated recursively (a formula referencing another formula
          * resolves that one first) with per-pass memoization and cycle
          * detection, then the result is written into the same reactive
-         * slot the rest of the sheet mutates — WakaPAC's own bindings pick
-         * the change up from there.
-         * @param {Array} grid - The component's grid array.
+         * cellData slot the rest of the sheet mutates — WakaPAC's own
+         * bindings pick the change up from there.
+         * @param {Array} cellData - The component's cellData array.
          */
-        function recalculateFormulas(grid) {
+        function recalculateFormulas(cellData) {
             const memo = new Map();
 
             function slotAt(row, col) {
-                if (row < 0 || row >= grid.length || col < 0 || col >= NUM_COLS) {
+                if (row < 0 || row >= cellData.length || col < 0 || col >= NUM_COLS) {
                     return null;
                 }
 
-                return grid[row].slots[col + 1];
+                return cellData[row][col];
             }
 
             function evalCell(row, col, visiting) {
@@ -769,7 +786,7 @@
                 return result;
             }
 
-            for (let r = 0; r < grid.length; r++) {
+            for (let r = 0; r < cellData.length; r++) {
                 for (let c = 0; c < NUM_COLS; c++) {
                     const slot = slotAt(r, c);
 
@@ -778,16 +795,26 @@
                     }
 
                     const result = evalCell(r, c, new Set());
+                    const newValue = result.error ? result.error : result.value;
+                    const newNumeric = !result.error;
+                    const newFormulaError = !!result.error;
 
-                    if (result.error) {
-                        slot.value = result.error;
-                        slot.numeric = false;
-                        slot.formulaError = true;
-                    } else {
-                        slot.value = result.value;
-                        slot.numeric = true;
-                        slot.formulaError = false;
+                    // Skip the write entirely when the result hasn't
+                    // actually changed — this runs after every edit
+                    // anywhere in the sheet, so most formula cells on a
+                    // given pass are unaffected and should cost nothing.
+                    if (slot.value === newValue && slot.numeric === newNumeric && slot.formulaError === newFormulaError) {
+                        continue;
                     }
+
+                    // One reactive write (replacing the whole slot) instead
+                    // of three field writes, same reasoning as _setCellData.
+                    cellData[r][c] = {
+                        raw: slot.raw,
+                        value: newValue,
+                        numeric: newNumeric,
+                        formulaError: newFormulaError
+                    };
                 }
             }
         }
@@ -812,10 +839,19 @@
         }
 
         /**
-         * Builds the reactive grid: one entry per row, each holding a leading
-         * row-header slot followed by NUM_COLS data-cell slots. Cells are
-         * mutated in place (see _setCellData) — WakaPAC's deep reactivity
-         * means the bound <td> updates itself, no manual render call needed.
+         * Builds the grid's STRUCTURE: one entry per row, each holding a
+         * leading row-header slot followed by NUM_COLS placeholder data-cell
+         * slots. This is what the nested foreach (tbody > tr) actually
+         * iterates, and — critically — it is built once and never mutated
+         * again. WakaPAC's foreach-rebuild rule fires whenever a changed
+         * path is nested under (or an ancestor of) a foreach's bound array,
+         * which means editing so much as one field of one cell here would
+         * rebuild the ENTIRE 1300-cell grid from scratch, every time,
+         * regardless of how few writes that edit takes (measured: still
+         * ~280ms even after collapsing a cell edit to a single write).
+         * Actual cell content lives in the separate, never-foreach-bound
+         * cellData array (see buildCellData) instead, so editing it only
+         * costs the ordinary reactive re-scan, not a rebuild.
          * @returns {Array<{slots: Array}>}
          */
         function buildGrid() {
@@ -825,10 +861,33 @@
                 const slots = [{ isHeader: true, display: r + 1 }];
 
                 for (let c = 0; c < NUM_COLS; c++) {
-                    slots.push({ isHeader: false, raw: "", value: "", numeric: false, formulaError: false });
+                    slots.push({ isHeader: false });
                 }
 
                 rows.push({ slots });
+            }
+
+            return rows;
+        }
+
+        /**
+         * Builds the reactive cell VALUES: NUM_ROWS x NUM_COLS, indexed the
+         * same as buildGrid's data slots (column c here == slot index c+1).
+         * This is what _setCellData actually mutates — see buildGrid's
+         * docstring for why it's kept separate.
+         * @returns {Array<Array<{raw: string, value: (string|number), numeric: boolean, formulaError: boolean}>>}
+         */
+        function buildCellData() {
+            const rows = [];
+
+            for (let r = 0; r < NUM_ROWS; r++) {
+                const cols = [];
+
+                for (let c = 0; c < NUM_COLS; c++) {
+                    cols.push({ raw: "", value: "", numeric: false, formulaError: false });
+                }
+
+                rows.push(cols);
             }
 
             return rows;
@@ -847,29 +906,45 @@
             /** Header row: corner marker + 26 column-letter cells */
             headerCells: buildHeaderCells(),
 
-            /** Dense reactive grid: NUM_ROWS entries, each with 27 slots */
+            /**
+             * Grid STRUCTURE only (NUM_ROWS entries, each with 27 slots) —
+             * built once, never mutated. See buildGrid's docstring for why
+             * that separation matters.
+             */
             grid: buildGrid(),
 
-            /** Active cell column (zero-based) */
-            selCol: 0,
+            /** Actual cell values — NUM_ROWS x NUM_COLS, mutated by every edit. */
+            cellData: buildCellData(),
 
-            /** Active cell row (zero-based) */
-            selRow: 0,
+            /**
+             * All selection + inline-edit state, bundled into one reactive
+             * object instead of separate top-level properties. Every write
+             * (a click, an arrow key, opening/closing the editor) replaces
+             * this object wholesale via _updateSel() — one reactive pass
+             * per user action, not one per field that action touches. See
+             * the update-mode comment on the two inputs above for why that
+             * matters: a single pass here costs the same as a full re-scan
+             * of all ~1300 bound cells, so the field count per action is
+             * the whole performance story.
+             */
+            sel: {
+                /** Active cell column/row (zero-based). */
+                col: 0,
+                row: 0,
 
-            /** Range selection end column, or null when no range is active */
-            selEndCol: null,
+                /** Range selection end column/row, or null when no range is active. */
+                endCol: null,
+                endRow: null,
 
-            /** Range selection end row, or null when no range is active */
-            selEndRow: null,
+                /** True when the inline cell editor is open. */
+                editing: false,
 
-            /** True when the inline cell editor is open */
-            editing: false,
+                /** Two-way bound to the floating cell editor <input>. */
+                editorValue: "",
 
-            /** Two-way bound to the floating cell editor <input> */
-            editorValue: "",
-
-            /** Two-way bound to the formula bar <input> — mirrors the active cell's raw text */
-            formulaValue: "",
+                /** Two-way bound to the formula bar <input> — mirrors the active cell's raw text. */
+                formulaValue: ""
+            },
 
             /** True when the formula bar has focus and is being edited */
             _editingFormulaBar: false,
@@ -903,12 +978,12 @@
             computed: {
                 /** "A1"-style reference for the active cell, shown in the cell-name box. */
                 activeCellRef() {
-                    return cellRef(this.selCol, this.selRow);
+                    return cellRef(this.sel.col, this.sel.row);
                 },
 
                 /** Status-bar left segment. */
                 statusText() {
-                    return this.editing ? "Edit" : "Ready";
+                    return this.sel.editing ? "Edit" : "Ready";
                 },
 
                 /**
@@ -946,8 +1021,8 @@
                  */
                 editorStyle() {
                     return {
-                        left: (ROW_HEADER_WIDTH + this.selCol * CELL_WIDTH) + "px",
-                        top: ((this.selRow + 1) * CELL_HEIGHT) + "px",
+                        left: (ROW_HEADER_WIDTH + this.sel.col * CELL_WIDTH) + "px",
+                        top: ((this.sel.row + 1) * CELL_HEIGHT) + "px",
                         width: CELL_WIDTH + "px",
                         height: CELL_HEIGHT + "px"
                     };
@@ -1032,7 +1107,7 @@
                         }
 
                         // Commit any in-progress edits before changing selection
-                        if (this.editing) {
+                        if (this.sel.editing) {
                             this._commitEdit();
                         }
 
@@ -1040,24 +1115,23 @@
                             this._commitFormulaBar();
                         }
 
-                        // Shift-click extends the selection range
+                        // Shift-click extends the selection range; either way,
+                        // editing is always closed and this is one _updateSel
+                        // write regardless of which branch runs.
                         if (event.wParam & wakaPAC.MK_SHIFT) {
-                            this.selEndCol = hit.col;
-                            this.selEndRow = hit.row;
+                            this._updateSel({ editing: false, endCol: hit.col, endRow: hit.row });
                         } else {
-                            this.selCol = hit.col;
-                            this.selRow = hit.row;
-                            this.selEndCol = null;
-                            this.selEndRow = null;
+                            this._updateSel({ editing: false, col: hit.col, row: hit.row, endCol: null, endRow: null });
                         }
 
-                        this._syncFormulaBar();
                         this._focusGrid();
                         return false;
                     }
 
                     // ---------------------------------------------------------
-                    // Mouse: double-click enters edit mode on the clicked cell
+                    // Mouse: double-click selects and edits the clicked cell
+                    // in one gesture — _enterEditMode(hit) folds both into a
+                    // single _updateSel write.
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_LBUTTONDBLCLK: {
                         const hit = this._hitTest(event);
@@ -1066,13 +1140,7 @@
                             break;
                         }
 
-                        this.selCol = hit.col;
-                        this.selRow = hit.row;
-                        this.selEndCol = null;
-                        this.selEndRow = null;
-
-                        this._enterEditMode();
-
+                        this._enterEditMode(hit);
                         return false;
                     }
 
@@ -1088,7 +1156,7 @@
                             break;
                         }
 
-                        if (this.editing) {
+                        if (this.sel.editing) {
                             this._commitEdit();
                         }
 
@@ -1096,13 +1164,9 @@
                             this._commitFormulaBar();
                         }
 
-                        this.selCol = hit.col;
-                        this.selRow = hit.row;
-                        this.selEndCol = null;
-                        this.selEndRow = null;
+                        this._updateSel({ editing: false, col: hit.col, row: hit.row, endCol: null, endRow: null });
                         this._dragging = true;
                         wakaPAC.setCapture(this.pacId);
-                        this._syncFormulaBar();
                         break;
                     }
 
@@ -1122,9 +1186,8 @@
 
                         const hit = this._hitTestCoords(oe.clientX, oe.clientY);
 
-                        if (hit && (this.selEndCol !== hit.col || this.selEndRow !== hit.row)) {
-                            this.selEndCol = hit.col;
-                            this.selEndRow = hit.row;
+                        if (hit && (this.sel.endCol !== hit.col || this.sel.endRow !== hit.row)) {
+                            this._updateSel({ endCol: hit.col, endRow: hit.row });
                         }
 
                         break;
@@ -1142,13 +1205,12 @@
                         wakaPAC.releaseCapture();
 
                         // Collapse range to single cell if start == end
-                        if (this.selEndCol === this.selCol && this.selEndRow === this.selRow) {
-                            this.selEndCol = null;
-                            this.selEndRow = null;
+                        if (this.sel.endCol === this.sel.col && this.sel.endRow === this.sel.row) {
+                            this._updateSel({ endCol: null, endRow: null });
                         }
 
                         // Flag so the subsequent LCLICK doesn't overwrite the range
-                        if (this.selEndCol !== null || this.selEndRow !== null) {
+                        if (this.sel.endCol !== null || this.sel.endRow !== null) {
                             this._wasDrag = true;
                         }
 
@@ -1231,8 +1293,13 @@
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_PASTE: {
                         if (this._focusedElement() === 'grid') {
-                            this._setCellData(this.selRow, this.selCol, event.detail.text);
-                            this._syncFormulaBar();
+                            if (this._setCellData(this.sel.row, this.sel.col, event.detail.text)) {
+                                this._recalculateAll();
+                            }
+
+                            // Empty patch: refreshes formulaValue in case the
+                            // pasted text differs from what's currently shown.
+                            this._updateSel({});
                             return false;
                         }
 
@@ -1262,8 +1329,8 @@
                     switch (vk) {
                         case wakaPAC.VK_RETURN: {
                             this._commitEdit();
-                            this._moveSelection(0, shift ? -1 : 1);
-                            this._syncFormulaBar();
+                            const next = this._clampedMove(0, shift ? -1 : 1);
+                            this._updateSel({ editing: false, col: next.col, row: next.row, endCol: null, endRow: null });
                             this._focusGrid();
                             event.preventDefault();
                             break;
@@ -1271,8 +1338,8 @@
 
                         case wakaPAC.VK_TAB: {
                             this._commitEdit();
-                            this._moveSelection(shift ? -1 : 1, 0);
-                            this._syncFormulaBar();
+                            const next = this._clampedMove(shift ? -1 : 1, 0);
+                            this._updateSel({ editing: false, col: next.col, row: next.row, endCol: null, endRow: null });
                             this._focusGrid();
                             event.preventDefault();
                             break;
@@ -1294,14 +1361,15 @@
                     switch (vk) {
                         case wakaPAC.VK_RETURN: {
                             this._commitFormulaBar();
+                            this._updateSel({});
                             this._focusGrid();
                             event.preventDefault();
                             break;
                         }
 
                         case wakaPAC.VK_ESCAPE: {
-                            this._syncFormulaBar();
                             this._editingFormulaBar = false;
+                            this._updateSel({});
                             this._focusGrid();
                             event.preventDefault();
                             break;
@@ -1322,15 +1390,17 @@
 
                         if (shift) {
                             // Extend range from current endpoint (or active cell if no range yet)
-                            const ec = this.selEndCol !== null ? this.selEndCol : this.selCol;
-                            const er = this.selEndRow !== null ? this.selEndRow : this.selRow;
-                            this.selEndCol = clamp(ec + dc, 0, NUM_COLS - 1);
-                            this.selEndRow = clamp(er + dr, 0, NUM_ROWS - 1);
+                            const ec = this.sel.endCol !== null ? this.sel.endCol : this.sel.col;
+                            const er = this.sel.endRow !== null ? this.sel.endRow : this.sel.row;
+
+                            this._updateSel({
+                                endCol: clamp(ec + dc, 0, NUM_COLS - 1),
+                                endRow: clamp(er + dr, 0, NUM_ROWS - 1)
+                            });
                         } else {
                             this._moveSelection(dc, dr);
                         }
 
-                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -1338,7 +1408,6 @@
 
                     case wakaPAC.VK_TAB: {
                         this._moveSelection(shift ? -1 : 1, 0);
-                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -1346,7 +1415,6 @@
 
                     case wakaPAC.VK_RETURN: {
                         this._moveSelection(0, shift ? -1 : 1);
-                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -1366,32 +1434,20 @@
                     }
 
                     case wakaPAC.VK_HOME: {
-                        if (ctrl) {
-                            this.selCol = 0;
-                            this.selRow = 0;
-                        } else {
-                            this.selCol = 0;
-                        }
+                        this._updateSel(ctrl
+                            ? { col: 0, row: 0, endCol: null, endRow: null }
+                            : { col: 0, endCol: null, endRow: null });
 
-                        this.selEndCol = null;
-                        this.selEndRow = null;
-                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
                     }
 
                     case wakaPAC.VK_END: {
-                        if (ctrl) {
-                            this.selCol = NUM_COLS - 1;
-                            this.selRow = this._getLastUsedRow();
-                        } else {
-                            this.selCol = NUM_COLS - 1;
-                        }
+                        this._updateSel(ctrl
+                            ? { col: NUM_COLS - 1, row: this._getLastUsedRow(), endCol: null, endRow: null }
+                            : { col: NUM_COLS - 1, endCol: null, endRow: null });
 
-                        this.selEndCol = null;
-                        this.selEndRow = null;
-                        this._syncFormulaBar();
                         this._scrollToSelection();
                         event.preventDefault();
                         break;
@@ -1399,10 +1455,7 @@
 
                     case wakaPAC.VK_A: {
                         if (ctrl) {
-                            this.selCol = 0;
-                            this.selRow = 0;
-                            this.selEndCol = NUM_COLS - 1;
-                            this.selEndRow = NUM_ROWS - 1;
+                            this._updateSel({ col: 0, row: 0, endCol: NUM_COLS - 1, endRow: NUM_ROWS - 1 });
                             event.preventDefault();
                         }
 
@@ -1422,51 +1475,63 @@
              * @returns {{raw: string, value: (string|number), numeric: boolean}}
              */
             _cellSlot(row, col) {
-                return this.grid[row].slots[col + 1];
+                return this.cellData[row][col];
             },
 
             /**
-             * Mutates a cell's slot in place, then recalculates every
-             * formula in the sheet (cheap enough at this grid size, and far
-             * simpler than tracking which formulas actually depend on this
-             * cell). WakaPAC's deep reactivity means every touched <td>
-             * updates itself — no manual render call needed.
+             * Mutates a cell's cellData slot in place (never the grid
+             * structure — see buildGrid's docstring). Does NOT recalculate
+             * formulas itself — callers that set more than one cell (e.g.
+             * _clearSelectedCells) should call _recalculateAll() once after
+             * the whole batch, not once per cell. WakaPAC's deep reactivity
+             * means every touched <td> updates itself — no manual render
+             * call needed, but each write here is still its own full
+             * reactive-binding re-scan, so batching the recalc matters.
              * @param {number} row - Row index.
              * @param {number} col - Column index.
              * @param {string} raw - Raw input string (empty to clear).
+             * @returns {boolean} True if the cell's raw text actually changed.
              */
             _setCellData(row, col, raw) {
-                const slot = this._cellSlot(row, col);
                 const trimmed = (raw || "").trim();
+                const slot = this._cellSlot(row, col);
 
-                if (trimmed === "") {
-                    slot.raw = "";
-                    slot.value = "";
-                    slot.numeric = false;
-                    slot.formulaError = false;
-                } else if (trimmed.startsWith("=")) {
-                    slot.raw = trimmed;
-                    slot.value = "";
-                    slot.numeric = false;
-                    slot.formulaError = false;
-                } else {
-                    const numeric = isNumeric(trimmed);
-                    slot.raw = trimmed;
-                    slot.value = numeric ? parseFloat(trimmed) : trimmed;
-                    slot.numeric = numeric;
-                    slot.formulaError = false;
+                if (slot.raw === trimmed) {
+                    return false;
                 }
 
-                this._recalculateAll();
+                let newSlot;
+
+                if (trimmed === "") {
+                    newSlot = { raw: "", value: "", numeric: false, formulaError: false };
+                } else if (trimmed.startsWith("=")) {
+                    newSlot = { raw: trimmed, value: "", numeric: false, formulaError: false };
+                } else {
+                    const numeric = isNumeric(trimmed);
+
+                    newSlot = {
+                        raw: trimmed,
+                        value: numeric ? parseFloat(trimmed) : trimmed,
+                        numeric: numeric,
+                        formulaError: false
+                    };
+                }
+
+                // One reactive write (replacing the whole slot) instead of
+                // four field writes — see the update-mode comment above for
+                // why every write's cost matters, not just the count.
+                this.cellData[row][col] = newSlot;
+
+                return true;
             },
 
             /**
-             * Re-runs the formula engine over the whole grid. See
+             * Re-runs the formula engine over the whole sheet. See
              * recalculateFormulas — this just points it at this component's
-             * grid.
+             * cellData.
              */
             _recalculateAll() {
-                recalculateFormulas(this.grid);
+                recalculateFormulas(this.cellData);
             },
 
             /**
@@ -1480,11 +1545,17 @@
             },
 
             /**
-             * Copies the active cell's raw value into the formula bar.
-             * Call after any change to selCol/selRow.
+             * Applies a partial patch to `sel` via a single reactive write
+             * (the whole object is replaced, not individual fields) — see
+             * the `sel` docstring for why that's the point. formulaValue is
+             * always recomputed from the patched (col, row), so callers
+             * never need to remember to sync it themselves.
+             * @param {Object} patch - Fields to override on the current `sel`.
              */
-            _syncFormulaBar() {
-                this.formulaValue = this._getRawValue(this.selRow, this.selCol);
+            _updateSel(patch) {
+                const next = Object.assign({}, this.sel, patch);
+                next.formulaValue = this._getRawValue(next.row, next.col);
+                this.sel = next;
             },
 
             // =================================================================
@@ -1492,15 +1563,30 @@
             // =================================================================
 
             /**
-             * Moves the active cell by a column/row delta and clears any range.
+             * Computes the clamped (col, row) reached by moving the active
+             * cell by a delta, without touching reactive state — callers
+             * combine this with other patch fields (e.g. editing: false)
+             * into a single _updateSel call.
+             * @param {number} dc - Column delta.
+             * @param {number} dr - Row delta.
+             * @returns {{col: number, row: number}}
+             */
+            _clampedMove(dc, dr) {
+                return {
+                    col: clamp(this.sel.col + dc, 0, NUM_COLS - 1),
+                    row: clamp(this.sel.row + dr, 0, NUM_ROWS - 1)
+                };
+            },
+
+            /**
+             * Moves the active cell by a column/row delta and clears any
+             * range, via a single _updateSel write.
              * @param {number} dc - Column delta (-1, 0, or 1).
              * @param {number} dr - Row delta (-1, 0, or 1).
              */
             _moveSelection(dc, dr) {
-                this.selCol = clamp(this.selCol + dc, 0, NUM_COLS - 1);
-                this.selRow = clamp(this.selRow + dr, 0, NUM_ROWS - 1);
-                this.selEndCol = null;
-                this.selEndRow = null;
+                const next = this._clampedMove(dc, dr);
+                this._updateSel({ col: next.col, row: next.row, endCol: null, endRow: null });
             },
 
             /**
@@ -1514,18 +1600,19 @@
              * @returns {{ minCol: number, maxCol: number, minRow: number, maxRow: number }}
              */
             _rangeBounds() {
-                const key = this.selCol + "," + this.selRow + "," + this.selEndCol + "," + this.selEndRow;
+                const s = this.sel;
+                const key = s.col + "," + s.row + "," + s.endCol + "," + s.endRow;
 
                 if (this._boundsCacheKey === key) {
                     return this._boundsCache;
                 }
 
-                const c2 = this.selEndCol !== null ? this.selEndCol : this.selCol;
-                const r2 = this.selEndRow !== null ? this.selEndRow : this.selRow;
+                const c2 = s.endCol !== null ? s.endCol : s.col;
+                const r2 = s.endRow !== null ? s.endRow : s.row;
 
                 this._boundsCache = {
-                    minCol: Math.min(this.selCol, c2), maxCol: Math.max(this.selCol, c2),
-                    minRow: Math.min(this.selRow, r2), maxRow: Math.max(this.selRow, r2)
+                    minCol: Math.min(s.col, c2), maxCol: Math.max(s.col, c2),
+                    minRow: Math.min(s.row, r2), maxRow: Math.max(s.row, r2)
                 };
                 this._boundsCacheKey = key;
 
@@ -1537,11 +1624,8 @@
              * @returns {boolean}
              */
             _isRangeSelection() {
-                return this.selEndCol !== null && this.selEndRow !== null &&
-                    (
-                        this.selEndCol !== this.selCol ||
-                        this.selEndRow !== this.selRow
-                    );
+                const s = this.sel;
+                return s.endCol !== null && s.endRow !== null && (s.endCol !== s.col || s.endRow !== s.row);
             },
 
             /**
@@ -1551,7 +1635,7 @@
              * @returns {boolean}
              */
             isCellSelected(row, col) {
-                return row === this.selRow && col === this.selCol;
+                return row === this.sel.row && col === this.sel.col;
             },
 
             /**
@@ -1595,7 +1679,7 @@
              */
             _scrollToSelection() {
                 const cell = this._scrollArea.querySelector(
-                    `.cell[data-row="${this.selRow}"][data-col="${this.selCol}"]`
+                    `.cell[data-row="${this.sel.row}"][data-col="${this.sel.col}"]`
                 );
 
                 if (cell) {
@@ -1608,19 +1692,29 @@
             // =================================================================
 
             /**
-             * Opens the inline cell editor over the active cell. Position
-             * comes from the editorStyle computed; only focus/cursor
-             * placement stay imperative here. This must happen
-             * synchronously (no rAF/setTimeout deferral): when opened from
-             * MSG_CHAR, the physical keypress that opens the editor is what
-             * types the first character, and it only lands in the editor
-             * because focus moves there before that keypress's native
+             * Opens the inline cell editor. Optionally also moves the
+             * selection to a new position first (used by double-click,
+             * which selects and edits in one gesture) — folded into the
+             * SAME _updateSel write rather than two. Position comes from
+             * the editorStyle computed; only focus/cursor placement stay
+             * imperative here. That must happen synchronously (no
+             * rAF/setTimeout deferral): when opened from MSG_CHAR, the
+             * physical keypress that opens the editor is what types the
+             * first character, and it only lands in the editor because
+             * focus moves there before that keypress's native
              * character-insertion fires.
+             * @param {{col: number, row: number}} [position] - Cell to edit;
+             *   defaults to the current selection (F2, typing a character).
              */
-            _enterEditMode() {
-                this.editing = true;
-                this.editorValue = this._getRawValue(this.selRow, this.selCol);
-                this.formulaValue = this.editorValue;
+            _enterEditMode(position) {
+                const col = position ? position.col : this.sel.col;
+                const row = position ? position.row : this.sel.row;
+                const raw = this._getRawValue(row, col);
+
+                this._updateSel({
+                    col: col, row: row, endCol: null, endRow: null,
+                    editing: true, editorValue: raw
+                });
 
                 this._editorInput.focus();
                 const len = this._editorInput.value.length;
@@ -1628,41 +1722,47 @@
             },
 
             /**
-             * Commits the cell editor's current value to the cell and closes it.
+             * Commits the cell editor's current value to the cell and
+             * closes it. Doesn't touch `sel.editing` or the formula bar
+             * itself — every caller folds those into its own _updateSel
+             * call right afterward (often combined with a selection move),
+             * so this doesn't spend a separate reactive pass on a value
+             * that call immediately overwrites.
              */
             _commitEdit() {
-                if (!this.editing) {
+                if (!this.sel.editing) {
                     return;
                 }
 
-                this.editing = false;
-
                 // Read the input's live DOM value, not the reactive
-                // editorValue — with update-mode "change" that property
+                // sel.editorValue — with update-mode "change" that property
                 // only refreshes on blur, which hasn't happened yet here
                 // (focus moves away *after* this call returns).
-                this._setCellData(this.selRow, this.selCol, this._editorInput.value);
-                this._syncFormulaBar();
+                if (this._setCellData(this.sel.row, this.sel.col, this._editorInput.value)) {
+                    this._recalculateAll();
+                }
             },
 
             /**
              * Discards the cell editor's value and closes it without saving.
              */
             _cancelEdit() {
-                this.editing = false;
-                this._syncFormulaBar();
+                this._updateSel({ editing: false });
             },
 
             /**
              * Commits the formula bar's current value to the active cell.
+             * Same reasoning as _commitEdit: callers handle their own
+             * _updateSel afterward.
              */
             _commitFormulaBar() {
                 this._editingFormulaBar = false;
 
-                // Same reasoning as _commitEdit: read the live DOM value,
-                // since formulaValue itself only refreshes on blur.
-                this._setCellData(this.selRow, this.selCol, this._formulaInputEl.value);
-                this._syncFormulaBar();
+                // Read the live DOM value, since sel.formulaValue itself
+                // only refreshes on blur.
+                if (this._setCellData(this.sel.row, this.sel.col, this._formulaInputEl.value)) {
+                    this._recalculateAll();
+                }
             },
 
             // =================================================================
@@ -1717,14 +1817,21 @@
              */
             _clearSelectedCells() {
                 const b = this._rangeBounds();
+                let anyChanged = false;
 
+                // One recalculate after the whole range, not one per cell —
+                // _setCellData no longer does it itself for exactly this reason.
                 for (let r = b.minRow; r <= b.maxRow; r++) {
                     for (let c = b.minCol; c <= b.maxCol; c++) {
-                        this._setCellData(r, c, "");
+                        anyChanged = this._setCellData(r, c, "") || anyChanged;
                     }
                 }
 
-                this._syncFormulaBar();
+                if (anyChanged) {
+                    this._recalculateAll();
+                }
+
+                this._updateSel({});
             },
 
             /**
@@ -1732,7 +1839,7 @@
              * @returns {number} Zero-based row index.
              */
             _getLastUsedRow() {
-                for (let r = this.grid.length - 1; r >= 0; r--) {
+                for (let r = this.cellData.length - 1; r >= 0; r--) {
                     for (let c = 0; c < NUM_COLS; c++) {
                         if (this._cellSlot(r, c).raw !== "") {
                             return r;
