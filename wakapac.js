@@ -71,7 +71,7 @@
     /** Registry of partial templates; keys are names, values are raw textContent strings. @type {Map<string, string>} */
     const _partials = new Map();
 
-    /** Guards collectPartials() so it only runs once. @type {boolean} */
+    /** Guards _collectPartials() so it only runs once. @type {boolean} */
     let _partialsCollected = false;
 
     /**
@@ -123,22 +123,6 @@
     const WP_IF_CLOSE_COMMENT_REGEX = /^\s*\/wp-if\s*$/;
     const WP_ELSE_IF_COMMENT_REGEX = /^\s*wp-else-if:\s*(.+?)\s*$/;
     const WP_ELSE_COMMENT_REGEX = /^\s*wp-else\s*$/;
-
-    /**
-     * Builds the opaque group entry a wp-if branch's node list uses to
-     * represent a nested wp-if as one atomic unit — see scanCommentBindings
-     * and updateCommentConditional's buried-comment handling, the two
-     * places that ever create one of these: a nested wp-if found as a
-     * direct comment sibling, and one found buried inside a descendant
-     * element respectively. Both need the identical shape, so both call
-     * this rather than each building the object literal itself.
-     * @param {Comment} openMarker
-     * @param {Comment} closeMarker
-     * @returns {{__wpGroup: true, openMarker: Comment, closeMarker: Comment}}
-     */
-    function makeWpIfGroup(openMarker, closeMarker) {
-        return { __wpGroup: true, openMarker, closeMarker };
-    }
 
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
@@ -285,13 +269,16 @@
     ]);
 
     /**
-     * Message types with no dedicated handler (unlike click/submit/change/
+     * Message types with no dedicated handler (unlike submit/change/
      * mouseenter/mouseleave, each of which has its own extra pre/post
      * processing) map here to the data-pac-bind event name they dispatch
      * through Runtime.prototype.handleGenericEventBinding() — see the
-     * `default` case in handlePacEvent(). Several button messages collapse
-     * onto the same name because native mousedown/mouseup fire for every
-     * button, unlike click, which only fires for the left one.
+     * `default` case in handlePacEvent(). Click is included here too: once
+     * target-shadowing and foreach-context injection moved into the shared
+     * invokeEventBinding(), click's dispatch is identical to every other
+     * entry, so it needs no dedicated handler of its own. Several button
+     * messages collapse onto the same name because native mousedown/mouseup
+     * fire for every button, unlike click, which only fires for the left one.
      *
      * The drag family (MSG_DRAGENTER/DRAGLEAVE/DROPTARGET_ENTER/DROPTARGET_LEAVE/DROP)
      * is deliberately NOT included: drag-and-drop is an inherently multi-message, stateful
@@ -303,6 +290,7 @@
      * working with msgProc. Kept as a msgProc-only feature.
      */
     const GENERIC_EVENT_BINDING_MESSAGES = new Map([
+        [MSG_LCLICK, 'click'],
         [MSG_LBUTTONDBLCLK, 'dblclick'],
         [MSG_LBUTTONDOWN, 'mousedown'], [MSG_MBUTTONDOWN, 'mousedown'], [MSG_RBUTTONDOWN, 'mousedown'],
         [MSG_LBUTTONUP, 'mouseup'], [MSG_MBUTTONUP, 'mouseup'], [MSG_RBUTTONUP, 'mouseup'],
@@ -316,22 +304,35 @@
 
     /**
      * Event binding types with their own dedicated dispatch (extra pre/post
-     * processing beyond a plain invoke: click's foreach-context injection and
-     * target-shadowing, submit's preventDefault, change's value-commit
-     * ordering, mouseenter/mouseleave's descendant-hover tracking).
+     * processing beyond a plain invoke: submit's preventDefault, change's
+     * value-commit ordering, mouseenter/mouseleave's descendant-hover
+     * tracking). Click used to belong here too — see GENERIC_EVENT_BINDING_MESSAGES.
      */
-    const BESPOKE_EVENT_BINDING_TYPES = new Set(['click', 'submit', 'change', 'mouseenter', 'mouseleave']);
+    const BESPOKE_EVENT_BINDING_TYPES = new Set(['submit', 'change', 'mouseenter', 'mouseleave']);
+
+    /**
+     * Every binding type that represents an actual interaction rather than a
+     * passive reactive attribute (css, text, class, value, ...): the bespoke
+     * types above plus every event name GENERIC_EVENT_BINDING_MESSAGES
+     * dispatches. Used by DomUpdateTracker.hasBoundInteraction() to decide
+     * whether an element is its own hit-test boundary — an element bound only
+     * via, say, `css:` must NOT count as one, or it would shadow an
+     * interactive ancestor (e.g. a mouseenter-bound button) from ever being
+     * resolved as the hover/click target once the pointer reaches it.
+     */
+    const INTERACTIVE_BINDING_TYPES = new Set([
+        ...BESPOKE_EVENT_BINDING_TYPES,
+        ...GENERIC_EVENT_BINDING_MESSAGES.values()
+    ]);
 
     /**
      * Binding types handled only for actual DOM/PAC events, never eagerly
-     * during render or reactive updates: the bespoke types above, every event
-     * name GENERIC_EVENT_BINDING_MESSAGES dispatches, and 'foreach' — included
-     * because its own rendering pipeline must bypass generic attribute-binding
-     * paths.
+     * during render or reactive updates: every interactive type above, plus
+     * 'foreach' — included because its own rendering pipeline must bypass
+     * generic attribute-binding paths.
      */
     const NON_ATTRIBUTE_BINDING_TYPES = new Set([
-        ...BESPOKE_EVENT_BINDING_TYPES,
-        ...GENERIC_EVENT_BINDING_MESSAGES.values(),
+        ...INTERACTIVE_BINDING_TYPES,
         'foreach'
     ]);
 
@@ -784,6 +785,50 @@
         },
 
         /**
+         * Detects the "object syntax" form shared by the class/style binding handlers
+         * (e.g. { active: true } or { color: 'red' }), as opposed to a plain string
+         * or array of names. Deliberately looser than isPlainObject() — class
+         * instances count as object syntax here too.
+         * @param {*} value
+         * @returns {boolean}
+         */
+        isObjectSyntaxValue(value) {
+            return typeof value === 'object' && value !== null && !Array.isArray(value);
+        },
+
+        /**
+         * Captures an element's current display value into data-pac-orig-display before hiding.
+         * Reads the inline style first to avoid a forced synchronous layout recalculation.
+         * Falls back to getComputedStyle deferred via requestAnimationFrame when no inline
+         * style is set, so the read never blocks a style write.
+         * @param {Element} element
+         */
+        captureOriginalDisplay(element) {
+            const inlineDisplay = element.style.display;
+
+            // Inline style is set and visible — capture it directly without touching the layout engine
+            if (inlineDisplay && inlineDisplay !== 'none') {
+                element.setAttribute('data-pac-orig-display', inlineDisplay);
+                return;
+            }
+
+            // No inline style — we'd need getComputedStyle, but calling it before a style write
+            // forces a synchronous layout recalculation. Defer to rAF so the read happens after
+            // the current paint cycle. Store an empty sentinel now so we don't repeat this.
+            if (!inlineDisplay) {
+                element.setAttribute('data-pac-orig-display', '');
+
+                requestAnimationFrame(() => {
+                    const computed = getComputedStyle(element).display;
+
+                    if (computed && computed !== 'none') {
+                        element.setAttribute('data-pac-orig-display', computed);
+                    }
+                });
+            }
+        },
+
+        /**
          * Gets a nested property value from an object using dot and bracket notation
          * @param {object} obj - The object to read from
          * @param {string} path - The property path (e.g., "configuration[theme]" or "todos[0].completed")
@@ -956,14 +1001,26 @@
         },
 
         /**
+         * Computes the viewport-relative bounding rect and window dimensions
+         * for an element, shared by isElementVisible/isElementFullyVisible.
+         * @param {HTMLElement} element - The element to measure
+         * @returns {{rect: DOMRect, viewHeight: number, viewWidth: number}}
+         */
+        getViewportMetrics(element) {
+            return {
+                rect: element.getBoundingClientRect(),
+                viewHeight: window.innerHeight,
+                viewWidth: window.innerWidth
+            };
+        },
+
+        /**
          * Checks if an element is at least partially visible in the viewport
          * @param {HTMLElement} element - The element to check
          * @returns {boolean} True if element intersects with viewport
          */
         isElementVisible(element) {
-            const rect = element.getBoundingClientRect();
-            const viewHeight = window.innerHeight;
-            const viewWidth = window.innerWidth;
+            const { rect, viewHeight, viewWidth } = this.getViewportMetrics(element);
 
             return (
                 rect.top < viewHeight &&
@@ -979,9 +1036,7 @@
          * @returns {boolean} True if entire element is within viewport bounds
          */
         isElementFullyVisible(element) {
-            const rect = element.getBoundingClientRect();
-            const viewHeight = window.innerHeight;
-            const viewWidth = window.innerWidth;
+            const { rect, viewHeight, viewWidth } = this.getViewportMetrics(element);
 
             return (
                 rect.top >= 0 &&
@@ -1006,7 +1061,7 @@
          * @returns {boolean} True if focus is within the element's boundaries
          */
         isElementFocusWithin(element) {
-            return element === document.activeElement || element.contains(document.activeElement);
+            return this.isElementDirectlyFocused(element) || element.contains(document.activeElement);
         },
 
         /**
@@ -1329,6 +1384,196 @@
     }
 
     // ========================================================================
+    // PARTIALS
+    // ========================================================================
+
+    /**
+     * Collects <script type="text/template" data-pac-partial="name"> elements into
+     * _partials once on the first wakaPAC() call. Uses textContent so {{> name}}
+     * is never entity-encoded.
+     * @returns {void}
+     */
+    function _collectPartials() {
+        if (_partialsCollected) {
+            return;
+        }
+
+        _partialsCollected = true;
+
+        // Find all partials
+        document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
+            // Extract name
+            const name = el.getAttribute(PAC_PARTIAL_ATTR);
+
+            // If none passed, ignore
+            if (!name) {
+                return;
+            }
+
+            // If already defined, warn the user and ignore
+            if (_partials.has(name)) {
+                console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
+                return;
+            }
+
+            // textContent gives the raw unencoded string — > is never encoded
+            // inside a script tag, so {{> name}} injection syntax is preserved
+            _partials.set(name, el.textContent);
+        });
+    }
+
+    /**
+     * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
+     * Normalizes {{&gt; to {{> first to handle strings captured via element.innerHTML.
+     * @param {string} html
+     * @param {number} [depth=0]
+     * @returns {string}
+     */
+    function _expandPartialsInString(html, depth) {
+        if (_partials.size === 0) {
+            return html;
+        }
+
+        depth = depth || 0;
+
+        if (depth >= 10) {
+            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
+            return html;
+        }
+
+        // Normalize &gt; encoding from innerHTML-captured templates
+        html = html.replace(/\{\{&gt;/g, '{{>');
+
+        // Quick check before paying regex cost
+        if (html.indexOf('{{>') === -1) {
+            return html;
+        }
+
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name, root) {
+            if (!_partials.has(name)) {
+                console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
+                return match;
+            }
+
+            // Extract the body
+            let body = _partials.get(name);
+
+            // If a root argument was supplied, substitute "$." with "root." throughout
+            // the partial body so property paths resolve against the passed object.
+            if (root) {
+                PARTIAL_PARAM_REGEX.lastIndex = 0;
+                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
+            }
+
+            return body;
+        });
+
+        // Recurse only if something was replaced and depth allows
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        if (expanded !== html && expanded.indexOf('{{>') !== -1) {
+            return _expandPartialsInString(expanded, depth + 1);
+        }
+
+        return expanded;
+    }
+
+    /**
+     * Expands {{> name}} injections inside a live DOM element by walking its
+     * text nodes (textContent is never entity-encoded, unlike innerHTML).
+     * @param {Element} element
+     * @returns {void}
+     */
+    function _expandPartials(element) {
+        if (_partials.size === 0) {
+            return;
+        }
+
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const hits = [];
+
+        let node;
+        while ((node = walker.nextNode())) {
+            if (node.textContent.indexOf('{{>') !== -1) {
+                hits.push(node);
+            }
+        }
+
+        if (hits.length === 0) {
+            return;
+        }
+
+        hits.forEach(function(textNode) {
+            const expanded = _expandPartialsInString(textNode.textContent, 0);
+
+            if (expanded === textNode.textContent) {
+                return;
+            }
+
+            // Replace the text node with parsed HTML nodes.
+            // Create a temporary container, parse the expanded HTML into it,
+            // then insert its children before the text node and remove it.
+            const temp = document.createElement('template');
+            temp.innerHTML = expanded;
+            const fragment = temp.content;
+            textNode.parentNode.replaceChild(fragment, textNode);
+        });
+    }
+
+    // ========================================================================
+    // DOM SCANNING HELPERS (private; used by wp-if comment reconciliation)
+    // ========================================================================
+
+    /**
+     * Calls scanAndRegisterNewElements on every Element node in the given array.
+     * Extracted as a module-level helper so it is defined once rather than
+     * recreated as a closure on each updateCommentConditional call.
+     * @param {Runtime} context
+     * @param {Node[]} nodes
+     */
+    function _scanElementNodes(context, nodes) {
+        nodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                context.scanAndRegisterNewElements(node);
+            }
+        });
+    }
+
+    /**
+     * Finds registered `wp-if` open comments buried inside descendant
+     * elements rather than appearing as direct comment siblings. A comment
+     * is identified as a `wp-if` by its presence in `map`; unregistered
+     * bindings are ignored and discovered by the normal scan.
+     * @param {Node[]} nodes
+     * @param {Map<Comment, Object>} map
+     * @returns {Comment[]}
+     */
+    function _findRegisteredWpIfComments(nodes, map) {
+        const found = [];
+
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+
+            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+                continue;
+            }
+
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
+            let commentNode;
+
+            while ((commentNode = walker.nextNode())) {
+                if (map.has(commentNode)) {
+                    found.push(commentNode);
+                }
+            }
+        }
+
+        return found;
+    }
+
+    // ========================================================================
     // UNIT HANDLING
     // ========================================================================
 
@@ -1363,304 +1608,6 @@
         }
     }
 
-    // ========================================================================
-    // REACTIVE PROXY
-    // ========================================================================
-
-    function makeDeepReactiveProxy(value, container) {
-
-        /**
-         * List of all methods allowed on an array
-         * @type {string[]}
-         */
-        const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
-
-        /**
-         * Determines whether a property should be wrapped in a reactive proxy.
-         * Properties starting with underscore (_) or dollar sign ($) are treated as non-reactive
-         * to avoid performance overhead when storing complex objects, DOM references, or internal state.
-         * @param {string|symbol|number} prop - The property name being accessed or set
-         * @returns {boolean} True if the property should trigger reactivity and DOM updates, false otherwise
-         */
-        function shouldMakeReactive(prop) {
-            return typeof prop === 'string' && !prop.startsWith('_') && !prop.startsWith('$');
-        }
-
-        /**
-         * Creates a wrapped array method that handles reactivity
-         * @param {Array} target - The array being proxied
-         * @param {string} methodName - The array method name (push, pop, etc.)
-         * @param {Array} currentPath - The path to this array in the data structure
-         * @returns {Function} Wrapped array method
-         */
-        function createReactiveArrayMethod(target, methodName, currentPath) {
-            return function() {
-                // Store the old array state before modification
-                const oldArray = Array.prototype.slice.call(target);
-
-                // Apply the array method to get the result
-                const result = Array.prototype[methodName].apply(target, arguments);
-
-                // Get the new array state after modification
-                const newArray = Array.prototype.slice.call(target);
-
-                // Re-proxy all items with correct indices after the operation
-                // This ensures all objects have the proper path references
-                newArray.forEach((item, index) => {
-                    if (item && typeof item === 'object' && !item._isReactive) {
-                        const correctPath = currentPath.concat([index]);
-                        newArray[index] = createProxy(item, correctPath);
-                        newArray[index]._isReactive = true;
-                    }
-                });
-
-                // Update the target array with the newly proxied items
-                // This is necessary because forEach works on a copy
-                for (let i = 0; i < newArray.length; i++) {
-                    target[i] = newArray[i];
-                }
-
-                // Dispatch events for the array change
-                dispatchReactiveChange(currentPath, oldArray, target);
-
-                // Return the result
-                return result;
-            };
-        }
-
-        /**
-         * Handles array length property changes
-         * @param {Array} target - The array being modified
-         * @param {number} newLength - The new length value
-         * @param {Array} currentPath - The path to this array
-         * @returns {boolean} Always returns true
-         */
-        function handleArrayLengthSet(target, newLength, currentPath) {
-            const oldLength = target.length;
-
-            // Only trigger events if length actually changes
-            if (oldLength === newLength) {
-                return true;
-            }
-
-            // Store old array state before truncation
-            const oldArray = Array.prototype.slice.call(target);
-
-            // Perform the truncation
-            target.length = newLength;
-
-            // Dispatch events
-            dispatchReactiveChange(currentPath, oldArray, Array.prototype.slice.call(target));
-
-            return true;
-        }
-
-        /**
-         * Handles scroll property assignments
-         * @param {string} prop - Property name
-         * @param {*} newValue - New scroll value
-         * @param {Array} propertyPath - Full property path
-         */
-        function handleScrollPropertySet(prop, newValue, propertyPath) {
-            // Only handle scroll properties at root level
-            if (propertyPath.length !== 1) {
-                return;
-            }
-
-            if (prop === 'containerScrollX' && container) {
-                container.scrollLeft = newValue;
-            } else if (prop === 'containerScrollY' && container) {
-                container.scrollTop = newValue;
-            } else if (prop === 'browserScrollX') {
-                window.scrollTo(newValue, window.scrollY);
-            } else if (prop === 'browserScrollY') {
-                window.scrollTo(window.scrollX, newValue);
-            }
-        }
-
-        /**
-         * Proxy get trap handler
-         * @param {Object|Array} target - The object being proxied
-         * @param {string|symbol} prop - Property being accessed
-         * @param {Array} currentPath - Current path in the data structure
-         * @returns {*} The property value (potentially wrapped in a proxy)
-         */
-        function proxyGetHandler(target, prop, currentPath) {
-            // Allow proxy.unwrap() to retrieve the unwrapped target
-            if (prop === 'unwrap') {
-                return () => target;
-            }
-
-            const val = target[prop];
-
-            // Handle array methods first
-            if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
-                return createReactiveArrayMethod(target, prop, currentPath);
-            }
-
-            // Check if this property is a getter-only property (computed property)
-            const descriptor = Object.getOwnPropertyDescriptor(target, prop);
-
-            if (descriptor && descriptor.get && !descriptor.set) {
-                // This is a getter-only property (computed), return the value as-is
-                return val;
-            }
-
-            // Don't make functions reactive, just return them as-is
-            if (typeof val === 'function') {
-                return val;
-            }
-
-            // If the value is an object/array and not already reactive, wrap it in a proxy
-            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
-                // Return raw value if the data is already proxied
-                if (val._externalProxy) {
-                    return val;
-                }
-
-                const propertyPath = currentPath.concat([prop]);
-                const proxiedVal = createProxy(val, propertyPath);
-                proxiedVal._isReactive = true;
-
-                // Write directly to target without going through the proxy set trap.
-                // This caches the proxy without firing pac:change.
-                Object.defineProperty(target, prop, {
-                    value: proxiedVal,
-                    writable: true,
-                    enumerable: true,
-                    configurable: true
-                });
-
-                return proxiedVal;
-            }
-
-            return val;
-        }
-
-        /**
-         * Proxy set trap handler
-         * @param {Object|Array} target - The object being proxied
-         * @param {string|symbol} prop - Property being set
-         * @param {*} newValue - New value being assigned
-         * @param {Array} currentPath - Current path in the data structure
-         * @returns {boolean} Always returns true
-         */
-        function proxySetHandler(target, prop, newValue, currentPath) {
-            // Handle array length truncation
-            if (Array.isArray(target) && prop === 'length') {
-                return handleArrayLengthSet(target, newValue, currentPath);
-            }
-
-            // Do nothing when value did not change
-            const oldValue = target[prop];
-            const propertyPath = currentPath.concat([prop]);
-
-            if (oldValue === newValue) {
-                return true;
-            }
-
-            // Special handling for scroll properties
-            handleScrollPropertySet(prop, newValue, propertyPath);
-
-            // Only make reactive and dispatch events for non-underscore properties
-            if (!shouldMakeReactive(prop)) {
-                target[prop] = newValue;
-                return true;
-            }
-
-            // Wrap objects and arrays in proxies when they're assigned
-            if (newValue && typeof newValue === 'object') {
-                target[prop] = createProxy(newValue, propertyPath);
-                target[prop]._isReactive = true;
-            } else {
-                target[prop] = newValue;
-            }
-
-            // Dispatch array-specific event if this is an array assignment
-            dispatchReactiveChange(propertyPath, oldValue, target[prop]);
-
-            return true;
-        }
-
-        /**
-         * Proxy deleteProperty trap handler.
-         * Fires a pac:change event when a reactive property is deleted,
-         * allowing the DOM to update in response.
-         * @param {Object|Array} target - The object being proxied
-         * @param {string|symbol} prop - Property being deleted
-         * @param {Array} currentPath - Current path in the data structure
-         * @returns {boolean} True if deletion succeeded
-         */
-        function proxyDeleteHandler(target, prop, currentPath) {
-            // Property doesn't exist — nothing to do
-            if (!(prop in target)) {
-                return true;
-            }
-
-            // Non-reactive properties: delete silently
-            if (!shouldMakeReactive(prop)) {
-                delete target[prop];
-                return true;
-            }
-
-            // Capture old value before deletion for the change event
-            const oldValue = target[prop];
-            const propertyPath = currentPath.concat([prop]);
-
-            // Perform the actual deletion
-            delete target[prop];
-
-            // Notify the DOM that this property is gone
-            dispatchReactiveChange(propertyPath, oldValue, undefined);
-
-            return true;
-        }
-
-        /**
-         * Creates a reactive proxy for an object or array
-         * @param {Object|Array} obj - The object to make reactive
-         * @param {Array} currentPath - Current path in the data structure
-         * @returns {Object|Array} A proxied version of the object
-         */
-        function createProxy(obj, currentPath) {
-            currentPath = currentPath || [];
-
-            return new Proxy(obj, {
-                get: function(target, prop) {
-                    return proxyGetHandler(target, prop, currentPath);
-                },
-
-                set: function(target, prop, newValue) {
-                    return proxySetHandler(target, prop, newValue, currentPath);
-                },
-
-                deleteProperty: function(target, prop) {
-                    return proxyDeleteHandler(target, prop, currentPath);
-                }
-            });
-        }
-
-        /**
-         * Dispatches a reactive change notification for the specified property path.
-         * This is emitted whenever a reactive property, array, or nested object is
-         * modified, allowing DOM bindings to update in response.
-         * @param {string[]} path - Path to the changed property within the reactive object.
-         * @param {*} oldValue - The property's value before the change.
-         * @param {*} newValue - The property's value after the change.
-         */
-        function dispatchReactiveChange(path, oldValue, newValue) {
-            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
-                detail: { path, oldValue, newValue }
-            }));
-        }
-
-        if (!value || typeof value !== 'object') {
-            return value;
-        }
-
-        return createProxy(value, []);
-    }
-
     // ============================================================================
     // Send PAC-events for changed DOM elements
     // ============================================================================
@@ -1675,8 +1622,13 @@
         /** @private {HTMLElement|null} The container that currently has the pointer inside it */
         _hoveredContainer: null,
 
-        /** @private {HTMLElement|null} The descendant element that currently has the pointer inside it */
-        _hoveredDescendant: null,
+        /**
+         * @private {Element[]} Interactive elements the pointer is currently
+         * over, outermost-first. Tracking the whole chain, not just the
+         * nearest match, lets a bound ancestor and a bound descendant hold
+         * independent hover state — see findInteractiveChain()/syncHoveredChain().
+         */
+        _hoveredChain: [],
 
         /** @private {HTMLElement|null} The container element that has captured mouse input */
         _capturedContainer: null,
@@ -2053,10 +2005,8 @@
                         if (!captured) {
                             // Leaving old container
                             if (self._hoveredContainer) {
-                                // Clean up any lingering descendant hover first
-                                if (self._hoveredDescendant) {
-                                    self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
-                                }
+                                // Clean up any lingering hover chain first
+                                self.syncHoveredChain(self._hoveredContainer, event, []);
 
                                 self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
                             }
@@ -2068,31 +2018,17 @@
                         }
 
                         self._hoveredContainer = currentContainer;
-                        self._hoveredDescendant = null;
+                        self._hoveredChain = [];
                     }
 
-                    // Within the current container, track which child element the
-                    // cursor is over. Fires enter/leave events when that element
-                    // changes, enabling per-element hover effects without requiring
-                    // each child to register its own listeners.
+                    // Track the whole chain of interactive elements under the
+                    // cursor, not just the nearest one, so nested bound
+                    // elements hold independent hover state.
                     if (currentContainer && !captured) {
                         const rawTarget = self.normalizeToElement(event.target);
+                        const newChain = self.findInteractiveChain(rawTarget, currentContainer);
 
-                        // Resolve the descendant: any element other than the
-                        // container root itself is a hovered child
-                        const currentDescendant = self.findInteractiveDescendant(rawTarget, currentContainer);
-
-                        if (self._hoveredDescendant !== currentDescendant) {
-                            if (self._hoveredDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, currentContainer, self._hoveredDescendant);
-                            }
-
-                            if (currentDescendant) {
-                                self.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, currentContainer, currentDescendant);
-                            }
-
-                            self._hoveredDescendant = currentDescendant;
-                        }
+                        self.syncHoveredChain(currentContainer, event, newChain);
                     }
 
                     // Unconditionally dispatch the move event to the current
@@ -2481,11 +2417,8 @@
 
                 // Dispatch leave to whatever container was last hovered
                 if (self._hoveredContainer) {
-                    // Clean up any lingering descendant hover first
-                    if (self._hoveredDescendant) {
-                        self.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, self._hoveredContainer, self._hoveredDescendant);
-                        self._hoveredDescendant = null;
-                    }
+                    // Clean up any lingering hover chain first
+                    self.syncHoveredChain(self._hoveredContainer, event, []);
 
                     // Dispatch mouse leave event
                     self.dispatchMouseMessage(MSG_MOUSELEAVE, event, self._hoveredContainer);
@@ -2833,6 +2766,18 @@
         },
 
         /**
+         * Resolves the reactive abstraction for the component observing the given
+         * element, shared by the intersection/resize observer callbacks below.
+         * @param {Element} element
+         * @returns {Object|null}
+         * @private
+         */
+        _getObservedAbstraction(element) {
+            const component = window.PACRegistry.getByElement(element);
+            return (component && component.abstraction) ? component.abstraction : null;
+        },
+
+        /**
          * Setup intersection and resize observers
          * @returns {void}
          * @private
@@ -2844,22 +2789,22 @@
             this._intersectionObserver = new IntersectionObserver((entries) => {
                 // Process all intersection updates generated in this observer batch
                 entries.forEach(entry => {
-                    // Resolve the framework component associated with the observed element
-                    const component = window.PACRegistry.getByElement(entry.target);
+                    // Resolve the reactive abstraction for the observed element
+                    const abstraction = self._getObservedAbstraction(entry.target);
 
                     // Only update state when a valid abstraction layer exists
-                    if (component && component.abstraction) {
+                    if (abstraction) {
                         // Snapshot of the element’s client rectangle at the time of intersection
                         const rect = entry.boundingClientRect;
 
                         // Whether any portion of the container is visible in the viewport
-                        component.abstraction.containerVisible = entry.isIntersecting;
+                        abstraction.containerVisible = entry.isIntersecting;
 
                         // Treat near-complete intersection as fully visible (tolerates float precision)
-                        component.abstraction.containerFullyVisible = entry.intersectionRatio >= 0.99;
+                        abstraction.containerFullyVisible = entry.intersectionRatio >= 0.99;
 
                         // Persist simplified geometry for downstream layout/logic consumers
-                        component.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
+                        abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
                     }
                 });
             }, {
@@ -2877,18 +2822,18 @@
                     // The DOM element whose size changed
                     const container = entry.target;
 
-                    // Resolve the framework component associated with this element
-                    const component = window.PACRegistry.getByElement(container);
+                    // Resolve the reactive abstraction for this element
+                    const abstraction = self._getObservedAbstraction(container);
 
                     // Only proceed if a valid abstraction layer exists
-                    if (component && component.abstraction) {
+                    if (abstraction) {
                         // Normalize reported size to integer pixels
                         const width = Math.round(entry.contentRect.width);
                         const height = Math.round(entry.contentRect.height);
 
                         // Persist latest container dimensions on the abstraction
-                        component.abstraction.containerWidth = width;
-                        component.abstraction.containerHeight = height;
+                        abstraction.containerWidth = width;
+                        abstraction.containerHeight = height;
 
                         // Determine logical size state used by the message system
                         let sizeType;
@@ -3210,7 +3155,7 @@
         /**
          * True if el is inherently interactive — independent of any click
          * binding. Shared by findInteractiveDescendant() and
-         * Runtime.prototype.findClickBindingElement() so both walks agree on
+         * Runtime.prototype.findEventBindingElement() so both walks agree on
          * what counts as "a control" a click can't pass through.
          * @param {Element} el
          * @returns {boolean}
@@ -3225,20 +3170,35 @@
         },
 
         /**
-         * Returns true if the element participates in the declarative binding system
-         * via data-pac-bind, regardless of binding type or tag.
+         * Returns true if the element carries a data-pac-bind binding of an
+         * interactive type (click, mouseenter/leave, submit, keydown, ...) —
+         * see INTERACTIVE_BINDING_TYPES. A passive reactive binding (css,
+         * text, class, value, ...) does NOT count: an icon bound only via
+         * `data-pac-bind="css: ..."` inside a mouseenter-bound button must
+         * not shadow that button as the hit-test boundary, or the button's
+         * mouseenter/mouseleave would spuriously toggle as the pointer
+         * crosses onto the icon.
          * @param {Element} el - The element to check
-         * @returns {boolean} True if el has a data-pac-bind attribute
+         * @returns {boolean} True if el has an interactive data-pac-bind binding
          * @private
          */
         hasBoundInteraction(el) {
-            return el.hasAttribute('data-pac-bind');
+            const bindingString = el.getAttribute('data-pac-bind');
+
+            if (!bindingString) {
+                return false;
+            }
+
+            return ExpressionCache.parseBindingString(bindingString)
+                .some(binding => INTERACTIVE_BINDING_TYPES.has(binding.type));
         },
 
         /**
          * Finds the nearest interactive element from `target` within `container`,
          * mirroring Win32 child-window hit-testing. Controls are inherently
-         * interactive or carry any data-pac-bind attribute.
+         * interactive or carry an interactive data-pac-bind binding (see
+         * hasBoundInteraction()) — a purely reactive binding like `css:` is
+         * transparent to this walk and does not stop it.
          * Returns null if `target` is outside `container` or no control is found.
          * @param {Element} target - Element that received the event
          * @param {Element} container - Container root to stop at
@@ -3266,6 +3226,69 @@
             // Target is either the container itself or plain
             // non-interactive content — no descendant to report
             return null;
+        },
+
+        /**
+         * Like findInteractiveDescendant(), but collects every match up to
+         * `container` instead of stopping at the nearest one — outermost-first.
+         * Used only by hover-chain tracking, so nested bound elements each get
+         * their own mouseenter/mouseleave transitions.
+         * @param {Element} target - Element that received the event
+         * @param {Element} container - Container root to stop at
+         * @returns {Element[]} Interactive ancestors, outermost-first; empty
+         *   if `target` is outside `container` or no control is found.
+         * @private
+         */
+        findInteractiveChain(target, container) {
+            if (container && !container.contains(target)) {
+                return [];
+            }
+
+            const chain = [];
+            let el = target;
+
+            while (el && el !== container) {
+                if (this.isInherentlyInteractive(el) || this.hasBoundInteraction(el)) {
+                    chain.push(el);
+                }
+
+                el = el.parentElement;
+            }
+
+            // Walked innermost-first; reverse to outermost-first for callers.
+            return chain.reverse();
+        },
+
+        /**
+         * Diffs `this._hoveredChain` against `newChain`, dispatching
+         * MSG_MOUSELEAVE_DESCENDANT for elements that fell off (innermost
+         * first) and MSG_MOUSEENTER_DESCENDANT for elements newly on it
+         * (outermost first) — matching native mouseover/mouseout bubbling
+         * order, so a move landing directly on a deeply nested element still
+         * fires every ancestor's enter outside-in in one go. Stores
+         * `newChain` as the new tracked state.
+         * @param {HTMLElement} container - Container to address the messages to
+         * @param {Event} event - Original DOM event, forwarded into the dispatched messages
+         * @param {Element[]} newChain - Outermost-first chain from findInteractiveChain(),
+         *   or [] to flush the entire current chain
+         * @private
+         */
+        syncHoveredChain(container, event, newChain) {
+            const oldChain = this._hoveredChain;
+
+            for (let i = oldChain.length - 1; i >= 0; i--) {
+                if (!newChain.includes(oldChain[i])) {
+                    this.dispatchMouseMessage(MSG_MOUSELEAVE_DESCENDANT, event, container, oldChain[i]);
+                }
+            }
+
+            for (let i = 0; i < newChain.length; i++) {
+                if (!oldChain.includes(newChain[i])) {
+                    this.dispatchMouseMessage(MSG_MOUSEENTER_DESCENDANT, event, container, newChain[i]);
+                }
+            }
+
+            this._hoveredChain = newChain;
         },
 
         /**
@@ -3332,11 +3355,12 @@
          * @param {number} msgType
          * @param {MouseEvent | TouchEvent | WheelEvent | DragEvent} domEvent
          * @param {HTMLElement} container
-         * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT and
-         *   DROPTARGET_ENTER/LEAVE, the specific descendant/drop-target entered/left.
-         *   Required for the LEAVE variants because they cannot be derived from the
-         *   event after the cursor moves; for the ENTER variants it reuses the
-         *   caller's computed element. Ignored for other message types.
+         * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
+         *   the one chain element that entered/left (syncHoveredChain() calls this
+         *   once per element); for DROPTARGET_ENTER/LEAVE, the specific drop target
+         *   entered/left. Required for the LEAVE variants because they cannot be
+         *   derived from the event after the cursor moves; for the ENTER variants
+         *   it reuses the caller's computed element. Ignored for other message types.
          * @param {Object} [extended]
          * @param {number|null} [wParamOverride] - Bypasses the default wParam
          *   encoding (modifier state) with a caller-supplied value, for message
@@ -3816,18 +3840,14 @@
          * @returns {void}
          */
         invalidateRect(pacId, rect) {
-            // Fetch the container
-            const container = wakaPAC.getContainerByPacId(pacId);
+            // Fetch the canvas container; bail if not found or not a canvas
+            const target = wakaPAC._resolveCanvasTarget(pacId);
 
-            // If not found, bail
-            if (!container) {
+            if (!target) {
                 return;
             }
 
-            // Do nothing if the container is not a canvas
-            if (!(container instanceof HTMLCanvasElement)) {
-                return;
-            }
+            const container = target.container;
 
             // Normalize: null rect means the whole canvas
             const fullRect = {
@@ -4419,20 +4439,30 @@
         },
 
         /**
+         * Parses a comma-separated list of expressions up to (not including) the
+         * given closing token type. Shared by argument lists and array literals.
+         * @param {string} closingType - Token type that ends the list (not consumed)
+         * @returns {Array} Array of parsed expressions
+         */
+        parseCommaSeparatedList(closingType) {
+            const items = [];
+
+            if (!this.check(closingType)) {
+                do {
+                    items.push(this.parseTernary());
+                } while (this.match('COMMA') && !this.check(closingType));
+            }
+
+            return items;
+        },
+
+        /**
          * Parses a comma-separated list of function arguments.
          * Continues parsing until reaching a closing parenthesis or end of input.
          * @returns {Array} Array of parsed argument expressions
          */
         parseArgumentList() {
-            const args = [];
-
-            if (!this.check('RPAREN')) {
-                do {
-                    args.push(this.parseTernary());
-                } while (this.match('COMMA') && !this.check('RPAREN'));
-            }
-
-            return args;
+            return this.parseCommaSeparatedList('RPAREN');
         },
 
         /**
@@ -4445,13 +4475,7 @@
          * @example
          */
         parseArrayLiteral() {
-            const elements = [];
-
-            if (!this.check('RBRACKET')) {
-                do {
-                    elements.push(this.parseTernary());
-                } while (this.match('COMMA') && !this.check('RBRACKET'));
-            }
+            const elements = this.parseCommaSeparatedList('RBRACKET');
 
             this.consume('RBRACKET', 'Expected closing bracket');
 
@@ -4744,7 +4768,7 @@
                     // Handle array methods
                     if (Array.isArray(object)) {
                         return this.evaluateArrayMethod(object, node.method,
-                            node.arguments.map(arg => this.evaluate(arg, context, scope))
+                            this.evaluateArgs(node.arguments, context, scope)
                         );
                     }
 
@@ -4764,7 +4788,7 @@
                             console.warn(`WakaPAC: data property "${node.unit}" is shadowing a registered unit`);
                         }
 
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
 
                         if (Array.isArray(obj)) {
                             return this.evaluateArrayMethod(obj, node.method, args);
@@ -4781,7 +4805,7 @@
                     const unit = _units.get(node.unit);
 
                     if (unit && typeof unit[node.method] === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return unit[node.method](...args);
                     }
 
@@ -4794,7 +4818,7 @@
                     const fn = this.getProperty(node.name, context, scope);
 
                     if (typeof fn === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return fn.call(context, ...args);
                     }
 
@@ -4802,7 +4826,7 @@
                     const importedUnits = scope?.importedUnits;
 
                     if (importedUnits && typeof importedUnits[node.name] === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return importedUnits[node.name](...args);
                     }
 
@@ -4814,6 +4838,17 @@
                 default:
                     return undefined;
             }
+        },
+
+        /**
+         * Evaluates a call node's argument expressions against the given context/scope.
+         * @param {Array} args - AST argument nodes
+         * @param {Object} context - Data context
+         * @param {Object} scope - Local scope (e.g. foreach item/index)
+         * @returns {Array} Evaluated argument values
+         */
+        evaluateArgs(args, context, scope) {
+            return args.map(arg => this.evaluate(arg, context, scope));
         },
 
         /**
@@ -4921,15 +4956,11 @@
          * @returns {Array<*>} The evaluated array, or an empty array if no elements are defined.
          */
         evaluateArrayLiteral(arrayExpr, context, resolverContext = null) {
-            const self = this;
-
             if (!arrayExpr.elements) {
                 return [];
             }
 
-            return arrayExpr.elements.map(function(element) {
-                return self.evaluate(element, context, resolverContext);
-            });
+            return arrayExpr.elements.map(element => this.evaluate(element, context, resolverContext));
         },
 
         /**
@@ -4942,12 +4973,11 @@
          * @returns {Object} The evaluated plain object, or an empty object if no pairs are defined.
          */
         evaluateObjectLiteral: function(node, context, scope) {
-            const self = this;
             const result = {};
 
             if (node.pairs) {
-                node.pairs.forEach(function({ key, value }) {
-                    result[key] = self.evaluate(value, context, scope);
+                node.pairs.forEach(({ key, value }) => {
+                    result[key] = this.evaluate(value, context, scope);
                 });
             }
 
@@ -5263,38 +5293,6 @@
     };
 
     /**
-     * Captures an element's current display value into data-pac-orig-display before hiding.
-     * Reads the inline style first to avoid a forced synchronous layout recalculation.
-     * Falls back to getComputedStyle deferred via requestAnimationFrame when no inline
-     * style is set, so the read never blocks a style write.
-     * @param {Element} element
-     */
-    function captureOriginalDisplay(element) {
-        const inlineDisplay = element.style.display;
-
-        // Inline style is set and visible — capture it directly without touching the layout engine
-        if (inlineDisplay && inlineDisplay !== 'none') {
-            element.setAttribute('data-pac-orig-display', inlineDisplay);
-            return;
-        }
-
-        // No inline style — we'd need getComputedStyle, but calling it before a style write
-        // forces a synchronous layout recalculation. Defer to rAF so the read happens after
-        // the current paint cycle. Store an empty sentinel now so we don't repeat this.
-        if (!inlineDisplay) {
-            element.setAttribute('data-pac-orig-display', '');
-
-            requestAnimationFrame(() => {
-                const computed = getComputedStyle(element).display;
-
-                if (computed && computed !== 'none') {
-                    element.setAttribute('data-pac-orig-display', computed);
-                }
-            });
-        }
-    }
-
-    /**
      * Visible binding - Shows/hides elements by managing display CSS
      * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
@@ -5312,7 +5310,7 @@
         } else {
             if (!element.hasAttribute('data-pac-hidden')) {
                 if (!element.hasAttribute('data-pac-orig-display')) {
-                    captureOriginalDisplay(element);
+                    Utils.captureOriginalDisplay(element);
                 }
 
                 element.style.display = 'none';
@@ -5392,7 +5390,7 @@
      */
     BindingHandlers.class = function(context, element, value) {
         // Object syntax: { active: true, disabled: false }
-        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        if (Utils.isObjectSyntaxValue(value)) {
             for (const className in value) {
                 if (value[className]) {
                     element.classList.add(className);
@@ -5437,7 +5435,7 @@
      */
     BindingHandlers.style = function(context, element, value) {
         // Object syntax: { color: 'red', fontSize: '16px' }
-        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        if (Utils.isObjectSyntaxValue(value)) {
             for (const prop in value) {
                 if (value[prop] != null) {
                     if (prop.startsWith('--')) {
@@ -5460,73 +5458,6 @@
     // ========================================================================
     // DOM UPDATER - Handles ALL binding applications
     // ========================================================================
-
-    /**
-     * Factory that creates a scopeResolver object for ExpressionParser.evaluate().
-     * All scopeResolver instances share the same shape — this avoids repeating the
-     * object literal at every call site and gives the minifier a single declaration to mangle.
-     * @param {Function} normalizeFn - Bound normalizePath function (already bound to correct `this`)
-     * @param {Element} element - The DOM element to use as path scope anchor
-     * @param importedUnits - List of imported units
-     * @returns {{ resolveScopedPath: function(string): * }}
-     */
-    function makeScopeResolver(normalizeFn, element, importedUnits) {
-        return {
-            resolveScopedPath: (path) => normalizeFn(path, element),
-            importedUnits: importedUnits || {}
-        };
-    }
-
-    /**
-     * Builds a scopeResolver anchored to a specific element, using this context's
-     * normalizePath and importedUnits. Exposed separately from evalInScope for call
-     * sites that need to evaluate more than one expression against the same resolver
-     * (e.g. a handler expression plus its fallback-args lookup).
-     * @param {Element} element - The DOM element to use as path scope anchor
-     * @returns {{ resolveScopedPath: function(string): * }}
-     */
-    Runtime.prototype.makeScopeResolverFor = function(element) {
-        return makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
-    };
-
-    /**
-     * Parses and evaluates an expression string against a given abstraction and
-     * scopeResolver. Lowest-level entry point to ExpressionParser — used directly
-     * by call sites that already have a scopeResolver (e.g. a cached one, or one
-     * being shared across multiple evaluations), and by evalInScope for the
-     * common case of building that resolver from a single element.
-     * @param {string} exprString - The expression to parse and evaluate
-     * @param {Object} abstraction - The abstraction (or scoped abstraction) to evaluate against
-     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolverFor()
-     * @returns {*} The evaluated result
-     */
-    Runtime.prototype.evaluateExpression = function(exprString, abstraction, scopeResolver) {
-        return ExpressionParser.evaluate(
-            ExpressionCache.parseExpression(exprString),
-            abstraction,
-            scopeResolver
-        );
-    };
-
-    /**
-     * Convenience wrapper around evaluateExpression for the common case: evaluate
-     * an expression against this context's abstraction (or an explicitly scoped one),
-     * with paths resolved relative to a single element. Builds a fresh scopeResolver
-     * for that element — call sites that need to reuse the same resolver across
-     * multiple evaluations should call makeScopeResolverFor()/evaluateExpression()
-     * directly instead.
-     * @param {string} exprString - The expression to parse and evaluate
-     * @param {Element} element - The DOM element to use as path scope anchor
-     * @param {Object} [abstraction] - Abstraction to evaluate against; defaults to this.abstraction
-     * @returns {*} The evaluated result
-     */
-    Runtime.prototype.evalInScope = function(exprString, element, abstraction) {
-        return this.evaluateExpression(
-            exprString,
-            abstraction || this.abstraction,
-            this.makeScopeResolverFor(element)
-        );
-    };
 
     /**
      * Defines DomUpdater class
@@ -5903,6 +5834,414 @@
         DomUpdateTracker.observeContainer(this.container);
     }
 
+    // ========================================================================
+    // RUNTIME STATIC HELPERS
+    // ========================================================================
+
+    /**
+     * Builds the opaque group entry a wp-if branch's node list uses to
+     * represent a nested wp-if as one atomic unit — see scanCommentBindings
+     * and updateCommentConditional's buried-comment handling, the two
+     * places that ever create one of these: a nested wp-if found as a
+     * direct comment sibling, and one found buried inside a descendant
+     * element respectively. Both need the identical shape, so both call
+     * this rather than each building the object literal itself.
+     * @param {Comment} openMarker
+     * @param {Comment} closeMarker
+     * @returns {{__wpGroup: true, openMarker: Comment, closeMarker: Comment}}
+     */
+    Runtime.makeWpIfGroup = function(openMarker, closeMarker) {
+        return { __wpGroup: true, openMarker, closeMarker };
+    };
+
+    // ========================================================================
+    // REACTIVE PROXY
+    // ========================================================================
+
+    Runtime.makeDeepReactiveProxy = function(value, container) {
+
+        /**
+         * List of all methods allowed on an array
+         * @type {string[]}
+         */
+        const ARRAY_METHODS = ['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse'];
+
+        /**
+         * Determines whether a property should be wrapped in a reactive proxy.
+         * Properties starting with underscore (_) or dollar sign ($) are treated as non-reactive
+         * to avoid performance overhead when storing complex objects, DOM references, or internal state.
+         * @param {string|symbol|number} prop - The property name being accessed or set
+         * @returns {boolean} True if the property should trigger reactivity and DOM updates, false otherwise
+         */
+        function shouldMakeReactive(prop) {
+            return typeof prop === 'string' && !prop.startsWith('_') && !prop.startsWith('$');
+        }
+
+        /**
+         * Creates a wrapped array method that handles reactivity
+         * @param {Array} target - The array being proxied
+         * @param {string} methodName - The array method name (push, pop, etc.)
+         * @param {Array} currentPath - The path to this array in the data structure
+         * @returns {Function} Wrapped array method
+         */
+        function createReactiveArrayMethod(target, methodName, currentPath) {
+            return function() {
+                // Store the old array state before modification
+                const oldArray = Array.prototype.slice.call(target);
+
+                // Apply the array method to get the result
+                const result = Array.prototype[methodName].apply(target, arguments);
+
+                // Get the new array state after modification
+                const newArray = Array.prototype.slice.call(target);
+
+                // Re-proxy all items with correct indices after the operation
+                // This ensures all objects have the proper path references
+                newArray.forEach((item, index) => {
+                    if (item && typeof item === 'object' && !item._isReactive) {
+                        const correctPath = currentPath.concat([index]);
+                        newArray[index] = createProxy(item, correctPath);
+                        newArray[index]._isReactive = true;
+                    }
+                });
+
+                // Update the target array with the newly proxied items
+                // This is necessary because forEach works on a copy
+                for (let i = 0; i < newArray.length; i++) {
+                    target[i] = newArray[i];
+                }
+
+                // Dispatch events for the array change
+                dispatchReactiveChange(currentPath, oldArray, target);
+
+                // Return the result
+                return result;
+            };
+        }
+
+        /**
+         * Handles array length property changes
+         * @param {Array} target - The array being modified
+         * @param {number} newLength - The new length value
+         * @param {Array} currentPath - The path to this array
+         * @returns {boolean} Always returns true
+         */
+        function handleArrayLengthSet(target, newLength, currentPath) {
+            const oldLength = target.length;
+
+            // Only trigger events if length actually changes
+            if (oldLength === newLength) {
+                return true;
+            }
+
+            // Store old array state before truncation
+            const oldArray = Array.prototype.slice.call(target);
+
+            // Perform the truncation
+            target.length = newLength;
+
+            // Dispatch events
+            dispatchReactiveChange(currentPath, oldArray, Array.prototype.slice.call(target));
+
+            return true;
+        }
+
+        /**
+         * Handles scroll property assignments
+         * @param {string} prop - Property name
+         * @param {*} newValue - New scroll value
+         * @param {Array} propertyPath - Full property path
+         */
+        function handleScrollPropertySet(prop, newValue, propertyPath) {
+            // Only handle scroll properties at root level
+            if (propertyPath.length !== 1) {
+                return;
+            }
+
+            if (prop === 'containerScrollX' && container) {
+                container.scrollLeft = newValue;
+            } else if (prop === 'containerScrollY' && container) {
+                container.scrollTop = newValue;
+            } else if (prop === 'browserScrollX') {
+                window.scrollTo(newValue, window.scrollY);
+            } else if (prop === 'browserScrollY') {
+                window.scrollTo(window.scrollX, newValue);
+            }
+        }
+
+        /**
+         * Proxy get trap handler
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being accessed
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {*} The property value (potentially wrapped in a proxy)
+         */
+        function proxyGetHandler(target, prop, currentPath) {
+            // Allow proxy.unwrap() to retrieve the unwrapped target
+            if (prop === 'unwrap') {
+                return () => target;
+            }
+
+            const val = target[prop];
+
+            // Handle array methods first
+            if (Array.isArray(target) && typeof val === 'function' && ARRAY_METHODS.includes(prop)) {
+                return createReactiveArrayMethod(target, prop, currentPath);
+            }
+
+            // Check if this property is a getter-only property (computed property)
+            const descriptor = Object.getOwnPropertyDescriptor(target, prop);
+
+            if (descriptor && descriptor.get && !descriptor.set) {
+                // This is a getter-only property (computed), return the value as-is
+                return val;
+            }
+
+            // Don't make functions reactive, just return them as-is
+            if (typeof val === 'function') {
+                return val;
+            }
+
+            // If the value is an object/array and not already reactive, wrap it in a proxy
+            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+                // Return raw value if the data is already proxied
+                if (val._externalProxy) {
+                    return val;
+                }
+
+                const propertyPath = currentPath.concat([prop]);
+                const proxiedVal = createProxy(val, propertyPath);
+                proxiedVal._isReactive = true;
+
+                // Write directly to target without going through the proxy set trap.
+                // This caches the proxy without firing pac:change.
+                Object.defineProperty(target, prop, {
+                    value: proxiedVal,
+                    writable: true,
+                    enumerable: true,
+                    configurable: true
+                });
+
+                return proxiedVal;
+            }
+
+            return val;
+        }
+
+        /**
+         * Proxy set trap handler
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being set
+         * @param {*} newValue - New value being assigned
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {boolean} Always returns true
+         */
+        function proxySetHandler(target, prop, newValue, currentPath) {
+            // Handle array length truncation
+            if (Array.isArray(target) && prop === 'length') {
+                return handleArrayLengthSet(target, newValue, currentPath);
+            }
+
+            // Do nothing when value did not change
+            const oldValue = target[prop];
+            const propertyPath = currentPath.concat([prop]);
+
+            if (oldValue === newValue) {
+                return true;
+            }
+
+            // Special handling for scroll properties
+            handleScrollPropertySet(prop, newValue, propertyPath);
+
+            // Only make reactive and dispatch events for non-underscore properties
+            if (!shouldMakeReactive(prop)) {
+                target[prop] = newValue;
+                return true;
+            }
+
+            // Wrap objects and arrays in proxies when they're assigned
+            if (newValue && typeof newValue === 'object') {
+                target[prop] = createProxy(newValue, propertyPath);
+                target[prop]._isReactive = true;
+            } else {
+                target[prop] = newValue;
+            }
+
+            // Dispatch array-specific event if this is an array assignment
+            dispatchReactiveChange(propertyPath, oldValue, target[prop]);
+
+            return true;
+        }
+
+        /**
+         * Proxy deleteProperty trap handler.
+         * Fires a pac:change event when a reactive property is deleted,
+         * allowing the DOM to update in response.
+         * @param {Object|Array} target - The object being proxied
+         * @param {string|symbol} prop - Property being deleted
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {boolean} True if deletion succeeded
+         */
+        function proxyDeleteHandler(target, prop, currentPath) {
+            // Property doesn't exist — nothing to do
+            if (!(prop in target)) {
+                return true;
+            }
+
+            // Non-reactive properties: delete silently
+            if (!shouldMakeReactive(prop)) {
+                delete target[prop];
+                return true;
+            }
+
+            // Capture old value before deletion for the change event
+            const oldValue = target[prop];
+            const propertyPath = currentPath.concat([prop]);
+
+            // Perform the actual deletion
+            delete target[prop];
+
+            // Notify the DOM that this property is gone
+            dispatchReactiveChange(propertyPath, oldValue, undefined);
+
+            return true;
+        }
+
+        /**
+         * Creates a reactive proxy for an object or array
+         * @param {Object|Array} obj - The object to make reactive
+         * @param {Array} currentPath - Current path in the data structure
+         * @returns {Object|Array} A proxied version of the object
+         */
+        function createProxy(obj, currentPath) {
+            currentPath = currentPath || [];
+
+            return new Proxy(obj, {
+                get: function(target, prop) {
+                    return proxyGetHandler(target, prop, currentPath);
+                },
+
+                set: function(target, prop, newValue) {
+                    return proxySetHandler(target, prop, newValue, currentPath);
+                },
+
+                deleteProperty: function(target, prop) {
+                    return proxyDeleteHandler(target, prop, currentPath);
+                }
+            });
+        }
+
+        /**
+         * Dispatches a reactive change notification for the specified property path.
+         * This is emitted whenever a reactive property, array, or nested object is
+         * modified, allowing DOM bindings to update in response.
+         * @param {string[]} path - Path to the changed property within the reactive object.
+         * @param {*} oldValue - The property's value before the change.
+         * @param {*} newValue - The property's value after the change.
+         */
+        function dispatchReactiveChange(path, oldValue, newValue) {
+            container.dispatchEvent(new CustomEvent(EV_PAC_CHANGE, {
+                detail: { path, oldValue, newValue }
+            }));
+        }
+
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+
+        return createProxy(value, []);
+    };
+
+    /**
+     * Factory that creates a scopeResolver object for ExpressionParser.evaluate().
+     * All scopeResolver instances share the same shape — this avoids repeating the
+     * object literal at every call site and gives the minifier a single declaration to mangle.
+     * @param {Function} normalizeFn - Bound normalizePath function (already bound to correct `this`)
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @param importedUnits - List of imported units
+     * @returns {{ resolveScopedPath: function(string): * }}
+     */
+    Runtime.makeScopeResolver = function(normalizeFn, element, importedUnits) {
+        return {
+            resolveScopedPath: (path) => normalizeFn(path, element),
+            importedUnits: importedUnits || {}
+        };
+    };
+
+    /**
+     * Parses a comment node as a foreach item marker.
+     * @param {Comment} commentNode - The DOM comment node to parse
+     * @returns {{foreachId: string, index: number, renderIndex: number}|null}
+     */
+    Runtime.parseForeachComment = function(commentNode) {
+        const match = commentNode.textContent.trim().match(FOREACH_INDEX_REGEX);
+
+        if (!match) {
+            return null;
+        }
+
+        return {
+            foreachId: match[1].trim(),
+            index: parseInt(match[2], 10),
+            renderIndex: parseInt(match[3], 10)
+        };
+    };
+
+    // ========================================================================
+    // RUNTIME EXPRESSION EVALUATION
+    // ========================================================================
+
+    /**
+     * Builds a scopeResolver anchored to a specific element, using this context's
+     * normalizePath and importedUnits. Exposed separately from evalInScope for call
+     * sites that need to evaluate more than one expression against the same resolver
+     * (e.g. a handler expression plus its fallback-args lookup).
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @returns {{ resolveScopedPath: function(string): * }}
+     */
+    Runtime.prototype.makeScopeResolverFor = function(element) {
+        return Runtime.makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
+    };
+
+    /**
+     * Parses and evaluates an expression string against a given abstraction and
+     * scopeResolver. Lowest-level entry point to ExpressionParser — used directly
+     * by call sites that already have a scopeResolver (e.g. a cached one, or one
+     * being shared across multiple evaluations), and by evalInScope for the
+     * common case of building that resolver from a single element.
+     * @param {string} exprString - The expression to parse and evaluate
+     * @param {Object} abstraction - The abstraction (or scoped abstraction) to evaluate against
+     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolverFor()
+     * @returns {*} The evaluated result
+     */
+    Runtime.prototype.evaluateExpression = function(exprString, abstraction, scopeResolver) {
+        return ExpressionParser.evaluate(
+            ExpressionCache.parseExpression(exprString),
+            abstraction,
+            scopeResolver
+        );
+    };
+
+    /**
+     * Convenience wrapper around evaluateExpression for the common case: evaluate
+     * an expression against this context's abstraction (or an explicitly scoped one),
+     * with paths resolved relative to a single element. Builds a fresh scopeResolver
+     * for that element — call sites that need to reuse the same resolver across
+     * multiple evaluations should call makeScopeResolverFor()/evaluateExpression()
+     * directly instead.
+     * @param {string} exprString - The expression to parse and evaluate
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @param {Object} [abstraction] - Abstraction to evaluate against; defaults to this.abstraction
+     * @returns {*} The evaluated result
+     */
+    Runtime.prototype.evalInScope = function(exprString, element, abstraction) {
+        return this.evaluateExpression(
+            exprString,
+            abstraction || this.abstraction,
+            this.makeScopeResolverFor(element)
+        );
+    };
+
     // =============================================================================
     // RUNTIME INITIALIZATION METHODS
     // =============================================================================
@@ -6195,7 +6534,7 @@
 
         // Expand partial templates before scanning so injected markup
         // is visible to scanBindings and scanTextBindings
-        expandPartials(parentElement);
+        _expandPartials(parentElement);
 
         // Stage 1: scan for new bound content within this container
         const newBindings = this.scanBindings(parentElement);
@@ -6657,11 +6996,6 @@
                 this.handleDomBlur(event);
                 break;
 
-            case MSG_LCLICK:
-                // Mouse button up events - handle DOM clicks
-                this.handleDomClicks(event);
-                break;
-
             case MSG_SUBMIT:
                 // Form submission events
                 this.handleDomSubmit(event);
@@ -6688,8 +7022,8 @@
                 break;
 
             default: {
-                // dblclick, mousedown/up, contextmenu, wheel, the drag family,
-                // keydown/up, copy/paste — see GENERIC_EVENT_BINDING_MESSAGES.
+                // click, dblclick, mousedown/up, contextmenu, wheel, the drag
+                // family, keydown/up, copy/paste — see GENERIC_EVENT_BINDING_MESSAGES.
                 const eventName = GENERIC_EVENT_BINDING_MESSAGES.get(event.message);
 
                 if (eventName) {
@@ -6715,7 +7049,7 @@
      * executed directly by ExpressionParser.evaluate, so this fallback call is skipped for them.
      * @param {string} bindingTarget - The binding expression to evaluate
      * @param {Object} scopedAbstraction - The abstraction, extended with $event/$item/$index as applicable
-     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolver()
+     * @param {Object} scopeResolver - Scope resolver for path resolution, from Runtime.makeScopeResolver()
      * @param {Array} fallbackArgs - Arguments to invoke the result with when it's a bare function reference
      * @returns {*} The evaluated result
      */
@@ -6730,9 +7064,15 @@
     };
 
     /**
-     * Evaluates a handler binding with $event in scope, resolving paths against the
-     * event target, and reports failures instead of propagating them. Shared by the
-     * click, submit and change bindings, which differ only in the name reported on error.
+     * Evaluates a handler binding with $event (and, inside a foreach, $item/$index)
+     * in scope, resolving paths against the event target, and reports failures
+     * instead of propagating them. Shared by every named event binding — click,
+     * submit, change, and the dblclick/mousedown/mouseup/contextmenu/wheel/
+     * keyboard/clipboard family — which differ only in the name reported on error.
+     *
+     * A failure while resolving foreach context aborts the handler — it does not
+     * fall through to the plain (non-foreach) evaluation below, since both live
+     * in the same try.
      * @param {string} kind - Binding name used in the failure message, e.g. 'click'
      * @param {string} bindingTarget - The binding expression to evaluate
      * @param {CustomEvent} event - The event being handled; its target anchors path resolution
@@ -6740,10 +7080,44 @@
      */
     Runtime.prototype.invokeEventBinding = function(kind, bindingTarget, event) {
         try {
-            // Build scope resolver, shared across the evaluation below
+            // Build scope resolver once, shared across every evaluation below
             const scopeResolver = this.makeScopeResolverFor(event.target);
 
-            // Evaluate expression with $event in scope (supports explicit arguments via parentheses)
+            // Check if the event occurred within a foreach loop context
+            const contextInfo = this.extractClosestForeachContext(event.target);
+
+            if (contextInfo) {
+                // Find the foreach element that contains this event's target
+                const foreachElement = Array.from(this.interpolationMap.entries())
+                    .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
+
+                if (foreachElement) {
+                    // Evaluate the foreach expression to get the source array
+                    const foreachData = this.interpolationMap.get(foreachElement);
+                    const array = this.evaluateExpression(foreachData.foreachExpr, this.abstraction, scopeResolver);
+
+                    // Inject foreach context into scope so expressions can reference $item, $index, $event
+                    const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
+                        $item: array[contextInfo.index],
+                        $index: contextInfo.index,
+                        $event: event
+                    });
+
+                    // Fallback (if bindingTarget is a bare method name): call with (event, item, index).
+                    // event goes first so a handler written for the plain (non-foreach) case still
+                    // receives it correctly if reused inside a foreach without change.
+                    this.evaluateHandlerExpression(
+                        bindingTarget,
+                        scopedAbstraction,
+                        scopeResolver,
+                        [event, array[contextInfo.index], contextInfo.index]
+                    );
+
+                    return;
+                }
+            }
+
+            // Plain case: evaluate expression with $event in scope
             const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
                 $event: event
             });
@@ -6758,12 +7132,12 @@
     /**
      * Finds the nearest ancestor (inclusive) bound for `bindingType` from
      * `target`, stopping at the container boundary or the first inherently
-     * interactive element. Shared by every event binding — click and the
-     * generic mechanism for dblclick/mousedown/mouseup/contextmenu/wheel/
-     * the drag family/keydown/keyup/copy/paste alike — so a decorative descendant
-     * (e.g. an icon inside a bound button) still resolves to its owning
-     * control, without ever inheriting a handler belonging to some other,
-     * unrelated control further up the tree.
+     * interactive element. Shared by every event binding — click, dblclick,
+     * mousedown/mouseup, contextmenu, wheel, the drag family, keydown/keyup,
+     * copy/paste alike — so a decorative descendant (e.g. an icon inside a
+     * bound button) still resolves to its owning control, without ever
+     * inheriting a handler belonging to some other, unrelated control
+     * further up the tree.
      *
      * Callers pass `event.realTarget` rather than `event.target` because
      * target may already be resolved by findInteractiveDescendant() for
@@ -6796,96 +7170,6 @@
 
         return null;
     };
-
-    /**
-     * Finds the nearest click-bound ancestor from `event.realTarget`.
-     * @param {Element|Node} target - The element that was clicked (event.realTarget)
-     * @returns {Element|null} The nearest element with a click binding, or null
-     */
-    Runtime.prototype.findClickBindingElement = function(target) {
-        return this.findEventBindingElement(target, 'click');
-    };
-
-    /**
-     * Handles DOM click events by executing bound abstraction methods.
-     * Supports both regular click handlers and foreach context-aware handlers.
-     * @param {CustomEvent} event - Custom event containing click details
-     * @param {Element} event.realTarget - The literal DOM element that was clicked
-     * @throws {Error} Logs errors if method execution fails
-     */
-    Runtime.prototype.handleDomClicks = function(event) {
-        // Resolve the element the click binding actually lives on, from the
-        // literal click point (event.realTarget) — see
-        // findClickBindingElement()'s own docblock for why this stays
-        // decoupled from the raw-layer's event.target resolution, and why
-        // it can't be a plain interpolationMap.get(event.realTarget) lookup
-        // either.
-        const clickElement = this.findClickBindingElement(event.realTarget);
-
-        if (!clickElement) {
-            return;
-        }
-
-        // If the click lands on a decorative child (e.g. an icon inside a
-        // button), treat the control as the target. This shadows the native
-        // Event.target getter so handlers consistently see the bound control
-        // rather than the clicked descendant.
-        Object.defineProperty(event, 'target', {
-            value: clickElement,
-            enumerable: true,
-            configurable: true
-        });
-
-        const mappingData = this.interpolationMap.get(clickElement);
-        const bindingTarget = mappingData.bindings.click.target;
-
-        try {
-            // Check if click occurred within a foreach loop context
-            const contextInfo = this.extractClosestForeachContext(event.target);
-
-            if (contextInfo) {
-                // Find the foreach element that contains this click target
-                const foreachElement = Array.from(this.interpolationMap.entries())
-                    .find(([, data]) => data.foreachId === contextInfo.foreachId)?.[0];
-
-                if (foreachElement) {
-                    // Build scope resolver once, shared across all evaluations below
-                    // and evaluate the foreach expression to get the source array
-                    const scopeResolver = this.makeScopeResolverFor(event.target);
-                    const foreachData = this.interpolationMap.get(foreachElement);
-                    const array = this.evaluateExpression(foreachData.foreachExpr, this.abstraction, scopeResolver);
-
-                    // Inject foreach context into scope so expressions can reference $item, $index, $event
-                    const scopedAbstraction = Object.assign(Object.create(this.abstraction), {
-                        $item: array[contextInfo.index],
-                        $index: contextInfo.index,
-                        $event: event
-                    });
-
-                    // Fallback (if bindingTarget is a bare method name): call with (event, item, index).
-                    // event goes first so a handler written for the plain (non-foreach) case still
-                    // receives it correctly if reused inside a foreach without change.
-                    this.evaluateHandlerExpression(
-                        bindingTarget,
-                        scopedAbstraction,
-                        scopeResolver,
-                        [event, array[contextInfo.index], contextInfo.index]
-                    );
-
-                    return;
-                }
-            }
-        } catch (error) {
-            console.warn(`Error executing click binding '${bindingTarget}':`, error);
-
-            // A failure while resolving foreach context aborts the handler — it does
-            // not fall through to the simple case, matching the original behaviour
-            return;
-        }
-
-        // Simple case: evaluate expression with $event in scope
-        this.invokeEventBinding('click', bindingTarget, event);
-    }
 
     /**
      * Handles DOM submit events by executing bound abstraction methods.
@@ -6931,33 +7215,46 @@
     };
 
     /**
-     * Handles every other named event binding type — dblclick, mousedown,
-     * mouseup, contextmenu, wheel, the drag family, keydown, keyup, copy,
-     * paste — by executing the corresponding data-pac-bind handler on its
-     * bound element. Reuses the framework's existing listener and target
-     * resolution for these message types (see CONTROL_TARGET_MESSAGES and
-     * the keyboard/clipboard setup); no separate DOM listener is registered
-     * for any of them, so this can never fire twice for the same event.
+     * Handles every named event binding type with no bespoke pre/post
+     * processing of its own — click, dblclick, mousedown, mouseup,
+     * contextmenu, wheel, keydown, keyup, copy, paste — by executing the
+     * corresponding data-pac-bind handler on its bound element. Reuses the
+     * framework's existing listener and target resolution for these message
+     * types (see CONTROL_TARGET_MESSAGES and the keyboard/clipboard setup);
+     * no separate DOM listener is registered for any of them, so this can
+     * never fire twice for the same event.
      *
-     * Walks from event.realTarget via findEventBindingElement(), exactly
-     * like click, so a decorative descendant (e.g. an icon inside a bound
-     * button) still resolves to its owning control, and shadows $event.target
-     * to that control the same way click does.
-     * @param {string} bindingType - e.g. 'dblclick', 'keydown', 'wheel'
+     * Walks from event.realTarget via findEventBindingElement() so a
+     * decorative descendant (e.g. an icon inside a bound button) still
+     * resolves to its owning control, and shadows $event.target to that
+     * control. invokeEventBinding() also injects foreach context ($item/
+     * $index) when the bound element sits inside a foreach.
+     * @param {string} bindingType - e.g. 'click', 'dblclick', 'keydown', 'wheel'
      * @param {CustomEvent} event - The PAC message event
      * @returns {void}
      */
     Runtime.prototype.handleGenericEventBinding = function(bindingType, event) {
+        // Resolve the element the binding actually lives on, from the literal
+        // event point (event.realTarget) — see findEventBindingElement()'s own
+        // docblock for why this stays decoupled from the raw-layer's
+        // event.target resolution.
         const boundElement = this.findEventBindingElement(event.realTarget, bindingType);
 
         if (!boundElement) {
             return;
         }
 
+        // If the event lands on a decorative child (e.g. an icon inside a
+        // button), treat the control as the target. This shadows the native
+        // Event.target getter so handlers consistently see the bound control
+        // rather than the literal descendant. Skipped when already equal, to
+        // avoid an unnecessary defineProperty call on the common case.
         if (event.target !== boundElement) {
             Object.defineProperty(event, 'target', { value: boundElement, enumerable: true, configurable: true });
         }
 
+        // Fetch binding target and invoke — invokeEventBinding() handles
+        // $event scope, foreach context, and the bare-method-reference fallback.
         const bindingTarget = this.interpolationMap.get(boundElement).bindings[bindingType].target;
         this.invokeEventBinding(bindingType, bindingTarget, event);
     };
@@ -7445,8 +7742,16 @@
             // result actually differs before doing any work.
             const array = directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
 
+            // oldValue is only "this array before the change" when the
+            // changed path *is* the array itself (mutator call/reassignment);
+            // for an ancestor or computed/bracket match it belongs to a
+            // different property, so only pass it through in that one case.
+            const previousArray = (pathString === mappingData.foreachExpr || pathString === mappingData.sourceArray)
+                ? event.detail.oldValue
+                : undefined;
+
             // Perform the rendering
-            this.renderForeach(element, array);
+            this.renderForeach(element, array, previousArray);
         }
     };
 
@@ -7766,156 +8071,6 @@
     };
 
     /**
-     * Collects <script type="text/template" data-pac-partial="name"> elements into
-     * _partials once on the first wakaPAC() call. Uses textContent so {{> name}}
-     * is never entity-encoded.
-     * @returns {void}
-     */
-    function collectPartials() {
-        if (_partialsCollected) {
-            return;
-        }
-
-        _partialsCollected = true;
-
-        // Find all partials
-        document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
-            // Extract name
-            const name = el.getAttribute(PAC_PARTIAL_ATTR);
-
-            // If none passed, ignore
-            if (!name) {
-                return;
-            }
-
-            // If already defined, warn the user and ignore
-            if (_partials.has(name)) {
-                console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
-                return;
-            }
-
-            // textContent gives the raw unencoded string — > is never encoded
-            // inside a script tag, so {{> name}} injection syntax is preserved
-            _partials.set(name, el.textContent);
-        });
-    }
-
-    /**
-     * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
-     * Normalizes {{&gt; to {{> first to handle strings captured via element.innerHTML.
-     * @param {string} html
-     * @param {number} [depth=0]
-     * @returns {string}
-     */
-    function expandPartialsInString(html, depth) {
-        if (_partials.size === 0) {
-            return html;
-        }
-
-        depth = depth || 0;
-
-        if (depth >= 10) {
-            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
-            return html;
-        }
-
-        // Normalize &gt; encoding from innerHTML-captured templates
-        html = html.replace(/\{\{&gt;/g, '{{>');
-
-        // Quick check before paying regex cost
-        if (html.indexOf('{{>') === -1) {
-            return html;
-        }
-
-        PARTIAL_INJECT_REGEX.lastIndex = 0;
-
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name, root) {
-            if (!_partials.has(name)) {
-                console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
-                return match;
-            }
-
-            // Extract the body
-            let body = _partials.get(name);
-
-            // If a root argument was supplied, substitute "$." with "root." throughout
-            // the partial body so property paths resolve against the passed object.
-            if (root) {
-                PARTIAL_PARAM_REGEX.lastIndex = 0;
-                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
-            }
-
-            return body;
-        });
-
-        // Recurse only if something was replaced and depth allows
-        PARTIAL_INJECT_REGEX.lastIndex = 0;
-
-        if (expanded !== html && expanded.indexOf('{{>') !== -1) {
-            return expandPartialsInString(expanded, depth + 1);
-        }
-
-        return expanded;
-    }
-
-    /**
-     * Expands {{> name}} injections inside a live DOM element by walking its
-     * text nodes (textContent is never entity-encoded, unlike innerHTML).
-     * @param {Element} element
-     * @returns {void}
-     */
-    function expandPartials(element) {
-        if (_partials.size === 0) {
-            return;
-        }
-
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        const hits = [];
-
-        let node;
-        while ((node = walker.nextNode())) {
-            if (node.textContent.indexOf('{{>') !== -1) {
-                hits.push(node);
-            }
-        }
-
-        if (hits.length === 0) {
-            return;
-        }
-
-        hits.forEach(function(textNode) {
-            const expanded = expandPartialsInString(textNode.textContent, 0);
-
-            if (expanded === textNode.textContent) {
-                return;
-            }
-
-            // Replace the text node with parsed HTML nodes.
-            // Create a temporary container, parse the expanded HTML into it,
-            // then insert its children before the text node and remove it.
-            const temp = document.createElement('template');
-            temp.innerHTML = expanded;
-            const fragment = temp.content;
-            textNode.parentNode.replaceChild(fragment, textNode);
-        });
-    }
-
-    /**
-     * Calls scanAndRegisterNewElements on every Element node in the given array.
-     * Extracted as a module-level helper so it is defined once rather than
-     * recreated as a closure on each updateCommentConditional call.
-     * @param {Runtime} context
-     * @param {Node[]} nodes
-     */
-    function scanElementNodes(context, nodes) {
-        nodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-                context.scanAndRegisterNewElements(node);
-            }
-        });
-    }
-
-    /**
      * Scans the container for comment nodes with wp-if conditionals
      * Builds mapping similar to element bindings but for comment-based conditionals
      * @param {Element} parentElement - The parent element to scan
@@ -8043,7 +8198,7 @@
                             node = node.nextSibling;
                         } while (node && depth > 0);
 
-                        activeBucket.push(makeWpIfGroup(openMarker, closeMarker));
+                        activeBucket.push(Runtime.makeWpIfGroup(openMarker, closeMarker));
                         continue;
                     }
                 }
@@ -8054,7 +8209,7 @@
                 // rescanning. Bindings not yet registered are ignored and handled when
                 // they are discovered.
                 if (node.nodeType === Node.ELEMENT_NODE) {
-                    const buried = findRegisteredWpIfComments([node], commentBindingMap);
+                    const buried = _findRegisteredWpIfComments([node], commentBindingMap);
 
                     if (buried.length > 0) {
                         activeBranch.buriedWpIfs = (activeBranch.buriedWpIfs || []).concat(buried);
@@ -8150,7 +8305,7 @@
             // Scan the newly shown branch once to register any reactive bindings
             // inside content that started hidden
             if (winningBranch !== -1 && !branches[winningBranch].scanned) {
-                scanElementNodes(this, branches[winningBranch].nodes);
+                _scanElementNodes(this, branches[winningBranch].nodes);
                 branches[winningBranch].scanned = true;
             }
 
@@ -8164,7 +8319,7 @@
                 for (let i = 0; i < buriedOpenMarkers.length; i++) {
                     const openMarker = buriedOpenMarkers[i];
                     const buriedMapping = this.commentBindingMap.get(openMarker);
-                    revealedGroups.push(makeWpIfGroup(openMarker, buriedMapping.closingComment));
+                    revealedGroups.push(Runtime.makeWpIfGroup(openMarker, buriedMapping.closingComment));
                 }
             }
 
@@ -8175,38 +8330,6 @@
             console.warn('WakaPAC: Error processing wp-if comment directive:', mappingData.expression, error);
         }
     };
-
-    /**
-     * Finds registered `wp-if` open comments buried inside descendant
-     * elements rather than appearing as direct comment siblings. A comment
-     * is identified as a `wp-if` by its presence in `map`; unregistered
-     * bindings are ignored and discovered by the normal scan.
-     * @param {Node[]} nodes
-     * @param {Map<Comment, Object>} map
-     * @returns {Comment[]}
-     */
-    function findRegisteredWpIfComments(nodes, map) {
-        const found = [];
-
-        for (let i = 0; i < nodes.length; i++) {
-            const node = nodes[i];
-
-            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
-                continue;
-            }
-
-            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
-            let commentNode;
-
-            while ((commentNode = walker.nextNode())) {
-                if (map.has(commentNode)) {
-                    found.push(commentNode);
-                }
-            }
-        }
-
-        return found;
-    }
 
     /**
      * Reconciles bindings inside wp-if groups that have just become visible.
@@ -8367,7 +8490,7 @@
         this.resolveAliases(this.originalAbstraction);
 
         // Create reactive proxy directly from original abstraction
-        const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
+        const proxiedReactive = Runtime.makeDeepReactiveProxy(this.originalAbstraction, this.container);
 
         // Copy all methods from the original abstraction to the reactive proxy (except the special
         // 'computed' property which gets handled separately), but critically: rebind their 'this'
@@ -8668,15 +8791,198 @@
     }
 
     /**
+     * Finds the root element of a single foreach item by its original array
+     * index — the first element following that item's opening boundary
+     * comment (see buildForeachItemHTML / FOREACH_INDEX_REGEX).
+     * @param {Element} foreachElement - The foreach container
+     * @param {string} foreachId - The foreach's own id
+     * @param {number} index - The item's original array index
+     * @returns {Element|null} The item's root element, or null if not found
+     */
+    Runtime.prototype.findForeachItemElement = function(foreachElement, foreachId, index) {
+        let node = foreachElement.firstChild;
+
+        while (node) {
+            if (node.nodeType === Node.COMMENT_NODE) {
+                const context = Runtime.parseForeachComment(node);
+
+                if (context && context.foreachId === foreachId && context.index === index) {
+                    let sibling = node.nextSibling;
+
+                    while (sibling && sibling.nodeType !== Node.ELEMENT_NODE) {
+                        sibling = sibling.nextSibling;
+                    }
+
+                    return sibling;
+                }
+            }
+
+            node = node.nextSibling;
+        }
+
+        return null;
+    };
+
+    /**
+     * Captures which element inside a foreach item currently has focus, if
+     * any, so renderForeach's innerHTML rebuild — which unavoidably destroys
+     * and recreates every item's DOM — can hand focus back to the equivalent
+     * element afterward instead of silently dropping it. The common case is
+     * an `<input>` the user is still typing into when editing that same item
+     * (through its own two-way binding) triggers the rebuild.
+     * @param {Element} foreachElement - The foreach container about to be rebuilt
+     * @param {Array} [previousArray] - Pre-mutation snapshot of the bound array,
+     *   if available (see handleForeachRebuildForChange) — lets the focused
+     *   item be found again by identity even if its position moved.
+     * @returns {{foreachId: string, index: number, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}|null}
+     *   A snapshot to hand to restoreForeachFocus, or null if nothing inside
+     *   foreachElement currently has focus.
+     */
+    Runtime.prototype.captureForeachFocus = function(foreachElement, previousArray) {
+        const active = document.activeElement;
+
+        if (!active || active === foreachElement || !foreachElement.contains(active)) {
+            return null;
+        }
+
+        // Walk up to the direct child of foreachElement that owns `active` —
+        // the item's root element, however deeply active is nested inside it
+        // (including inside a foreach of its own). Resolving context from
+        // this element rather than from `active` directly means an inner
+        // foreach's own context can never be mistaken for this (outer) one.
+        let itemRoot = active;
+
+        while (itemRoot && itemRoot.parentElement !== foreachElement) {
+            itemRoot = itemRoot.parentElement;
+        }
+
+        if (!itemRoot) {
+            return null;
+        }
+
+        const context = this.extractClosestForeachContext(itemRoot);
+
+        if (!context) {
+            return null;
+        }
+
+        // Path of child-node indices (not just elements — see restoreForeachFocus)
+        // from the item's root down to the focused element. The item's template
+        // markup is static — only the bound values inside it differ between
+        // renders — so this position reliably identifies "the same slot in the
+        // item" in whatever gets rendered in its place.
+        const path = [];
+        let node = active;
+
+        while (node && node !== itemRoot) {
+            const parent = node.parentElement;
+
+            if (!parent) {
+                return null;
+            }
+
+            path.unshift(Array.prototype.indexOf.call(parent.childNodes, node));
+            node = parent;
+        }
+
+        // Resolve the focused item by object identity (same technique
+        // buildIndexMap uses for filtered/sorted views) so it can be found
+        // again even if an insert/removal elsewhere shifts its position.
+        // hasItem is tracked separately from item's value so a legitimately
+        // undefined item (e.g. a foreach over primitives) isn't mistaken for
+        // "no snapshot was available" in restoreForeachFocus.
+        const hasItem = Array.isArray(previousArray) && context.index < previousArray.length;
+
+        return {
+            foreachId: context.foreachId,
+            index: context.index,
+            hasItem: hasItem,
+            item: hasItem ? previousArray[context.index] : undefined,
+            path: path,
+            selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+            selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+        };
+    };
+
+    /**
+     * Restores focus captured by captureForeachFocus once a foreach rebuild
+     * has finished. A no-op if nothing was captured, or if the same item no
+     * longer exists (e.g. it was removed by the change that triggered this
+     * rebuild).
+     * @param {Element} foreachElement - The just-rebuilt foreach container
+     * @param {?{foreachId: string, index: number, hasItem: boolean, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}} snapshot
+     *   The value returned by captureForeachFocus, or null.
+     * @param {Array} [sourceArray] - The bound array's current contents, used
+     *   to relocate a captured item by identity; falls back to the captured
+     *   (possibly stale) index without it.
+     */
+    Runtime.prototype.restoreForeachFocus = function(foreachElement, snapshot, sourceArray) {
+        if (!snapshot) {
+            return;
+        }
+
+        let index = snapshot.index;
+
+        // Prefer relocating by identity; fall back to the captured position.
+        if (snapshot.hasItem && Array.isArray(sourceArray)) {
+            const resolvedIndex = sourceArray.indexOf(snapshot.item);
+
+            if (resolvedIndex === -1) {
+                // The item itself is gone — nothing sensible to refocus.
+                return;
+            }
+
+            index = resolvedIndex;
+        }
+
+        const itemRoot = this.findForeachItemElement(foreachElement, snapshot.foreachId, index);
+
+        if (!itemRoot) {
+            return;
+        }
+
+        // childNodes, not children: a wp-if sibling toggles by swapping its
+        // node for a same-position placeholder comment (see DomUpdater
+        // hideNode/showNode) rather than removing it, so childNodes indices
+        // stay stable across the toggle while children (elements-only)
+        // indices would shift — matching how the path was built.
+        let target = itemRoot;
+
+        for (let i = 0; i < snapshot.path.length && target; i++) {
+            target = target.childNodes[snapshot.path[i]] || null;
+        }
+
+        if (!target || typeof target.focus !== 'function') {
+            return;
+        }
+
+        target.focus();
+
+        if (snapshot.selectionStart !== null && typeof target.setSelectionRange === 'function') {
+            try {
+                target.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+            } catch (_e) {
+                // Throws for input types that don't support a selection range
+                // (e.g. type="number") — focus is already restored, which is
+                // the part that matters.
+            }
+        }
+    };
+
+    /**
      * Renders a foreach loop's DOM content from an already-evaluated array.
      * Evaluating and validating the foreach expression is the caller's job (see
      * evaluateForeachArray / getChangedForeachArray) — this function only renders
      * whatever array it's handed, or does nothing if not handed one.
      * @param {Element} foreachElement - DOM element with foreach binding
      * @param {Array} array - The array to render; if falsy, this is a no-op
+     * @param {Array} [previousArray] - Pre-mutation snapshot of the bound
+     *   array, if available — passed through to captureForeachFocus (see
+     *   handleForeachRebuildForChange). Omit for an initial render; focus is
+     *   then only preserved by position.
      * @returns {void}
      */
-    Runtime.prototype.renderForeach = function(foreachElement, array) {
+    Runtime.prototype.renderForeach = function(foreachElement, array, previousArray) {
         const self = this;
         const mappingData = this.interpolationMap.get(foreachElement);
 
@@ -8693,6 +8999,10 @@
         if (!array) {
             return;
         }
+
+        // Snapshot which element (if any) currently has focus inside this
+        // foreach, before its DOM is torn down below — see captureForeachFocus.
+        const focusSnapshot = this.captureForeachFocus(foreachElement, previousArray);
 
         // Clean up old elements from maps before clearing innerHTML
         // This prevents memory leaks when re-rendering dynamic content
@@ -8723,7 +9033,7 @@
 
             // Expand partial templates in the foreach template string once, up front,
             // rather than on every iteration — partials are static markup
-            const expandedTemplate = expandPartialsInString(mappingData.template);
+            const expandedTemplate = _expandPartialsInString(mappingData.template);
 
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
@@ -8769,6 +9079,11 @@
             // This is where the "natural retry" happens - nested foreach elements found here
             // will now have proper parent context available for successful rendering
             this.scanAndRegisterNewElements(foreachElement);
+
+            // Hand focus back to the equivalent element, if something inside
+            // this foreach had it before the rebuild — see captureForeachFocus.
+            // sourceArray matches the indexing scheme buildIndexMap used above.
+            this.restoreForeachFocus(foreachElement, focusSnapshot, sourceArray);
 
             // After rebuilding children, sync <select> DOM state back to the model.
             // When a foreach replaces <option> elements inside a <select>, the browser
@@ -9185,25 +9500,6 @@
         }
 
         return elementsToUpdate;
-    };
-
-    /**
-     * Parses a comment node as a foreach item marker.
-     * @param {Comment} commentNode - The DOM comment node to parse
-     * @returns {{foreachId: string, index: number, renderIndex: number}|null}
-     */
-    Runtime.parseForeachComment = function(commentNode) {
-        const match = commentNode.textContent.trim().match(FOREACH_INDEX_REGEX);
-
-        if (!match) {
-            return null;
-        }
-
-        return {
-            foreachId: match[1].trim(),
-            index: parseInt(match[2], 10),
-            renderIndex: parseInt(match[3], 10)
-        };
     };
 
     /**
@@ -9691,11 +9987,7 @@
             this.isRecording = true;
 
             // Initialize points array with starting position
-            this.gesturePoints = [{
-                x: event.clientX,
-                y: event.clientY,
-                time: Date.now()
-            }];
+            this.gesturePoints = [this._capturePoint(event)];
 
             // Record when gesture started for duration calculation
             this.startTime = Date.now();
@@ -9719,12 +10011,17 @@
             // Only record if moved enough distance to avoid recording jitter
             // This creates a cleaner path with fewer redundant points
             if (distance >= this.MIN_DISTANCE) {
-                this.gesturePoints.push({
-                    x: event.clientX,
-                    y: event.clientY,
-                    time: Date.now()
-                });
+                this.gesturePoints.push(this._capturePoint(event));
             }
+        },
+
+        /**
+         * Captures a gesture point's coordinates and timestamp from a mouse event.
+         * @param {MouseEvent} event
+         * @returns {{x: number, y: number, time: number}}
+         */
+        _capturePoint(event) {
+            return { x: event.clientX, y: event.clientY, time: Date.now() };
         },
 
         /**
@@ -10148,6 +10445,14 @@
             // Step 2: Build hierarchy map with parent and children for each component
             const hierarchyMap = new Map();
 
+            const getOrCreateEntry = (key) => {
+                if (!hierarchyMap.has(key)) {
+                    hierarchyMap.set(key, { parent: null, children: [] });
+                }
+
+                return hierarchyMap.get(key);
+            };
+
             this.components.forEach(component => {
                 const container = component.container;
 
@@ -10167,22 +10472,11 @@
                 }
 
                 // Initialize hierarchy entry for this component
-                if (!hierarchyMap.has(container)) {
-                    hierarchyMap.set(container, { parent: null, children: [] });
-                }
-
-                const hierarchy = hierarchyMap.get(container);
-                hierarchy.parent = parent;
+                getOrCreateEntry(container).parent = parent;
 
                 // Add this component as child to its parent
                 if (parent) {
-                    // Ensure parent has hierarchy entry
-                    if (!hierarchyMap.has(parent.container)) {
-                        hierarchyMap.set(parent.container, { parent: null, children: [] });
-                    }
-
-                    // Add to parent's children array
-                    hierarchyMap.get(parent.container).children.push(component);
+                    getOrCreateEntry(parent.container).children.push(component);
                 }
             });
 
@@ -10549,7 +10843,7 @@
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
         // Collect data-pac-partial elements from the document (once only)
-        collectPartials();
+        _collectPartials();
 
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
@@ -10882,6 +11176,27 @@
     };
 
     /**
+     * Resolves a target container and builds its message object, shared by
+     * postMessage/sendMessage. Returns null if the container doesn't exist,
+     * so the caller can drop the message.
+     * @param {string} pacId - Target container's data-pac-id attribute value
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} extended - Additional data stored in event.detail for custom use cases
+     * @returns {{container: Element, event: CustomEvent}|null}
+     */
+    wakaPAC._prepareMessage = function(pacId, messageId, wParam, lParam, extended) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container) {
+            return null;
+        }
+
+        return { container, event: this.createPacMessage(messageId, wParam, lParam, extended) };
+    };
+
+    /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 PostMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
@@ -10891,23 +11206,17 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.postMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
-        // Resolve the target container from the registry.
-        // If the container does not exist, the message is dropped.
-        const container = this.getContainerByPacId(pacId);
+        const prepared = this._prepareMessage(pacId, messageId, wParam, lParam, extended);
 
-        if (!container) {
+        if (!prepared) {
             return;
         }
-
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not deliver the message by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
 
         // Dispatch the message through the DOM event system.
         // Delivery is asynchronous and follows normal event routing semantics.
         setTimeout(function() {
-            if (container.isConnected) {
-                DomUpdateTracker.dispatchToContainer(container, event);
+            if (prepared.container.isConnected) {
+                DomUpdateTracker.dispatchToContainer(prepared.container, prepared.event);
             }
         }, 0);
     };
@@ -10923,20 +11232,15 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
-        // Resolve the target container. If it does not exist, the message is dropped.
-        const container = this.getContainerByPacId(pacId);
+        const prepared = this._prepareMessage(pacId, messageId, wParam, lParam, extended);
 
-        if (!container) {
+        if (!prepared) {
             return;
         }
 
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not dispatch anything by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
         // Invoke the message procedure directly.
         // This call is synchronous and executes immediately in the current call stack.
-        DomUpdateTracker.dispatchToContainer(container, event);
+        DomUpdateTracker.dispatchToContainer(prepared.container, prepared.event);
     };
 
     /**
@@ -11440,7 +11744,7 @@
         }
 
         // Store the data
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         _accelTables.set(tableKey, parsed);
     };
 
@@ -11449,7 +11753,7 @@
      * @param {string|null} pacId — Container pac-id, or null for global.
      */
     wakaPAC.destroyAcceleratorTable = function(pacId) {
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         _accelTables.delete(tableKey);
     };
 
@@ -11462,7 +11766,7 @@
      * @returns {Array<{key: string, cmdId: number}>|null}
      */
     wakaPAC.getAcceleratorTable = function(pacId) {
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         const table = _accelTables.get(tableKey);
         return table ? table.map(e => ({ key: e.key, cmdId: e.cmdId })) : null;
     };
@@ -11582,17 +11886,28 @@
      * @param {string} pacId
      * @returns {RenderingContext|null}
      */
-    wakaPAC.getDC = function(pacId) {
+    wakaPAC._resolveCanvasTarget = function(pacId) {
         const container = this.getContainerByPacId(pacId);
 
         if (!container || !(container instanceof HTMLCanvasElement)) {
             return null;
         }
 
-        // Resolve context attributes from component config
         const pacContext = window.PACRegistry.get(pacId);
         const contextType = container.dataset.pacContext || '2d';
         const attributes = pacContext?.config?.dcAttributes;
+
+        return { container, contextType, attributes };
+    };
+
+    wakaPAC.getDC = function(pacId) {
+        const target = this._resolveCanvasTarget(pacId);
+
+        if (!target) {
+            return null;
+        }
+
+        const { container, contextType, attributes } = target;
 
         // Delegate context acquisition to getDCFromElement
         const ctx = this.getDCFromElement(container, attributes);
@@ -11671,17 +11986,13 @@
      * @returns {RenderingContext|null}
      */
     wakaPAC.createCompatibleDC = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return null;
         }
 
-        const contextType = container.dataset.pacContext || '2d';
-        const pacContext = window.PACRegistry.get(pacId);
-        const attributes = pacContext?.config?.dcAttributes;
-
-        return _createCanvas(container.width, container.height, contextType, attributes);
+        return _createCanvas(target.container.width, target.container.height, target.contextType, target.attributes);
     };
 
     /**
@@ -11844,13 +12155,13 @@
      * @param {number} height - New backing store height in pixels
      */
     wakaPAC.resizeCanvas = function(pacId, width, height) {
-        // Fetch the container
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        // resizeCanvas is only meaningful for canvas containers
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return;
         }
+
+        const { container, contextType } = target;
 
         // Skip if dimensions are unchanged — assigning to width/height clears the
         // backing store even when the value is the same, so avoid it entirely
@@ -11865,8 +12176,6 @@
         // Schedule a repaint for 2D canvases — the canvas content is invalid after
         // every resize. Non-2D canvases (e.g. WebGL, via a plugin) drive their own
         // render loop and do not use the dirty rect / MSG_PAINT mechanism.
-        const contextType = container.dataset.pacContext || '2d';
-
         if (contextType === '2d') {
             DomUpdateTracker.invalidateRect(pacId, null);
         }
@@ -11881,15 +12190,15 @@
      * @returns {{width:number, height:number}|null}
      */
     wakaPAC.getCanvasSize = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return null;
         }
 
         return {
-            width: container.width,
-            height: container.height
+            width: target.container.width,
+            height: target.container.height
         };
     };
 
