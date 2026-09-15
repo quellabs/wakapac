@@ -71,7 +71,7 @@
     /** Registry of partial templates; keys are names, values are raw textContent strings. @type {Map<string, string>} */
     const _partials = new Map();
 
-    /** Guards collectPartials() so it only runs once. @type {boolean} */
+    /** Guards Runtime.collectPartials() so it only runs once. @type {boolean} */
     let _partialsCollected = false;
 
     /**
@@ -136,9 +136,9 @@
      * @param {Comment} closeMarker
      * @returns {{__wpGroup: true, openMarker: Comment, closeMarker: Comment}}
      */
-    function makeWpIfGroup(openMarker, closeMarker) {
+    Runtime.makeWpIfGroup = function(openMarker, closeMarker) {
         return { __wpGroup: true, openMarker, closeMarker };
-    }
+    };
 
     /** Attribute for partial definition elements: <script type="text/template" data-pac-partial="name"> */
     const PAC_PARTIAL_ATTR = 'data-pac-partial';
@@ -811,6 +811,38 @@
         },
 
         /**
+         * Captures an element's current display value into data-pac-orig-display before hiding.
+         * Reads the inline style first to avoid a forced synchronous layout recalculation.
+         * Falls back to getComputedStyle deferred via requestAnimationFrame when no inline
+         * style is set, so the read never blocks a style write.
+         * @param {Element} element
+         */
+        captureOriginalDisplay(element) {
+            const inlineDisplay = element.style.display;
+
+            // Inline style is set and visible — capture it directly without touching the layout engine
+            if (inlineDisplay && inlineDisplay !== 'none') {
+                element.setAttribute('data-pac-orig-display', inlineDisplay);
+                return;
+            }
+
+            // No inline style — we'd need getComputedStyle, but calling it before a style write
+            // forces a synchronous layout recalculation. Defer to rAF so the read happens after
+            // the current paint cycle. Store an empty sentinel now so we don't repeat this.
+            if (!inlineDisplay) {
+                element.setAttribute('data-pac-orig-display', '');
+
+                requestAnimationFrame(() => {
+                    const computed = getComputedStyle(element).display;
+
+                    if (computed && computed !== 'none') {
+                        element.setAttribute('data-pac-orig-display', computed);
+                    }
+                });
+            }
+        },
+
+        /**
          * Gets a nested property value from an object using dot and bracket notation
          * @param {object} obj - The object to read from
          * @param {string} path - The property path (e.g., "configuration[theme]" or "todos[0].completed")
@@ -1404,7 +1436,7 @@
     // REACTIVE PROXY
     // ========================================================================
 
-    function makeDeepReactiveProxy(value, container) {
+    Runtime.makeDeepReactiveProxy = function(value, container) {
 
         /**
          * List of all methods allowed on an array
@@ -1696,7 +1728,7 @@
         }
 
         return createProxy(value, []);
-    }
+    };
 
     // ============================================================================
     // Send PAC-events for changed DOM elements
@@ -5342,38 +5374,6 @@
     };
 
     /**
-     * Captures an element's current display value into data-pac-orig-display before hiding.
-     * Reads the inline style first to avoid a forced synchronous layout recalculation.
-     * Falls back to getComputedStyle deferred via requestAnimationFrame when no inline
-     * style is set, so the read never blocks a style write.
-     * @param {Element} element
-     */
-    function captureOriginalDisplay(element) {
-        const inlineDisplay = element.style.display;
-
-        // Inline style is set and visible — capture it directly without touching the layout engine
-        if (inlineDisplay && inlineDisplay !== 'none') {
-            element.setAttribute('data-pac-orig-display', inlineDisplay);
-            return;
-        }
-
-        // No inline style — we'd need getComputedStyle, but calling it before a style write
-        // forces a synchronous layout recalculation. Defer to rAF so the read happens after
-        // the current paint cycle. Store an empty sentinel now so we don't repeat this.
-        if (!inlineDisplay) {
-            element.setAttribute('data-pac-orig-display', '');
-
-            requestAnimationFrame(() => {
-                const computed = getComputedStyle(element).display;
-
-                if (computed && computed !== 'none') {
-                    element.setAttribute('data-pac-orig-display', computed);
-                }
-            });
-        }
-    }
-
-    /**
      * Visible binding - Shows/hides elements by managing display CSS
      * @param {Runtime} context - The PAC component context
      * @param {Element} element - The container element
@@ -5391,7 +5391,7 @@
         } else {
             if (!element.hasAttribute('data-pac-hidden')) {
                 if (!element.hasAttribute('data-pac-orig-display')) {
-                    captureOriginalDisplay(element);
+                    Utils.captureOriginalDisplay(element);
                 }
 
                 element.style.display = 'none';
@@ -5549,12 +5549,12 @@
      * @param importedUnits - List of imported units
      * @returns {{ resolveScopedPath: function(string): * }}
      */
-    function makeScopeResolver(normalizeFn, element, importedUnits) {
+    Runtime.makeScopeResolver = function(normalizeFn, element, importedUnits) {
         return {
             resolveScopedPath: (path) => normalizeFn(path, element),
             importedUnits: importedUnits || {}
         };
-    }
+    };
 
     /**
      * Builds a scopeResolver anchored to a specific element, using this context's
@@ -5565,7 +5565,7 @@
      * @returns {{ resolveScopedPath: function(string): * }}
      */
     Runtime.prototype.makeScopeResolverFor = function(element) {
-        return makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
+        return Runtime.makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
     };
 
     /**
@@ -6274,7 +6274,7 @@
 
         // Expand partial templates before scanning so injected markup
         // is visible to scanBindings and scanTextBindings
-        expandPartials(parentElement);
+        Runtime.expandPartials(parentElement);
 
         // Stage 1: scan for new bound content within this container
         const newBindings = this.scanBindings(parentElement);
@@ -6789,7 +6789,7 @@
      * executed directly by ExpressionParser.evaluate, so this fallback call is skipped for them.
      * @param {string} bindingTarget - The binding expression to evaluate
      * @param {Object} scopedAbstraction - The abstraction, extended with $event/$item/$index as applicable
-     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolver()
+     * @param {Object} scopeResolver - Scope resolver for path resolution, from Runtime.makeScopeResolver()
      * @param {Array} fallbackArgs - Arguments to invoke the result with when it's a bare function reference
      * @returns {*} The evaluated result
      */
@@ -7816,7 +7816,7 @@
      * is never entity-encoded.
      * @returns {void}
      */
-    function collectPartials() {
+    Runtime.collectPartials = function() {
         if (_partialsCollected) {
             return;
         }
@@ -7843,7 +7843,7 @@
             // inside a script tag, so {{> name}} injection syntax is preserved
             _partials.set(name, el.textContent);
         });
-    }
+    };
 
     /**
      * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
@@ -7852,7 +7852,7 @@
      * @param {number} [depth=0]
      * @returns {string}
      */
-    function expandPartialsInString(html, depth) {
+    Runtime.expandPartialsInString = function(html, depth) {
         if (_partials.size === 0) {
             return html;
         }
@@ -7897,11 +7897,11 @@
         PARTIAL_INJECT_REGEX.lastIndex = 0;
 
         if (expanded !== html && expanded.indexOf('{{>') !== -1) {
-            return expandPartialsInString(expanded, depth + 1);
+            return Runtime.expandPartialsInString(expanded, depth + 1);
         }
 
         return expanded;
-    }
+    };
 
     /**
      * Expands {{> name}} injections inside a live DOM element by walking its
@@ -7909,7 +7909,7 @@
      * @param {Element} element
      * @returns {void}
      */
-    function expandPartials(element) {
+    Runtime.expandPartials = function(element) {
         if (_partials.size === 0) {
             return;
         }
@@ -7929,7 +7929,7 @@
         }
 
         hits.forEach(function(textNode) {
-            const expanded = expandPartialsInString(textNode.textContent, 0);
+            const expanded = Runtime.expandPartialsInString(textNode.textContent, 0);
 
             if (expanded === textNode.textContent) {
                 return;
@@ -7943,7 +7943,7 @@
             const fragment = temp.content;
             textNode.parentNode.replaceChild(fragment, textNode);
         });
-    }
+    };
 
     /**
      * Calls scanAndRegisterNewElements on every Element node in the given array.
@@ -7952,13 +7952,13 @@
      * @param {Runtime} context
      * @param {Node[]} nodes
      */
-    function scanElementNodes(context, nodes) {
+    Runtime.scanElementNodes = function(context, nodes) {
         nodes.forEach(node => {
             if (node.nodeType === Node.ELEMENT_NODE) {
                 context.scanAndRegisterNewElements(node);
             }
         });
-    }
+    };
 
     /**
      * Scans the container for comment nodes with wp-if conditionals
@@ -8088,7 +8088,7 @@
                             node = node.nextSibling;
                         } while (node && depth > 0);
 
-                        activeBucket.push(makeWpIfGroup(openMarker, closeMarker));
+                        activeBucket.push(Runtime.makeWpIfGroup(openMarker, closeMarker));
                         continue;
                     }
                 }
@@ -8099,7 +8099,7 @@
                 // rescanning. Bindings not yet registered are ignored and handled when
                 // they are discovered.
                 if (node.nodeType === Node.ELEMENT_NODE) {
-                    const buried = findRegisteredWpIfComments([node], commentBindingMap);
+                    const buried = Runtime.findRegisteredWpIfComments([node], commentBindingMap);
 
                     if (buried.length > 0) {
                         activeBranch.buriedWpIfs = (activeBranch.buriedWpIfs || []).concat(buried);
@@ -8195,7 +8195,7 @@
             // Scan the newly shown branch once to register any reactive bindings
             // inside content that started hidden
             if (winningBranch !== -1 && !branches[winningBranch].scanned) {
-                scanElementNodes(this, branches[winningBranch].nodes);
+                Runtime.scanElementNodes(this, branches[winningBranch].nodes);
                 branches[winningBranch].scanned = true;
             }
 
@@ -8209,7 +8209,7 @@
                 for (let i = 0; i < buriedOpenMarkers.length; i++) {
                     const openMarker = buriedOpenMarkers[i];
                     const buriedMapping = this.commentBindingMap.get(openMarker);
-                    revealedGroups.push(makeWpIfGroup(openMarker, buriedMapping.closingComment));
+                    revealedGroups.push(Runtime.makeWpIfGroup(openMarker, buriedMapping.closingComment));
                 }
             }
 
@@ -8230,7 +8230,7 @@
      * @param {Map<Comment, Object>} map
      * @returns {Comment[]}
      */
-    function findRegisteredWpIfComments(nodes, map) {
+    Runtime.findRegisteredWpIfComments = function(nodes, map) {
         const found = [];
 
         for (let i = 0; i < nodes.length; i++) {
@@ -8251,7 +8251,7 @@
         }
 
         return found;
-    }
+    };
 
     /**
      * Reconciles bindings inside wp-if groups that have just become visible.
@@ -8412,7 +8412,7 @@
         this.resolveAliases(this.originalAbstraction);
 
         // Create reactive proxy directly from original abstraction
-        const proxiedReactive = makeDeepReactiveProxy(this.originalAbstraction, this.container);
+        const proxiedReactive = Runtime.makeDeepReactiveProxy(this.originalAbstraction, this.container);
 
         // Copy all methods from the original abstraction to the reactive proxy (except the special
         // 'computed' property which gets handled separately), but critically: rebind their 'this'
@@ -8955,7 +8955,7 @@
 
             // Expand partial templates in the foreach template string once, up front,
             // rather than on every iteration — partials are static markup
-            const expandedTemplate = expandPartialsInString(mappingData.template);
+            const expandedTemplate = Runtime.expandPartialsInString(mappingData.template);
 
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
@@ -10784,7 +10784,7 @@
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
         // Collect data-pac-partial elements from the document (once only)
-        collectPartials();
+        Runtime.collectPartials();
 
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
