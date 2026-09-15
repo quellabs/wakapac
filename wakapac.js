@@ -4489,6 +4489,33 @@
         },
 
         /**
+         * Depth of a pure "$parent" climb prefix rooted at this node: 1 for
+         * identifier($parent) itself, N+1 for N further ".$parent" member
+         * hops on top of that, or null if node isn't such a prefix.
+         * $parent only means anything combined with the identifier naming
+         * the outer frame's itemVar right after it (normalizePath counts
+         * leading "$parent" tokens to know how many foreach scopes to climb
+         * before resolving the rest) — so the 'member' case below uses this
+         * to fold a climb prefix and its target identifier into one
+         * getProperty/resolveScopedPath call, rather than resolving "$parent"
+         * on its own first the way an ordinary chain segment would be.
+         * @param {Object} node - AST node.
+         * @returns {number|null}
+         */
+        parentClimbDepth(node) {
+            if (node.type === 'identifier') {
+                return node.name === '$parent' ? 1 : null;
+            }
+
+            if (node.type === 'member' && node.property === '$parent') {
+                const inner = this.parentClimbDepth(node.object);
+                return inner === null ? null : inner + 1;
+            }
+
+            return null;
+        },
+
+        /**
          * Checks if current token matches any of the given types
          * @param {...string} types - Token types to match
          * @returns {boolean} True if current token matches any type
@@ -4668,6 +4695,14 @@
                 }
 
                 case 'member': {
+                    const climbs = this.parentClimbDepth(node.object);
+
+                    if (scope && climbs !== null) {
+                        const segments = new Array(climbs).fill('$parent');
+                        segments.push(node.property);
+                        return this.getProperty(segments, context, scope);
+                    }
+
                     const obj = this.evaluate(node.object, context, scope);
                     return obj && obj[node.property];
                 }
