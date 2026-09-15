@@ -524,6 +524,147 @@
                 c.destroy();
             });
 
+            await test('typing in a two-way-bound input inside a foreach item keeps focus (and cursor position) across the resulting rebuild (issue #211)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li><input class="name-input" data-pac-bind="value: item.name">' +
+                    '<span class="name-echo">{{item.name}}</span></li></ul>',
+                    { items: [{ name: 'One' }, { name: 'Two' }] }
+                );
+                await tick();
+
+                const input = c.container.querySelectorAll('.name-input')[0];
+                input.focus();
+                input.value = 'On3';
+                input.setSelectionRange(3, 3);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await tick();
+
+                assertEqual(c.abstraction.items[0].name, 'On3', 'two-way binding writes back to the correct array item');
+
+                const newInput = c.container.querySelectorAll('.name-input')[0];
+                assertEqual(newInput.value, 'On3', 'rebuilt input reflects the typed value');
+                assertEqual(document.activeElement, newInput, 'focus was restored to the equivalent input after the rebuild');
+                assertEqual(newInput.selectionStart, 3, 'cursor position was restored too');
+                assertEqual(c.container.querySelectorAll('.name-echo')[0].textContent, 'On3', 'sibling interpolation for the same item still updates');
+
+                c.destroy();
+            });
+
+            await test('focus follows the edited item across an unrelated insert elsewhere in the same list (issue #211 follow-up)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li><input class="name-input" data-pac-bind="value: item.name">' +
+                    '<span class="name-echo">{{item.name}}</span></li></ul>',
+                    { items: [{ name: 'One' }, { name: 'Two' }, { name: 'Three' }] }
+                );
+                await tick();
+
+                // Focus "Two"'s input, at index 1.
+                const inputs = c.container.querySelectorAll('.name-input');
+                inputs[1].focus();
+                assertEqual(document.activeElement, inputs[1], 'sanity check: focus is on "Two"\'s input');
+
+                // Insert a new item at the front — "Two" is now at index 2, not 1.
+                c.abstraction.items.unshift({ name: 'Zero' });
+                await tick();
+
+                const newInputs = c.container.querySelectorAll('.name-input');
+                assertEqual(newInputs.length, 4, 'list grew by the inserted item');
+                assertEqual(document.activeElement, newInputs[2], 'focus followed "Two" to its new position');
+                assertEqual(document.activeElement.value, 'Two', 'the refocused input still belongs to "Two", not whichever item now sits at the old index');
+
+                c.destroy();
+            });
+
+            await test('focus in a nested inner foreach item survives the OUTER foreach rebuilding (issue #211 follow-up: nested foreach)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: outerItems" data-pac-item="outerItem">' +
+                    '<li><span>{{outerItem.label}}</span>' +
+                    '<ol data-pac-bind="foreach: outerItem.rows" data-pac-item="row">' +
+                    '<li><input class="row-input" data-pac-bind="value: row.text"></li>' +
+                    '</ol></li></ul>',
+                    {
+                        outerItems: [
+                            { label: 'A', rows: [{ text: 'a1' }, { text: 'a2' }] },
+                            { label: 'B', rows: [{ text: 'b1' }] }
+                        ]
+                    }
+                );
+                await tick();
+
+                // Focus the inner input belonging to outerItems[0].rows[0] ("a1").
+                const firstInnerInput = c.container.querySelectorAll('.row-input')[0];
+                firstInnerInput.focus();
+                assertEqual(document.activeElement, firstInnerInput, 'sanity check: focus is on the inner input');
+
+                // Mutate the OUTER item's own property (unrelated to the inner
+                // rows) — this rebuilds the whole outer <ul>, tearing down and
+                // recreating outerItems[0]'s nested inner foreach too.
+                c.abstraction.outerItems[1].label = 'B changed';
+                await tick();
+
+                const newFirstInnerInput = c.container.querySelectorAll('.row-input')[0];
+                assertEqual(document.activeElement, newFirstInnerInput, 'focus survived the outer rebuild, landing on the equivalent inner input');
+                assertEqual(newFirstInnerInput.value, 'a1', 'the refocused inner input still belongs to the correct row');
+
+                c.destroy();
+            });
+
+            await test('identity-tracking distinguishes a genuinely undefined item from "no snapshot available" (issue #211 follow-up)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li><input class="item-input"></li></ul>',
+                    { items: ['Alpha', undefined, 'Gamma'] }
+                );
+                await tick();
+
+                // Focus the input for the undefined-valued item, at index 1.
+                const inputs = c.container.querySelectorAll('.item-input');
+                inputs[1].focus();
+                assertEqual(document.activeElement, inputs[1], 'sanity check: focus is on the undefined-valued item');
+
+                // Insert a new item at the front — the undefined item is now at index 2, not 1.
+                c.abstraction.items.unshift('Zero');
+                await tick();
+
+                const newInputs = c.container.querySelectorAll('.item-input');
+                assertEqual(newInputs.length, 4, 'list grew by the inserted item');
+                assertEqual(document.activeElement, newInputs[2], 'focus followed the undefined-valued item to its new position, not whichever item now sits at the old index');
+
+                c.destroy();
+            });
+
+            await test('focus and cursor survive a same-item wp-if sibling toggling as a side effect of the edit (issue #211 follow-up: wp-if sibling)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li>' +
+                    '<input class="name-input" data-pac-bind="value: item.name">' +
+                    '<!-- wp-if: item.name.length > 0 --><span class="ok">ok</span><!-- /wp-if -->' +
+                    '</li></ul>',
+                    { items: [{ name: '' }] }
+                );
+                await tick();
+
+                const input = c.container.querySelector('.name-input');
+                input.focus();
+                input.value = 'X';
+                input.setSelectionRange(1, 1);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await tick();
+
+                // Typing flips the wp-if from hidden to shown, changing whether
+                // the <span> is a live element or a placeholder comment right
+                // next to the input.
+                assertEqual(c.container.querySelectorAll('.ok').length, 1, 'sanity check: the wp-if sibling became visible');
+
+                const newInput = c.container.querySelector('.name-input');
+                assertEqual(document.activeElement, newInput, 'focus is still on the name input, not the newly-revealed sibling');
+                assertEqual(newInput.selectionStart, 1, 'cursor position survived too');
+
+                c.destroy();
+            });
+
             suite('Click bindings & msgProc');
 
             await test('click binding invokes the bound method', async function () {
@@ -627,6 +768,282 @@
                 container.parentNode.removeChild(container);
             });
 
+            suite('Mouse hover bindings (mouseenter/mouseleave)');
+
+            await test('mouseenter/mouseleave bindings invoke bound methods on real hover, not on mount (issue #206)', async function () {
+                const c = mount(
+                    '<div id="outer">outer<div id="hoverme" data-pac-bind="mouseenter: enter, mouseleave: leave">hover me</div></div>',
+                    {
+                        enters: 0,
+                        leaves: 0,
+                        enter() { this.enters++; },
+                        leave() { this.leaves++; }
+                    }
+                );
+                await tick();
+                assertEqual(c.abstraction.enters, 0, 'mouseenter must not fire on mount');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave must not fire on mount');
+
+                moveOver(c.container.querySelector('#hoverme'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter fires once when the pointer enters the element');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave has not fired yet');
+
+                moveOver(c.container.querySelector('#outer'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter does not re-fire on an unrelated move');
+                assertEqual(c.abstraction.leaves, 1, 'mouseleave fires once when the pointer leaves the element');
+
+                c.destroy();
+            });
+
+            await test('mouseenter binding supports a bare method reference without parentheses (issue #206)', async function () {
+                const c = mount(
+                    '<div id="hoverme2" data-pac-bind="mouseenter: enter">hover</div>',
+                    {
+                        enters: 0,
+                        enter() { this.enters++; }
+                    }
+                );
+                await tick();
+                moveOver(c.container.querySelector('#hoverme2'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'a bare method reference (no parentheses) is still invoked on mouseenter');
+                c.destroy();
+            });
+
+            await test('mouseenter/mouseleave bindings are not applied to the DOM as literal attributes', async function () {
+                const c = mount(
+                    '<div id="hoverme3" data-pac-bind="mouseenter: enter, mouseleave: leave">hover</div>',
+                    { enter() {}, leave() {} }
+                );
+                await tick();
+                const el = c.container.querySelector('#hoverme3');
+                assert(!el.hasAttribute('mouseenter'), 'mouseenter must not be set as a literal DOM attribute');
+                assert(!el.hasAttribute('mouseleave'), 'mouseleave must not be set as a literal DOM attribute');
+                c.destroy();
+            });
+
+            await test('a nested reactive-attribute binding (e.g. css) does not shadow an ancestor mouseenter/mouseleave binding', async function () {
+                // The icon is bound via a plain reactive attribute, not an event
+                // binding. It must be transparent to hover hit-testing so the
+                // button underneath it keeps tracking as the hovered descendant
+                // instead of the icon spuriously becoming its own boundary.
+                const c = mount(
+                    '<div id="outer">outer' +
+                    '<button id="hoverbtn" data-pac-bind="mouseenter: enter, mouseleave: leave">' +
+                    '<span id="hovericon" data-pac-bind="css: iconClass"></span>' +
+                    '</button></div>',
+                    {
+                        enters: 0,
+                        leaves: 0,
+                        iconClass: 'icon',
+                        enter() { this.enters++; },
+                        leave() { this.leaves++; }
+                    }
+                );
+                await tick();
+
+                moveOver(c.container.querySelector('#hoverbtn'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter fires once when the pointer enters the button');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave has not fired yet');
+
+                moveOver(c.container.querySelector('#hovericon'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter does not re-fire when moving onto the nested css-bound icon');
+                assertEqual(c.abstraction.leaves, 0, 'mouseleave must not fire when the pointer is still over the button, just on the icon');
+
+                moveOver(c.container.querySelector('#outer'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.enters, 1, 'mouseenter still fired only once overall');
+                assertEqual(c.abstraction.leaves, 1, 'mouseleave fires once when the pointer actually leaves the button');
+
+                c.destroy();
+            });
+
+            await test('nested mouseenter/mouseleave bindings hold independent hover state (issue: outer must not leave when the pointer enters a bound descendant)', async function () {
+                // Unlike the css:-bound icon above, the button has its own real
+                // mouseenter/mouseleave binding — both elements must track hover independently.
+                const c = mount(
+                    '<div id="outerHover" data-pac-bind="mouseenter: outerEnter, mouseleave: outerLeave">outer' +
+                    '<button id="innerHover" data-pac-bind="mouseenter: innerEnter, mouseleave: innerLeave">inner</button>' +
+                    '</div>',
+                    {
+                        outerEnters: 0, outerLeaves: 0, innerEnters: 0, innerLeaves: 0,
+                        outerEnter() { this.outerEnters++; },
+                        outerLeave() { this.outerLeaves++; },
+                        innerEnter() { this.innerEnters++; },
+                        innerLeave() { this.innerLeaves++; }
+                    }
+                );
+                await tick();
+
+                // Enter the outer div, off the button.
+                moveOver(c.container.querySelector('#outerHover'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.outerEnters, 1, 'outer mouseenter fires once entering the div');
+                assertEqual(c.abstraction.innerEnters, 0, 'inner has not been entered yet');
+
+                // Move onto the nested button — must not fire the outer's mouseleave.
+                moveOver(c.container.querySelector('#innerHover'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.outerEnters, 1, 'outer mouseenter does not re-fire moving onto the nested button');
+                assertEqual(c.abstraction.outerLeaves, 0, 'outer mouseleave must not fire — the pointer is still within the div, just over the nested button');
+                assertEqual(c.abstraction.innerEnters, 1, 'inner mouseenter fires once entering the button');
+
+                // Back onto the div, off the button.
+                moveOver(c.container.querySelector('#outerHover'));
+                await flushMouseMove();
+                assertEqual(c.abstraction.outerEnters, 1, 'outer mouseenter still fired only once overall');
+                assertEqual(c.abstraction.innerLeaves, 1, 'inner mouseleave fires once when the pointer leaves the button back onto the div');
+
+                // Leave the component entirely.
+                moveOver(fixtures);
+                await flushMouseMove();
+                assertEqual(c.abstraction.outerLeaves, 1, 'outer mouseleave fires once when the pointer actually leaves the div');
+                assertEqual(c.abstraction.innerLeaves, 1, 'inner mouseleave still fired only once overall');
+
+                c.destroy();
+            });
+
+            suite('Additional named event bindings (dblclick/mousedown/mouseup/contextmenu/wheel/keydown/...)');
+
+            await test('dblclick binding invokes the bound method on a real dblclick, not on mount or unrelated changes', async function () {
+                const c = mount(
+                    '<span>{{counter}}</span><button id="dbl" data-pac-bind="dblclick: onDblClick()">button</button>',
+                    {
+                        counter: 0,
+                        calls: 0,
+                        onDblClick() { this.calls++; }
+                    }
+                );
+                await tick();
+                assertEqual(c.abstraction.calls, 0, 'must not fire on mount');
+
+                c.abstraction.counter++;
+                c.abstraction.counter++;
+                await tick();
+                assertEqual(c.abstraction.calls, 0, 'must not fire from an unrelated reactive change');
+
+                c.container.querySelector('#dbl').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.calls, 1, 'fires exactly once on a real dblclick');
+                c.destroy();
+            });
+
+            await test('dblclick binding supports a bare method reference without parentheses', async function () {
+                const c = mount(
+                    '<button id="dblBare" data-pac-bind="dblclick: onDblClick">button</button>',
+                    { calls: 0, onDblClick() { this.calls++; } }
+                );
+                await tick();
+                c.container.querySelector('#dblBare').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.calls, 1, 'a bare method reference is still invoked on a real dblclick');
+                c.destroy();
+            });
+
+            await test('dblclick binding on an icon-wrapping button shadows $event.target to the bound button', async function () {
+                const c = mount(
+                    '<button id="dblIcon" data-pac-bind="dblclick: onDblClick($event)"><span id="icon">*</span></button>',
+                    { seenId: null, onDblClick(event) { this.seenId = event.target.id; } }
+                );
+                await tick();
+                c.container.querySelector('#icon').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.seenId, 'dblIcon', '$event.target resolves to the bound button, not the decorative icon');
+                c.destroy();
+            });
+
+            await test('dblclick binding inside a foreach receives $item/$index, matching click', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li data-pac-bind="dblclick: onDblClick($item, $index)">{{item.label}}</li></ul>',
+                    {
+                        items: [{ label: 'a' }, { label: 'b' }],
+                        seen: null,
+                        onDblClick(item, index) { this.seen = `${item.label}:${index}`; }
+                    }
+                );
+                await tick();
+                c.container.querySelectorAll('li')[1].dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.seen, 'b:1', '$item and $index resolve to the clicked row, not the outer scope');
+                c.destroy();
+            });
+
+            await test('dblclick binding inside a foreach falls back to (event, item, index) for a bare method reference', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li data-pac-bind="dblclick: onDblClick">{{item.label}}</li></ul>',
+                    {
+                        items: [{ label: 'a' }, { label: 'b' }],
+                        seen: null,
+                        onDblClick(event, item, index) { this.seen = `${event.originalEvent.type}:${item.label}:${index}`; }
+                    }
+                );
+                await tick();
+                c.container.querySelectorAll('li')[0].dispatchEvent(new MouseEvent('dblclick', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.seen, 'dblclick:a:0', 'bare method reference receives (event, item, index) inside a foreach');
+                c.destroy();
+            });
+
+            await test('mousedown and mouseup bindings invoke their bound methods on real events', async function () {
+                const c = mount(
+                    '<button id="md" data-pac-bind="mousedown: onDown(), mouseup: onUp()">button</button>',
+                    { downCalls: 0, upCalls: 0, onDown() { this.downCalls++; }, onUp() { this.upCalls++; } }
+                );
+                await tick();
+                const btn = c.container.querySelector('#md');
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.downCalls, 1, 'mousedown fires once');
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+                await tick();
+                assertEqual(c.abstraction.upCalls, 1, 'mouseup fires once');
+                c.destroy();
+            });
+
+            await test('contextmenu and wheel bindings invoke their bound methods on real events', async function () {
+                const c = mount(
+                    '<div id="cw" data-pac-bind="contextmenu: onContext(), wheel: onWheel()">area</div>',
+                    { contextCalls: 0, wheelCalls: 0, onContext() { this.contextCalls++; }, onWheel() { this.wheelCalls++; } }
+                );
+                await tick();
+                const el = c.container.querySelector('#cw');
+                el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+                await tick();
+                assertEqual(c.abstraction.contextCalls, 1, 'contextmenu fires once');
+                el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 10 }));
+                await tick();
+                assertEqual(c.abstraction.wheelCalls, 1, 'wheel fires once');
+                c.destroy();
+            });
+
+            await test('keydown binding invokes the bound method on a real keydown, with the native key reachable via $event.originalEvent', async function () {
+                const c = mount(
+                    '<input id="kd" data-pac-bind="keydown: onKeyDown($event)">',
+                    { seenKey: null, onKeyDown(event) { this.seenKey = event.originalEvent.key; } }
+                );
+                await tick();
+                c.container.querySelector('#kd').dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
+                await tick();
+                assertEqual(c.abstraction.seenKey, 'a', 'keydown binding can reach the native KeyboardEvent via $event.originalEvent');
+                c.destroy();
+            });
+
+            await test('keydown binding is not applied to the DOM as a literal attribute', async function () {
+                const c = mount(
+                    '<input id="kdAttr" data-pac-bind="keydown: onKeyDown()">',
+                    { onKeyDown() {} }
+                );
+                await tick();
+                assert(!c.container.querySelector('#kdAttr').hasAttribute('keydown'), 'keydown must not be set as a literal DOM attribute');
+                c.destroy();
+            });
+
             suite('Mouse target resolution');
 
             await test('MSG_MOUSEMOVE over a decorative descendant resolves target to the owning control', async function () {
@@ -654,6 +1071,50 @@
                     c.abstraction.moveTargets.every(function (id) { return id === 'btn'; }),
                     'every MSG_MOUSEMOVE target resolved to the button while hovering its icon, got ' + JSON.stringify(c.abstraction.moveTargets)
                 );
+                c.destroy();
+            });
+
+            await test('MSG_MOUSEENTER_DESCENDANT/MSG_MOUSELEAVE_DESCENDANT fire for every nested interactive ancestor, not just the nearest one', async function () {
+                // Three levels deep; lvl3 is inherently interactive (<button>) with no
+                // mouseenter binding of its own — chain tracking is msgProc-visible regardless.
+                const c = mount(
+                    '<div id="lvl1" data-pac-bind="mouseenter: enter1, mouseleave: leave1">' +
+                    '<div id="lvl2" data-pac-bind="mouseenter: enter2, mouseleave: leave2">' +
+                    '<button id="lvl3">deep</button>' +
+                    '</div></div>',
+                    {
+                        events: [],
+                        enter1() {}, leave1() {}, enter2() {}, leave2() {},
+                        msgProc(message) {
+                            if (message.message === wakaPAC.MSG_MOUSEENTER_DESCENDANT) {
+                                this.events.push('enter:' + message.target.id);
+                            }
+                            if (message.message === wakaPAC.MSG_MOUSELEAVE_DESCENDANT) {
+                                this.events.push('leave:' + message.target.id);
+                            }
+                        }
+                    }
+                );
+                await tick();
+
+                // Jump straight from outside onto the innermost element in one move.
+                moveOver(c.container.querySelector('#lvl3'));
+                await flushMouseMove();
+                assertEqual(
+                    c.abstraction.events,
+                    ['enter:lvl1', 'enter:lvl2', 'enter:lvl3'],
+                    'landing directly on the deepest element fires every ancestor mouseenter, outermost first, in the same move'
+                );
+
+                // Jump straight back out to unrelated content in one move.
+                moveOver(fixtures);
+                await flushMouseMove();
+                assertEqual(
+                    c.abstraction.events,
+                    ['enter:lvl1', 'enter:lvl2', 'enter:lvl3', 'leave:lvl3', 'leave:lvl2', 'leave:lvl1'],
+                    'leaving directly fires every ancestor mouseleave, innermost first'
+                );
+
                 c.destroy();
             });
 
