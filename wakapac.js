@@ -71,7 +71,7 @@
     /** Registry of partial templates; keys are names, values are raw textContent strings. @type {Map<string, string>} */
     const _partials = new Map();
 
-    /** Guards Runtime.collectPartials() so it only runs once. @type {boolean} */
+    /** Guards _collectPartials() so it only runs once. @type {boolean} */
     let _partialsCollected = false;
 
     /**
@@ -1379,6 +1379,196 @@
         getPacCache(node) {
             return node._pacCache || (node._pacCache = {});
         }
+    }
+
+    // ========================================================================
+    // PARTIALS
+    // ========================================================================
+
+    /**
+     * Collects <script type="text/template" data-pac-partial="name"> elements into
+     * _partials once on the first wakaPAC() call. Uses textContent so {{> name}}
+     * is never entity-encoded.
+     * @returns {void}
+     */
+    function _collectPartials() {
+        if (_partialsCollected) {
+            return;
+        }
+
+        _partialsCollected = true;
+
+        // Find all partials
+        document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
+            // Extract name
+            const name = el.getAttribute(PAC_PARTIAL_ATTR);
+
+            // If none passed, ignore
+            if (!name) {
+                return;
+            }
+
+            // If already defined, warn the user and ignore
+            if (_partials.has(name)) {
+                console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
+                return;
+            }
+
+            // textContent gives the raw unencoded string — > is never encoded
+            // inside a script tag, so {{> name}} injection syntax is preserved
+            _partials.set(name, el.textContent);
+        });
+    }
+
+    /**
+     * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
+     * Normalizes {{&gt; to {{> first to handle strings captured via element.innerHTML.
+     * @param {string} html
+     * @param {number} [depth=0]
+     * @returns {string}
+     */
+    function _expandPartialsInString(html, depth) {
+        if (_partials.size === 0) {
+            return html;
+        }
+
+        depth = depth || 0;
+
+        if (depth >= 10) {
+            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
+            return html;
+        }
+
+        // Normalize &gt; encoding from innerHTML-captured templates
+        html = html.replace(/\{\{&gt;/g, '{{>');
+
+        // Quick check before paying regex cost
+        if (html.indexOf('{{>') === -1) {
+            return html;
+        }
+
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name, root) {
+            if (!_partials.has(name)) {
+                console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
+                return match;
+            }
+
+            // Extract the body
+            let body = _partials.get(name);
+
+            // If a root argument was supplied, substitute "$." with "root." throughout
+            // the partial body so property paths resolve against the passed object.
+            if (root) {
+                PARTIAL_PARAM_REGEX.lastIndex = 0;
+                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
+            }
+
+            return body;
+        });
+
+        // Recurse only if something was replaced and depth allows
+        PARTIAL_INJECT_REGEX.lastIndex = 0;
+
+        if (expanded !== html && expanded.indexOf('{{>') !== -1) {
+            return _expandPartialsInString(expanded, depth + 1);
+        }
+
+        return expanded;
+    }
+
+    /**
+     * Expands {{> name}} injections inside a live DOM element by walking its
+     * text nodes (textContent is never entity-encoded, unlike innerHTML).
+     * @param {Element} element
+     * @returns {void}
+     */
+    function _expandPartials(element) {
+        if (_partials.size === 0) {
+            return;
+        }
+
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const hits = [];
+
+        let node;
+        while ((node = walker.nextNode())) {
+            if (node.textContent.indexOf('{{>') !== -1) {
+                hits.push(node);
+            }
+        }
+
+        if (hits.length === 0) {
+            return;
+        }
+
+        hits.forEach(function(textNode) {
+            const expanded = _expandPartialsInString(textNode.textContent, 0);
+
+            if (expanded === textNode.textContent) {
+                return;
+            }
+
+            // Replace the text node with parsed HTML nodes.
+            // Create a temporary container, parse the expanded HTML into it,
+            // then insert its children before the text node and remove it.
+            const temp = document.createElement('template');
+            temp.innerHTML = expanded;
+            const fragment = temp.content;
+            textNode.parentNode.replaceChild(fragment, textNode);
+        });
+    }
+
+    // ========================================================================
+    // DOM SCANNING HELPERS (private; used by wp-if comment reconciliation)
+    // ========================================================================
+
+    /**
+     * Calls scanAndRegisterNewElements on every Element node in the given array.
+     * Extracted as a module-level helper so it is defined once rather than
+     * recreated as a closure on each updateCommentConditional call.
+     * @param {Runtime} context
+     * @param {Node[]} nodes
+     */
+    function _scanElementNodes(context, nodes) {
+        nodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                context.scanAndRegisterNewElements(node);
+            }
+        });
+    }
+
+    /**
+     * Finds registered `wp-if` open comments buried inside descendant
+     * elements rather than appearing as direct comment siblings. A comment
+     * is identified as a `wp-if` by its presence in `map`; unregistered
+     * bindings are ignored and discovered by the normal scan.
+     * @param {Node[]} nodes
+     * @param {Map<Comment, Object>} map
+     * @returns {Comment[]}
+     */
+    function _findRegisteredWpIfComments(nodes, map) {
+        const found = [];
+
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+
+            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+                continue;
+            }
+
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
+            let commentNode;
+
+            while ((commentNode = walker.nextNode())) {
+                if (map.has(commentNode)) {
+                    found.push(commentNode);
+                }
+            }
+        }
+
+        return found;
     }
 
     // ========================================================================
@@ -5936,188 +6126,6 @@
     };
 
     /**
-     * Collects <script type="text/template" data-pac-partial="name"> elements into
-     * _partials once on the first wakaPAC() call. Uses textContent so {{> name}}
-     * is never entity-encoded.
-     * @returns {void}
-     */
-    Runtime.collectPartials = function() {
-        if (_partialsCollected) {
-            return;
-        }
-
-        _partialsCollected = true;
-
-        // Find all partials
-        document.querySelectorAll('script[type="text/template"][' + PAC_PARTIAL_ATTR + ']').forEach(function(el) {
-            // Extract name
-            const name = el.getAttribute(PAC_PARTIAL_ATTR);
-
-            // If none passed, ignore
-            if (!name) {
-                return;
-            }
-
-            // If already defined, warn the user and ignore
-            if (_partials.has(name)) {
-                console.warn('wakaPAC: Duplicate partial "' + name + '" — only the first definition is used.');
-                return;
-            }
-
-            // textContent gives the raw unencoded string — > is never encoded
-            // inside a script tag, so {{> name}} injection syntax is preserved
-            _partials.set(name, el.textContent);
-        });
-    };
-
-    /**
-     * Expands {{> name}} injections in a raw HTML string. Recursive up to depth 10.
-     * Normalizes {{&gt; to {{> first to handle strings captured via element.innerHTML.
-     * @param {string} html
-     * @param {number} [depth=0]
-     * @returns {string}
-     */
-    Runtime.expandPartialsInString = function(html, depth) {
-        if (_partials.size === 0) {
-            return html;
-        }
-
-        depth = depth || 0;
-
-        if (depth >= 10) {
-            console.warn('wakaPAC: Partial expansion stopped at maximum depth (10). Check for circular partial references.');
-            return html;
-        }
-
-        // Normalize &gt; encoding from innerHTML-captured templates
-        html = html.replace(/\{\{&gt;/g, '{{>');
-
-        // Quick check before paying regex cost
-        if (html.indexOf('{{>') === -1) {
-            return html;
-        }
-
-        PARTIAL_INJECT_REGEX.lastIndex = 0;
-
-        const expanded = html.replace(PARTIAL_INJECT_REGEX, function(match, name, root) {
-            if (!_partials.has(name)) {
-                console.warn('wakaPAC: Unknown partial "{{> ' + name + '}}" — register a <div data-pac-partial="' + name + '"> element in the document.');
-                return match;
-            }
-
-            // Extract the body
-            let body = _partials.get(name);
-
-            // If a root argument was supplied, substitute "$." with "root." throughout
-            // the partial body so property paths resolve against the passed object.
-            if (root) {
-                PARTIAL_PARAM_REGEX.lastIndex = 0;
-                body = body.replace(PARTIAL_PARAM_REGEX, root + '.');
-            }
-
-            return body;
-        });
-
-        // Recurse only if something was replaced and depth allows
-        PARTIAL_INJECT_REGEX.lastIndex = 0;
-
-        if (expanded !== html && expanded.indexOf('{{>') !== -1) {
-            return Runtime.expandPartialsInString(expanded, depth + 1);
-        }
-
-        return expanded;
-    };
-
-    /**
-     * Expands {{> name}} injections inside a live DOM element by walking its
-     * text nodes (textContent is never entity-encoded, unlike innerHTML).
-     * @param {Element} element
-     * @returns {void}
-     */
-    Runtime.expandPartials = function(element) {
-        if (_partials.size === 0) {
-            return;
-        }
-
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        const hits = [];
-
-        let node;
-        while ((node = walker.nextNode())) {
-            if (node.textContent.indexOf('{{>') !== -1) {
-                hits.push(node);
-            }
-        }
-
-        if (hits.length === 0) {
-            return;
-        }
-
-        hits.forEach(function(textNode) {
-            const expanded = Runtime.expandPartialsInString(textNode.textContent, 0);
-
-            if (expanded === textNode.textContent) {
-                return;
-            }
-
-            // Replace the text node with parsed HTML nodes.
-            // Create a temporary container, parse the expanded HTML into it,
-            // then insert its children before the text node and remove it.
-            const temp = document.createElement('template');
-            temp.innerHTML = expanded;
-            const fragment = temp.content;
-            textNode.parentNode.replaceChild(fragment, textNode);
-        });
-    };
-
-    /**
-     * Calls scanAndRegisterNewElements on every Element node in the given array.
-     * Extracted as a module-level helper so it is defined once rather than
-     * recreated as a closure on each updateCommentConditional call.
-     * @param {Runtime} context
-     * @param {Node[]} nodes
-     */
-    Runtime.scanElementNodes = function(context, nodes) {
-        nodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-                context.scanAndRegisterNewElements(node);
-            }
-        });
-    };
-
-    /**
-     * Finds registered `wp-if` open comments buried inside descendant
-     * elements rather than appearing as direct comment siblings. A comment
-     * is identified as a `wp-if` by its presence in `map`; unregistered
-     * bindings are ignored and discovered by the normal scan.
-     * @param {Node[]} nodes
-     * @param {Map<Comment, Object>} map
-     * @returns {Comment[]}
-     */
-    Runtime.findRegisteredWpIfComments = function(nodes, map) {
-        const found = [];
-
-        for (let i = 0; i < nodes.length; i++) {
-            const node = nodes[i];
-
-            if (!node || node.nodeType !== Node.ELEMENT_NODE) {
-                continue;
-            }
-
-            const walker = document.createTreeWalker(node, NodeFilter.SHOW_COMMENT);
-            let commentNode;
-
-            while ((commentNode = walker.nextNode())) {
-                if (map.has(commentNode)) {
-                    found.push(commentNode);
-                }
-            }
-        }
-
-        return found;
-    };
-
-    /**
      * Parses a comment node as a foreach item marker.
      * @param {Comment} commentNode - The DOM comment node to parse
      * @returns {{foreachId: string, index: number, renderIndex: number}|null}
@@ -6483,7 +6491,7 @@
 
         // Expand partial templates before scanning so injected markup
         // is visible to scanBindings and scanTextBindings
-        Runtime.expandPartials(parentElement);
+        _expandPartials(parentElement);
 
         // Stage 1: scan for new bound content within this container
         const newBindings = this.scanBindings(parentElement);
@@ -8158,7 +8166,7 @@
                 // rescanning. Bindings not yet registered are ignored and handled when
                 // they are discovered.
                 if (node.nodeType === Node.ELEMENT_NODE) {
-                    const buried = Runtime.findRegisteredWpIfComments([node], commentBindingMap);
+                    const buried = _findRegisteredWpIfComments([node], commentBindingMap);
 
                     if (buried.length > 0) {
                         activeBranch.buriedWpIfs = (activeBranch.buriedWpIfs || []).concat(buried);
@@ -8254,7 +8262,7 @@
             // Scan the newly shown branch once to register any reactive bindings
             // inside content that started hidden
             if (winningBranch !== -1 && !branches[winningBranch].scanned) {
-                Runtime.scanElementNodes(this, branches[winningBranch].nodes);
+                _scanElementNodes(this, branches[winningBranch].nodes);
                 branches[winningBranch].scanned = true;
             }
 
@@ -8982,7 +8990,7 @@
 
             // Expand partial templates in the foreach template string once, up front,
             // rather than on every iteration — partials are static markup
-            const expandedTemplate = Runtime.expandPartialsInString(mappingData.template);
+            const expandedTemplate = _expandPartialsInString(mappingData.template);
 
             // Generate DOM content for each array item
             // HTML comments mark the boundaries and context for each iteration
@@ -10792,7 +10800,7 @@
      */
     function wakaPAC(selector, abstraction = {}, options = {}) {
         // Collect data-pac-partial elements from the document (once only)
-        Runtime.collectPartials();
+        _collectPartials();
 
         // Initialize global event tracking first
         DomUpdateTracker.initialize();
