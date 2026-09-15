@@ -4528,6 +4528,42 @@
         },
 
         /**
+         * True if this AST node can be losslessly round-tripped through
+         * astToPath + getProperty's scope resolution — i.e. it's built
+         * entirely from identifier/literal/member/index nodes. evaluate()'s
+         * scoped 'index'/'member' cases use this as a guard: astToPath
+         * stringifies anything (falling back to '' for an unhandled type,
+         * or reconstructing operators as literal text for 'arithmetic'),
+         * but getProperty's path resolution only understands plain
+         * identifier/numeric segments — so a flattened call, ternary, or
+         * arithmetic sub-expression silently resolves to nothing instead of
+         * throwing. Direct recursive evaluation (the non-scoped code path,
+         * reused here as the fallback) handles those correctly instead.
+         * @param {Object} node - AST node to check.
+         * @returns {boolean}
+         */
+        isFlattenablePath(node) {
+            if (!node) {
+                return true;
+            }
+
+            switch (node.type) {
+                case 'identifier':
+                case 'literal':
+                    return true;
+
+                case 'member':
+                    return this.isFlattenablePath(node.object);
+
+                case 'index':
+                    return this.isFlattenablePath(node.object) && this.isFlattenablePath(node.index);
+
+                default:
+                    return false;
+            }
+        },
+
+        /**
          * Checks if current token matches any of the given types
          * @param {...string} types - Token types to match
          * @returns {boolean} True if current token matches any type
@@ -4656,7 +4692,7 @@
                     return this.evaluateObjectLiteral(node, context, scope);
 
                 case 'index': {
-                    if (scope) {
+                    if (scope && this.isFlattenablePath(node)) {
                         return this.getProperty(this.astToPath(node), context, scope);
                     }
 
@@ -4711,7 +4747,7 @@
                 }
 
                 case 'member': {
-                    if (scope) {
+                    if (scope && this.isFlattenablePath(node)) {
                         return this.getProperty(this.astToPath(node), context, scope);
                     }
 
