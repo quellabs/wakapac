@@ -677,6 +677,40 @@
                 c.destroy();
             });
 
+            await test('$parent.item (with no further path segments) resolves to the actual enclosing item object, not a path string', async function () {
+                const captured = [];
+                const c = mount(
+                    '<ul data-pac-bind="foreach: categories">' +
+                    '<li><ul data-pac-bind="foreach: item.products">' +
+                    '<li class="prod">{{capture($parent.item)}}</li>' +
+                    '</ul></li></ul>',
+                    {
+                        categories: [
+                            { name: 'Electronics', products: [{ name: 'Laptop' }, { name: 'Mouse' }] }
+                        ],
+                        capture(parentItem) {
+                            captured.push(parentItem);
+                            // If $parent.item were still the raw "categories[0]" path
+                            // string, .name/.products would be undefined and this
+                            // would render "undefined (undefined products)".
+                            return parentItem && typeof parentItem === 'object' ?
+                                parentItem.name + ' (' + parentItem.products.length + ' products)' :
+                                String(parentItem);
+                        }
+                    }
+                );
+                await tick();
+
+                const prods = c.container.querySelectorAll('.prod');
+                assertEqual(prods[0].textContent, 'Electronics (2 products)', '$parent.item is a real object, not the unresolved "categories[0]" path string');
+                assertEqual(prods[1].textContent, 'Electronics (2 products)');
+
+                // Same underlying object, not a structurally-equal copy.
+                assertEqual(captured[0] === c.abstraction.categories[0], true, '$parent.item is the identical live object reference from the reactive data, not a clone');
+
+                c.destroy();
+            });
+
             await test('nested foreach with default item/$index names does not log "No foreach binding found" on a normal initial render (issue #214)', async function () {
                 const originalWarn = console.warn;
                 const warnings = [];
