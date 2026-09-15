@@ -4529,16 +4529,9 @@
 
         /**
          * True if this AST node can be losslessly round-tripped through
-         * astToPath + getProperty's scope resolution — i.e. it's built
-         * entirely from identifier/literal/member/index nodes. evaluate()'s
-         * scoped 'index'/'member' cases use this as a guard: astToPath
-         * stringifies anything (falling back to '' for an unhandled type,
-         * or reconstructing operators as literal text for 'arithmetic'),
-         * but getProperty's path resolution only understands plain
-         * identifier/numeric segments — so a flattened call, ternary, or
-         * arithmetic sub-expression silently resolves to nothing instead of
-         * throwing. Direct recursive evaluation (the non-scoped code path,
-         * reused here as the fallback) handles those correctly instead.
+         * astToPath and scoped getProperty resolution. Only identifier,
+         * literal, member, and index nodes are supported. Complex nodes
+         * (calls, ternaries, arithmetic) must use recursive evaluation.
          * @param {Object} node - AST node to check.
          * @returns {boolean}
          */
