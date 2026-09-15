@@ -5227,57 +5227,6 @@
     // ========================================================================
 
     /**
-     * Builds a scopeResolver anchored to a specific element, using this context's
-     * normalizePath and importedUnits. Exposed separately from evalInScope for call
-     * sites that need to evaluate more than one expression against the same resolver
-     * (e.g. a handler expression plus its fallback-args lookup).
-     * @param {Element} element - The DOM element to use as path scope anchor
-     * @returns {{ resolveScopedPath: function(string): * }}
-     */
-    Runtime.prototype.makeScopeResolverFor = function(element) {
-        return Runtime.makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
-    };
-
-    /**
-     * Parses and evaluates an expression string against a given abstraction and
-     * scopeResolver. Lowest-level entry point to ExpressionParser — used directly
-     * by call sites that already have a scopeResolver (e.g. a cached one, or one
-     * being shared across multiple evaluations), and by evalInScope for the
-     * common case of building that resolver from a single element.
-     * @param {string} exprString - The expression to parse and evaluate
-     * @param {Object} abstraction - The abstraction (or scoped abstraction) to evaluate against
-     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolverFor()
-     * @returns {*} The evaluated result
-     */
-    Runtime.prototype.evaluateExpression = function(exprString, abstraction, scopeResolver) {
-        return ExpressionParser.evaluate(
-            ExpressionCache.parseExpression(exprString),
-            abstraction,
-            scopeResolver
-        );
-    };
-
-    /**
-     * Convenience wrapper around evaluateExpression for the common case: evaluate
-     * an expression against this context's abstraction (or an explicitly scoped one),
-     * with paths resolved relative to a single element. Builds a fresh scopeResolver
-     * for that element — call sites that need to reuse the same resolver across
-     * multiple evaluations should call makeScopeResolverFor()/evaluateExpression()
-     * directly instead.
-     * @param {string} exprString - The expression to parse and evaluate
-     * @param {Element} element - The DOM element to use as path scope anchor
-     * @param {Object} [abstraction] - Abstraction to evaluate against; defaults to this.abstraction
-     * @returns {*} The evaluated result
-     */
-    Runtime.prototype.evalInScope = function(exprString, element, abstraction) {
-        return this.evaluateExpression(
-            exprString,
-            abstraction || this.abstraction,
-            this.makeScopeResolverFor(element)
-        );
-    };
-
-    /**
      * Defines DomUpdater class
      * @param context
      * @constructor
@@ -6185,6 +6134,61 @@
             index: parseInt(match[2], 10),
             renderIndex: parseInt(match[3], 10)
         };
+    };
+
+    // ========================================================================
+    // RUNTIME EXPRESSION EVALUATION
+    // ========================================================================
+
+    /**
+     * Builds a scopeResolver anchored to a specific element, using this context's
+     * normalizePath and importedUnits. Exposed separately from evalInScope for call
+     * sites that need to evaluate more than one expression against the same resolver
+     * (e.g. a handler expression plus its fallback-args lookup).
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @returns {{ resolveScopedPath: function(string): * }}
+     */
+    Runtime.prototype.makeScopeResolverFor = function(element) {
+        return Runtime.makeScopeResolver(this.normalizePath.bind(this), element, this.importedUnits);
+    };
+
+    /**
+     * Parses and evaluates an expression string against a given abstraction and
+     * scopeResolver. Lowest-level entry point to ExpressionParser — used directly
+     * by call sites that already have a scopeResolver (e.g. a cached one, or one
+     * being shared across multiple evaluations), and by evalInScope for the
+     * common case of building that resolver from a single element.
+     * @param {string} exprString - The expression to parse and evaluate
+     * @param {Object} abstraction - The abstraction (or scoped abstraction) to evaluate against
+     * @param {Object} scopeResolver - Scope resolver for path resolution, from makeScopeResolverFor()
+     * @returns {*} The evaluated result
+     */
+    Runtime.prototype.evaluateExpression = function(exprString, abstraction, scopeResolver) {
+        return ExpressionParser.evaluate(
+            ExpressionCache.parseExpression(exprString),
+            abstraction,
+            scopeResolver
+        );
+    };
+
+    /**
+     * Convenience wrapper around evaluateExpression for the common case: evaluate
+     * an expression against this context's abstraction (or an explicitly scoped one),
+     * with paths resolved relative to a single element. Builds a fresh scopeResolver
+     * for that element — call sites that need to reuse the same resolver across
+     * multiple evaluations should call makeScopeResolverFor()/evaluateExpression()
+     * directly instead.
+     * @param {string} exprString - The expression to parse and evaluate
+     * @param {Element} element - The DOM element to use as path scope anchor
+     * @param {Object} [abstraction] - Abstraction to evaluate against; defaults to this.abstraction
+     * @returns {*} The evaluated result
+     */
+    Runtime.prototype.evalInScope = function(exprString, element, abstraction) {
+        return this.evaluateExpression(
+            exprString,
+            abstraction || this.abstraction,
+            this.makeScopeResolverFor(element)
+        );
     };
 
     // =============================================================================
