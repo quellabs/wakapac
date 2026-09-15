@@ -4,6 +4,9 @@ A compact reactive UI runtime with a desktop-style event pipeline —
 delivered as a single drop-in script. No build tools, no CLI, no
 node_modules.
 
+**~31KB gzipped** (~100KB minified) · zero dependencies · works with any
+browser that supports `Proxy` (all evergreen browsers)
+
 ## Why WakaPAC?
 
 Most reactive libraries stop at data binding. WakaPAC routes **all interaction through a centralized message pipeline**, inspired by desktop UI frameworks.
@@ -48,37 +51,31 @@ Stdlib (built-in), Math, StringUtils, DateUtils, NumberUtils, TypeUtils, Collect
 
 ## Plugins
 
-**WakaChart** — renders pie, bar, line, and sparkline charts onto WakaPAC canvas components via the metafile/display list API. Global defaults (colors, font, padding) are set at registration time; all options can be overridden per call.
+Optional, drop-in scripts that extend WakaPAC's message pipeline into specific domains. Full details for each: **[wakapac.com/docs](https://www.wakapac.com/docs)**
 
-**WakaStore** — shared reactive state across components, with server sync via polling, WebSocket, and HTTP push.
+**Graphics & Canvas**
+- **WakaCanvas** — Win32-style GDI drawing API: pens, brushes, and drawing primitives, plus a MetaFile API for recording, replaying, and hit-testing display lists
+- **WakaChart** — pie, bar, line, and sparkline charts rendered onto WakaPAC canvas components via the metafile/display list API
+- **WakaD3D** — WebGL/WebGL2 support for 3D/GPU-accelerated canvas drawing, with automatic context-loss recovery
+- **WakaDDraw** — DirectDraw-inspired blitter: low-level pixel transfer plus a higher-level sprite/z-order/dirty-rect scene system, with a scrolling tilemap renderer
+- **WakaDSound** — DirectSound-inspired audio: static and streaming buffers, 3D positional audio, waveform analysis, and playback/stream-health messages
 
-**WakaForm** — reactive form state and field-level validation with composable rules.
+**Data & Forms**
+- **WakaStore** — shared reactive state across components, with server sync via polling, WebSocket, and HTTP push
+- **WakaForm** — reactive form state and field-level validation with composable rules
+- **WakaMask** — live input masking (phone numbers, dates, custom codes) driven by a token pattern, running entirely on WakaPAC's message pipeline
+- **WakaSync** — full-featured HTTP client with request grouping, cancellation, retries, and interceptors
 
-**WakaMask** — live input masking (phone numbers, dates, custom codes) driven by a token pattern (`data-pac-mask="999-999-9999"`). Runs entirely on WakaPAC's existing message pipeline — no parallel DOM listeners — intercepting keystrokes, deletions, and paste via `MSG_KEYDOWN`/`MSG_CHAR`/`MSG_PASTE`. Reports `MSG_MASK_COMPLETE` when every slot is filled and `MSG_MASK_REJECT` when a typed character doesn't fit its slot.
+**Navigation & Sensors**
+- **WakaRoute** — client-side router delivering navigation events through `msgProc`
+- **WakaMotion** — device motion and orientation sensors as reactive properties
 
-**WakaRoute** — client-side router delivering navigation events through `msgProc`.
-
-**WakaMotion** — device motion and orientation sensors as reactive properties.
-
-**WakaSync** — full-featured HTTP client with request grouping, cancellation, retries, and interceptors. Results delivered as `MSG_HTTP_SUCCESS`, `MSG_HTTP_ERROR`, or `MSG_HTTP_ABORT`.
-
-**WakaCKEditor** — bridges CKEditor 4 into WakaPAC. Activate on any `<waka-ckeditor>` container; the CKEditor script is injected and shared automatically. Editor content is kept on `abstraction.value` on every change and synced back to the textarea on form submit, so native form posts work without extra handling.
-
-**WakaVideo** — bridges native `<video>` elements into the WakaPAC message and abstraction model. Supports playback control, volume, seek, playback rate, programmatic cues (`addCue`), and canvas frame capture via `bitBlt`/`stretchBlt`.
-
-**WakaYouTube** — bridges the YouTube IFrame API into WakaPAC. Activate on any `<waka-youtube data-youtube-id="...">` container; the API script is injected and shared automatically. Supports playback control, volume, seek, and mute.
-
-**WakaVimeo** — bridges the Vimeo Player SDK into WakaPAC. Activate on any `<waka-vimeo data-vimeo-id="...">` container; the SDK script is injected automatically. Supports playback control, volume, seek, mute, and playback rate (requires Vimeo PRO/Business).
-
-**WakaLightGallery** — bridges lightGallery v2 into WakaPAC. Activate on any `<waka-lightgallery>` container; the lightGallery JS and CSS are injected and shared automatically. Exposes the full gallery lifecycle — open, close, and slide transitions — as `msgProc` messages, with the current slide index kept on `abstraction.currentIndex`. Supports lightGallery sub-plugins (zoom, thumbnails, autoplay, etc.) via the `plugins` option.
-
-**WakaCanvas** — Win32-style GDI drawing API for wakaPAC canvas components. Provides stateful device context management with pens, brushes, and a complete set of drawing primitives (lines, rectangles, ellipses, arcs, polygons, text, bitmaps). Includes a MetaFile API for recording, replaying, and hit-testing display lists — enabling resolution-independent rendering and decoupled paint logic.
-
-**WakaDDraw** — DirectDraw-inspired blitter plugin for pixel-level canvas work. Provides a two-tier API: a low-level stateless blitter (`bltFast`) for immediate surface-to-surface pixel transfer with color key transparency, and a higher-level scene system that manages sprites, z-ordering, and dirty rectangle compositing automatically. Includes a tilemap renderer for scrolling tile-based worlds with parallax support via layered z-ordered tilemaps.
-
-**WakaDSound** — DirectSound-inspired audio plugin for wakaPAC components. Manages static buffers for sound effects and streaming buffers for music and ambience. Includes 3D positional audio (opt-in per buffer), a waveform analyser with per-frame callback, and a rich message system that routes load, playback, and stream health events to the owning component automatically.
-
-**WakaD3D** — adds WebGL/WebGL2 support to wakaPAC canvas components, for 3D or GPU-accelerated drawing instead of plain 2D graphics. It recovers automatically if the browser drops the graphics context (which can happen anytime), keeps the canvas redrawing on a schedule for smooth animation.
+**Media Embeds**
+- **WakaCKEditor** — bridges CKEditor 4 into WakaPAC, with content synced to `abstraction.value` and back to the textarea on form submit
+- **WakaVideo** — bridges native `<video>` elements: playback control, volume, seek, playback rate, programmatic cues, and canvas frame capture
+- **WakaYouTube** — bridges the YouTube IFrame API: playback control, volume, seek, and mute
+- **WakaVimeo** — bridges the Vimeo Player SDK: playback control, volume, seek, mute, and playback rate (PRO/Business)
+- **WakaLightGallery** — bridges lightGallery v2, exposing the full gallery lifecycle as `msgProc` messages, with sub-plugin support (zoom, thumbnails, autoplay, etc.)
 
 ## Documentation
 

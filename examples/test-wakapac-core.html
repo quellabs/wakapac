@@ -524,6 +524,147 @@
                 c.destroy();
             });
 
+            await test('typing in a two-way-bound input inside a foreach item keeps focus (and cursor position) across the resulting rebuild (issue #211)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li><input class="name-input" data-pac-bind="value: item.name">' +
+                    '<span class="name-echo">{{item.name}}</span></li></ul>',
+                    { items: [{ name: 'One' }, { name: 'Two' }] }
+                );
+                await tick();
+
+                const input = c.container.querySelectorAll('.name-input')[0];
+                input.focus();
+                input.value = 'On3';
+                input.setSelectionRange(3, 3);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await tick();
+
+                assertEqual(c.abstraction.items[0].name, 'On3', 'two-way binding writes back to the correct array item');
+
+                const newInput = c.container.querySelectorAll('.name-input')[0];
+                assertEqual(newInput.value, 'On3', 'rebuilt input reflects the typed value');
+                assertEqual(document.activeElement, newInput, 'focus was restored to the equivalent input after the rebuild');
+                assertEqual(newInput.selectionStart, 3, 'cursor position was restored too');
+                assertEqual(c.container.querySelectorAll('.name-echo')[0].textContent, 'On3', 'sibling interpolation for the same item still updates');
+
+                c.destroy();
+            });
+
+            await test('focus follows the edited item across an unrelated insert elsewhere in the same list (issue #211 follow-up)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li><input class="name-input" data-pac-bind="value: item.name">' +
+                    '<span class="name-echo">{{item.name}}</span></li></ul>',
+                    { items: [{ name: 'One' }, { name: 'Two' }, { name: 'Three' }] }
+                );
+                await tick();
+
+                // Focus "Two"'s input, at index 1.
+                const inputs = c.container.querySelectorAll('.name-input');
+                inputs[1].focus();
+                assertEqual(document.activeElement, inputs[1], 'sanity check: focus is on "Two"\'s input');
+
+                // Insert a new item at the front — "Two" is now at index 2, not 1.
+                c.abstraction.items.unshift({ name: 'Zero' });
+                await tick();
+
+                const newInputs = c.container.querySelectorAll('.name-input');
+                assertEqual(newInputs.length, 4, 'list grew by the inserted item');
+                assertEqual(document.activeElement, newInputs[2], 'focus followed "Two" to its new position');
+                assertEqual(document.activeElement.value, 'Two', 'the refocused input still belongs to "Two", not whichever item now sits at the old index');
+
+                c.destroy();
+            });
+
+            await test('focus in a nested inner foreach item survives the OUTER foreach rebuilding (issue #211 follow-up: nested foreach)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: outerItems" data-pac-item="outerItem">' +
+                    '<li><span>{{outerItem.label}}</span>' +
+                    '<ol data-pac-bind="foreach: outerItem.rows" data-pac-item="row">' +
+                    '<li><input class="row-input" data-pac-bind="value: row.text"></li>' +
+                    '</ol></li></ul>',
+                    {
+                        outerItems: [
+                            { label: 'A', rows: [{ text: 'a1' }, { text: 'a2' }] },
+                            { label: 'B', rows: [{ text: 'b1' }] }
+                        ]
+                    }
+                );
+                await tick();
+
+                // Focus the inner input belonging to outerItems[0].rows[0] ("a1").
+                const firstInnerInput = c.container.querySelectorAll('.row-input')[0];
+                firstInnerInput.focus();
+                assertEqual(document.activeElement, firstInnerInput, 'sanity check: focus is on the inner input');
+
+                // Mutate the OUTER item's own property (unrelated to the inner
+                // rows) — this rebuilds the whole outer <ul>, tearing down and
+                // recreating outerItems[0]'s nested inner foreach too.
+                c.abstraction.outerItems[1].label = 'B changed';
+                await tick();
+
+                const newFirstInnerInput = c.container.querySelectorAll('.row-input')[0];
+                assertEqual(document.activeElement, newFirstInnerInput, 'focus survived the outer rebuild, landing on the equivalent inner input');
+                assertEqual(newFirstInnerInput.value, 'a1', 'the refocused inner input still belongs to the correct row');
+
+                c.destroy();
+            });
+
+            await test('identity-tracking distinguishes a genuinely undefined item from "no snapshot available" (issue #211 follow-up)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li><input class="item-input"></li></ul>',
+                    { items: ['Alpha', undefined, 'Gamma'] }
+                );
+                await tick();
+
+                // Focus the input for the undefined-valued item, at index 1.
+                const inputs = c.container.querySelectorAll('.item-input');
+                inputs[1].focus();
+                assertEqual(document.activeElement, inputs[1], 'sanity check: focus is on the undefined-valued item');
+
+                // Insert a new item at the front — the undefined item is now at index 2, not 1.
+                c.abstraction.items.unshift('Zero');
+                await tick();
+
+                const newInputs = c.container.querySelectorAll('.item-input');
+                assertEqual(newInputs.length, 4, 'list grew by the inserted item');
+                assertEqual(document.activeElement, newInputs[2], 'focus followed the undefined-valued item to its new position, not whichever item now sits at the old index');
+
+                c.destroy();
+            });
+
+            await test('focus and cursor survive a same-item wp-if sibling toggling as a side effect of the edit (issue #211 follow-up: wp-if sibling)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
+                    '<li>' +
+                    '<input class="name-input" data-pac-bind="value: item.name">' +
+                    '<!-- wp-if: item.name.length > 0 --><span class="ok">ok</span><!-- /wp-if -->' +
+                    '</li></ul>',
+                    { items: [{ name: '' }] }
+                );
+                await tick();
+
+                const input = c.container.querySelector('.name-input');
+                input.focus();
+                input.value = 'X';
+                input.setSelectionRange(1, 1);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await tick();
+
+                // Typing flips the wp-if from hidden to shown, changing whether
+                // the <span> is a live element or a placeholder comment right
+                // next to the input.
+                assertEqual(c.container.querySelectorAll('.ok').length, 1, 'sanity check: the wp-if sibling became visible');
+
+                const newInput = c.container.querySelector('.name-input');
+                assertEqual(document.activeElement, newInput, 'focus is still on the name input, not the newly-revealed sibling');
+                assertEqual(newInput.selectionStart, 1, 'cursor position survived too');
+
+                c.destroy();
+            });
+
             suite('Click bindings & msgProc');
 
             await test('click binding invokes the bound method', async function () {
