@@ -611,6 +611,69 @@
                 c.destroy();
             });
 
+            await test('nested foreach using the default item/$index names on both levels shadows the outer scope correctly (issue #214)', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: categories">' +
+                    '<li><strong class="cat">{{item.name}} (#{{$index}})</strong>' +
+                    '<ul data-pac-bind="foreach: item.products">' +
+                    '<li class="prod">{{$index}}: {{item.name}} - {{item.price}}</li>' +
+                    '</ul></li></ul>',
+                    {
+                        categories: [
+                            { name: 'Electronics', products: [{ name: 'Laptop', price: 999 }, { name: 'Mouse', price: 25 }] },
+                            { name: 'Books', products: [{ name: 'JavaScript Guide', price: 39 }, { name: 'Design Patterns', price: 45 }] }
+                        ]
+                    }
+                );
+                await tick();
+
+                const cats = c.container.querySelectorAll('.cat');
+                assertEqual(cats[0].textContent, 'Electronics (#0)');
+                assertEqual(cats[1].textContent, 'Books (#1)');
+
+                const electronicsProducts = c.container.querySelectorAll('ul ul')[0].querySelectorAll('.prod');
+                assertEqual(electronicsProducts.length, 2, 'inner foreach renders its own array\'s length, not the outer\'s');
+                assertEqual(electronicsProducts[0].textContent, '0: Laptop - 999', 'inner item/$index resolve to the inner array, not the outer item');
+                assertEqual(electronicsProducts[1].textContent, '1: Mouse - 25');
+
+                const booksProducts = c.container.querySelectorAll('ul ul')[1].querySelectorAll('.prod');
+                assertEqual(booksProducts[0].textContent, '0: JavaScript Guide - 39');
+                assertEqual(booksProducts[1].textContent, '1: Design Patterns - 45');
+
+                c.destroy();
+            });
+
+            await test('nested foreach with default item/$index names does not log "No foreach binding found" on a normal initial render (issue #214)', async function () {
+                const originalWarn = console.warn;
+                const warnings = [];
+                console.warn = function () { warnings.push(Array.prototype.join.call(arguments, ' ')); };
+
+                let c;
+                try {
+                    c = mount(
+                        '<ul data-pac-bind="foreach: categories">' +
+                        '<li>{{item.name}}' +
+                        '<ul data-pac-bind="foreach: item.products">' +
+                        '<li>{{item.name}}</li></ul></li></ul>',
+                        {
+                            categories: [
+                                { name: 'Electronics', products: [{ name: 'Laptop' }] }
+                            ]
+                        }
+                    );
+                    await tick();
+                } finally {
+                    console.warn = originalWarn;
+                }
+
+                const bindingWarnings = warnings.filter(function (w) {
+                    return w.indexOf('No foreach binding found for element') !== -1;
+                });
+
+                assertEqual(bindingWarnings, [], 'no spurious "no foreach binding" warning while a nested foreach is waiting on its parent context');
+                c.destroy();
+            });
+
             await test('identity-tracking distinguishes a genuinely undefined item from "no snapshot available" (issue #211 follow-up)', async function () {
                 const c = mount(
                     '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
