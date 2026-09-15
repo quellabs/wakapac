@@ -6,3 +6,6 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# Local working notes, not repo docs
+*.md
