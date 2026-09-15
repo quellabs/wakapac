@@ -199,6 +199,7 @@
         }
 
         td.cell.numeric { text-align: right; }
+        td.cell.error { color: #c5221f; font-family: var(--font-mono),serif; }
 
         /* Active cell and range selection are plain per-cell state now — no
            overlay elements to keep positioned in JS. */
@@ -274,6 +275,7 @@
     <div class="formula-bar">
         <div class="cell-name-box">{{activeCellRef}}</div>
         <input class="formula-input" id="formulaInput" type="text" spellcheck="false"
+               placeholder="Value, or a formula like =SUM(A1:A10)"
                data-pac-bind="value: formulaValue">
     </div>
     <div class="grid-scroll-area" id="gridScrollArea">
@@ -295,6 +297,7 @@
                             'row-header': slot.isHeader,
                             cell: !slot.isHeader,
                             numeric: !slot.isHeader && slot.numeric,
+                            error: !slot.isHeader && slot.formulaError,
                             active: slot.isHeader && isRowActive(rowIndex),
                             selected: !slot.isHeader && isCellSelected(rowIndex, colIndex - 1),
                             'in-range': !slot.isHeader && isCellInRange(rowIndex, colIndex - 1)
@@ -385,6 +388,396 @@
             return v !== "" && v !== null && !isNaN(v);
         }
 
+        /**
+         * Parses a single-letter cell reference (this sheet only has 26
+         * columns, so multi-letter refs like "AA1" are out of range) into
+         * zero-based coordinates.
+         * @param {string} ref - Cell reference (e.g. "B3").
+         * @returns {{col: number, row: number}|null} Null if out of range.
+         */
+        function parseCellRef(ref) {
+            const m = ref.match(/^([A-Z]+)([0-9]+)$/);
+
+            if (!m || m[1].length !== 1) {
+                return null;
+            }
+
+            const col = m[1].charCodeAt(0) - 65;
+            const row = parseInt(m[2], 10) - 1;
+
+            if (col < 0 || col >= NUM_COLS || row < 0 || row >= NUM_ROWS) {
+                return null;
+            }
+
+            return { col, row };
+        }
+
+        // =====================================================================
+        // FORMULA ENGINE
+        // =====================================================================
+        //
+        // A cell whose raw text starts with "=" is a formula: simple
+        // arithmetic (+ - * / and parentheses) over numbers and cell
+        // references, plus SUM/AVERAGE(or AVG)/COUNT/MIN/MAX over a
+        // "A1:B5"-style range or a comma-separated argument list.
+        //
+        // This is plain domain logic, not something WakaPAC provides —
+        // WakaPAC's job stays "render the grid reactively"; recalculateFormulas
+        // just mutates the same reactive cell slots the rest of the sheet
+        // already mutates, so the bound <td>s update themselves as usual.
+
+        /**
+         * Splits a formula's body into tokens. Throws a formula error (with
+         * a `.code` matching a spreadsheet error string) on invalid input.
+         * @param {string} text - Formula text with the leading "=" removed.
+         * @returns {Array<{type: string, value?: (number|string)}>}
+         */
+        function tokenizeFormula(text) {
+            const tokens = [];
+            const re = /\s*(?:([0-9]+(?:\.[0-9]+)?)|([A-Za-z]+[0-9]*)|([:,()+\-*/]))/y;
+            let i = 0;
+
+            while (i < text.length) {
+                re.lastIndex = i;
+                const m = re.exec(text);
+
+                if (!m) {
+                    formulaFail("#ERROR!");
+                }
+
+                i = re.lastIndex;
+
+                if (m[1] !== undefined) {
+                    tokens.push({ type: "NUM", value: parseFloat(m[1]) });
+                } else if (m[2] !== undefined) {
+                    tokens.push({ type: "WORD", value: m[2].toUpperCase() });
+                } else if (m[3] !== undefined) {
+                    tokens.push({ type: m[3] });
+                }
+            }
+
+            return tokens;
+        }
+
+        /**
+         * Throws an Error carrying a spreadsheet error code (e.g. "#REF!")
+         * as its `.code`, for recalculateFormulas to catch and display.
+         * @param {string} code
+         */
+        function formulaFail(code) {
+            const error = new Error(code);
+            error.code = code;
+            throw error;
+        }
+
+        /**
+         * Parses and evaluates a formula's body against the given resolver
+         * callbacks, which look up cell/range values in the sheet.
+         * @param {string} text - Formula text with the leading "=" removed.
+         * @param {{resolveRef: function(string): number, resolveRange: function(string, string): number[]}} refs
+         * @returns {number} The formula's numeric result.
+         */
+        function evaluateFormula(text, refs) {
+            const tokens = tokenizeFormula(text);
+            let pos = 0;
+
+            function peek() { return tokens[pos]; }
+            function advance() { return tokens[pos++]; }
+
+            function parseExpr() {
+                let value = parseTerm();
+
+                while (peek() && (peek().type === "+" || peek().type === "-")) {
+                    const op = advance().type;
+                    const rhs = parseTerm();
+                    value = op === "+" ? value + rhs : value - rhs;
+                }
+
+                return value;
+            }
+
+            function parseTerm() {
+                let value = parseFactor();
+
+                while (peek() && (peek().type === "*" || peek().type === "/")) {
+                    const op = advance().type;
+                    const rhs = parseFactor();
+
+                    if (op === "*") {
+                        value *= rhs;
+                    } else {
+                        if (rhs === 0) {
+                            formulaFail("#DIV/0!");
+                        }
+
+                        value /= rhs;
+                    }
+                }
+
+                return value;
+            }
+
+            function parseFactor() {
+                const t = peek();
+
+                if (!t) {
+                    formulaFail("#ERROR!");
+                }
+
+                if (t.type === "-") { advance(); return -parseFactor(); }
+                if (t.type === "+") { advance(); return parseFactor(); }
+                if (t.type === "NUM") { advance(); return t.value; }
+
+                if (t.type === "(") {
+                    advance();
+                    const value = parseExpr();
+
+                    if (!peek() || peek().type !== ")") {
+                        formulaFail("#ERROR!");
+                    }
+
+                    advance();
+                    return value;
+                }
+
+                if (t.type === "WORD") {
+                    advance();
+
+                    if (peek() && peek().type === "(") {
+                        advance();
+                        const args = parseArgs();
+
+                        if (!peek() || peek().type !== ")") {
+                            formulaFail("#ERROR!");
+                        }
+
+                        advance();
+                        return callFunction(t.value, args);
+                    }
+
+                    if (!/^[A-Z]+[0-9]+$/.test(t.value)) {
+                        formulaFail("#REF!");
+                    }
+
+                    return refs.resolveRef(t.value);
+                }
+
+                formulaFail("#ERROR!");
+            }
+
+            // A function's argument list is a comma-separated mix of plain
+            // expressions and "A1:B5" ranges; both are flattened into one
+            // number array so SUM/AVERAGE/etc. don't need to care which.
+            function parseArgs() {
+                const values = [];
+
+                if (peek() && peek().type === ")") {
+                    return values;
+                }
+
+                while (true) {
+                    values.push(...parseArg());
+
+                    if (peek() && peek().type === ",") {
+                        advance();
+                        continue;
+                    }
+
+                    break;
+                }
+
+                return values;
+            }
+
+            function parseArg() {
+                if (peek() && peek().type === "WORD" && tokens[pos + 1] && tokens[pos + 1].type === ":") {
+                    const ref1 = advance().value;
+                    advance(); // ':'
+                    const ref2 = advance();
+
+                    if (!ref2 || ref2.type !== "WORD") {
+                        formulaFail("#REF!");
+                    }
+
+                    return refs.resolveRange(ref1, ref2.value);
+                }
+
+                return [parseExpr()];
+            }
+
+            function callFunction(name, args) {
+                switch (name) {
+                    case "SUM":
+                        return args.reduce((a, b) => a + b, 0);
+
+                    case "AVERAGE":
+                    case "AVG":
+                        if (args.length === 0) { formulaFail("#DIV/0!"); }
+                        return args.reduce((a, b) => a + b, 0) / args.length;
+
+                    case "COUNT":
+                        return args.length;
+
+                    case "MIN":
+                        if (args.length === 0) { formulaFail("#ERROR!"); }
+                        return Math.min(...args);
+
+                    case "MAX":
+                        if (args.length === 0) { formulaFail("#ERROR!"); }
+                        return Math.max(...args);
+
+                    default:
+                        formulaFail("#NAME?");
+                }
+            }
+
+            const result = parseExpr();
+
+            if (peek()) {
+                formulaFail("#ERROR!");
+            }
+
+            if (typeof result !== "number" || !isFinite(result)) {
+                formulaFail("#ERROR!");
+            }
+
+            return result;
+        }
+
+        /**
+         * Recalculates every formula cell in the grid. Each cell is
+         * evaluated recursively (a formula referencing another formula
+         * resolves that one first) with per-pass memoization and cycle
+         * detection, then the result is written into the same reactive
+         * slot the rest of the sheet mutates — WakaPAC's own bindings pick
+         * the change up from there.
+         * @param {Array} grid - The component's grid array.
+         */
+        function recalculateFormulas(grid) {
+            const memo = new Map();
+
+            function slotAt(row, col) {
+                if (row < 0 || row >= grid.length || col < 0 || col >= NUM_COLS) {
+                    return null;
+                }
+
+                return grid[row].slots[col + 1];
+            }
+
+            function evalCell(row, col, visiting) {
+                const key = row + "," + col;
+
+                if (memo.has(key)) {
+                    return memo.get(key);
+                }
+
+                const slot = slotAt(row, col);
+
+                if (!slot) {
+                    return { error: "#REF!" };
+                }
+
+                if (!slot.raw.startsWith("=")) {
+                    // Blank cells act as 0 in arithmetic (matching common
+                    // spreadsheet convention) but are excluded from ranges
+                    // by resolveRange's own `blank` check below.
+                    const result = slot.raw === ""
+                        ? { value: 0, blank: true }
+                        : { value: slot.value };
+
+                    memo.set(key, result);
+                    return result;
+                }
+
+                if (visiting.has(key)) {
+                    const result = { error: "#CIRCULAR!" };
+                    memo.set(key, result);
+                    return result;
+                }
+
+                visiting.add(key);
+
+                let result;
+
+                try {
+                    const value = evaluateFormula(slot.raw.slice(1), {
+                        resolveRef(ref) {
+                            const pos = parseCellRef(ref);
+
+                            if (!pos) {
+                                formulaFail("#REF!");
+                            }
+
+                            const cellResult = evalCell(pos.row, pos.col, visiting);
+
+                            if (cellResult.error) {
+                                formulaFail(cellResult.error);
+                            }
+
+                            if (typeof cellResult.value !== "number") {
+                                formulaFail("#VALUE!");
+                            }
+
+                            return cellResult.value;
+                        },
+
+                        resolveRange(ref1, ref2) {
+                            const p1 = parseCellRef(ref1);
+                            const p2 = parseCellRef(ref2);
+
+                            if (!p1 || !p2) {
+                                formulaFail("#REF!");
+                            }
+
+                            const values = [];
+
+                            for (let r = Math.min(p1.row, p2.row); r <= Math.max(p1.row, p2.row); r++) {
+                                for (let c = Math.min(p1.col, p2.col); c <= Math.max(p1.col, p2.col); c++) {
+                                    const cellResult = evalCell(r, c, visiting);
+
+                                    if (!cellResult.error && !cellResult.blank && typeof cellResult.value === "number") {
+                                        values.push(cellResult.value);
+                                    }
+                                }
+                            }
+
+                            return values;
+                        }
+                    });
+
+                    result = { value };
+                } catch (error) {
+                    result = { error: error.code || "#ERROR!" };
+                }
+
+                visiting.delete(key);
+                memo.set(key, result);
+                return result;
+            }
+
+            for (let r = 0; r < grid.length; r++) {
+                for (let c = 0; c < NUM_COLS; c++) {
+                    const slot = slotAt(r, c);
+
+                    if (!slot.raw.startsWith("=")) {
+                        continue;
+                    }
+
+                    const result = evalCell(r, c, new Set());
+
+                    if (result.error) {
+                        slot.value = result.error;
+                        slot.numeric = false;
+                        slot.formulaError = true;
+                    } else {
+                        slot.value = result.value;
+                        slot.numeric = true;
+                        slot.formulaError = false;
+                    }
+                }
+            }
+        }
+
         // =====================================================================
         // GRID DATA MODEL
         // =====================================================================
@@ -418,7 +811,7 @@
                 const slots = [{ isHeader: true, display: r + 1 }];
 
                 for (let c = 0; c < NUM_COLS; c++) {
-                    slots.push({ isHeader: false, raw: "", value: "", numeric: false });
+                    slots.push({ isHeader: false, raw: "", value: "", numeric: false, formulaError: false });
                 }
 
                 rows.push({ slots });
@@ -1010,9 +1403,11 @@
             },
 
             /**
-             * Mutates a cell's slot in place. WakaPAC's deep reactivity means
-             * the bound <td> (text + numeric class) updates itself — no
-             * manual render call needed.
+             * Mutates a cell's slot in place, then recalculates every
+             * formula in the sheet (cheap enough at this grid size, and far
+             * simpler than tracking which formulas actually depend on this
+             * cell). WakaPAC's deep reactivity means every touched <td>
+             * updates itself — no manual render call needed.
              * @param {number} row - Row index.
              * @param {number} col - Column index.
              * @param {string} raw - Raw input string (empty to clear).
@@ -1025,12 +1420,30 @@
                     slot.raw = "";
                     slot.value = "";
                     slot.numeric = false;
+                    slot.formulaError = false;
+                } else if (trimmed.startsWith("=")) {
+                    slot.raw = trimmed;
+                    slot.value = "";
+                    slot.numeric = false;
+                    slot.formulaError = false;
                 } else {
                     const numeric = isNumeric(trimmed);
                     slot.raw = trimmed;
                     slot.value = numeric ? parseFloat(trimmed) : trimmed;
                     slot.numeric = numeric;
+                    slot.formulaError = false;
                 }
+
+                this._recalculateAll();
+            },
+
+            /**
+             * Re-runs the formula engine over the whole grid. See
+             * recalculateFormulas — this just points it at this component's
+             * grid.
+             */
+            _recalculateAll() {
+                recalculateFormulas(this.grid);
             },
 
             /**
