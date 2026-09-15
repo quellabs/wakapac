@@ -971,14 +971,26 @@
         },
 
         /**
+         * Computes the viewport-relative bounding rect and window dimensions
+         * for an element, shared by isElementVisible/isElementFullyVisible.
+         * @param {HTMLElement} element - The element to measure
+         * @returns {{rect: DOMRect, viewHeight: number, viewWidth: number}}
+         */
+        getViewportMetrics(element) {
+            return {
+                rect: element.getBoundingClientRect(),
+                viewHeight: window.innerHeight,
+                viewWidth: window.innerWidth
+            };
+        },
+
+        /**
          * Checks if an element is at least partially visible in the viewport
          * @param {HTMLElement} element - The element to check
          * @returns {boolean} True if element intersects with viewport
          */
         isElementVisible(element) {
-            const rect = element.getBoundingClientRect();
-            const viewHeight = window.innerHeight;
-            const viewWidth = window.innerWidth;
+            const { rect, viewHeight, viewWidth } = this.getViewportMetrics(element);
 
             return (
                 rect.top < viewHeight &&
@@ -994,9 +1006,7 @@
          * @returns {boolean} True if entire element is within viewport bounds
          */
         isElementFullyVisible(element) {
-            const rect = element.getBoundingClientRect();
-            const viewHeight = window.innerHeight;
-            const viewWidth = window.innerWidth;
+            const { rect, viewHeight, viewWidth } = this.getViewportMetrics(element);
 
             return (
                 rect.top >= 0 &&
@@ -1021,7 +1031,7 @@
          * @returns {boolean} True if focus is within the element's boundaries
          */
         isElementFocusWithin(element) {
-            return element === document.activeElement || element.contains(document.activeElement);
+            return this.isElementDirectlyFocused(element) || element.contains(document.activeElement);
         },
 
         /**
@@ -3855,18 +3865,14 @@
          * @returns {void}
          */
         invalidateRect(pacId, rect) {
-            // Fetch the container
-            const container = wakaPAC.getContainerByPacId(pacId);
+            // Fetch the canvas container; bail if not found or not a canvas
+            const target = wakaPAC._resolveCanvasTarget(pacId);
 
-            // If not found, bail
-            if (!container) {
+            if (!target) {
                 return;
             }
 
-            // Do nothing if the container is not a canvas
-            if (!(container instanceof HTMLCanvasElement)) {
-                return;
-            }
+            const container = target.container;
 
             // Normalize: null rect means the whole canvas
             const fullRect = {
@@ -4458,20 +4464,30 @@
         },
 
         /**
+         * Parses a comma-separated list of expressions up to (not including) the
+         * given closing token type. Shared by argument lists and array literals.
+         * @param {string} closingType - Token type that ends the list (not consumed)
+         * @returns {Array} Array of parsed expressions
+         */
+        parseCommaSeparatedList(closingType) {
+            const items = [];
+
+            if (!this.check(closingType)) {
+                do {
+                    items.push(this.parseTernary());
+                } while (this.match('COMMA') && !this.check(closingType));
+            }
+
+            return items;
+        },
+
+        /**
          * Parses a comma-separated list of function arguments.
          * Continues parsing until reaching a closing parenthesis or end of input.
          * @returns {Array} Array of parsed argument expressions
          */
         parseArgumentList() {
-            const args = [];
-
-            if (!this.check('RPAREN')) {
-                do {
-                    args.push(this.parseTernary());
-                } while (this.match('COMMA') && !this.check('RPAREN'));
-            }
-
-            return args;
+            return this.parseCommaSeparatedList('RPAREN');
         },
 
         /**
@@ -4484,13 +4500,7 @@
          * @example
          */
         parseArrayLiteral() {
-            const elements = [];
-
-            if (!this.check('RBRACKET')) {
-                do {
-                    elements.push(this.parseTernary());
-                } while (this.match('COMMA') && !this.check('RBRACKET'));
-            }
+            const elements = this.parseCommaSeparatedList('RBRACKET');
 
             this.consume('RBRACKET', 'Expected closing bracket');
 
@@ -4783,7 +4793,7 @@
                     // Handle array methods
                     if (Array.isArray(object)) {
                         return this.evaluateArrayMethod(object, node.method,
-                            node.arguments.map(arg => this.evaluate(arg, context, scope))
+                            this.evaluateArgs(node.arguments, context, scope)
                         );
                     }
 
@@ -4803,7 +4813,7 @@
                             console.warn(`WakaPAC: data property "${node.unit}" is shadowing a registered unit`);
                         }
 
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
 
                         if (Array.isArray(obj)) {
                             return this.evaluateArrayMethod(obj, node.method, args);
@@ -4820,7 +4830,7 @@
                     const unit = _units.get(node.unit);
 
                     if (unit && typeof unit[node.method] === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return unit[node.method](...args);
                     }
 
@@ -4833,7 +4843,7 @@
                     const fn = this.getProperty(node.name, context, scope);
 
                     if (typeof fn === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return fn.call(context, ...args);
                     }
 
@@ -4841,7 +4851,7 @@
                     const importedUnits = scope?.importedUnits;
 
                     if (importedUnits && typeof importedUnits[node.name] === 'function') {
-                        const args = node.arguments.map(arg => this.evaluate(arg, context, scope));
+                        const args = this.evaluateArgs(node.arguments, context, scope);
                         return importedUnits[node.name](...args);
                     }
 
@@ -4853,6 +4863,17 @@
                 default:
                     return undefined;
             }
+        },
+
+        /**
+         * Evaluates a call node's argument expressions against the given context/scope.
+         * @param {Array} args - AST argument nodes
+         * @param {Object} context - Data context
+         * @param {Object} scope - Local scope (e.g. foreach item/index)
+         * @returns {Array} Evaluated argument values
+         */
+        evaluateArgs(args, context, scope) {
+            return args.map(arg => this.evaluate(arg, context, scope));
         },
 
         /**
@@ -4960,15 +4981,11 @@
          * @returns {Array<*>} The evaluated array, or an empty array if no elements are defined.
          */
         evaluateArrayLiteral(arrayExpr, context, resolverContext = null) {
-            const self = this;
-
             if (!arrayExpr.elements) {
                 return [];
             }
 
-            return arrayExpr.elements.map(function(element) {
-                return self.evaluate(element, context, resolverContext);
-            });
+            return arrayExpr.elements.map(element => this.evaluate(element, context, resolverContext));
         },
 
         /**
@@ -4981,12 +4998,11 @@
          * @returns {Object} The evaluated plain object, or an empty object if no pairs are defined.
          */
         evaluateObjectLiteral: function(node, context, scope) {
-            const self = this;
             const result = {};
 
             if (node.pairs) {
-                node.pairs.forEach(function({ key, value }) {
-                    result[key] = self.evaluate(value, context, scope);
+                node.pairs.forEach(({ key, value }) => {
+                    result[key] = this.evaluate(value, context, scope);
                 });
             }
 
@@ -9888,11 +9904,7 @@
             this.isRecording = true;
 
             // Initialize points array with starting position
-            this.gesturePoints = [{
-                x: event.clientX,
-                y: event.clientY,
-                time: Date.now()
-            }];
+            this.gesturePoints = [this._capturePoint(event)];
 
             // Record when gesture started for duration calculation
             this.startTime = Date.now();
@@ -9916,12 +9928,17 @@
             // Only record if moved enough distance to avoid recording jitter
             // This creates a cleaner path with fewer redundant points
             if (distance >= this.MIN_DISTANCE) {
-                this.gesturePoints.push({
-                    x: event.clientX,
-                    y: event.clientY,
-                    time: Date.now()
-                });
+                this.gesturePoints.push(this._capturePoint(event));
             }
+        },
+
+        /**
+         * Captures a gesture point's coordinates and timestamp from a mouse event.
+         * @param {MouseEvent} event
+         * @returns {{x: number, y: number, time: number}}
+         */
+        _capturePoint(event) {
+            return { x: event.clientX, y: event.clientY, time: Date.now() };
         },
 
         /**
@@ -11079,6 +11096,27 @@
     };
 
     /**
+     * Resolves a target container and builds its message object, shared by
+     * postMessage/sendMessage. Returns null if the container doesn't exist,
+     * so the caller can drop the message.
+     * @param {string} pacId - Target container's data-pac-id attribute value
+     * @param {number} messageId - Message identifier (integer constant, e.g., WM_USER + 1)
+     * @param {number} wParam - First message parameter (integer)
+     * @param {number} lParam - Second message parameter (integer)
+     * @param {Object} extended - Additional data stored in event.detail for custom use cases
+     * @returns {{container: Element, event: CustomEvent}|null}
+     */
+    wakaPAC._prepareMessage = function(pacId, messageId, wParam, lParam, extended) {
+        const container = this.getContainerByPacId(pacId);
+
+        if (!container) {
+            return null;
+        }
+
+        return { container, event: this.createPacMessage(messageId, wParam, lParam, extended) };
+    };
+
+    /**
      * Send a message to a specific WakaPAC container by its data-pac-id
      * Similar to Win32 PostMessage with a specific HWND
      * @param {string} pacId - Target container's data-pac-id attribute value
@@ -11088,23 +11126,17 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.postMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
-        // Resolve the target container from the registry.
-        // If the container does not exist, the message is dropped.
-        const container = this.getContainerByPacId(pacId);
+        const prepared = this._prepareMessage(pacId, messageId, wParam, lParam, extended);
 
-        if (!container) {
+        if (!prepared) {
             return;
         }
-
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not deliver the message by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
 
         // Dispatch the message through the DOM event system.
         // Delivery is asynchronous and follows normal event routing semantics.
         setTimeout(function() {
-            if (container.isConnected) {
-                DomUpdateTracker.dispatchToContainer(container, event);
+            if (prepared.container.isConnected) {
+                DomUpdateTracker.dispatchToContainer(prepared.container, prepared.event);
             }
         }, 0);
     };
@@ -11120,20 +11152,15 @@
      * @param {Object} [extended={}] - Additional data stored in event.detail for custom use cases
      */
     wakaPAC.sendMessage = function(pacId, messageId, wParam, lParam, extended = {}) {
-        // Resolve the target container. If it does not exist, the message is dropped.
-        const container = this.getContainerByPacId(pacId);
+        const prepared = this._prepareMessage(pacId, messageId, wParam, lParam, extended);
 
-        if (!container) {
+        if (!prepared) {
             return;
         }
 
-        // Construct a wakapac message object carrying messageId, wParam, and lParam.
-        // This does not dispatch anything by itself.
-        const event = this.createPacMessage(messageId, wParam, lParam, extended);
-
         // Invoke the message procedure directly.
         // This call is synchronous and executes immediately in the current call stack.
-        DomUpdateTracker.dispatchToContainer(container, event);
+        DomUpdateTracker.dispatchToContainer(prepared.container, prepared.event);
     };
 
     /**
@@ -11637,7 +11664,7 @@
         }
 
         // Store the data
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         _accelTables.set(tableKey, parsed);
     };
 
@@ -11646,7 +11673,7 @@
      * @param {string|null} pacId — Container pac-id, or null for global.
      */
     wakaPAC.destroyAcceleratorTable = function(pacId) {
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         _accelTables.delete(tableKey);
     };
 
@@ -11659,7 +11686,7 @@
      * @returns {Array<{key: string, cmdId: number}>|null}
      */
     wakaPAC.getAcceleratorTable = function(pacId) {
-        const tableKey = (pacId === null || pacId === undefined) ? ACCEL_GLOBAL_KEY : pacId;
+        const tableKey = pacId ?? ACCEL_GLOBAL_KEY;
         const table = _accelTables.get(tableKey);
         return table ? table.map(e => ({ key: e.key, cmdId: e.cmdId })) : null;
     };
@@ -11779,17 +11806,28 @@
      * @param {string} pacId
      * @returns {RenderingContext|null}
      */
-    wakaPAC.getDC = function(pacId) {
+    wakaPAC._resolveCanvasTarget = function(pacId) {
         const container = this.getContainerByPacId(pacId);
 
         if (!container || !(container instanceof HTMLCanvasElement)) {
             return null;
         }
 
-        // Resolve context attributes from component config
         const pacContext = window.PACRegistry.get(pacId);
         const contextType = container.dataset.pacContext || '2d';
         const attributes = pacContext?.config?.dcAttributes;
+
+        return { container, contextType, attributes };
+    };
+
+    wakaPAC.getDC = function(pacId) {
+        const target = this._resolveCanvasTarget(pacId);
+
+        if (!target) {
+            return null;
+        }
+
+        const { container, contextType, attributes } = target;
 
         // Delegate context acquisition to getDCFromElement
         const ctx = this.getDCFromElement(container, attributes);
@@ -11868,17 +11906,13 @@
      * @returns {RenderingContext|null}
      */
     wakaPAC.createCompatibleDC = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return null;
         }
 
-        const contextType = container.dataset.pacContext || '2d';
-        const pacContext = window.PACRegistry.get(pacId);
-        const attributes = pacContext?.config?.dcAttributes;
-
-        return _createCanvas(container.width, container.height, contextType, attributes);
+        return _createCanvas(target.container.width, target.container.height, target.contextType, target.attributes);
     };
 
     /**
@@ -12041,13 +12075,13 @@
      * @param {number} height - New backing store height in pixels
      */
     wakaPAC.resizeCanvas = function(pacId, width, height) {
-        // Fetch the container
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        // resizeCanvas is only meaningful for canvas containers
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return;
         }
+
+        const { container, contextType } = target;
 
         // Skip if dimensions are unchanged — assigning to width/height clears the
         // backing store even when the value is the same, so avoid it entirely
@@ -12062,8 +12096,6 @@
         // Schedule a repaint for 2D canvases — the canvas content is invalid after
         // every resize. Non-2D canvases (e.g. WebGL, via a plugin) drive their own
         // render loop and do not use the dirty rect / MSG_PAINT mechanism.
-        const contextType = container.dataset.pacContext || '2d';
-
         if (contextType === '2d') {
             DomUpdateTracker.invalidateRect(pacId, null);
         }
@@ -12078,15 +12110,15 @@
      * @returns {{width:number, height:number}|null}
      */
     wakaPAC.getCanvasSize = function(pacId) {
-        const container = this.getContainerByPacId(pacId);
+        const target = this._resolveCanvasTarget(pacId);
 
-        if (!container || !(container instanceof HTMLCanvasElement)) {
+        if (!target) {
             return null;
         }
 
         return {
-            width: container.width,
-            height: container.height
+            width: target.container.width,
+            height: target.container.height
         };
     };
 
