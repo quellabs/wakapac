@@ -1721,7 +1721,7 @@
                     editing: true, editorValue: raw
                 });
 
-                wakaPAC.getContextByPacId(this.pacId).flushReactiveChanges();
+                wakaPAC.flushReactiveChanges(this.pacId);
 
                 this._editorInput.focus();
                 const len = this._editorInput.value.length;

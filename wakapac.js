@@ -11166,6 +11166,23 @@
         return window.PACRegistry.get(pacId);
     };
 
+    /**
+     * Forces any batched `pac:change` updates for a component to apply to the
+     * DOM immediately, instead of waiting for the next microtask flush. Use
+     * before an imperative DOM operation (e.g. focusing an element that a
+     * reactive binding just made visible) that needs the update applied now.
+     * @param {string} pacId - data-pac-id of the target component
+     */
+    wakaPAC.flushReactiveChanges = function(pacId) {
+        const context = window.PACRegistry.get(pacId);
+
+        if (!context) {
+            console.warn(`wakaPAC: Container with id "${pacId}" not found`);
+            return;
+        }
+
+        context.flushReactiveChanges();
+    };
 
     /**
      * Resolve a WakaPAC container element by its data-pac-id.
