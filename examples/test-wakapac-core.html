@@ -652,7 +652,7 @@
                 const c = mount(
                     '<ul data-pac-bind="foreach: categories">' +
                     '<li><ul data-pac-bind="foreach: item.products">' +
-                    '<li class="prod">{{$parent.item.name}} / {{item.name}}</li>' +
+                    '<li class="prod">{{$parent.item.name}}#{{$parent.$index}} / {{item.name}}</li>' +
                     '</ul></li></ul>',
                     {
                         categories: [
@@ -665,14 +665,14 @@
 
                 const prods = c.container.querySelectorAll('.prod');
                 assertEqual(prods.length, 3);
-                assertEqual(prods[0].textContent, 'Electronics / Laptop', '$parent.item resolves to the enclosing category, not the inner product');
-                assertEqual(prods[1].textContent, 'Electronics / Mouse');
-                assertEqual(prods[2].textContent, 'Books / JavaScript Guide', '$parent.item tracks the correct outer item across foreach instances');
+                assertEqual(prods[0].textContent, 'Electronics#0 / Laptop', '$parent.item resolves to the enclosing category, and $parent.$index (a scalar, no itemVar hop needed) to its index');
+                assertEqual(prods[1].textContent, 'Electronics#0 / Mouse');
+                assertEqual(prods[2].textContent, 'Books#1 / JavaScript Guide', '$parent.item and $parent.$index both track the correct outer frame across foreach instances');
 
                 c.abstraction.categories[0].name = 'Electronics (sale)';
                 await tick();
 
-                assertEqual(c.container.querySelectorAll('.prod')[0].textContent, 'Electronics (sale) / Laptop', '$parent.item binding updates reactively when the outer item changes');
+                assertEqual(c.container.querySelectorAll('.prod')[0].textContent, 'Electronics (sale)#0 / Laptop', '$parent.item binding updates reactively when the outer item changes');
 
                 c.destroy();
             });
