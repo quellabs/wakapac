@@ -272,10 +272,23 @@
     createElement, no querySelector-and-mutate render loop.
 -->
 <div class="spreadsheet-outer" id="spreadsheet" data-pac-id="spreadsheet" tabindex="0">
+    <!--
+        data-pac-update-mode="change" on the two text inputs below: a
+        reactive property write re-evaluates every bound element/text node
+        in the whole component (WakaPAC doesn't scope that pass to actual
+        dependents), so with ~1300 bound cells the default "immediate" mode
+        turns every keystroke into a full-grid pass. "change" defers the
+        write to blur instead. Since nothing here needs the live keystroke
+        value reactively — _commitEdit/_commitFormulaBar read the input's
+        .value directly, and the formula-bar mirror reads it straight off
+        the MSG_INPUT_COMPLETE event — this costs nothing but the
+        already-immediate native typing feel.
+    -->
     <div class="formula-bar">
         <div class="cell-name-box">{{activeCellRef}}</div>
         <input class="formula-input" id="formulaInput" type="text" spellcheck="false"
                placeholder="Value, or a formula like =SUM(A1:A10)"
+               data-pac-update-mode="change"
                data-pac-bind="value: formulaValue">
     </div>
     <div class="grid-scroll-area" id="gridScrollArea">
@@ -308,6 +321,7 @@
         </table>
 
         <input class="cell-editor" id="cellEditor" type="text" spellcheck="false" autocomplete="off"
+               data-pac-update-mode="change"
                data-pac-bind="visible: editing, value: editorValue, style: editorStyle">
     </div>
 
@@ -869,6 +883,10 @@
              */
             _wasDrag: false,
 
+            /** Memoization for _rangeBounds() — see its docstring. */
+            _boundsCache: null,
+            _boundsCacheKey: null,
+
             // -----------------------------------------------------------------
             // DOM references (assigned in init) — only for focus handling and
             // scrollIntoView; rendering itself needs none of these.
@@ -1171,11 +1189,16 @@
 
                     // ---------------------------------------------------------
                     // Input complete: sync the formula bar while typing in
-                    // the cell editor
+                    // the cell editor. A direct DOM write, not a reactive
+                    // property write — editorValue itself only updates on
+                    // blur (see data-pac-update-mode="change" above), and a
+                    // per-keystroke reactive write here would cost the same
+                    // full-grid pass anyway. event.detail.value is the
+                    // input's current (post-keystroke) value.
                     // ---------------------------------------------------------
                     case wakaPAC.MSG_INPUT_COMPLETE: {
                         if (this._focusedElement() === "editor") {
-                            this.formulaValue = this.editorValue;
+                            this._formulaInputEl.value = event.detail.value;
                         }
 
                         break;
@@ -1482,17 +1505,31 @@
 
             /**
              * Computes the normalised bounding rectangle of the current selection.
-             * Works for both single cells and multi-cell ranges.
+             * Works for both single cells and multi-cell ranges. Called from
+             * every header cell's class binding (and, while a range is
+             * active, every data cell's) on each reactive pass, so the
+             * result is memoized against the four selection fields it
+             * depends on — cheap to keep fresh, and avoids rebuilding the
+             * same object hundreds of times per pass.
              * @returns {{ minCol: number, maxCol: number, minRow: number, maxRow: number }}
              */
             _rangeBounds() {
+                const key = this.selCol + "," + this.selRow + "," + this.selEndCol + "," + this.selEndRow;
+
+                if (this._boundsCacheKey === key) {
+                    return this._boundsCache;
+                }
+
                 const c2 = this.selEndCol !== null ? this.selEndCol : this.selCol;
                 const r2 = this.selEndRow !== null ? this.selEndRow : this.selRow;
 
-                return {
+                this._boundsCache = {
                     minCol: Math.min(this.selCol, c2), maxCol: Math.max(this.selCol, c2),
                     minRow: Math.min(this.selRow, r2), maxRow: Math.max(this.selRow, r2)
                 };
+                this._boundsCacheKey = key;
+
+                return this._boundsCache;
             },
 
             /**
@@ -1599,7 +1636,12 @@
                 }
 
                 this.editing = false;
-                this._setCellData(this.selRow, this.selCol, this.editorValue);
+
+                // Read the input's live DOM value, not the reactive
+                // editorValue — with update-mode "change" that property
+                // only refreshes on blur, which hasn't happened yet here
+                // (focus moves away *after* this call returns).
+                this._setCellData(this.selRow, this.selCol, this._editorInput.value);
                 this._syncFormulaBar();
             },
 
@@ -1616,7 +1658,10 @@
              */
             _commitFormulaBar() {
                 this._editingFormulaBar = false;
-                this._setCellData(this.selRow, this.selCol, this.formulaValue);
+
+                // Same reasoning as _commitEdit: read the live DOM value,
+                // since formulaValue itself only refreshes on blur.
+                this._setCellData(this.selRow, this.selCol, this._formulaInputEl.value);
                 this._syncFormulaBar();
             },
 
