@@ -6954,6 +6954,7 @@
                     this.flushScheduled = true;
                     queueMicrotask(() => this.flushReactiveChanges());
                 }
+
                 break;
 
             // Handle browser state changes (navigation, history, URL changes)
