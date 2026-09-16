@@ -5691,27 +5691,34 @@
          * Removes a timer entry by its globally unique ID.
          * Stops the rAF loop if no timers remain, avoiding idle rAF calls.
          * @param {number} timerId - Globally unique timer ID to remove
+         * @returns {boolean} True if the timer was found and removed, false otherwise
          */
         remove(timerId) {
-            this.timers.delete(timerId);
+            const existed = this.timers.delete(timerId);
 
             // No timers left — stop the loop to avoid running it idle
             if (this.timers.size === 0 && this.rafId !== null) {
                 cancelAnimationFrame(this.rafId);
                 this.rafId = null;
             }
+
+            return existed;
         },
 
         /**
          * Removes all timers belonging to a specific context.
          * Called by killAllTimers to clean up when a component is destroyed.
          * @param {Runtime} context - The context whose timers should be removed
+         * @returns {number} Number of timers removed
          */
         removeAllForContext(context) {
+            let removedCount = 0;
+
             // Match entries by context reference — globally unique IDs make this safe
             for (const [timerId, entry] of this.timers) {
                 if (entry.context === context) {
                     this.timers.delete(timerId);
+                    removedCount++;
                 }
             }
 
@@ -5720,6 +5727,8 @@
                 cancelAnimationFrame(this.rafId);
                 this.rafId = null;
             }
+
+            return removedCount;
         },
 
         /**
@@ -6419,7 +6428,7 @@
      * Kills a specific timer for this component, similar to Win32 KillTimer.
      * Stops the timer from sending further MSG_TIMER messages.
      * @param {number} timerId - The timer ID returned from setTimer()
-     * @returns {void}
+     * @returns {boolean} True if the timer was found and killed, false otherwise
      */
     Runtime.prototype.killTimer = function(timerId) {
         // Delegate directly to the engine — timer IDs are globally unique
@@ -6430,7 +6439,7 @@
      * Kills all timers for this component.
      * Called automatically on component destruction to prevent MSG_TIMER delivery
      * to a context that no longer exists.
-     * @returns {void}
+     * @returns {number} Number of timers killed
      */
     Runtime.prototype.killAllTimers = function() {
         // Delegate bulk removal to the engine, which matches by context reference
@@ -11533,7 +11542,7 @@
 
     /**
      * Extracts wheel delta from MSG_MOUSEWHEEL wParam
-     * Positive = scroll up, Negative = scroll down
+     * Positive = scroll down, Negative = scroll up (matches native WheelEvent.deltaY sign)
      * Standard value is ±120 per notch
      * @param wParam
      * @returns {number}
