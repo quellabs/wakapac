@@ -276,9 +276,18 @@
      * `default` case in handlePacEvent(). Click is included here too: once
      * target-shadowing and foreach-context injection moved into the shared
      * invokeEventBinding(), click's dispatch is identical to every other
-     * entry, so it needs no dedicated handler of its own. Several button
-     * messages collapse onto the same name because native mousedown/mouseup
-     * fire for every button, unlike click, which only fires for the left one.
+     * entry, so it needs no dedicated handler of its own.
+     *
+     * mousedown/mouseup, wheel, and keydown/keyup are deliberately NOT
+     * included, for the same reason the drag family below isn't: they're
+     * either continuous/repeating (wheel; keydown auto-repeats while held)
+     * rather than a single discrete action, or — mousedown/mouseup — usually
+     * just the first/last message of a stateful multi-message gesture (drag,
+     * press-and-hold) that a flat declarative binding doesn't model well.
+     * keydown/keyup additionally overlap with the Accelerator Tables feature
+     * for keyboard shortcuts. All of them remain fully available at the
+     * msgProc level (MSG_LBUTTONDOWN/UP, MSG_MOUSEWHEEL, MSG_KEYDOWN/UP) —
+     * only the declarative binding shortcut is withheld.
      *
      * The drag family (MSG_DRAGENTER/DRAGLEAVE/DROPTARGET_ENTER/DROPTARGET_LEAVE/DROP)
      * is deliberately NOT included: drag-and-drop is an inherently multi-message, stateful
@@ -292,12 +301,7 @@
     const GENERIC_EVENT_BINDING_MESSAGES = new Map([
         [MSG_LCLICK, 'click'],
         [MSG_LBUTTONDBLCLK, 'dblclick'],
-        [MSG_LBUTTONDOWN, 'mousedown'], [MSG_MBUTTONDOWN, 'mousedown'], [MSG_RBUTTONDOWN, 'mousedown'],
-        [MSG_LBUTTONUP, 'mouseup'], [MSG_MBUTTONUP, 'mouseup'], [MSG_RBUTTONUP, 'mouseup'],
         [MSG_CONTEXTMENU, 'contextmenu'],
-        [MSG_MOUSEWHEEL, 'wheel'],
-        [MSG_KEYDOWN, 'keydown'],
-        [MSG_KEYUP, 'keyup'],
         [MSG_COPY, 'copy'],
         [MSG_PASTE, 'paste']
     ]);
@@ -3171,7 +3175,7 @@
 
         /**
          * Returns true if the element carries a data-pac-bind binding of an
-         * interactive type (click, mouseenter/leave, submit, keydown, ...) —
+         * interactive type (click, mouseenter/leave, submit, contextmenu, ...) —
          * see INTERACTIVE_BINDING_TYPES. A passive reactive binding (css,
          * text, class, value, ...) does NOT count: an icon bound only via
          * `data-pac-bind="css: ..."` inside a mouseenter-bound button must
@@ -7030,8 +7034,10 @@
                 break;
 
             default: {
-                // click, dblclick, mousedown/up, contextmenu, wheel, the drag
-                // family, keydown/up, copy/paste — see GENERIC_EVENT_BINDING_MESSAGES.
+                // Falls through for every message with no dedicated case above —
+                // mousedown/up, wheel, keydown/up, and the drag family included —
+                // but only the types in GENERIC_EVENT_BINDING_MESSAGES (click,
+                // dblclick, contextmenu, copy/paste) resolve to a binding name here.
                 const eventName = GENERIC_EVENT_BINDING_MESSAGES.get(event.message);
 
                 if (eventName) {
@@ -7075,8 +7081,8 @@
      * Evaluates a handler binding with $event (and, inside a foreach, $item/$index)
      * in scope, resolving paths against the event target, and reports failures
      * instead of propagating them. Shared by every named event binding — click,
-     * submit, change, and the dblclick/mousedown/mouseup/contextmenu/wheel/
-     * keyboard/clipboard family — which differ only in the name reported on error.
+     * dblclick, contextmenu, submit, change, mouseenter/mouseleave, and the
+     * copy/paste clipboard pair — which differ only in the name reported on error.
      *
      * A failure while resolving foreach context aborts the handler — it does not
      * fall through to the plain (non-foreach) evaluation below, since both live
@@ -7141,8 +7147,7 @@
      * Finds the nearest ancestor (inclusive) bound for `bindingType` from
      * `target`, stopping at the container boundary or the first inherently
      * interactive element. Shared by every event binding — click, dblclick,
-     * mousedown/mouseup, contextmenu, wheel, the drag family, keydown/keyup,
-     * copy/paste alike — so a decorative descendant (e.g. an icon inside a
+     * contextmenu, copy/paste alike — so a decorative descendant (e.g. an icon inside a
      * bound button) still resolves to its owning control, without ever
      * inheriting a handler belonging to some other, unrelated control
      * further up the tree.
@@ -7224,20 +7229,19 @@
 
     /**
      * Handles every named event binding type with no bespoke pre/post
-     * processing of its own — click, dblclick, mousedown, mouseup,
-     * contextmenu, wheel, keydown, keyup, copy, paste — by executing the
-     * corresponding data-pac-bind handler on its bound element. Reuses the
-     * framework's existing listener and target resolution for these message
-     * types (see CONTROL_TARGET_MESSAGES and the keyboard/clipboard setup);
-     * no separate DOM listener is registered for any of them, so this can
-     * never fire twice for the same event.
+     * processing of its own — click, dblclick, contextmenu, copy, paste —
+     * by executing the corresponding data-pac-bind handler on its bound
+     * element. Reuses the framework's existing listener and target
+     * resolution for these message types (see CONTROL_TARGET_MESSAGES and
+     * the clipboard setup); no separate DOM listener is registered for any
+     * of them, so this can never fire twice for the same event.
      *
      * Walks from event.realTarget via findEventBindingElement() so a
      * decorative descendant (e.g. an icon inside a bound button) still
      * resolves to its owning control, and shadows $event.target to that
      * control. invokeEventBinding() also injects foreach context ($item/
      * $index) when the bound element sits inside a foreach.
-     * @param {string} bindingType - e.g. 'click', 'dblclick', 'keydown', 'wheel'
+     * @param {string} bindingType - e.g. 'click', 'dblclick', 'contextmenu'
      * @param {CustomEvent} event - The PAC message event
      * @returns {void}
      */
