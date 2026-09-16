@@ -1703,6 +1703,11 @@
              * first character, and it only lands in the editor because
              * focus moves there before that keypress's native
              * character-insertion fires.
+             *
+             * WakaPAC flushes reactive DOM updates on a microtask, so the
+             * `visible`/`value`/`style` bindings on `_editorInput` haven't
+             * applied yet when `_updateSel` returns — forcing a flush here
+             * keeps the synchronous requirement above true.
              * @param {{col: number, row: number}} [position] - Cell to edit;
              *   defaults to the current selection (F2, typing a character).
              */
@@ -1715,6 +1720,8 @@
                     col: col, row: row, endCol: null, endRow: null,
                     editing: true, editorValue: raw
                 });
+
+                wakaPAC.flushReactiveChanges(this.pacId);
 
                 this._editorInput.focus();
                 const len = this._editorInput.value.length;
