@@ -1,11 +1,12 @@
 ## WakaPAC
 
-A compact reactive UI runtime with a desktop-style event pipeline —
-delivered as a single drop-in script. No build tools, no CLI, no
-node_modules.
+[![License: MIT](https://img.shields.io/github/license/quellabs/wakapac)](LICENSE)
+[![Tests](https://github.com/quellabs/wakapac/actions/workflows/test.yml/badge.svg)](https://github.com/quellabs/wakapac/actions/workflows/test.yml)
+[![jsDelivr hits](https://img.shields.io/jsdelivr/gh/hm/quellabs/wakapac)](https://www.jsdelivr.com/package/gh/quellabs/wakapac)
 
-**~31KB gzipped** (~100KB minified) · zero dependencies · works with any
-browser that supports `Proxy` (all evergreen browsers)
+A compact reactive UI runtime with a desktop-style event pipeline — delivered as a single drop-in script. No build tools, no CLI, no node_modules.
+
+**~31KB gzipped** (~100KB minified) · zero dependencies · works with any browser that supports `Proxy` (all evergreen browsers)
 
 ## Why WakaPAC?
 
@@ -21,33 +22,46 @@ You get reactive DOM updates *and* predictable interaction logic in one lightwei
 <div id="app">
   <h1>Hello {{ name }}</h1>
   <input data-pac-bind="value: name">
+  <button data-pac-bind="click: reset">Reset</button>
 </div>
 
 <script>
 wakaPAC('#app', {
-  name: 'World'
+  name: 'World',
+
+  reset() {
+    this.name = 'World';
+  },
+
+  // Every click, key, timer, and gesture in the container also flows
+  // through here first, Win32-style, if you need to intercept it.
+  msgProc(event) {
+    if (event.message === wakaPAC.MSG_KEYUP && event.wParam === wakaPAC.VK_ESCAPE) {
+      this.reset();
+    }
+  }
 });
 </script>
 ```
 
-Two-way binding, reactive updates, zero configuration.
+Two-way binding, reactive updates, and every interaction routed through one predictable handler.
 
 ## Features
 
-**Core**
+**🛠️ Core**
 - Centralized message pipeline for all UI and system events
 - Reactive bindings, computed properties, watchers, deep reactive objects and arrays
 - Parent–child component messaging
 
-**Interaction**
+**🖱️ Interaction**
 - Mouse, keyboard, timers, gestures, clipboard, HTML5 drag & drop — all normalized through `msgProc`
 
-**Canvas**
+**🎨 Canvas**
 - Win32-style paint cycle with dirty rect accumulation and automatic clipping
 - Metafile API: display list recording, playback, and hit testing
 
-**Units** — optional utility libraries callable from templates and component methods:
-Stdlib (built-in), Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, EscapeUtils, ColorUtils
+**📦 Units** — optional utility libraries callable from templates and component methods:
+Stdlib (built-in), Math, StringUtils, DateUtils, NumberUtils, TypeUtils, CollectionUtils, PhpUtils, RegexUtils, EscapeUtils, ColorUtils. No need to pull in micro-libraries for basic tasks — everything's built-in and callable directly from templates.
 
 ## Plugins
 
@@ -79,8 +93,7 @@ Optional, drop-in scripts that extend WakaPAC's message pipeline into specific d
 
 ## Documentation
 
-Full docs, guides, and API reference:
-**[wakapac.com/docs](https://www.wakapac.com/docs)**
+Full docs, guides, and API reference: **[wakapac.com/docs](https://www.wakapac.com/docs)**
 
 ## License
 
