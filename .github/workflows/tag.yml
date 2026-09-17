@@ -1,4 +1,4 @@
-name: Release
+name: Tag on version bump
 
 on:
   push:
@@ -8,10 +8,9 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
-  release:
+  tag:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +21,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: https://registry.npmjs.org
-
-      - name: Install dependencies
-        run: npm ci
 
       - name: Check for version bump
         id: check
@@ -53,14 +48,11 @@ jobs:
 
           echo "Latest tag: ${LATEST_TAG:-<none>}, package.json version: $VERSION"
 
-      - name: Create tag and GitHub release
+      - name: Create and push tag
         if: steps.check.outputs.is_new == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${{ steps.check.outputs.version }}" --target main --generate-notes
-
-      - name: Publish to npm
-        if: steps.check.outputs.is_new == 'true'
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
