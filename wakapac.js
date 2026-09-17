@@ -222,9 +222,10 @@
     const MSG_CONTEXTMENU = 0x007B;
     const MSG_CAPTURECHANGED = 0x0215;
     const MSG_DRAGENTER = 0x0231;
-    const MSG_DRAGOVER = 0x0232;
+    const MSG_DROPTARGET_ENTER = 0x0232;
     const MSG_DRAGLEAVE = 0x0233;
     const MSG_DROP = 0x0234;
+    const MSG_DROPTARGET_LEAVE = 0x0235;
     const MSG_CHAR = 0x0300;
     const MSG_CHANGE = 0x0301;
     const MSG_SUBMIT = 0x0302;
@@ -250,10 +251,11 @@
      * via DomUpdateTracker.findInteractiveDescendant(), mirroring Win32's
      * behavior of addressing mouse messages to controls rather than content
      * painted inside them. Covers the discrete click/button family, the two
-     * continuous pointer streams (move, wheel), HTML5 drag-and-drop, and
-     * gesture recognition — every message type dispatched through
-     * dispatchMouseMessage() except MOUSEENTER/LEAVE (always the container)
-     * and ENTER/LEAVE_DESCENDANT (resolved by the caller, not here).
+     * continuous pointer streams (move, wheel), HTML5 drag-and-drop
+     * (container-level enter/leave and drop), and gesture recognition —
+     * every message type dispatched through dispatchMouseMessage() except
+     * MOUSEENTER/LEAVE (always the container) and ENTER/LEAVE_DESCENDANT
+     * and DROPTARGET_ENTER/LEAVE (resolved by the caller, not here).
      */
     const CONTROL_TARGET_MESSAGES = new Set([
         MSG_LBUTTONDOWN, MSG_LBUTTONUP, MSG_LBUTTONDBLCLK,
@@ -262,7 +264,7 @@
         MSG_LCLICK, MSG_MCLICK, MSG_RCLICK,
         MSG_CONTEXTMENU,
         MSG_MOUSEMOVE, MSG_MOUSEWHEEL,
-        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DRAGOVER, MSG_DROP,
+        MSG_DRAGENTER, MSG_DRAGLEAVE, MSG_DROP,
         MSG_GESTURE
     ]);
 
@@ -274,12 +276,21 @@
      * `default` case in handlePacEvent(). Click is included here too: once
      * target-shadowing and foreach-context injection moved into the shared
      * invokeEventBinding(), click's dispatch is identical to every other
-     * entry, so it needs no dedicated handler of its own. Several button
-     * messages collapse onto the same name because native mousedown/mouseup
-     * fire for every button, unlike click, which only fires for the left one.
+     * entry, so it needs no dedicated handler of its own.
      *
-     * The drag family (MSG_DRAGENTER/DRAGLEAVE/DRAGOVER/DROP) is deliberately
-     * NOT included: drag-and-drop is an inherently multi-message, stateful
+     * mousedown/mouseup, wheel, and keydown/keyup are deliberately NOT
+     * included, for the same reason the drag family below isn't: they're
+     * either continuous/repeating (wheel; keydown auto-repeats while held)
+     * rather than a single discrete action, or — mousedown/mouseup — usually
+     * just the first/last message of a stateful multi-message gesture (drag,
+     * press-and-hold) that a flat declarative binding doesn't model well.
+     * keydown/keyup additionally overlap with the Accelerator Tables feature
+     * for keyboard shortcuts. All of them remain fully available at the
+     * msgProc level (MSG_LBUTTONDOWN/UP, MSG_MOUSEWHEEL, MSG_KEYDOWN/UP) —
+     * only the declarative binding shortcut is withheld.
+     *
+     * The drag family (MSG_DRAGENTER/DRAGLEAVE/DROPTARGET_ENTER/DROPTARGET_LEAVE/DROP)
+     * is deliberately NOT included: drag-and-drop is an inherently multi-message, stateful
      * interaction (enter -> repeated over -> drop, typically tracking state
      * like a highlight flag across all of them, as the msgProc drag-and-drop
      * docs' own example does) that a flat, single-event declarative binding
@@ -290,12 +301,7 @@
     const GENERIC_EVENT_BINDING_MESSAGES = new Map([
         [MSG_LCLICK, 'click'],
         [MSG_LBUTTONDBLCLK, 'dblclick'],
-        [MSG_LBUTTONDOWN, 'mousedown'], [MSG_MBUTTONDOWN, 'mousedown'], [MSG_RBUTTONDOWN, 'mousedown'],
-        [MSG_LBUTTONUP, 'mouseup'], [MSG_MBUTTONUP, 'mouseup'], [MSG_RBUTTONUP, 'mouseup'],
         [MSG_CONTEXTMENU, 'contextmenu'],
-        [MSG_MOUSEWHEEL, 'wheel'],
-        [MSG_KEYDOWN, 'keydown'],
-        [MSG_KEYUP, 'keyup'],
         [MSG_COPY, 'copy'],
         [MSG_PASTE, 'paste']
     ]);
@@ -2243,6 +2249,11 @@
                     return;
                 }
 
+                // Fully exiting the container also exits any active dropzone
+                if (self._dropzoneTarget) {
+                    self._leaveDropzone(event, container);
+                }
+
                 self.dispatchMouseMessage(MSG_DRAGLEAVE, event, container, null, {
                     types: Array.from(event.dataTransfer.types)
                 });
@@ -2250,9 +2261,32 @@
         },
 
         /**
+         * Dispatches MSG_DROPTARGET_LEAVE for the currently tracked dropzone
+         * and clears tracking state. Shared by every path that can end a
+         * hover over a drop target: moving off it, switching to another one,
+         * and exiting the container. Callers must check _dropzoneTarget is
+         * set before calling.
+         * @private
+         * @param {DragEvent} event
+         * @param {HTMLElement} container
+         */
+        _leaveDropzone(event, container) {
+            const leftTarget = this._dropzoneTarget;
+            this._dropzoneTarget = null;
+
+            this.dispatchMouseMessage(MSG_DROPTARGET_LEAVE, event, container, leftTarget, {
+                dropTarget: leftTarget,
+                types: Array.from(event.dataTransfer.types)
+            });
+        },
+
+        /**
          * Coalesces high-frequency dragover events into a single dispatch
-         * per animation frame.  Only fires for valid drop targets whose
-         * element has actually changed.
+         * per animation frame. Dispatches MSG_DROPTARGET_ENTER when the
+         * hovered drop target changes, and MSG_DROPTARGET_LEAVE when the
+         * cursor moves off it (onto non-drop-target space, or to another
+         * drop target — leave-old-then-enter-new, mirroring
+         * MOUSEENTER_DESCENDANT/MOUSELEAVE_DESCENDANT).
          * @private
          */
         _onDragOver() {
@@ -2260,7 +2294,7 @@
 
             document.addEventListener('dragover', function(event) {
                 // Fetch the container
-                const container = self.getContainerForEvent(MSG_DRAGOVER, event);
+                const container = self.getContainerForEvent(MSG_DROPTARGET_ENTER, event);
 
                 // If none found, abort
                 if (!container) {
@@ -2270,9 +2304,12 @@
                 // Find the drop target
                 const dropTarget = event.target.closest(DROP_TARGET_SEL);
 
-                // If none found, abort
+                // If none found, we've moved off any active dropzone
                 if (!dropTarget) {
                     event.dataTransfer.dropEffect = 'none';
+                    if (self._dropzoneTarget) {
+                        self._leaveDropzone(event, container);
+                    }
                     return;
                 }
 
@@ -2281,8 +2318,13 @@
                 event.preventDefault();
 
                 // If we are already hovering over the drop target, do not send new 'over' event
-                if (event.target === self._dropzoneTarget) {
+                if (dropTarget === self._dropzoneTarget) {
                     return;
+                }
+
+                // Switching straight from one drop target to another — leave the old one first
+                if (self._dropzoneTarget) {
+                    self._leaveDropzone(event, container);
                 }
 
                 // Update the effect (mouse pointer)
@@ -2292,7 +2334,7 @@
                 // Store the new dropzone
                 self._dropzoneTarget = dropTarget;
 
-                self.dispatchMouseMessage(MSG_DRAGOVER, event, container, null, {
+                self.dispatchMouseMessage(MSG_DROPTARGET_ENTER, event, container, dropTarget, {
                     dropTarget: dropTarget,
                     types: Array.from(event.dataTransfer.types)
                 });
@@ -2318,15 +2360,17 @@
                 // Check if this is a valid drop target
                 const dropTarget = event.target.closest(DROP_TARGET_SEL);
 
+                // Drag sequence complete — clean up tracking state regardless
+                // of whether this specific drop lands on a valid target
+                self._enterDepths.delete(container);
+                self._dropzoneTarget = null;
+
                 if (!dropTarget) {
                     return;
                 }
 
                 // Mark the target as valid by calling preventDefault on it
                 event.preventDefault();
-
-                // Drag sequence complete — clean up tracking state
-                self._enterDepths.delete(container);
 
                 const transfer = event.dataTransfer;
 
@@ -3131,7 +3175,7 @@
 
         /**
          * Returns true if the element carries a data-pac-bind binding of an
-         * interactive type (click, mouseenter/leave, submit, keydown, ...) —
+         * interactive type (click, mouseenter/leave, submit, contextmenu, ...) —
          * see INTERACTIVE_BINDING_TYPES. A passive reactive binding (css,
          * text, class, value, ...) does NOT count: an icon bound only via
          * `data-pac-bind="css: ..."` inside a mouseenter-bound button must
@@ -3317,8 +3361,10 @@
          * @param {HTMLElement} container
          * @param {Element|null} [descendantOverride] - For ENTER/LEAVE_DESCENDANT,
          *   the one chain element that entered/left (syncHoveredChain() calls this
-         *   once per element). Required for LEAVE since it can't be derived from the
-         *   event after the cursor moves. Ignored for other message types.
+         *   once per element); for DROPTARGET_ENTER/LEAVE, the specific drop target
+         *   entered/left. Required for the LEAVE variants because they cannot be
+         *   derived from the event after the cursor moves; for the ENTER variants
+         *   it reuses the caller's computed element. Ignored for other message types.
          * @param {Object} [extended]
          * @param {number|null} [wParamOverride] - Bypasses the default wParam
          *   encoding (modifier state) with a caller-supplied value, for message
@@ -3339,7 +3385,8 @@
 
             if (msgType === MSG_MOUSEENTER || msgType === MSG_MOUSELEAVE) {
                 targetOverride = container;
-            } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT) {
+            } else if (msgType === MSG_MOUSEENTER_DESCENDANT || msgType === MSG_MOUSELEAVE_DESCENDANT ||
+                msgType === MSG_DROPTARGET_ENTER || msgType === MSG_DROPTARGET_LEAVE) {
                 targetOverride = descendantOverride;
             } else if (CONTROL_TARGET_MESSAGES.has(msgType)) {
                 const rawTarget = this.normalizeToElement(domEvent.target);
@@ -5687,27 +5734,34 @@
          * Removes a timer entry by its globally unique ID.
          * Stops the rAF loop if no timers remain, avoiding idle rAF calls.
          * @param {number} timerId - Globally unique timer ID to remove
+         * @returns {boolean} True if the timer was found and removed, false otherwise
          */
         remove(timerId) {
-            this.timers.delete(timerId);
+            const existed = this.timers.delete(timerId);
 
             // No timers left — stop the loop to avoid running it idle
             if (this.timers.size === 0 && this.rafId !== null) {
                 cancelAnimationFrame(this.rafId);
                 this.rafId = null;
             }
+
+            return existed;
         },
 
         /**
          * Removes all timers belonging to a specific context.
          * Called by killAllTimers to clean up when a component is destroyed.
          * @param {Runtime} context - The context whose timers should be removed
+         * @returns {number} Number of timers removed
          */
         removeAllForContext(context) {
+            let removedCount = 0;
+
             // Match entries by context reference — globally unique IDs make this safe
             for (const [timerId, entry] of this.timers) {
                 if (entry.context === context) {
                     this.timers.delete(timerId);
+                    removedCount++;
                 }
             }
 
@@ -5716,6 +5770,8 @@
                 cancelAnimationFrame(this.rafId);
                 this.rafId = null;
             }
+
+            return removedCount;
         },
 
         /**
@@ -6415,7 +6471,7 @@
      * Kills a specific timer for this component, similar to Win32 KillTimer.
      * Stops the timer from sending further MSG_TIMER messages.
      * @param {number} timerId - The timer ID returned from setTimer()
-     * @returns {void}
+     * @returns {boolean} True if the timer was found and killed, false otherwise
      */
     Runtime.prototype.killTimer = function(timerId) {
         // Delegate directly to the engine — timer IDs are globally unique
@@ -6426,7 +6482,7 @@
      * Kills all timers for this component.
      * Called automatically on component destruction to prevent MSG_TIMER delivery
      * to a context that no longer exists.
-     * @returns {void}
+     * @returns {number} Number of timers killed
      */
     Runtime.prototype.killAllTimers = function() {
         // Delegate bulk removal to the engine, which matches by context reference
@@ -6987,8 +7043,10 @@
                 break;
 
             default: {
-                // click, dblclick, mousedown/up, contextmenu, wheel, the drag
-                // family, keydown/up, copy/paste — see GENERIC_EVENT_BINDING_MESSAGES.
+                // Falls through for every message with no dedicated case above —
+                // mousedown/up, wheel, keydown/up, and the drag family included —
+                // but only the types in GENERIC_EVENT_BINDING_MESSAGES (click,
+                // dblclick, contextmenu, copy/paste) resolve to a binding name here.
                 const eventName = GENERIC_EVENT_BINDING_MESSAGES.get(event.message);
 
                 if (eventName) {
@@ -7032,8 +7090,8 @@
      * Evaluates a handler binding with $event (and, inside a foreach, $item/$index)
      * in scope, resolving paths against the event target, and reports failures
      * instead of propagating them. Shared by every named event binding — click,
-     * submit, change, and the dblclick/mousedown/mouseup/contextmenu/wheel/
-     * keyboard/clipboard family — which differ only in the name reported on error.
+     * dblclick, contextmenu, submit, change, mouseenter/mouseleave, and the
+     * copy/paste clipboard pair — which differ only in the name reported on error.
      *
      * A failure while resolving foreach context aborts the handler — it does not
      * fall through to the plain (non-foreach) evaluation below, since both live
@@ -7098,8 +7156,7 @@
      * Finds the nearest ancestor (inclusive) bound for `bindingType` from
      * `target`, stopping at the container boundary or the first inherently
      * interactive element. Shared by every event binding — click, dblclick,
-     * mousedown/mouseup, contextmenu, wheel, the drag family, keydown/keyup,
-     * copy/paste alike — so a decorative descendant (e.g. an icon inside a
+     * contextmenu, copy/paste alike — so a decorative descendant (e.g. an icon inside a
      * bound button) still resolves to its owning control, without ever
      * inheriting a handler belonging to some other, unrelated control
      * further up the tree.
@@ -7181,20 +7238,19 @@
 
     /**
      * Handles every named event binding type with no bespoke pre/post
-     * processing of its own — click, dblclick, mousedown, mouseup,
-     * contextmenu, wheel, keydown, keyup, copy, paste — by executing the
-     * corresponding data-pac-bind handler on its bound element. Reuses the
-     * framework's existing listener and target resolution for these message
-     * types (see CONTROL_TARGET_MESSAGES and the keyboard/clipboard setup);
-     * no separate DOM listener is registered for any of them, so this can
-     * never fire twice for the same event.
+     * processing of its own — click, dblclick, contextmenu, copy, paste —
+     * by executing the corresponding data-pac-bind handler on its bound
+     * element. Reuses the framework's existing listener and target
+     * resolution for these message types (see CONTROL_TARGET_MESSAGES and
+     * the clipboard setup); no separate DOM listener is registered for any
+     * of them, so this can never fire twice for the same event.
      *
      * Walks from event.realTarget via findEventBindingElement() so a
      * decorative descendant (e.g. an icon inside a bound button) still
      * resolves to its owning control, and shadows $event.target to that
      * control. invokeEventBinding() also injects foreach context ($item/
      * $index) when the bound element sits inside a foreach.
-     * @param {string} bindingType - e.g. 'click', 'dblclick', 'keydown', 'wheel'
+     * @param {string} bindingType - e.g. 'click', 'dblclick', 'contextmenu'
      * @param {CustomEvent} event - The PAC message event
      * @returns {void}
      */
@@ -11529,7 +11585,7 @@
 
     /**
      * Extracts wheel delta from MSG_MOUSEWHEEL wParam
-     * Positive = scroll up, Negative = scroll down
+     * Positive = scroll down, Negative = scroll up (matches native WheelEvent.deltaY sign)
      * Standard value is ±120 per notch
      * @param wParam
      * @returns {number}
@@ -12645,8 +12701,8 @@
         MSG_PLUGIN, MSG_SETFOCUS, MSG_KILLFOCUS, MSG_KEYDOWN, MSG_KEYUP, MSG_USER, MSG_TIMER, MSG_ACCEL,
         MSG_COMMAND, MSG_COPY, MSG_PASTE, MSG_MOUSEWHEEL, MSG_GESTURE, MSG_PAINT, MSG_SIZE,
         MSG_FOREACH_REBUILT, MSG_MOUSEENTER, MSG_MOUSELEAVE, MSG_MOUSEENTER_DESCENDANT,
-        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DRAGOVER, MSG_DRAGLEAVE, MSG_DROP,
-        MSG_DPR_CHANGE,
+        MSG_MOUSELEAVE_DESCENDANT, MSG_CAPTURECHANGED, MSG_DRAGENTER, MSG_DROPTARGET_ENTER, MSG_DRAGLEAVE, MSG_DROP,
+        MSG_DROPTARGET_LEAVE, MSG_DPR_CHANGE,
 
         // Mouse modifier keys
         MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_SHIFT, MK_CONTROL, MK_ALT,
