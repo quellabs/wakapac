@@ -783,9 +783,19 @@
             // Get prototype
             const proto = Object.getPrototypeOf(value);
 
-            // Accept Object.create(null) (no prototype) and plain objects whose
-            // prototype chain is exactly: value -> Object.prototype -> null
-            return proto === null || Object.getPrototypeOf(proto) === null;
+            // Accept Object.create(null) and objects whose immediate prototype
+            // is an Object.prototype, including one from another realm. Checking
+            // the native constructor source distinguishes it from custom prototypes.
+            if (proto === null) {
+                return true;
+            }
+
+            const constructor = Object.prototype.hasOwnProperty.call(proto, 'constructor')
+                && proto.constructor;
+
+            return typeof constructor === 'function'
+                && Function.prototype.toString.call(constructor)
+                    === Function.prototype.toString.call(Object);
         },
 
         /**

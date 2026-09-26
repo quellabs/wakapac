@@ -1449,6 +1449,34 @@
 
             // ── Summary ───────────────────────────────────────────────────────────
 
+            suite('Plugin unit validation');
+
+            await test('plain plugin function objects register while custom prototypes are rejected', async function () {
+                const plainFunctions = { answer: function () { return 42; } };
+                const nullPrototypeFunctions = Object.assign(Object.create(null), {
+                    answer: function () { return 42; }
+                });
+                const customPrototypeFunctions = Object.assign(Object.create(Object.create(null)), {
+                    answer: function () { return 42; }
+                });
+
+                function registerUnit(name, functions) {
+                    wakaPAC.use({
+                        createPacPlugin: function () {
+                            return { name: name, functions: functions };
+                        }
+                    });
+                }
+
+                registerUnit('PlainObjectRegression', plainFunctions);
+                registerUnit('NullPrototypeRegression', nullPrototypeFunctions);
+                registerUnit('CustomPrototypeRegression', customPrototypeFunctions);
+
+                assert(wakaPAC.unit('PlainObjectRegression') === plainFunctions, 'plain object accepted');
+                assert(wakaPAC.unit('NullPrototypeRegression') === nullPrototypeFunctions, 'null-prototype object accepted');
+                assert(wakaPAC.unit('CustomPrototypeRegression') === null, 'custom-prototype object rejected');
+            });
+
             const total = passed + failed;
             summary.textContent = failed === 0
                 ? '✓ All ' + total + ' tests passed'
