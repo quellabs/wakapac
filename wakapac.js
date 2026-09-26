@@ -3131,20 +3131,6 @@
         },
 
         /**
-         * Updates the wakapac.js target fields together. `controlElement` is
-         * a data-property alias for the framework-resolved `target`.
-         * @param {CustomEvent} event - The PAC message event
-         * @param {HTMLElement|null} target - The resolved control element
-         * @returns {void}
-         */
-        setMessageEventTarget(event, target) {
-            Object.defineProperties(event, {
-                target: { value: target, enumerable: true, configurable: true },
-                controlElement: { value: target, enumerable: true, configurable: true }
-            });
-        },
-
-        /**
          * Normalizes a DOM event/hit-test target to the nearest Element. Event
          * targets can be a TextNode when the cursor is over bare text content;
          * TextNode has no closest()/hasAttribute(), so callers that walk the
@@ -7298,7 +7284,10 @@
         // rather than the literal descendant. Skipped when already equal, to
         // avoid an unnecessary defineProperty call on the common case.
         if (event.target !== boundElement) {
-            this.setMessageEventTarget(event, boundElement);
+            Object.defineProperties(event, {
+                target: { value: boundElement, enumerable: true, configurable: true },
+                controlElement: { value: boundElement, enumerable: true, configurable: true }
+            });
         }
 
         // Fetch binding target and invoke — invokeEventBinding() handles
