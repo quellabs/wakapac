@@ -3074,6 +3074,8 @@
          * @returns {CustomEvent<{}>}
          */
         wrapDomEventAsMessage(messageType, originalEvent, wParam = 0, lParam = 0, extended = {}, targetOverride = null) {
+            const controlElement = targetOverride ?? originalEvent?.target;
+
             // Create custom event with extended data in detail (optional)
             const customEvent = new CustomEvent(EV_PAC_EVENT, {
                 bubbles: true,
@@ -3091,7 +3093,8 @@
 
                 // Standard tracking fields
                 timestamp: { value: Date.now(), enumerable: true, configurable: true },
-                target: { value: targetOverride ?? originalEvent?.target, enumerable: true, configurable: true },
+                target: { value: controlElement, enumerable: true, configurable: true },
+                controlElement: { value: controlElement, enumerable: true, configurable: true },
                 realTarget: { value: originalEvent?.target, enumerable: true, configurable: true },
 
                 // Reference to the original DOM event for debugging/advanced usage
@@ -3125,6 +3128,20 @@
 
             // Return the event
             return customEvent;
+        },
+
+        /**
+         * Updates the wakapac.js target fields together. `controlElement` is
+         * a data-property alias for the framework-resolved `target`.
+         * @param {CustomEvent} event - The PAC message event
+         * @param {HTMLElement|null} target - The resolved control element
+         * @returns {void}
+         */
+        setMessageEventTarget(event, target) {
+            Object.defineProperties(event, {
+                target: { value: target, enumerable: true, configurable: true },
+                controlElement: { value: target, enumerable: true, configurable: true }
+            });
         },
 
         /**
@@ -7281,7 +7298,7 @@
         // rather than the literal descendant. Skipped when already equal, to
         // avoid an unnecessary defineProperty call on the common case.
         if (event.target !== boundElement) {
-            Object.defineProperty(event, 'target', { value: boundElement, enumerable: true, configurable: true });
+            this.setMessageEventTarget(event, boundElement);
         }
 
         // Fetch binding target and invoke — invokeEventBinding() handles
