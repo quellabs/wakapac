@@ -5952,14 +5952,27 @@
                 return;
             }
 
+            // Skip the write when the DOM is already at this position. Without this guard,
+            // code that observes the current scroll position and mirrors it back onto the
+            // abstraction (e.g. scroll/resize state sync) causes a redundant scrollTo/scrollLeft
+            // write every tick, which invalidates layout and forces a synchronous reflow on the
+            // next geometry read.
             if (prop === 'containerScrollX' && container) {
-                container.scrollLeft = newValue;
+                if (container.scrollLeft !== newValue) {
+                    container.scrollLeft = newValue;
+                }
             } else if (prop === 'containerScrollY' && container) {
-                container.scrollTop = newValue;
+                if (container.scrollTop !== newValue) {
+                    container.scrollTop = newValue;
+                }
             } else if (prop === 'browserScrollX') {
-                window.scrollTo(newValue, window.scrollY);
+                if (window.scrollX !== newValue) {
+                    window.scrollTo(newValue, window.scrollY);
+                }
             } else if (prop === 'browserScrollY') {
-                window.scrollTo(window.scrollX, newValue);
+                if (window.scrollY !== newValue) {
+                    window.scrollTo(window.scrollX, newValue);
+                }
             }
         }
 
