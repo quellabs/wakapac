@@ -6424,6 +6424,14 @@
 
         // 2D canvases perform an initial synchronous paint and require no further setup.
         if (this.contextType === '2d') {
+            // containerWidth/Height are normally populated by the deferred,
+            // batched LayoutMetricsScheduler flush (see scheduleLayoutMetricsUpdate)
+            // to avoid forcing a reflow on every binding scan. But this paint is
+            // itself synchronous by design, so measure synchronously here too —
+            // otherwise msgProc's first MSG_PAINT would run with containerWidth/
+            // Height still at their 0 defaults.
+            this.applyContainerMetrics(Runtime.measureContainer(this.container));
+
             DomUpdateTracker.invalidateRect(this.abstraction.pacId);
             DomUpdateTracker.flushPaintQueue();
         }
