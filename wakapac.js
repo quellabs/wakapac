@@ -5817,8 +5817,9 @@
     /**
      * Batches layout measurements across Runtime instances into one flush,
      * avoiding redundant reflows from DOM mutations in the same frame.
-     * Defers reads by two frames to let the browser complete layout,
-     * avoiding forced synchronous reflows.
+     * Reads are deferred to a setTimeout after the next rAF, not a nested
+     * rAF, so another component's own binding scan can't still sneak a DOM
+     * write in before our read and force the reflow back.
      */
     const LayoutMetricsScheduler = {
         /** @type {Set<Runtime>} Runtimes queued for re-measurement */
@@ -5828,9 +5829,9 @@
         scheduled: false,
 
         /**
-         * Queues a runtime for a batched layout re-measure on the next
-         * animation-frame pair, coalescing repeated calls (e.g. multiple
-         * binding scans in the same tick) into a single flush.
+         * Queues a runtime for a batched layout re-measure once the current
+         * frame has finished rendering, coalescing repeated calls (e.g.
+         * multiple binding scans in the same tick) into a single flush.
          * @param {Runtime} runtime - The runtime whose container needs re-measuring
          */
         schedule(runtime) {
@@ -5841,7 +5842,7 @@
             }
 
             this.scheduled = true;
-            requestAnimationFrame(() => requestAnimationFrame(() => this.flush()));
+            requestAnimationFrame(() => setTimeout(() => this.flush(), 0));
         },
 
         /**
