@@ -2826,18 +2826,28 @@
                     // The DOM element whose size changed
                     const container = entry.target;
 
-                    // Resolve the reactive abstraction for this element
-                    const abstraction = self._getObservedAbstraction(container);
+                    // Resolve the owning component (not just its abstraction —
+                    // applyContainerMetrics is a Runtime method)
+                    const component = window.PACRegistry.getByElement(container);
 
-                    // Only proceed if a valid abstraction layer exists
-                    if (abstraction) {
-                        // Normalize reported size to integer pixels
+                    // Only proceed if a valid component/abstraction exists
+                    if (component && component.abstraction) {
+                        // Refresh containerWidth/Height and the scroll-derived
+                        // fields through the same path as every other geometry
+                        // trigger (scroll, window resize, deferred post-mutation
+                        // re-measure), so they all agree on one box model
+                        // (clientWidth/clientHeight) instead of this callback
+                        // writing its own contentRect-based reading.
+                        component.applyContainerMetrics(Runtime.measureContainer(container));
+
+                        // Normalize reported size to integer pixels for the
+                        // MSG_SIZE message below — this intentionally keeps
+                        // reporting the raw ResizeObserver contentRect reading,
+                        // distinct from the clientWidth-based containerWidth/
+                        // Height above, since it's relaying what the observer
+                        // actually fired with, borderBoxSize/contentBoxSize included
                         const width = Math.round(entry.contentRect.width);
                         const height = Math.round(entry.contentRect.height);
-
-                        // Persist latest container dimensions on the abstraction
-                        abstraction.containerWidth = width;
-                        abstraction.containerHeight = height;
 
                         // Determine logical size state used by the message system
                         let sizeType;
@@ -5800,6 +5810,74 @@
         }
     };
 
+    // =============================================================================
+    // Layout metrics scheduler
+    // =============================================================================
+
+    /**
+     * Batches layout measurements across Runtime instances into one flush,
+     * avoiding redundant reflows from DOM mutations in the same frame.
+     * Defers reads by two frames to let the browser complete layout,
+     * avoiding forced synchronous reflows.
+     */
+    const LayoutMetricsScheduler = {
+        /** @type {Set<Runtime>} Runtimes queued for re-measurement */
+        pending: new Set(),
+
+        /** @type {boolean} Whether a flush is already queued */
+        scheduled: false,
+
+        /**
+         * Queues a runtime for a batched layout re-measure on the next
+         * animation-frame pair, coalescing repeated calls (e.g. multiple
+         * binding scans in the same tick) into a single flush.
+         * @param {Runtime} runtime - The runtime whose container needs re-measuring
+         */
+        schedule(runtime) {
+            this.pending.add(runtime);
+
+            if (this.scheduled) {
+                return;
+            }
+
+            this.scheduled = true;
+            requestAnimationFrame(() => requestAnimationFrame(() => this.flush()));
+        },
+
+        /**
+         * Measures every queued runtime's container, then applies the results.
+         * Measurements are gathered before any are applied, since applying one
+         * runtime's result can itself change the DOM and invalidate layout for
+         * a runtime measured later in the same pass.
+         */
+        flush() {
+            const runtimes = Array.from(this.pending).filter(item => !item.destroyed);
+            this.pending.clear();
+            this.scheduled = false;
+
+            if (!runtimes.length) {
+                return;
+            }
+
+            const documentWidth = document.documentElement.scrollWidth;
+            const documentHeight = document.documentElement.scrollHeight;
+            const measurements = runtimes.map(item => ({
+                runtime: item,
+                ...Runtime.measureContainer(item.container)
+            }));
+
+            measurements.forEach(({ runtime, ...metrics }) => {
+                if (runtime.destroyed) {
+                    return;
+                }
+
+                runtime.abstraction.browserContentWidth = documentWidth;
+                runtime.abstraction.browserContentHeight = documentHeight;
+                runtime.applyContainerMetrics(metrics);
+            });
+        }
+    };
+
     // ========================================================================
     // COMPONENT RUNTIME
     // ========================================================================
@@ -6346,6 +6424,14 @@
 
         // 2D canvases perform an initial synchronous paint and require no further setup.
         if (this.contextType === '2d') {
+            // containerWidth/Height are normally populated by the deferred,
+            // batched LayoutMetricsScheduler flush (see scheduleLayoutMetricsUpdate)
+            // to avoid forcing a reflow on every binding scan. But this paint is
+            // itself synchronous by design, so measure synchronously here too —
+            // otherwise msgProc's first MSG_PAINT would run with containerWidth/
+            // Height still at their 0 defaults.
+            this.applyContainerMetrics(Runtime.measureContainer(this.container));
+
             DomUpdateTracker.invalidateRect(this.abstraction.pacId);
             DomUpdateTracker.flushPaintQueue();
         }
@@ -6507,27 +6593,51 @@
     // =============================================================================
 
     /**
+     * Reads the current geometry of a container element in the single shape
+     * every container-metrics trigger (scroll, ResizeObserver, window resize,
+     * deferred post-mutation re-measure) feeds into applyContainerMetrics, so
+     * they all agree on one box model (clientWidth/clientHeight) instead of
+     * each picking its own.
+     * @param {Element} container
+     * @returns {{scrollX: number, scrollY: number, clientWidth: number, clientHeight: number, contentWidth: number, contentHeight: number}}
+     */
+    Runtime.measureContainer = function(container) {
+        return {
+            scrollX: container.scrollLeft,
+            scrollY: container.scrollTop,
+            clientWidth: container.clientWidth,
+            clientHeight: container.clientHeight,
+            contentWidth: container.scrollWidth,
+            contentHeight: container.scrollHeight
+        };
+    };
+
+    /**
      * Callback to update container scroll state
      */
     Runtime.prototype.updateContainerScrollState = function() {
-        // Get scroll measurements
-        const scrollX = this.container.scrollLeft;
-        const scrollY = this.container.scrollTop;
-        const clientWidth = this.container.clientWidth;
-        const clientHeight = this.container.clientHeight;
-        const scrollContentWidth = this.container.scrollWidth;
-        const scrollContentHeight = this.container.scrollHeight;
+        this.applyContainerMetrics(Runtime.measureContainer(this.container));
+    }
 
-        // Calculate scrollable state (use existing containerWidth/Height for visible dimensions)
-        const isScrollable =
-            scrollContentWidth > this.abstraction.containerWidth ||
-            scrollContentHeight > this.abstraction.containerHeight;
+    /**
+     * Applies a Runtime.measureContainer() reading to the reactive abstraction.
+     * The single place that writes containerWidth/Height and the scroll-derived
+     * fields, so every trigger that re-measures the container (scroll,
+     * ResizeObserver, window resize, deferred post-mutation re-measure) updates
+     * them together and consistently rather than each writing its own subset.
+     * @param {Object} metrics - A Runtime.measureContainer() reading
+     */
+    Runtime.prototype.applyContainerMetrics = function(metrics) {
+        const { scrollX, scrollY, clientWidth, clientHeight, contentWidth, contentHeight } = metrics;
+        const isScrollable = contentWidth > clientWidth || contentHeight > clientHeight;
 
         // Update individual properties
+        this.abstraction.containerWidth = clientWidth;
+        this.abstraction.containerHeight = clientHeight;
         this.abstraction.containerScrollX = scrollX;
         this.abstraction.containerScrollY = scrollY;
-        this.abstraction.containerContentWidth = scrollContentWidth;
-        this.abstraction.containerContentHeight = scrollContentHeight;
+        this.abstraction.containerContentWidth = contentWidth;
+        this.abstraction.containerContentHeight = contentHeight;
         this.abstraction.containerIsScrollable = isScrollable;
 
         // Update scroll window object
@@ -6608,7 +6718,7 @@
         // foreach items rendered, etc.) — recompute scroll metrics now, tied to
         // the actual DOM mutation rather than an independently-timed check that
         // could fire before or after rendering completes.
-        self.updateContainerScrollState();
+        LayoutMetricsScheduler.schedule(self);
     };
 
     /**
@@ -7901,13 +8011,17 @@
                 this.abstraction.browserScrollX = stateData.scrollX;
                 this.abstraction.browserScrollY = stateData.scrollY;
 
-                // Get bounding rect
-                const rect = this.container.getBoundingClientRect();
+                // Refresh containerWidth/Height and the scroll-derived fields
+                // through the same path as every other geometry trigger
+                // (scroll, ResizeObserver, deferred post-mutation re-measure),
+                // so they all agree on one box model (clientWidth/clientHeight)
+                // instead of this handler writing its own getBoundingClientRect
+                // reading.
+                this.applyContainerMetrics(Runtime.measureContainer(this.container));
 
-                // Set dimensions
-                this.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
-                this.abstraction.containerWidth = rect.width;
-                this.abstraction.containerHeight = rect.height;
+                // containerClientRect is its own distinct snapshot (border-box,
+                // includes transforms) — unrelated to the box model above
+                this.abstraction.containerClientRect = Utils.domRectToSimpleObject(this.container.getBoundingClientRect());
 
                 // Use Utils for consistent visibility calculation
                 this.abstraction.containerVisible = Utils.isElementVisible(this.container);
@@ -8736,15 +8850,15 @@
 
         // Initialize total document width/height including content outside the viewport
         // Useful for calculating scroll percentages or infinite scroll triggers
-        abstraction.browserContentWidth = document.documentElement.scrollWidth;
-        abstraction.browserContentHeight = document.documentElement.scrollHeight;
+        abstraction.browserContentWidth = window.innerWidth;
+        abstraction.browserContentHeight = window.innerHeight;
 
         // Container scroll properties
         abstraction.containerIsScrollable = false;                         // Can scroll in any direction
-        abstraction.containerScrollX = this.container.scrollLeft;           // Current horizontal scroll position
-        abstraction.containerScrollY = this.container.scrollTop;            // Current vertical scroll position
-        abstraction.containerContentWidth = this.container.scrollWidth;     // Total scrollable content width
-        abstraction.containerContentHeight = this.container.scrollHeight;   // Total scrollable content height
+        abstraction.containerScrollX = 0; // Filled after the first layout pass
+        abstraction.containerScrollY = 0;
+        abstraction.containerContentWidth = 0;
+        abstraction.containerContentHeight = 0;
         abstraction.containerScrollWindow = {
             top: 0,        // scrollTop
             left: 0,       // scrollLeft
@@ -8765,8 +8879,8 @@
         abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
         abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
         abstraction.containerClientRect = { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
-        abstraction.containerWidth = this.container.clientWidth;
-        abstraction.containerHeight = this.container.clientHeight;
+        abstraction.containerWidth = 0;
+        abstraction.containerHeight = 0;
 
         // Screen orientation
         abstraction.browserOrientationAngle = screen.orientation ? screen.orientation.angle : 0;
