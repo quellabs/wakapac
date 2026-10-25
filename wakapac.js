@@ -2826,18 +2826,28 @@
                     // The DOM element whose size changed
                     const container = entry.target;
 
-                    // Resolve the reactive abstraction for this element
-                    const abstraction = self._getObservedAbstraction(container);
+                    // Resolve the owning component (not just its abstraction —
+                    // applyContainerMetrics is a Runtime method)
+                    const component = window.PACRegistry.getByElement(container);
 
-                    // Only proceed if a valid abstraction layer exists
-                    if (abstraction) {
-                        // Normalize reported size to integer pixels
+                    // Only proceed if a valid component/abstraction exists
+                    if (component && component.abstraction) {
+                        // Refresh containerWidth/Height and the scroll-derived
+                        // fields through the same path as every other geometry
+                        // trigger (scroll, window resize, deferred post-mutation
+                        // re-measure), so they all agree on one box model
+                        // (clientWidth/clientHeight) instead of this callback
+                        // writing its own contentRect-based reading.
+                        component.applyContainerMetrics(Runtime.measureContainer(container));
+
+                        // Normalize reported size to integer pixels for the
+                        // MSG_SIZE message below — this intentionally keeps
+                        // reporting the raw ResizeObserver contentRect reading,
+                        // distinct from the clientWidth-based containerWidth/
+                        // Height above, since it's relaying what the observer
+                        // actually fired with, borderBoxSize/contentBoxSize included
                         const width = Math.round(entry.contentRect.width);
                         const height = Math.round(entry.contentRect.height);
-
-                        // Persist latest container dimensions on the abstraction
-                        abstraction.containerWidth = width;
-                        abstraction.containerHeight = height;
 
                         // Determine logical size state used by the message system
                         let sizeType;
@@ -5853,12 +5863,7 @@
             const documentHeight = document.documentElement.scrollHeight;
             const measurements = runtimes.map(item => ({
                 runtime: item,
-                scrollX: item.container.scrollLeft,
-                scrollY: item.container.scrollTop,
-                clientWidth: item.container.clientWidth,
-                clientHeight: item.container.clientHeight,
-                contentWidth: item.container.scrollWidth,
-                contentHeight: item.container.scrollHeight
+                ...Runtime.measureContainer(item.container)
             }));
 
             measurements.forEach(({ runtime, ...metrics }) => {
@@ -5868,9 +5873,7 @@
 
                 runtime.abstraction.browserContentWidth = documentWidth;
                 runtime.abstraction.browserContentHeight = documentHeight;
-                runtime.abstraction.containerWidth = metrics.clientWidth;
-                runtime.abstraction.containerHeight = metrics.clientHeight;
-                runtime.applyContainerScrollState(metrics);
+                runtime.applyContainerMetrics(metrics);
             });
         }
     };
@@ -6582,25 +6585,47 @@
     // =============================================================================
 
     /**
+     * Reads the current geometry of a container element in the single shape
+     * every container-metrics trigger (scroll, ResizeObserver, window resize,
+     * deferred post-mutation re-measure) feeds into applyContainerMetrics, so
+     * they all agree on one box model (clientWidth/clientHeight) instead of
+     * each picking its own.
+     * @param {Element} container
+     * @returns {{scrollX: number, scrollY: number, clientWidth: number, clientHeight: number, contentWidth: number, contentHeight: number}}
+     */
+    Runtime.measureContainer = function(container) {
+        return {
+            scrollX: container.scrollLeft,
+            scrollY: container.scrollTop,
+            clientWidth: container.clientWidth,
+            clientHeight: container.clientHeight,
+            contentWidth: container.scrollWidth,
+            contentHeight: container.scrollHeight
+        };
+    };
+
+    /**
      * Callback to update container scroll state
      */
     Runtime.prototype.updateContainerScrollState = function() {
-        // Get scroll measurements
-        this.applyContainerScrollState({
-            scrollX: this.container.scrollLeft,
-            scrollY: this.container.scrollTop,
-            clientWidth: this.container.clientWidth,
-            clientHeight: this.container.clientHeight,
-            contentWidth: this.container.scrollWidth,
-            contentHeight: this.container.scrollHeight
-        });
+        this.applyContainerMetrics(Runtime.measureContainer(this.container));
     }
 
-    Runtime.prototype.applyContainerScrollState = function(metrics) {
+    /**
+     * Applies a Runtime.measureContainer() reading to the reactive abstraction.
+     * The single place that writes containerWidth/Height and the scroll-derived
+     * fields, so every trigger that re-measures the container (scroll,
+     * ResizeObserver, window resize, deferred post-mutation re-measure) updates
+     * them together and consistently rather than each writing its own subset.
+     * @param {Object} metrics - A Runtime.measureContainer() reading
+     */
+    Runtime.prototype.applyContainerMetrics = function(metrics) {
         const { scrollX, scrollY, clientWidth, clientHeight, contentWidth, contentHeight } = metrics;
         const isScrollable = contentWidth > clientWidth || contentHeight > clientHeight;
 
         // Update individual properties
+        this.abstraction.containerWidth = clientWidth;
+        this.abstraction.containerHeight = clientHeight;
         this.abstraction.containerScrollX = scrollX;
         this.abstraction.containerScrollY = scrollY;
         this.abstraction.containerContentWidth = contentWidth;
@@ -7978,13 +8003,17 @@
                 this.abstraction.browserScrollX = stateData.scrollX;
                 this.abstraction.browserScrollY = stateData.scrollY;
 
-                // Get bounding rect
-                const rect = this.container.getBoundingClientRect();
+                // Refresh containerWidth/Height and the scroll-derived fields
+                // through the same path as every other geometry trigger
+                // (scroll, ResizeObserver, deferred post-mutation re-measure),
+                // so they all agree on one box model (clientWidth/clientHeight)
+                // instead of this handler writing its own getBoundingClientRect
+                // reading.
+                this.applyContainerMetrics(Runtime.measureContainer(this.container));
 
-                // Set dimensions
-                this.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
-                this.abstraction.containerWidth = rect.width;
-                this.abstraction.containerHeight = rect.height;
+                // containerClientRect is its own distinct snapshot (border-box,
+                // includes transforms) — unrelated to the box model above
+                this.abstraction.containerClientRect = Utils.domRectToSimpleObject(this.container.getBoundingClientRect());
 
                 // Use Utils for consistent visibility calculation
                 this.abstraction.containerVisible = Utils.isElementVisible(this.container);
