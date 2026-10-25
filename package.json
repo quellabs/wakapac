@@ -1,4 +1,46 @@
 {
+  "name": "wakapac",
+  "version": "2.5.0",
+  "description": "A lightweight, no-build UI engine for structured interactivity. WakaPAC unifies declarative data binding with a centralized Win32-style event pipeline to keep your client-side state predictable and clean.",
+  "main": "wakapac.js",
+  "unpkg": "wakapac.min.js",
+  "jsdelivr": "wakapac.min.js",
+  "files": [
+    "wakapac.js",
+    "wakapac.min.js",
+    "plugins",
+    "units",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "data-binding",
+    "frontend",
+    "javascript",
+    "presentation-abstraction-control",
+    "reactive",
+    "two-way-binding",
+    "ui-framework",
+    "vanilla-js",
+    "pac",
+    "centralized-state",
+    "event-driven",
+    "message-pipeline",
+    "no-build",
+    "reactivity",
+    "state-management",
+    "pac-pattern"
+  ],
+  "homepage": "https://www.wakapac.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quellabs/wakapac.git"
+  },
+  "bugs": {
+    "url": "https://github.com/quellabs/wakapac/issues"
+  },
+  "author": "Floris van den Berg",
+  "license": "MIT",
   "scripts": {
     "test": "playwright test",
     "test:headed": "playwright test --headed --project=chromium",
