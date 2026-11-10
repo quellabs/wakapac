@@ -27,6 +27,11 @@
      * @constructor
      */
     function WakaSync() {
+        // Available before plugin installation, matching the constructor statics.
+        this.MSG_HTTP_SUCCESS = WakaSync.MSG_HTTP_SUCCESS;
+        this.MSG_HTTP_ERROR = WakaSync.MSG_HTTP_ERROR;
+        this.MSG_HTTP_ABORT = WakaSync.MSG_HTTP_ABORT;
+
         // Request tracking for grouping and cancellation
         this._requestGroups = new Map();
 
@@ -65,8 +70,12 @@
          * automatic request cancellation on destroy.
          *
          * WakaSync has no dependency on wakaPAC. The pac reference is received
-         * as an argument and used solely for postMessage delivery and reading
-         * the MSG_USER constant.
+         * as an argument and used for postMessage delivery and reading
+         * the MSG_PLUGIN constant.
+         *
+         * Component-bound this._http request methods return a numeric request ID,
+         * not a Promise. Results arrive in msgProc with that ID in event.wParam.
+         * Standalone wakaSync request methods return Promises instead.
          *
          * Message contract delivered to msgProc:
          *
@@ -1388,6 +1397,12 @@
 
     // Static version property
     WakaSync.VERSION = VERSION;
+
+    // Public message IDs use wakaPAC's reserved MSG_PLUGIN base (0x2000).
+    // Keep these available even when wakaPAC is not loaded or installed yet.
+    WakaSync.MSG_HTTP_SUCCESS = 0x2200;
+    WakaSync.MSG_HTTP_ERROR = 0x2201;
+    WakaSync.MSG_HTTP_ABORT = 0x2202;
 
     // Create default instance
     const wakaSync = new WakaSync();

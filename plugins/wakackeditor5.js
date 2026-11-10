@@ -545,6 +545,10 @@
     // =========================================================================
 
     window.WakaCKEditor = {
+        // Message IDs are available before wakaPAC.use() (MSG_PLUGIN = 0x2000).
+        MSG_EDITOR_READY: 0x2200,
+        MSG_EDITOR_ERROR: 0x2201,
+
 
         /**
          * Called on plugin initialization through wakaPAC.use()

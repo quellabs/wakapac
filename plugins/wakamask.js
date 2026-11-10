@@ -588,6 +588,10 @@
     // =========================================================================
 
     window.WakaMask = {
+        // Message IDs are available before wakaPAC.use() (MSG_PLUGIN = 0x2000).
+        MSG_MASK_COMPLETE: 0x2200,
+        MSG_MASK_REJECT  : 0x2201,
+
 
         createPacPlugin(pac, _options = {}) {
             // Derive message constants from the host's MSG_PLUGIN base.

@@ -362,6 +362,19 @@
     // =========================================================================
 
     window.WakaVimeo = {
+        // Message IDs are available before wakaPAC.use() (MSG_PLUGIN = 0x2000).
+        MSG_VIDEO_PLAY         : 0x2100,
+        MSG_VIDEO_PAUSE        : 0x2101,
+        MSG_VIDEO_ENDED        : 0x2102,
+        MSG_VIDEO_SEEK         : 0x2103,
+        MSG_VIDEO_LOADED       : 0x2104,
+        MSG_VIDEO_ERROR        : 0x2107,
+        MSG_VIDEO_VOLUME_CHANGE: 0x2108,
+        MSG_VIDEO_RATE_CHANGE  : 0x2109,
+        MSG_VIDEO_WAITING      : 0x210A,
+        MSG_VIDEO_CANPLAY      : 0x210B,
+        MSG_VIDEO_TIMEUPDATE   : 0x210C,
+
 
         createPacPlugin(pac, _options = {}) {
 

@@ -200,6 +200,16 @@
     // =========================================================================
 
     window.wakaLightGallery = {
+        // Message IDs are available before wakaPAC.use() (MSG_PLUGIN = 0x2000).
+        MSG_GALLERY_READY: 0x2300,
+        MSG_GALLERY_ERROR: 0x2301,
+        MSG_BEFORE_OPEN  : 0x2302,
+        MSG_AFTER_OPEN   : 0x2303,
+        MSG_BEFORE_CLOSE : 0x2304,
+        MSG_AFTER_CLOSE  : 0x2305,
+        MSG_BEFORE_SLIDE : 0x2306,
+        MSG_AFTER_SLIDE  : 0x2307,
+
 
         /**
          * Called on plugin initialization through wakaPAC.use().

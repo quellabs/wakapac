@@ -80,6 +80,13 @@ Optional, drop-in scripts that extend WakaPAC's message pipeline into specific d
 - **WakaMask** — live input masking (phone numbers, dates, custom codes) driven by a token pattern, running entirely on WakaPAC's message pipeline
 - **WakaSync** — full-featured HTTP client with request grouping, cancellation, retries, and interceptors
 
+WakaSync's HTTP message constants (`MSG_HTTP_SUCCESS`, `MSG_HTTP_ERROR`, and
+`MSG_HTTP_ABORT`) are available on both `WakaSync` and `wakaSync` before plugin
+installation. After `wakaPAC.use(wakaSync)`, component-bound `this._http` request
+methods return a numeric request ID, with results delivered through `msgProc`
+and the ID in `event.wParam`. Standalone `wakaSync` request methods return
+Promises instead.
+
 **Navigation & Sensors**
 - **WakaRoute** — client-side router delivering navigation events through `msgProc`
 - **WakaMotion** — device motion and orientation sensors as reactive properties
