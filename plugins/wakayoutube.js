@@ -444,31 +444,19 @@
                 rel: _options.rel ?? 0
             };
 
-            // Derive message constants from the host's MSG_PLUGIN base.
-            // Offsets are identical to WakaVideo so msgProc handlers are
-            // interchangeable between the two plugins.
-            const MSG_VIDEO_PLAY = pac.MSG_PLUGIN + 0x100;
-            const MSG_VIDEO_PAUSE = pac.MSG_PLUGIN + 0x101;
-            const MSG_VIDEO_ENDED = pac.MSG_PLUGIN + 0x102;
-            const MSG_VIDEO_SEEK = pac.MSG_PLUGIN + 0x103;
-            const MSG_VIDEO_LOADED = pac.MSG_PLUGIN + 0x104;
-            const MSG_VIDEO_ERROR = pac.MSG_PLUGIN + 0x107;
-            const MSG_VIDEO_VOLUME_CHANGE = pac.MSG_PLUGIN + 0x108;
-            const MSG_VIDEO_WAITING = pac.MSG_PLUGIN + 0x10A;
-            const MSG_VIDEO_CANPLAY = pac.MSG_PLUGIN + 0x10B;
-            const MSG_VIDEO_TIMEUPDATE = pac.MSG_PLUGIN + 0x10C;
-
-            // Attach constants so components can reference WakaYouTube.MSG_VIDEO_PLAY etc.
-            this.MSG_VIDEO_PLAY = MSG_VIDEO_PLAY;
-            this.MSG_VIDEO_PAUSE = MSG_VIDEO_PAUSE;
-            this.MSG_VIDEO_ENDED = MSG_VIDEO_ENDED;
-            this.MSG_VIDEO_SEEK = MSG_VIDEO_SEEK;
-            this.MSG_VIDEO_LOADED = MSG_VIDEO_LOADED;
-            this.MSG_VIDEO_ERROR = MSG_VIDEO_ERROR;
-            this.MSG_VIDEO_VOLUME_CHANGE = MSG_VIDEO_VOLUME_CHANGE;
-            this.MSG_VIDEO_WAITING = MSG_VIDEO_WAITING;
-            this.MSG_VIDEO_CANPLAY = MSG_VIDEO_CANPLAY;
-            this.MSG_VIDEO_TIMEUPDATE = MSG_VIDEO_TIMEUPDATE;
+            // Use the public message IDs for delivery as well as comparisons.
+            const {
+                MSG_VIDEO_PLAY,
+                MSG_VIDEO_PAUSE,
+                MSG_VIDEO_ENDED,
+                MSG_VIDEO_SEEK,
+                MSG_VIDEO_LOADED,
+                MSG_VIDEO_ERROR,
+                MSG_VIDEO_VOLUME_CHANGE,
+                MSG_VIDEO_WAITING,
+                MSG_VIDEO_CANPLAY,
+                MSG_VIDEO_TIMEUPDATE
+            } = this;
 
             const msgConstants = {
                 MSG_VIDEO_PLAY,

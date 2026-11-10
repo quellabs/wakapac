@@ -209,37 +209,22 @@
 
         createPacPlugin(pac, _options = {}) {
 
-            // Derive message constants from the host's MSG_PLUGIN base.
-            // WakaVideo never hardcodes these values.
-            const MSG_VIDEO_PLAY = pac.MSG_PLUGIN + 0x100;
-            const MSG_VIDEO_PAUSE = pac.MSG_PLUGIN + 0x101;
-            const MSG_VIDEO_ENDED = pac.MSG_PLUGIN + 0x102;
-            const MSG_VIDEO_SEEK = pac.MSG_PLUGIN + 0x103;
-            const MSG_VIDEO_LOADED = pac.MSG_PLUGIN + 0x104;
-            const MSG_VIDEO_CUE_ENTER = pac.MSG_PLUGIN + 0x105;
-            const MSG_VIDEO_CUE_LEAVE = pac.MSG_PLUGIN + 0x106;
-            const MSG_VIDEO_ERROR = pac.MSG_PLUGIN + 0x107;
-            const MSG_VIDEO_VOLUME_CHANGE = pac.MSG_PLUGIN + 0x108;
-            const MSG_VIDEO_RATE_CHANGE = pac.MSG_PLUGIN + 0x109;
-            const MSG_VIDEO_WAITING = pac.MSG_PLUGIN + 0x10A;
-            const MSG_VIDEO_CANPLAY = pac.MSG_PLUGIN + 0x10B;
-            const MSG_VIDEO_TIMEUPDATE = pac.MSG_PLUGIN + 0x10C;
-
-            // Attach message constants so components can reference
-            // them as WakaVideo.MSG_VIDEO_PLAY etc.
-            this.MSG_VIDEO_PLAY = MSG_VIDEO_PLAY;
-            this.MSG_VIDEO_PAUSE = MSG_VIDEO_PAUSE;
-            this.MSG_VIDEO_ENDED = MSG_VIDEO_ENDED;
-            this.MSG_VIDEO_SEEK = MSG_VIDEO_SEEK;
-            this.MSG_VIDEO_LOADED = MSG_VIDEO_LOADED;
-            this.MSG_VIDEO_CUE_ENTER = MSG_VIDEO_CUE_ENTER;
-            this.MSG_VIDEO_CUE_LEAVE = MSG_VIDEO_CUE_LEAVE;
-            this.MSG_VIDEO_ERROR = MSG_VIDEO_ERROR;
-            this.MSG_VIDEO_VOLUME_CHANGE = MSG_VIDEO_VOLUME_CHANGE;
-            this.MSG_VIDEO_RATE_CHANGE = MSG_VIDEO_RATE_CHANGE;
-            this.MSG_VIDEO_WAITING = MSG_VIDEO_WAITING;
-            this.MSG_VIDEO_CANPLAY = MSG_VIDEO_CANPLAY;
-            this.MSG_VIDEO_TIMEUPDATE = MSG_VIDEO_TIMEUPDATE;
+            // Use the public message IDs for delivery as well as comparisons.
+            const {
+                MSG_VIDEO_PLAY,
+                MSG_VIDEO_PAUSE,
+                MSG_VIDEO_ENDED,
+                MSG_VIDEO_SEEK,
+                MSG_VIDEO_LOADED,
+                MSG_VIDEO_CUE_ENTER,
+                MSG_VIDEO_CUE_LEAVE,
+                MSG_VIDEO_ERROR,
+                MSG_VIDEO_VOLUME_CHANGE,
+                MSG_VIDEO_RATE_CHANGE,
+                MSG_VIDEO_WAITING,
+                MSG_VIDEO_CANPLAY,
+                MSG_VIDEO_TIMEUPDATE
+            } = this;
 
             return {
 

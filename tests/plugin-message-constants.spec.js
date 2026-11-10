@@ -134,6 +134,8 @@ for (const [file, primary, alias, constants] of plugins) {
 
             await page.addScriptTag({ url: '/wakapac.js' });
             const after = await page.evaluate(({ primary }) => {
+                // Installation must consume constants without redefining them.
+                Object.freeze(window[primary]);
                 window.wakaPAC.use(window[primary]);
                 return Object.fromEntries(Object.entries(window[primary]).filter(([name]) => name.startsWith('MSG_')));
             }, { primary });

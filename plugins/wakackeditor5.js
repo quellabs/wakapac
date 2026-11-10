@@ -592,13 +592,11 @@
                 _defaultEditorConfig.licenseKey = options.licenseKey;
             }
 
-            // Derive message constants from the host's MSG_PLUGIN base.
-            const MSG_EDITOR_READY = pac.MSG_PLUGIN + 0x200;
-            const MSG_EDITOR_ERROR = pac.MSG_PLUGIN + 0x201;
-
-            // Attach constants so components can reference WakaCKEditor.MSG_EDITOR_READY etc.
-            this.MSG_EDITOR_READY = MSG_EDITOR_READY;
-            this.MSG_EDITOR_ERROR = MSG_EDITOR_ERROR;
+            // Use the public message IDs for delivery as well as comparisons.
+            const {
+                MSG_EDITOR_READY,
+                MSG_EDITOR_ERROR
+            } = this;
 
             const msgConstants = {
                 MSG_EDITOR_READY,

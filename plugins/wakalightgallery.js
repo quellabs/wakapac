@@ -239,19 +239,8 @@
                 plugins: options.plugins ?? []
             };
 
-            // Derive message constants from the host's MSG_PLUGIN base.
-            const MSG_GALLERY_READY = pac.MSG_PLUGIN + 0x300;
-            const MSG_GALLERY_ERROR = pac.MSG_PLUGIN + 0x301;
-            const MSG_BEFORE_OPEN = pac.MSG_PLUGIN + 0x302;
-            const MSG_AFTER_OPEN = pac.MSG_PLUGIN + 0x303;
-            const MSG_BEFORE_CLOSE = pac.MSG_PLUGIN + 0x304;
-            const MSG_AFTER_CLOSE = pac.MSG_PLUGIN + 0x305;
-            const MSG_BEFORE_SLIDE = pac.MSG_PLUGIN + 0x306;
-            const MSG_AFTER_SLIDE = pac.MSG_PLUGIN + 0x307;
-
-            // Expose constants so components can reference them as
-            // WakaLightGallery.MSG_GALLERY_READY etc.
-            Object.assign(this, {
+            // Use the public message IDs for delivery as well as comparisons.
+            const {
                 MSG_GALLERY_READY,
                 MSG_GALLERY_ERROR,
                 MSG_BEFORE_OPEN,
@@ -260,7 +249,7 @@
                 MSG_AFTER_CLOSE,
                 MSG_BEFORE_SLIDE,
                 MSG_AFTER_SLIDE
-            });
+            } = this;
 
             // =====================================================================
             // Pending init queue

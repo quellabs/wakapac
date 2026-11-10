@@ -594,13 +594,11 @@
 
 
         createPacPlugin(pac, _options = {}) {
-            // Derive message constants from the host's MSG_PLUGIN base.
-            const MSG_MASK_COMPLETE = pac.MSG_PLUGIN + 0x200;
-            const MSG_MASK_REJECT = pac.MSG_PLUGIN + 0x201;
-
-            // Attach constants so components can reference WakaMask.MSG_MASK_COMPLETE etc.
-            this.MSG_MASK_COMPLETE = MSG_MASK_COMPLETE;
-            this.MSG_MASK_REJECT = MSG_MASK_REJECT;
+            // Use the public message IDs for delivery as well as comparisons.
+            const {
+                MSG_MASK_COMPLETE,
+                MSG_MASK_REJECT
+            } = this;
 
             const msgConstants = { MSG_MASK_COMPLETE, MSG_MASK_REJECT };
 
