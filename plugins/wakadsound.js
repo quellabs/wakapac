@@ -575,23 +575,26 @@
     /** @type {string} */
     const VERSION = '1.0.0';
 
+    // Support standalone loading while using the host's plugin base when present.
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+
     // =========================================================================
     // MESSAGES
     // =========================================================================
 
-    const MSG_BUFFER_LOADED = 0xD001;
-    const MSG_BUFFER_FAILED = 0xD002;
-    const MSG_STREAM_LOADED = 0xD003;
-    const MSG_STREAM_FAILED = 0xD004;
-    const MSG_STREAM_ERROR = 0xD00C;
-    const MSG_STREAM_BUFFERING = 0xD00D;
-    const MSG_STREAM_READY = 0xD00E;
-    const MSG_BUFFER_STARTED = 0xD006;
-    const MSG_BUFFER_STOPPED = 0xD007;
-    const MSG_STREAM_STARTED = 0xD008;
-    const MSG_STREAM_STOPPED = 0xD009;
-    const MSG_VOLUME_CHANGED = 0xD00A;
-    const MSG_PAN_CHANGED = 0xD00B;
+    const MSG_BUFFER_LOADED = MSG_PLUGIN + 0x800;
+    const MSG_BUFFER_FAILED = MSG_PLUGIN + 0x801;
+    const MSG_STREAM_LOADED = MSG_PLUGIN + 0x802;
+    const MSG_STREAM_FAILED = MSG_PLUGIN + 0x803;
+    const MSG_STREAM_ERROR = MSG_PLUGIN + 0x804;
+    const MSG_STREAM_BUFFERING = MSG_PLUGIN + 0x805;
+    const MSG_STREAM_READY = MSG_PLUGIN + 0x806;
+    const MSG_BUFFER_STARTED = MSG_PLUGIN + 0x807;
+    const MSG_BUFFER_STOPPED = MSG_PLUGIN + 0x808;
+    const MSG_STREAM_STARTED = MSG_PLUGIN + 0x809;
+    const MSG_STREAM_STOPPED = MSG_PLUGIN + 0x80A;
+    const MSG_VOLUME_CHANGED = MSG_PLUGIN + 0x80B;
+    const MSG_PAN_CHANGED = MSG_PLUGIN + 0x80C;
 
     // =========================================================================
     // STATE
@@ -682,6 +685,20 @@
      * @constructor
      */
     function WakaDSound() {
+        // Available before plugin installation, matching the constructor statics.
+        this.MSG_BUFFER_LOADED = WakaDSound.MSG_BUFFER_LOADED;
+        this.MSG_BUFFER_FAILED = WakaDSound.MSG_BUFFER_FAILED;
+        this.MSG_STREAM_LOADED = WakaDSound.MSG_STREAM_LOADED;
+        this.MSG_STREAM_FAILED = WakaDSound.MSG_STREAM_FAILED;
+        this.MSG_BUFFER_STARTED = WakaDSound.MSG_BUFFER_STARTED;
+        this.MSG_BUFFER_STOPPED = WakaDSound.MSG_BUFFER_STOPPED;
+        this.MSG_STREAM_STARTED = WakaDSound.MSG_STREAM_STARTED;
+        this.MSG_STREAM_STOPPED = WakaDSound.MSG_STREAM_STOPPED;
+        this.MSG_VOLUME_CHANGED = WakaDSound.MSG_VOLUME_CHANGED;
+        this.MSG_PAN_CHANGED = WakaDSound.MSG_PAN_CHANGED;
+        this.MSG_STREAM_ERROR = WakaDSound.MSG_STREAM_ERROR;
+        this.MSG_STREAM_BUFFERING = WakaDSound.MSG_STREAM_BUFFERING;
+        this.MSG_STREAM_READY = WakaDSound.MSG_STREAM_READY;
     }
 
     WakaDSound.prototype = {

@@ -561,6 +561,13 @@
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
     // =========================================================================
+    // MESSAGES
+    // =========================================================================
+
+    const MSG_MASK_COMPLETE = MSG_PLUGIN + 0x400;
+    const MSG_MASK_REJECT = MSG_PLUGIN + 0x401;
+
+    // =========================================================================
     // Pattern parsing
     // =========================================================================
 
@@ -599,8 +606,8 @@
 
     window.WakaMask = {
         // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
-        MSG_MASK_COMPLETE: MSG_PLUGIN + 0x400,
-        MSG_MASK_REJECT  : MSG_PLUGIN + 0x401,
+        MSG_MASK_COMPLETE: MSG_MASK_COMPLETE,
+        MSG_MASK_REJECT  : MSG_MASK_REJECT,
 
         createPacPlugin(pac, _options = {}) {
             const pluginLifecycleHandlers = {
@@ -631,12 +638,10 @@
             };
 
             // Use the public message IDs for delivery as well as comparisons.
-            const {
-                MSG_MASK_COMPLETE,
-                MSG_MASK_REJECT
-            } = this;
-
-            const msgConstants = { MSG_MASK_COMPLETE, MSG_MASK_REJECT };
+            const msgConstants = {
+                MSG_MASK_COMPLETE: this.MSG_MASK_COMPLETE,
+                MSG_MASK_REJECT  : this.MSG_MASK_REJECT
+            };
 
             // Installed once, for the lifetime of the page — intercepts MSG_KEYDOWN,
             // MSG_CHAR, and MSG_PASTE for every masked input on every container,

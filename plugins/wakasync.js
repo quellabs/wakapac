@@ -239,6 +239,14 @@
     // Support standalone loading while using the host's plugin base when present.
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
+    // =========================================================================
+    // MESSAGES
+    // =========================================================================
+
+    const MSG_HTTP_SUCCESS = MSG_PLUGIN + 0x200;
+    const MSG_HTTP_ERROR = MSG_PLUGIN + 0x201;
+    const MSG_HTTP_ABORT = MSG_PLUGIN + 0x202;
+
     const VERSION = '1.3.0';
 
     /**
@@ -1492,9 +1500,9 @@
 
     // Public message IDs use wakaPAC's reserved MSG_PLUGIN base.
     // Keep these available even when wakaPAC is not loaded or installed yet.
-    WakaSync.MSG_HTTP_SUCCESS = MSG_PLUGIN + 0x200;
-    WakaSync.MSG_HTTP_ERROR = MSG_PLUGIN + 0x201;
-    WakaSync.MSG_HTTP_ABORT = MSG_PLUGIN + 0x202;
+    WakaSync.MSG_HTTP_SUCCESS = MSG_HTTP_SUCCESS;
+    WakaSync.MSG_HTTP_ERROR = MSG_HTTP_ERROR;
+    WakaSync.MSG_HTTP_ABORT = MSG_HTTP_ABORT;
 
     // Create default instance
     const wakaSync = new WakaSync();

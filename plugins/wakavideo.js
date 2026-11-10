@@ -503,6 +503,24 @@
     // Support standalone loading while using the host's plugin base when present.
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
+    // =========================================================================
+    // MESSAGES
+    // =========================================================================
+
+    const MSG_VIDEO_PLAY = MSG_PLUGIN + 0x100;
+    const MSG_VIDEO_PAUSE = MSG_PLUGIN + 0x101;
+    const MSG_VIDEO_ENDED = MSG_PLUGIN + 0x102;
+    const MSG_VIDEO_SEEK = MSG_PLUGIN + 0x103;
+    const MSG_VIDEO_LOADED = MSG_PLUGIN + 0x104;
+    const MSG_VIDEO_CUE_ENTER = MSG_PLUGIN + 0x105;
+    const MSG_VIDEO_CUE_LEAVE = MSG_PLUGIN + 0x106;
+    const MSG_VIDEO_ERROR = MSG_PLUGIN + 0x107;
+    const MSG_VIDEO_VOLUME_CHANGE = MSG_PLUGIN + 0x108;
+    const MSG_VIDEO_RATE_CHANGE = MSG_PLUGIN + 0x109;
+    const MSG_VIDEO_WAITING = MSG_PLUGIN + 0x10A;
+    const MSG_VIDEO_CANPLAY = MSG_PLUGIN + 0x10B;
+    const MSG_VIDEO_TIMEUPDATE = MSG_PLUGIN + 0x10C;
+
     /**
      * Registry of active video components keyed by pacId.
      * Each entry holds the pac reference, the HTMLVideoElement, the MSG_VIDEO_ERROR
@@ -521,19 +539,19 @@
 
     window.WakaVideo = {
         // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
-        MSG_VIDEO_PLAY         : MSG_PLUGIN + 0x100,
-        MSG_VIDEO_PAUSE        : MSG_PLUGIN + 0x101,
-        MSG_VIDEO_ENDED        : MSG_PLUGIN + 0x102,
-        MSG_VIDEO_SEEK         : MSG_PLUGIN + 0x103,
-        MSG_VIDEO_LOADED       : MSG_PLUGIN + 0x104,
-        MSG_VIDEO_CUE_ENTER    : MSG_PLUGIN + 0x105,
-        MSG_VIDEO_CUE_LEAVE    : MSG_PLUGIN + 0x106,
-        MSG_VIDEO_ERROR        : MSG_PLUGIN + 0x107,
-        MSG_VIDEO_VOLUME_CHANGE: MSG_PLUGIN + 0x108,
-        MSG_VIDEO_RATE_CHANGE  : MSG_PLUGIN + 0x109,
-        MSG_VIDEO_WAITING      : MSG_PLUGIN + 0x10A,
-        MSG_VIDEO_CANPLAY      : MSG_PLUGIN + 0x10B,
-        MSG_VIDEO_TIMEUPDATE   : MSG_PLUGIN + 0x10C,
+        MSG_VIDEO_PLAY         : MSG_VIDEO_PLAY,
+        MSG_VIDEO_PAUSE        : MSG_VIDEO_PAUSE,
+        MSG_VIDEO_ENDED        : MSG_VIDEO_ENDED,
+        MSG_VIDEO_SEEK         : MSG_VIDEO_SEEK,
+        MSG_VIDEO_LOADED       : MSG_VIDEO_LOADED,
+        MSG_VIDEO_CUE_ENTER    : MSG_VIDEO_CUE_ENTER,
+        MSG_VIDEO_CUE_LEAVE    : MSG_VIDEO_CUE_LEAVE,
+        MSG_VIDEO_ERROR        : MSG_VIDEO_ERROR,
+        MSG_VIDEO_VOLUME_CHANGE: MSG_VIDEO_VOLUME_CHANGE,
+        MSG_VIDEO_RATE_CHANGE  : MSG_VIDEO_RATE_CHANGE,
+        MSG_VIDEO_WAITING      : MSG_VIDEO_WAITING,
+        MSG_VIDEO_CANPLAY      : MSG_VIDEO_CANPLAY,
+        MSG_VIDEO_TIMEUPDATE   : MSG_VIDEO_TIMEUPDATE,
 
         createPacPlugin(pac, _options = {}) {
             return new VideoPlugin(this, pac, _options).initialize();

@@ -298,6 +298,24 @@
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
     // =========================================================================
+    // MESSAGES
+    // =========================================================================
+
+    /**
+     * Message identifier for route change notifications.
+     * Occupies the first slot in the MSG_PLUGIN range.
+     * @type {number}
+     */
+    const MSG_ROUTE_CHANGE = MSG_PLUGIN + 0x000;
+
+    /**
+     * Sent before a navigation commits. A component's msgProc may return false
+     * to cancel the navigation. Detail shape: { path, query, params }.
+     * @type {number}
+     */
+    const MSG_ROUTE_BEFORE = MSG_PLUGIN + 0x001;
+
+    // =========================================================================
     // PATTERN COMPILER
     // =========================================================================
 
@@ -319,26 +337,15 @@
 
     /**
      * WakaRoute - Client-side router plugin for WakaPAC.
-     * Exported as a singleton instance (window.wakaRoute).
+     * Exported as window.WakaRoute (class) and window.wakaRoute (singleton instance).
      * @constructor
      */
     function WakaRoute() {
-        /**
-         * Sent before a navigation commits. A component's msgProc may return false
-         * to cancel the navigation. Detail shape: { path, query, params }.
-         * Also attached to the wakaPAC instance as wakaPAC.MSG_ROUTE_BEFORE.
-         * @type {number}
-         */
-        this.MSG_ROUTE_BEFORE = MSG_PLUGIN + 0x001;
-
-        /**
-         * Message identifier for route change notifications.
-         * Occupies the first slot in the MSG_PLUGIN range (0x2000).
-         * Also attached to the wakaPAC instance by createPacPlugin() so it is
-         * accessible as wakaPAC.MSG_ROUTE_CHANGE alongside the built-in messages.
-         * @type {number}
-         */
-        this.MSG_ROUTE_CHANGE = MSG_PLUGIN + 0x000;
+        // Also attached to the wakaPAC instance by createPacPlugin() so they are
+        // accessible as wakaPAC.MSG_ROUTE_BEFORE / wakaPAC.MSG_ROUTE_CHANGE
+        // alongside the built-in messages.
+        this.MSG_ROUTE_BEFORE = MSG_ROUTE_BEFORE;
+        this.MSG_ROUTE_CHANGE = MSG_ROUTE_CHANGE;
 
         /**
          * Reference to the wakaPAC instance, populated by createPacPlugin().
@@ -380,19 +387,7 @@
         const self = this;
 
         // Stored by reference so destroy() can remove it
-        this._popstateHandler = function _popstateHandler () {
-            const path = pluginRuntime._normalizePath(location.pathname);
-
-            if (pluginRuntime._broadcastBeforeRoute(self, path)) {
-                // Undo the browser navigation. We can't know the direction reliably,
-                // so we go(1) — this works for back (the common case) and is a no-op
-                // for forward if the guard triggers there too.
-                history.go(1);
-                return;
-            }
-
-            pluginRuntime._broadcastCurrentRoute(self);
-        };
+        this._popstateHandler = this._handlePopstate.bind(this);
 
         // Browser back/forward navigation
         window.addEventListener('popstate', this._popstateHandler);
@@ -464,6 +459,25 @@
                 self._routeTable.delete(pacId);
             }
         };
+    };
+
+    /**
+     * Handles the browser's popstate event (back/forward navigation).
+     * Broadcasts MSG_ROUTE_BEFORE first; if blocked, undoes the navigation.
+     * @private
+     */
+    WakaRoute.prototype._handlePopstate = function _handlePopstate () {
+        const path = pluginRuntime._normalizePath(location.pathname);
+
+        if (pluginRuntime._broadcastBeforeRoute(this, path)) {
+            // Undo the browser navigation. We can't know the direction reliably,
+            // so we go(1) — this works for back (the common case) and is a no-op
+            // for forward if the guard triggers there too.
+            history.go(1);
+            return;
+        }
+
+        pluginRuntime._broadcastCurrentRoute(this);
     };
 
     // =========================================================================
@@ -592,9 +606,14 @@
         this._pac = null;
     };
 
+    // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
+    WakaRoute.MSG_ROUTE_CHANGE = MSG_ROUTE_CHANGE;
+    WakaRoute.MSG_ROUTE_BEFORE = MSG_ROUTE_BEFORE;
+
     // =========================================================================
     // EXPORTS
     // =========================================================================
 
+    window.WakaRoute = WakaRoute;
     window.wakaRoute = new WakaRoute();
 })();

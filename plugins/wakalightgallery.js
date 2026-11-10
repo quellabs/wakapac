@@ -418,6 +418,19 @@
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
     // =========================================================================
+    // MESSAGES
+    // =========================================================================
+
+    const MSG_GALLERY_READY = MSG_PLUGIN + 0x300;
+    const MSG_GALLERY_ERROR = MSG_PLUGIN + 0x301;
+    const MSG_BEFORE_OPEN = MSG_PLUGIN + 0x302;
+    const MSG_AFTER_OPEN = MSG_PLUGIN + 0x303;
+    const MSG_BEFORE_CLOSE = MSG_PLUGIN + 0x304;
+    const MSG_AFTER_CLOSE = MSG_PLUGIN + 0x305;
+    const MSG_BEFORE_SLIDE = MSG_PLUGIN + 0x306;
+    const MSG_AFTER_SLIDE = MSG_PLUGIN + 0x307;
+
+    // =========================================================================
     // lightGallery v2 CDN assets
     // =========================================================================
     // lightGallery v2 ships as a UMD bundle plus a CSS file. Both are required.
@@ -482,14 +495,14 @@
 
     window.wakaLightGallery = {
         // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
-        MSG_GALLERY_READY: MSG_PLUGIN + 0x300,
-        MSG_GALLERY_ERROR: MSG_PLUGIN + 0x301,
-        MSG_BEFORE_OPEN  : MSG_PLUGIN + 0x302,
-        MSG_AFTER_OPEN   : MSG_PLUGIN + 0x303,
-        MSG_BEFORE_CLOSE : MSG_PLUGIN + 0x304,
-        MSG_AFTER_CLOSE  : MSG_PLUGIN + 0x305,
-        MSG_BEFORE_SLIDE : MSG_PLUGIN + 0x306,
-        MSG_AFTER_SLIDE  : MSG_PLUGIN + 0x307,
+        MSG_GALLERY_READY: MSG_GALLERY_READY,
+        MSG_GALLERY_ERROR: MSG_GALLERY_ERROR,
+        MSG_BEFORE_OPEN  : MSG_BEFORE_OPEN,
+        MSG_AFTER_OPEN   : MSG_AFTER_OPEN,
+        MSG_BEFORE_CLOSE : MSG_BEFORE_CLOSE,
+        MSG_AFTER_CLOSE  : MSG_AFTER_CLOSE,
+        MSG_BEFORE_SLIDE : MSG_BEFORE_SLIDE,
+        MSG_AFTER_SLIDE  : MSG_AFTER_SLIDE,
 
         /**
          * Called on plugin initialization through wakaPAC.use().

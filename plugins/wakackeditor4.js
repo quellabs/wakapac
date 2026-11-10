@@ -105,14 +105,9 @@
             Object.keys(state._defaultEditorConfig).forEach(state.visitItem);
 
             // Use the public message IDs for delivery as well as comparisons.
-            ({
-                MSG_EDITOR_READY: state._MSG_EDITOR_READY,
-                MSG_EDITOR_ERROR: state._MSG_EDITOR_ERROR
-            } = state._owner);
-
             state._msgConstants = {
-                MSG_EDITOR_READY: state._MSG_EDITOR_READY,
-                MSG_EDITOR_ERROR: state._MSG_EDITOR_ERROR
+                MSG_EDITOR_READY: state._owner.MSG_EDITOR_READY,
+                MSG_EDITOR_ERROR: state._owner.MSG_EDITOR_ERROR
             };
 
             return state.createDescriptor();
@@ -503,6 +498,13 @@
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
     // =========================================================================
+    // MESSAGES
+    // =========================================================================
+
+    const MSG_EDITOR_READY = MSG_PLUGIN + 0x500;
+    const MSG_EDITOR_ERROR = MSG_PLUGIN + 0x501;
+
+    // =========================================================================
     // CKEditor 4 script bootstrap
     // =========================================================================
     // CKEditor 4 is a single shared global (window.CKEDITOR). We inject its
@@ -582,8 +584,8 @@
 
     window.WakaCKEditor = {
         // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
-        MSG_EDITOR_READY: MSG_PLUGIN + 0x500,
-        MSG_EDITOR_ERROR: MSG_PLUGIN + 0x501,
+        MSG_EDITOR_READY: MSG_EDITOR_READY,
+        MSG_EDITOR_ERROR: MSG_EDITOR_ERROR,
 
         /**
          * Called on plugin initialization through wakaPAC.use()

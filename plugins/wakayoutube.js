@@ -89,30 +89,17 @@
             };
 
             // Use the public message IDs for delivery as well as comparisons.
-            ({
-                MSG_VIDEO_PLAY: state._MSG_VIDEO_PLAY,
-                MSG_VIDEO_PAUSE: state._MSG_VIDEO_PAUSE,
-                MSG_VIDEO_ENDED: state._MSG_VIDEO_ENDED,
-                MSG_VIDEO_SEEK: state._MSG_VIDEO_SEEK,
-                MSG_VIDEO_LOADED: state._MSG_VIDEO_LOADED,
-                MSG_VIDEO_ERROR: state._MSG_VIDEO_ERROR,
-                MSG_VIDEO_VOLUME_CHANGE: state._MSG_VIDEO_VOLUME_CHANGE,
-                MSG_VIDEO_WAITING: state._MSG_VIDEO_WAITING,
-                MSG_VIDEO_CANPLAY: state._MSG_VIDEO_CANPLAY,
-                MSG_VIDEO_TIMEUPDATE: state._MSG_VIDEO_TIMEUPDATE
-            } = state._owner);
-
             state._msgConstants = {
-                MSG_VIDEO_PLAY         : state._MSG_VIDEO_PLAY,
-                MSG_VIDEO_PAUSE        : state._MSG_VIDEO_PAUSE,
-                MSG_VIDEO_ENDED        : state._MSG_VIDEO_ENDED,
-                MSG_VIDEO_SEEK         : state._MSG_VIDEO_SEEK,
-                MSG_VIDEO_LOADED       : state._MSG_VIDEO_LOADED,
-                MSG_VIDEO_ERROR        : state._MSG_VIDEO_ERROR,
-                MSG_VIDEO_VOLUME_CHANGE: state._MSG_VIDEO_VOLUME_CHANGE,
-                MSG_VIDEO_WAITING      : state._MSG_VIDEO_WAITING,
-                MSG_VIDEO_CANPLAY      : state._MSG_VIDEO_CANPLAY,
-                MSG_VIDEO_TIMEUPDATE   : state._MSG_VIDEO_TIMEUPDATE
+                MSG_VIDEO_PLAY         : state._owner.MSG_VIDEO_PLAY,
+                MSG_VIDEO_PAUSE        : state._owner.MSG_VIDEO_PAUSE,
+                MSG_VIDEO_ENDED        : state._owner.MSG_VIDEO_ENDED,
+                MSG_VIDEO_SEEK         : state._owner.MSG_VIDEO_SEEK,
+                MSG_VIDEO_LOADED       : state._owner.MSG_VIDEO_LOADED,
+                MSG_VIDEO_ERROR        : state._owner.MSG_VIDEO_ERROR,
+                MSG_VIDEO_VOLUME_CHANGE: state._owner.MSG_VIDEO_VOLUME_CHANGE,
+                MSG_VIDEO_WAITING      : state._owner.MSG_VIDEO_WAITING,
+                MSG_VIDEO_CANPLAY      : state._owner.MSG_VIDEO_CANPLAY,
+                MSG_VIDEO_TIMEUPDATE   : state._owner.MSG_VIDEO_TIMEUPDATE
             };
 
             return state.createDescriptor();
@@ -496,6 +483,21 @@
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
     // =========================================================================
+    // MESSAGES
+    // =========================================================================
+
+    const MSG_VIDEO_PLAY = MSG_PLUGIN + 0x100;
+    const MSG_VIDEO_PAUSE = MSG_PLUGIN + 0x101;
+    const MSG_VIDEO_ENDED = MSG_PLUGIN + 0x102;
+    const MSG_VIDEO_SEEK = MSG_PLUGIN + 0x103;
+    const MSG_VIDEO_LOADED = MSG_PLUGIN + 0x104;
+    const MSG_VIDEO_ERROR = MSG_PLUGIN + 0x107;
+    const MSG_VIDEO_VOLUME_CHANGE = MSG_PLUGIN + 0x108;
+    const MSG_VIDEO_WAITING = MSG_PLUGIN + 0x10A;
+    const MSG_VIDEO_CANPLAY = MSG_PLUGIN + 0x10B;
+    const MSG_VIDEO_TIMEUPDATE = MSG_PLUGIN + 0x10C;
+
+    // =========================================================================
     // YouTube IFrame API bootstrap
     //
     // The IFrame API is a single shared global. We inject its script tag once
@@ -590,16 +592,16 @@
 
     window.WakaYouTube = {
         // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
-        MSG_VIDEO_PLAY         : MSG_PLUGIN + 0x100,
-        MSG_VIDEO_PAUSE        : MSG_PLUGIN + 0x101,
-        MSG_VIDEO_ENDED        : MSG_PLUGIN + 0x102,
-        MSG_VIDEO_SEEK         : MSG_PLUGIN + 0x103,
-        MSG_VIDEO_LOADED       : MSG_PLUGIN + 0x104,
-        MSG_VIDEO_ERROR        : MSG_PLUGIN + 0x107,
-        MSG_VIDEO_VOLUME_CHANGE: MSG_PLUGIN + 0x108,
-        MSG_VIDEO_WAITING      : MSG_PLUGIN + 0x10A,
-        MSG_VIDEO_CANPLAY      : MSG_PLUGIN + 0x10B,
-        MSG_VIDEO_TIMEUPDATE   : MSG_PLUGIN + 0x10C,
+        MSG_VIDEO_PLAY         : MSG_VIDEO_PLAY,
+        MSG_VIDEO_PAUSE        : MSG_VIDEO_PAUSE,
+        MSG_VIDEO_ENDED        : MSG_VIDEO_ENDED,
+        MSG_VIDEO_SEEK         : MSG_VIDEO_SEEK,
+        MSG_VIDEO_LOADED       : MSG_VIDEO_LOADED,
+        MSG_VIDEO_ERROR        : MSG_VIDEO_ERROR,
+        MSG_VIDEO_VOLUME_CHANGE: MSG_VIDEO_VOLUME_CHANGE,
+        MSG_VIDEO_WAITING      : MSG_VIDEO_WAITING,
+        MSG_VIDEO_CANPLAY      : MSG_VIDEO_CANPLAY,
+        MSG_VIDEO_TIMEUPDATE   : MSG_VIDEO_TIMEUPDATE,
 
         createPacPlugin(pac, _options = {}) {
             return new YouTubePlugin(this, pac, _options).initialize();

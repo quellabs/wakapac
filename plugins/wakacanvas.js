@@ -231,13 +231,20 @@
     /** @type {string} */
     const VERSION = '1.0.0';
 
+    // Support standalone loading while using the host's plugin base when present.
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+
+    // =========================================================================
+    // MESSAGES
+    // =========================================================================
+
     /**
      * Message broadcast to all components when a font finishes loading.
      * wParam: alias name (string)
      * lParam: { alias: string, family: string }
      * @type {number}
      */
-    const MSG_FONT_LOADED = 0xC001;
+    const MSG_FONT_LOADED = MSG_PLUGIN + 0x700;
 
     /**
      * Message broadcast to all components when a font fails to load.
@@ -245,7 +252,7 @@
      * lParam: { alias: string, url: string }
      * @type {number}
      */
-    const MSG_FONT_FAILED = 0xC002;
+    const MSG_FONT_FAILED = MSG_PLUGIN + 0x701;
 
     // =========================================================================
     // FONT REGISTRY
@@ -477,6 +484,9 @@
      * @constructor
      */
     function WakaCanvas() {
+        // Available before plugin installation, matching the constructor statics.
+        this.MSG_FONT_LOADED = WakaCanvas.MSG_FONT_LOADED;
+        this.MSG_FONT_FAILED = WakaCanvas.MSG_FONT_FAILED;
     }
 
     WakaCanvas.prototype = {

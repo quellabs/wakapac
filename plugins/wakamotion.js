@@ -78,14 +78,14 @@
                 const last = _lastDispatched;
 
                 const accChanged =
-                                                                                   Math.abs((state._x     ?? last.x) - last.x) > t ||
-                                                                                   Math.abs((state._y     ?? last.y) - last.y) > t ||
-                                                                                   Math.abs((state._z     ?? last.z) - last.z) > t;
+                    Math.abs((state._x ?? last.x) - last.x) > t ||
+                    Math.abs((state._y ?? last.y) - last.y) > t ||
+                    Math.abs((state._z ?? last.z) - last.z) > t;
 
                 const rotChanged =
-                                                                                   Math.abs((state._alpha ?? last.alpha) - last.alpha) > t ||
-                                                                                   Math.abs((state._beta  ?? last.beta)  - last.beta)  > t ||
-                                                                                   Math.abs((state._gamma ?? last.gamma) - last.gamma) > t;
+                    Math.abs((state._alpha ?? last.alpha) - last.alpha) > t ||
+                    Math.abs((state._beta ?? last.beta) - last.beta) > t ||
+                    Math.abs((state._gamma ?? last.gamma) - last.gamma) > t;
 
                 if (!accChanged && !rotChanged) {
                     return;
