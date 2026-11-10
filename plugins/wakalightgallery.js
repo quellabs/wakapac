@@ -66,6 +66,9 @@
 (function() {
     "use strict";
 
+    // Support standalone loading while using the host's plugin base when present.
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+
     // =========================================================================
     // lightGallery v2 CDN assets
     // =========================================================================
@@ -200,15 +203,15 @@
     // =========================================================================
 
     window.wakaLightGallery = {
-        // Message IDs are available before wakaPAC.use() (MSG_PLUGIN = 0x2000).
-        MSG_GALLERY_READY: 0x2300,
-        MSG_GALLERY_ERROR: 0x2301,
-        MSG_BEFORE_OPEN  : 0x2302,
-        MSG_AFTER_OPEN   : 0x2303,
-        MSG_BEFORE_CLOSE : 0x2304,
-        MSG_AFTER_CLOSE  : 0x2305,
-        MSG_BEFORE_SLIDE : 0x2306,
-        MSG_AFTER_SLIDE  : 0x2307,
+        // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
+        MSG_GALLERY_READY: MSG_PLUGIN + 0x300,
+        MSG_GALLERY_ERROR: MSG_PLUGIN + 0x301,
+        MSG_BEFORE_OPEN  : MSG_PLUGIN + 0x302,
+        MSG_AFTER_OPEN   : MSG_PLUGIN + 0x303,
+        MSG_BEFORE_CLOSE : MSG_PLUGIN + 0x304,
+        MSG_AFTER_CLOSE  : MSG_PLUGIN + 0x305,
+        MSG_BEFORE_SLIDE : MSG_PLUGIN + 0x306,
+        MSG_AFTER_SLIDE  : MSG_PLUGIN + 0x307,
 
 
         /**

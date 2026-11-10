@@ -71,6 +71,9 @@
 (function() {
     "use strict";
 
+    // Support standalone loading while using the host's plugin base when present.
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+
     // =========================================================================
     // Pattern parsing
     // =========================================================================
@@ -586,9 +589,9 @@
     // =========================================================================
 
     window.WakaMask = {
-        // Message IDs are available before wakaPAC.use() (MSG_PLUGIN = 0x2000).
-        MSG_MASK_COMPLETE: 0x2400,
-        MSG_MASK_REJECT  : 0x2401,
+        // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
+        MSG_MASK_COMPLETE: MSG_PLUGIN + 0x400,
+        MSG_MASK_REJECT  : MSG_PLUGIN + 0x401,
 
 
         createPacPlugin(pac, _options = {}) {

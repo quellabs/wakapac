@@ -87,17 +87,19 @@ methods return a numeric request ID, with results delivered through `msgProc`
 and the ID in `event.wParam`. Standalone `wakaSync` request methods return
 Promises instead.
 
-Plugin message IDs reserve separate ranges for unrelated events:
+Plugin message IDs use offsets from `MSG_PLUGIN`, reserving separate ranges for
+unrelated events. Plugins read `wakaPAC.MSG_PLUGIN` when loaded, using the standard
+`0x2000` base when loaded standalone.
 
-| Events | IDs |
+| Events | Offsets from `MSG_PLUGIN` |
 | --- | --- |
-| Routing | `0x2000`–`0x2001` |
-| Video, Vimeo, YouTube | `0x2100`–`0x210C` |
-| HTTP | `0x2200`–`0x2202` |
-| LightGallery | `0x2300`–`0x2307` |
-| Mask | `0x2400`–`0x2401` |
-| CKEditor 4/5, TinyMCE, Jodit | `0x2500`–`0x2501` |
-| ColorPicker | `0x2600` |
+| Routing | `0x000`–`0x001` |
+| Video, Vimeo, YouTube | `0x100`–`0x10C` |
+| HTTP | `0x200`–`0x202` |
+| LightGallery | `0x300`–`0x307` |
+| Mask | `0x400`–`0x401` |
+| CKEditor 4/5, TinyMCE, Jodit | `0x500`–`0x501` |
+| ColorPicker | `0x600` |
 
 Equivalent video events share IDs across video plugins by design; equivalent
 editor events also share IDs across editor plugins. Mask, editor, and ColorPicker

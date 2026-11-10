@@ -47,6 +47,9 @@
 (function() {
     "use strict";
 
+    // Support standalone loading while using the host's plugin base when present.
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+
     /** @type {Map<string, function>} Maps pacId to its pac:change unlisten function. */
     const _unlisteners = new Map();
 
@@ -564,7 +567,7 @@
      * wParam is a 24-bit COLORREF integer (0x00RRGGBB).
      * @type {number}
      */
-    const MSG_COLOR_CHANGED = 0x2600;
+    const MSG_COLOR_CHANGED = MSG_PLUGIN + 0x600;
 
     window.WakaColorPicker = {
 

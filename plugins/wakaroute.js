@@ -41,6 +41,9 @@
 (function () {
     "use strict";
 
+    // Support standalone loading while using the host's plugin base when present.
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+
     // =========================================================================
     // PATTERN COMPILER
     // =========================================================================
@@ -222,7 +225,7 @@
          * Also attached to the wakaPAC instance as wakaPAC.MSG_ROUTE_BEFORE.
          * @type {number}
          */
-        this.MSG_ROUTE_BEFORE = 0x2001;
+        this.MSG_ROUTE_BEFORE = MSG_PLUGIN + 0x001;
 
         /**
          * Message identifier for route change notifications.
@@ -231,7 +234,7 @@
          * accessible as wakaPAC.MSG_ROUTE_CHANGE alongside the built-in messages.
          * @type {number}
          */
-        this.MSG_ROUTE_CHANGE = 0x2000;
+        this.MSG_ROUTE_CHANGE = MSG_PLUGIN + 0x000;
 
         /**
          * Reference to the wakaPAC instance, populated by createPacPlugin().

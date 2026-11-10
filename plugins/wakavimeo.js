@@ -69,6 +69,9 @@
 (function () {
     "use strict";
 
+    // Support standalone loading while using the host's plugin base when present.
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+
     // =========================================================================
     // Vimeo Player SDK bootstrap
     //
@@ -362,18 +365,18 @@
     // =========================================================================
 
     window.WakaVimeo = {
-        // Message IDs are available before wakaPAC.use() (MSG_PLUGIN = 0x2000).
-        MSG_VIDEO_PLAY         : 0x2100,
-        MSG_VIDEO_PAUSE        : 0x2101,
-        MSG_VIDEO_ENDED        : 0x2102,
-        MSG_VIDEO_SEEK         : 0x2103,
-        MSG_VIDEO_LOADED       : 0x2104,
-        MSG_VIDEO_ERROR        : 0x2107,
-        MSG_VIDEO_VOLUME_CHANGE: 0x2108,
-        MSG_VIDEO_RATE_CHANGE  : 0x2109,
-        MSG_VIDEO_WAITING      : 0x210A,
-        MSG_VIDEO_CANPLAY      : 0x210B,
-        MSG_VIDEO_TIMEUPDATE   : 0x210C,
+        // Message IDs are available before wakaPAC.use(), relative to MSG_PLUGIN.
+        MSG_VIDEO_PLAY         : MSG_PLUGIN + 0x100,
+        MSG_VIDEO_PAUSE        : MSG_PLUGIN + 0x101,
+        MSG_VIDEO_ENDED        : MSG_PLUGIN + 0x102,
+        MSG_VIDEO_SEEK         : MSG_PLUGIN + 0x103,
+        MSG_VIDEO_LOADED       : MSG_PLUGIN + 0x104,
+        MSG_VIDEO_ERROR        : MSG_PLUGIN + 0x107,
+        MSG_VIDEO_VOLUME_CHANGE: MSG_PLUGIN + 0x108,
+        MSG_VIDEO_RATE_CHANGE  : MSG_PLUGIN + 0x109,
+        MSG_VIDEO_WAITING      : MSG_PLUGIN + 0x10A,
+        MSG_VIDEO_CANPLAY      : MSG_PLUGIN + 0x10B,
+        MSG_VIDEO_TIMEUPDATE   : MSG_PLUGIN + 0x10C,
 
 
         createPacPlugin(pac, _options = {}) {

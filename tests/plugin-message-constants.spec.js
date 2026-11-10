@@ -124,6 +124,38 @@ const plugins = [
     ]
 ];
 
+for (const suffix of ['.js', '.min.js']) {
+    test(`${suffix}: message IDs use the host MSG_PLUGIN base before installation`, async ({ page }) => {
+        await page.goto('/');
+        await page.evaluate(() => {
+            window.wakaPAC = { MSG_PLUGIN: 0x4000 };
+        });
+
+        const clients = [
+            ...plugins,
+            ['wakasync', 'WakaSync', 'wakaSync', {
+                MSG_HTTP_SUCCESS: 0x2200,
+                MSG_HTTP_ERROR  : 0x2201,
+                MSG_HTTP_ABORT  : 0x2202
+            }],
+            ['wakaroute', 'wakaRoute', 'wakaRoute', {
+                MSG_ROUTE_CHANGE: 0x2000,
+                MSG_ROUTE_BEFORE: 0x2001
+            }]
+        ];
+        for (const [file, primary, alias, constants] of clients) {
+            await page.addScriptTag({ url: `/plugins/${file}${suffix}` });
+            const values = await page.evaluate(({ primary, alias, names }) => names.map(name => [
+                window[primary][name],
+                window[alias][name]
+            ]), { primary, alias, names: Object.keys(constants) });
+            const expected = Object.values(constants).map(id => [id + 0x2000, id + 0x2000]);
+
+            expect(values, `${file} must derive its message IDs from MSG_PLUGIN`).toEqual(expected);
+        }
+    });
+}
+
 for (const [file, primary, alias, constants] of plugins) {
     for (const suffix of ['.js', '.min.js']) {
         test(`${file}${suffix}: message constants exist before installation`, async ({ page }) => {
