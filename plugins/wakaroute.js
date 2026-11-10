@@ -226,7 +226,7 @@
 
         /**
          * Message identifier for route change notifications.
-         * Occupies the first slot above MSG_USER (0x1001).
+         * Occupies the first slot in the MSG_PLUGIN range (0x2000).
          * Also attached to the wakaPAC instance by createPacPlugin() so it is
          * accessible as wakaPAC.MSG_ROUTE_CHANGE alongside the built-in messages.
          * @type {number}

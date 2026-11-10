@@ -559,13 +559,12 @@
 
     /**
      * WakaPAC message constant fired when the user picks a color.
-     * Follows the WakaPAC plugin convention — MSG_PLUGIN + 1 guarantees
-     * no collision with built-in wakaPAC message types.
+     * Uses the reserved WakaColorPicker message range (0x2600).
      * Sent via pac.sendMessage(pacId, MSG_COLOR_CHANGED, colorRef, 0, { hex }).
      * wParam is a 24-bit COLORREF integer (0x00RRGGBB).
      * @type {number}
      */
-    const MSG_COLOR_CHANGED = (window.wakaPAC?.MSG_PLUGIN ?? 0x2000) + 1;
+    const MSG_COLOR_CHANGED = 0x2600;
 
     window.WakaColorPicker = {
 
@@ -685,7 +684,7 @@
 
     // ─── Exports ──────────────────────────────────────────────────────────────
 
-    /** Message constant fired when the user picks a color (MSG_PLUGIN + 1). */
+    /** Message constant fired when the user picks a color (0x2600). */
     window.WakaColorPicker.MSG_COLOR_CHANGED = MSG_COLOR_CHANGED;
 
     /**

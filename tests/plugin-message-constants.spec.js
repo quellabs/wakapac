@@ -6,8 +6,8 @@ const plugins = [
         'WakaCKEditor',
         'wakaCKEditor',
         {
-            MSG_EDITOR_READY: 0x2200,
-            MSG_EDITOR_ERROR: 0x2201
+            MSG_EDITOR_READY: 0x2500,
+            MSG_EDITOR_ERROR: 0x2501
         }
     ],
     [
@@ -15,8 +15,8 @@ const plugins = [
         'WakaCKEditor',
         'wakaCKEditor',
         {
-            MSG_EDITOR_READY: 0x2200,
-            MSG_EDITOR_ERROR: 0x2201
+            MSG_EDITOR_READY: 0x2500,
+            MSG_EDITOR_ERROR: 0x2501
         }
     ],
     [
@@ -24,8 +24,8 @@ const plugins = [
         'WakaTinyMCE',
         'wakaTinyMCE',
         {
-            MSG_EDITOR_READY: 0x2200,
-            MSG_EDITOR_ERROR: 0x2201
+            MSG_EDITOR_READY: 0x2500,
+            MSG_EDITOR_ERROR: 0x2501
         }
     ],
     [
@@ -33,8 +33,8 @@ const plugins = [
         'WakaJodit',
         'wakaJodit',
         {
-            MSG_EDITOR_READY: 0x2200,
-            MSG_EDITOR_ERROR: 0x2201
+            MSG_EDITOR_READY: 0x2500,
+            MSG_EDITOR_ERROR: 0x2501
         }
     ],
     [
@@ -97,9 +97,15 @@ const plugins = [
         'WakaMask',
         'wakaMask',
         {
-            MSG_MASK_COMPLETE: 0x2200,
-            MSG_MASK_REJECT  : 0x2201
+            MSG_MASK_COMPLETE: 0x2400,
+            MSG_MASK_REJECT  : 0x2401
         }
+    ],
+    [
+        'wakacolorpicker',
+        'WakaColorPicker',
+        'wakaColorPicker',
+        { MSG_COLOR_CHANGED: 0x2600 }
     ],
     [
         'wakalightgallery',

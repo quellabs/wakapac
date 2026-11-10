@@ -87,6 +87,23 @@ methods return a numeric request ID, with results delivered through `msgProc`
 and the ID in `event.wParam`. Standalone `wakaSync` request methods return
 Promises instead.
 
+Plugin message IDs reserve separate ranges for unrelated events:
+
+| Events | IDs |
+| --- | --- |
+| Routing | `0x2000`–`0x2001` |
+| Video, Vimeo, YouTube | `0x2100`–`0x210C` |
+| HTTP | `0x2200`–`0x2202` |
+| LightGallery | `0x2300`–`0x2307` |
+| Mask | `0x2400`–`0x2401` |
+| CKEditor 4/5, TinyMCE, Jodit | `0x2500`–`0x2501` |
+| ColorPicker | `0x2600` |
+
+Equivalent video events share IDs across video plugins by design; equivalent
+editor events also share IDs across editor plugins. Mask, editor, and ColorPicker
+IDs have changed to remove collisions. Use the exported `MSG_*` constants instead
+of numeric literals, and update source and minified plugin bundles together.
+
 **Navigation & Sensors**
 - **WakaRoute** — client-side router delivering navigation events through `msgProc`
 - **WakaMotion** — device motion and orientation sensors as reactive properties

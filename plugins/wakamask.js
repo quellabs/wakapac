@@ -64,9 +64,7 @@
  * ║    - IME composition (event.key === 'Process') is not intercepted. Composed text     ║
  * ║      lands in the field unmasked; the field will format correctly on the next        ║
  * ║      plain keystroke, paste, or WakaMask.setValue() call, but not while composing.   ║
- * ║    - MSG_PLUGIN offsets below assume no other installed plugin has claimed the       ║
- * ║      0x200 range. WakaYouTube/WakaVideo use 0x100–0x10C; if you have other plugins   ║
- * ║      installed, check their offsets don't collide with this one.                     ║
+ * ║    - Message IDs 0x2400-0x2401 are reserved for WakaMask.                            ║
  * ║                                                                                      ║
  * ╚══════════════════════════════════════════════════════════════════════════════════════╝
  */
@@ -589,8 +587,8 @@
 
     window.WakaMask = {
         // Message IDs are available before wakaPAC.use() (MSG_PLUGIN = 0x2000).
-        MSG_MASK_COMPLETE: 0x2200,
-        MSG_MASK_REJECT  : 0x2201,
+        MSG_MASK_COMPLETE: 0x2400,
+        MSG_MASK_REJECT  : 0x2401,
 
 
         createPacPlugin(pac, _options = {}) {
