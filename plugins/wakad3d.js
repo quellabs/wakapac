@@ -53,6 +53,363 @@
 
 (function() {
     'use strict';
+    const pluginRuntime = {
+        /**
+         * Returns true if ctx is a WebGL or WebGL2 context. Used both to decide
+         * whether a canvas is ours to manage and to validate the destDC passed
+         * to wakaD3D.bitBlt().
+         * @param {RenderingContext} ctx
+         * @returns {boolean}
+         */
+        _isWebGLContext(ctx) {
+            return ctx instanceof WebGLRenderingContext || ctx instanceof WebGL2RenderingContext;
+        },
+
+        /**
+         * Copies a source canvas onto a WebGL destination as a texture bound to
+         * the currently active texture unit. The caller is responsible for binding
+         * the target texture before calling wakaD3D.bitBlt() — this function
+         * assumes that has already been done.
+         * There is no rect parameter: texImage2D always uploads the whole
+         * srcCanvas as a texture, so a partial-region or scaled copy — the way
+         * wakaPAC.bitBlt()/stretchBlt() do it for a 2D destination — isn't
+         * meaningful here.
+         * @param {WebGLRenderingContext|WebGL2RenderingContext} destGL
+         * @param {HTMLCanvasElement} srcCanvas
+         */
+        _blitToWebGL(destGL, srcCanvas) {
+            destGL.texImage2D(
+                destGL.TEXTURE_2D,
+                0,                  // mip level
+                destGL.RGBA,        // internal format
+                destGL.RGBA,        // format
+                destGL.UNSIGNED_BYTE,
+                srcCanvas
+            );
+        },
+
+        /**
+         * Builds the render-loop callback for a canvas. Created once per canvas
+         * (see onComponentCreated) and reused across every _startLoop() call —
+         * including pause/resume cycles — instead of being recreated each time.
+         * Uses the wakaPAC global directly: wakaPAC is a singleton function
+         * declared once in wakapac.js (no constructor exists to create a second
+         * one), and createPacPlugin(wakaPAC, options) always passes that exact
+         * object — so pac and wakaPAC are always the same reference.
+         * @param {string} pacId
+         * @returns {function(): void}
+         */
+        _createTick(pacId) {
+            const createTickHandlers = {
+                renderFrame() {
+                    const e = _canvases.get(pacId);
+
+                    // Stopped for good (component destroyed) — do not reschedule.
+                    if (!e || e.loopHandle === undefined) {
+                        return;
+                    }
+
+                    if (e.ready) {
+                        wakaPAC.sendMessage(pacId, MSG_WEBGL_RENDER, 0, 0);
+                    }
+
+                    e.loopHandle = requestAnimationFrame(e.tick);
+                }
+            };
+
+            return createTickHandlers.renderFrame.bind(this);
+        },
+
+        /**
+         * @param {string} pacId
+         * @returns {void}
+         */
+        _startLoop(pacId) {
+            const entry = _canvases.get(pacId);
+
+            if (!entry) {
+                return;
+            }
+
+            entry.loopHandle = requestAnimationFrame(entry.tick);
+        },
+
+        /**
+         * Stops a canvas's render loop entirely. Safe to call even if no loop is running.
+         * @param {string} pacId
+         * @returns {void}
+         */
+        _stopLoop(pacId) {
+            const entry = _canvases.get(pacId);
+
+            if (entry && typeof entry.loopHandle === 'number') {
+                cancelAnimationFrame(entry.loopHandle);
+            }
+
+            if (entry) {
+                entry.loopHandle = undefined;
+            }
+        },
+
+        /**
+         * Pauses a canvas's render loop without forgetting it, so it can later be
+         * resumed via _resumeLoop(). Used while a WebGL context is lost —
+         * dispatching MSG_WEBGL_RENDER to a lost context produces GL errors.
+         * @param {string} pacId
+         * @returns {void}
+         */
+        _pauseLoop(pacId) {
+            const entry = _canvases.get(pacId);
+
+            if (entry && typeof entry.loopHandle === 'number') {
+                cancelAnimationFrame(entry.loopHandle);
+                entry.loopHandle = null;
+            }
+        },
+
+        /**
+         * Resumes a canvas's render loop if it was paused via _pauseLoop(). No-op
+         * if the loop was never started or was fully stopped (component destroyed).
+         * @param {string} pacId
+         * @returns {void}
+         */
+        _resumeLoop(pacId) {
+            const entry = _canvases.get(pacId);
+
+            if (entry && entry.loopHandle === null) {
+                pluginRuntime._startLoop(pacId);
+            }
+        },
+
+        /**
+         * Schedules a single MSG_WEBGL_RENDER for a canvas on the next animation frame.
+         * The on-demand counterpart to renderLoop: true — use this for a canvas
+         * that only needs to redraw in response to data changes or interaction,
+         * not continuously.
+         *
+         * Safe to call multiple times before the next frame — only one MSG_WEBGL_RENDER
+         * will fire, via the entry's own renderRequested flag rather than relying
+         * on requestAnimationFrame to deduplicate (it doesn't; separate calls
+         * schedule separate callbacks).
+         *
+         * Withheld until the canvas has fired MSG_WEBGL_READY, same as the
+         * continuous render loop — there is no context to render into before that.
+         *
+         * No-op (with a console warning) if pacId is not a canvas this plugin manages.
+         * @param {string} pacId
+         * @returns {void}
+         */
+        _requestRender(pacId) {
+            const requestRenderHandlers = {
+                onAnimationFrame() {
+                    const e = _canvases.get(pacId);
+
+                    // Guard: component may have been destroyed before the frame fired
+                    if (!e) {
+                        return;
+                    }
+
+                    e.renderRequested = false;
+
+                    if (e.ready) {
+                        wakaPAC.sendMessage(pacId, MSG_WEBGL_RENDER, 0, 0);
+                    }
+                }
+            };
+
+            const entry = _canvases.get(pacId);
+
+            if (!entry) {
+                console.warn(`wakaD3D.requestRender: "${pacId}" is not a WakaD3D-managed canvas.`);
+                return;
+            }
+
+            if (entry.renderRequested) {
+                return;
+            }
+
+            entry.renderRequested = true;
+
+            requestAnimationFrame(requestRenderHandlers.onAnimationFrame.bind(this));
+        },
+
+        /**
+         * Listens for this canvas's first MSG_SIZE (dispatched once layout has
+         * happened) and fires MSG_WEBGL_READY exactly once. At that point getDC()
+         * returns a valid context — safe to compile shaders, upload geometry, etc.
+         * @param {string} pacId
+         * @param {HTMLCanvasElement} container
+         * @returns {void}
+         */
+        _armReadySignal(pacId, container) {
+            const armReadySignalHandlers = {
+                onFirstSize(event) {
+                    if (event.message !== wakaPAC.MSG_SIZE) {
+                        return;
+                    }
+
+                    container.removeEventListener(PAC_EVENT, onFirstSize);
+                    entry.ready = true;
+
+                    wakaPAC.sendMessage(pacId, MSG_WEBGL_READY, 0, 0, {
+                        // Provide the GL context directly on the event so components
+                        // can set up shaders in the handler without a separate getDC() call.
+                        glContext: wakaPAC.getDC(pacId)
+                    });
+                }
+            };
+
+            const entry = _canvases.get(pacId);
+
+            // Defensive: onComponentCreated always inserts the entry before
+            // calling this, but don't assume that ordering holds forever.
+            if (!entry) {
+                return;
+            }
+
+            const onFirstSize = armReadySignalHandlers.onFirstSize.bind(this);
+
+            container.addEventListener(PAC_EVENT, onFirstSize);
+            entry.onFirstSize = onFirstSize;
+        },
+
+        /**
+         * @param {string} pacId
+         * @param {WebGLContextEvent} e
+         * @returns {void}
+         */
+        _handleContextLost(pacId, e) {
+            const entry = _canvases.get(pacId);
+
+            if (!entry) {
+                return;
+            }
+
+            // Calling preventDefault() is required — without it the browser will
+            // not attempt to restore the context after it is lost.
+            e.preventDefault();
+
+            // Pause the render loop while the context is unavailable. Dispatching
+            // paint messages to a lost context produces GL errors.
+            pluginRuntime._pauseLoop(pacId);
+
+            // Notify the component so it can discard all WebGL resource handles.
+            // Buffers, textures, framebuffers, programs, etc. become invalid after
+            // a context loss and must be recreated after restoration.
+            wakaPAC.sendMessage(pacId, MSG_WEBGL_CONTEXT_LOST, 0, 0);
+        },
+
+        /**
+         * @param {string} pacId
+         * @param {WebGLContextEvent} e
+         * @returns {void}
+         */
+        _handleContextRestored(pacId, _e) {
+            const entry = _canvases.get(pacId);
+
+            if (!entry) {
+                return;
+            }
+
+            // The browser has created a brand-new WebGL context. All GPU resources
+            // must be recreated before rendering can continue.
+            wakaPAC.sendMessage(pacId, MSG_WEBGL_CONTEXT_RESTORED, 0, 0, {
+                glContext: wakaPAC.getDC(pacId)
+            });
+
+            // Resume rendering if the component was previously running a render loop.
+            pluginRuntime._resumeLoop(pacId);
+        },
+
+        /**
+         * Builds the onComponentCreated/onComponentDestroyed hooks.
+         * @returns {{
+         *   onComponentCreated: function(Object, string, Object): void,
+         *   onComponentDestroyed: function(string): void
+         * }}
+         */
+        _createLifecycleHooks() {
+            return {
+                /**
+                 * Fires for every new wakaPAC component, canvas or not. Only
+                 * canvases with data-pac-context="webgl"/"webgl2" are ours —
+                 * everything else is ignored.
+                 * @param {Object} abstraction
+                 * @param {string} pacId
+                 * @param {Object} config
+                 */
+                onComponentCreated(abstraction, pacId, config) {
+                    const componentLifecycleHandlers = {
+                        boundRestored(e) { return pluginRuntime._handleContextRestored(pacId, e); },
+
+                        boundLost(e) { return pluginRuntime._handleContextLost(pacId, e); }
+                    };
+
+                    const container = wakaPAC.getContainerByPacId(pacId);
+
+                    if (!(container instanceof HTMLCanvasElement)) {
+                        return;
+                    }
+
+                    const contextType = container.dataset.pacContext;
+
+                    if (contextType !== 'webgl' && contextType !== 'webgl2') {
+                        return;
+                    }
+
+                    const boundLost = componentLifecycleHandlers.boundLost.bind(this);
+                    const boundRestored = componentLifecycleHandlers.boundRestored.bind(this);
+
+                    container.addEventListener('webglcontextlost', boundLost);
+                    container.addEventListener('webglcontextrestored', boundRestored);
+
+                    const entry = {
+                        container,
+                        boundLost,
+                        boundRestored,
+                        onFirstSize    : null,
+                        ready          : false,
+                        loopHandle     : undefined,
+                        tick           : null,
+                        renderRequested: false
+                    };
+
+                    entry.tick = pluginRuntime._createTick(pacId);
+                    _canvases.set(pacId, entry);
+
+                    pluginRuntime._armReadySignal(pacId, container);
+
+                    if (config.renderLoop === true) {
+                        pluginRuntime._startLoop(pacId);
+                    }
+                },
+
+                /**
+                 * Fires for every destroyed wakaPAC component, canvas or not.
+                 * No-op for components this plugin was never managing.
+                 * @param {string} pacId
+                 */
+                onComponentDestroyed(pacId) {
+                    const entry = _canvases.get(pacId);
+
+                    if (!entry) {
+                        return;
+                    }
+
+                    pluginRuntime._stopLoop(pacId);
+
+                    entry.container.removeEventListener('webglcontextlost', entry.boundLost);
+                    entry.container.removeEventListener('webglcontextrestored', entry.boundRestored);
+
+                    if (entry.onFirstSize) {
+                        entry.container.removeEventListener(PAC_EVENT, entry.onFirstSize);
+                    }
+
+                    _canvases.delete(pacId);
+                }
+            };
+        }
+    };
 
     const VERSION = '1.0.0';
 
@@ -86,40 +443,6 @@
     // =========================================================================
     // WEBGL CONTEXT TEST / BLIT
     // =========================================================================
-
-    /**
-     * Returns true if ctx is a WebGL or WebGL2 context. Used both to decide
-     * whether a canvas is ours to manage and to validate the destDC passed
-     * to wakaD3D.bitBlt().
-     * @param {RenderingContext} ctx
-     * @returns {boolean}
-     */
-    function _isWebGLContext(ctx) {
-        return ctx instanceof WebGLRenderingContext || ctx instanceof WebGL2RenderingContext;
-    }
-
-    /**
-     * Copies a source canvas onto a WebGL destination as a texture bound to
-     * the currently active texture unit. The caller is responsible for binding
-     * the target texture before calling wakaD3D.bitBlt() — this function
-     * assumes that has already been done.
-     * There is no rect parameter: texImage2D always uploads the whole
-     * srcCanvas as a texture, so a partial-region or scaled copy — the way
-     * wakaPAC.bitBlt()/stretchBlt() do it for a 2D destination — isn't
-     * meaningful here.
-     * @param {WebGLRenderingContext|WebGL2RenderingContext} destGL
-     * @param {HTMLCanvasElement} srcCanvas
-     */
-    function _blitToWebGL(destGL, srcCanvas) {
-        destGL.texImage2D(
-            destGL.TEXTURE_2D,
-            0,                  // mip level
-            destGL.RGBA,        // internal format
-            destGL.RGBA,        // format
-            destGL.UNSIGNED_BYTE,
-            srcCanvas
-        );
-    }
 
     // =========================================================================
     // PER-CANVAS STATE
@@ -160,234 +483,13 @@
     // canvas has flagged `ready` (see _armReadySignal below), since shaders/GL
     // resources are not set up before that point.
 
-    /**
-     * Builds the render-loop callback for a canvas. Created once per canvas
-     * (see onComponentCreated) and reused across every _startLoop() call —
-     * including pause/resume cycles — instead of being recreated each time.
-     * Uses the wakaPAC global directly: wakaPAC is a singleton function
-     * declared once in wakapac.js (no constructor exists to create a second
-     * one), and createPacPlugin(wakaPAC, options) always passes that exact
-     * object — so pac and wakaPAC are always the same reference.
-     * @param {string} pacId
-     * @returns {function(): void}
-     */
-    function _createTick(pacId) {
-        return () => {
-            const e = _canvases.get(pacId);
-
-            // Stopped for good (component destroyed) — do not reschedule.
-            if (!e || e.loopHandle === undefined) {
-                return;
-            }
-
-            if (e.ready) {
-                wakaPAC.sendMessage(pacId, MSG_WEBGL_RENDER, 0, 0);
-            }
-
-            e.loopHandle = requestAnimationFrame(e.tick);
-        };
-    }
-
-    /**
-     * @param {string} pacId
-     * @returns {void}
-     */
-    function _startLoop(pacId) {
-        const entry = _canvases.get(pacId);
-
-        if (!entry) {
-            return;
-        }
-
-        entry.loopHandle = requestAnimationFrame(entry.tick);
-    }
-
-    /**
-     * Stops a canvas's render loop entirely. Safe to call even if no loop is running.
-     * @param {string} pacId
-     * @returns {void}
-     */
-    function _stopLoop(pacId) {
-        const entry = _canvases.get(pacId);
-
-        if (entry && typeof entry.loopHandle === 'number') {
-            cancelAnimationFrame(entry.loopHandle);
-        }
-
-        if (entry) {
-            entry.loopHandle = undefined;
-        }
-    }
-
-    /**
-     * Pauses a canvas's render loop without forgetting it, so it can later be
-     * resumed via _resumeLoop(). Used while a WebGL context is lost —
-     * dispatching MSG_WEBGL_RENDER to a lost context produces GL errors.
-     * @param {string} pacId
-     * @returns {void}
-     */
-    function _pauseLoop(pacId) {
-        const entry = _canvases.get(pacId);
-
-        if (entry && typeof entry.loopHandle === 'number') {
-            cancelAnimationFrame(entry.loopHandle);
-            entry.loopHandle = null;
-        }
-    }
-
-    /**
-     * Resumes a canvas's render loop if it was paused via _pauseLoop(). No-op
-     * if the loop was never started or was fully stopped (component destroyed).
-     * @param {string} pacId
-     * @returns {void}
-     */
-    function _resumeLoop(pacId) {
-        const entry = _canvases.get(pacId);
-
-        if (entry && entry.loopHandle === null) {
-            _startLoop(pacId);
-        }
-    }
-
-    /**
-     * Schedules a single MSG_WEBGL_RENDER for a canvas on the next animation frame.
-     * The on-demand counterpart to renderLoop: true — use this for a canvas
-     * that only needs to redraw in response to data changes or interaction,
-     * not continuously.
-     *
-     * Safe to call multiple times before the next frame — only one MSG_WEBGL_RENDER
-     * will fire, via the entry's own renderRequested flag rather than relying
-     * on requestAnimationFrame to deduplicate (it doesn't; separate calls
-     * schedule separate callbacks).
-     *
-     * Withheld until the canvas has fired MSG_WEBGL_READY, same as the
-     * continuous render loop — there is no context to render into before that.
-     *
-     * No-op (with a console warning) if pacId is not a canvas this plugin manages.
-     * @param {string} pacId
-     * @returns {void}
-     */
-    function _requestRender(pacId) {
-        const entry = _canvases.get(pacId);
-
-        if (!entry) {
-            console.warn(`wakaD3D.requestRender: "${pacId}" is not a WakaD3D-managed canvas.`);
-            return;
-        }
-
-        if (entry.renderRequested) {
-            return;
-        }
-
-        entry.renderRequested = true;
-
-        requestAnimationFrame(() => {
-            const e = _canvases.get(pacId);
-
-            // Guard: component may have been destroyed before the frame fired
-            if (!e) {
-                return;
-            }
-
-            e.renderRequested = false;
-
-            if (e.ready) {
-                wakaPAC.sendMessage(pacId, MSG_WEBGL_RENDER, 0, 0);
-            }
-        });
-    }
-
     // =========================================================================
     // READY SIGNAL
     // =========================================================================
 
-    /**
-     * Listens for this canvas's first MSG_SIZE (dispatched once layout has
-     * happened) and fires MSG_WEBGL_READY exactly once. At that point getDC()
-     * returns a valid context — safe to compile shaders, upload geometry, etc.
-     * @param {string} pacId
-     * @param {HTMLCanvasElement} container
-     * @returns {void}
-     */
-    function _armReadySignal(pacId, container) {
-        const entry = _canvases.get(pacId);
-
-        // Defensive: onComponentCreated always inserts the entry before
-        // calling this, but don't assume that ordering holds forever.
-        if (!entry) {
-            return;
-        }
-
-        const onFirstSize = (event) => {
-            if (event.message !== wakaPAC.MSG_SIZE) {
-                return;
-            }
-
-            container.removeEventListener(PAC_EVENT, onFirstSize);
-            entry.ready = true;
-
-            wakaPAC.sendMessage(pacId, MSG_WEBGL_READY, 0, 0, {
-                // Provide the GL context directly on the event so components
-                // can set up shaders in the handler without a separate getDC() call.
-                glContext: wakaPAC.getDC(pacId)
-            });
-        };
-
-        container.addEventListener(PAC_EVENT, onFirstSize);
-        entry.onFirstSize = onFirstSize;
-    }
-
     // =========================================================================
     // CONTEXT LOSS / RESTORE
     // =========================================================================
-
-    /**
-     * @param {string} pacId
-     * @param {WebGLContextEvent} e
-     * @returns {void}
-     */
-    function _handleContextLost(pacId, e) {
-        const entry = _canvases.get(pacId);
-
-        if (!entry) {
-            return;
-        }
-
-        // Calling preventDefault() is required — without it the browser will
-        // not attempt to restore the context after it is lost.
-        e.preventDefault();
-
-        // Pause the render loop while the context is unavailable. Dispatching
-        // paint messages to a lost context produces GL errors.
-        _pauseLoop(pacId);
-
-        // Notify the component so it can discard all WebGL resource handles.
-        // Buffers, textures, framebuffers, programs, etc. become invalid after
-        // a context loss and must be recreated after restoration.
-        wakaPAC.sendMessage(pacId, MSG_WEBGL_CONTEXT_LOST, 0, 0);
-    }
-
-    /**
-     * @param {string} pacId
-     * @param {WebGLContextEvent} e
-     * @returns {void}
-     */
-    function _handleContextRestored(pacId, _e) {
-        const entry = _canvases.get(pacId);
-
-        if (!entry) {
-            return;
-        }
-
-        // The browser has created a brand-new WebGL context. All GPU resources
-        // must be recreated before rendering can continue.
-        wakaPAC.sendMessage(pacId, MSG_WEBGL_CONTEXT_RESTORED, 0, 0, {
-            glContext: wakaPAC.getDC(pacId)
-        });
-
-        // Resume rendering if the component was previously running a render loop.
-        _resumeLoop(pacId);
-    }
 
     // =========================================================================
     // PLUGIN SETUP HELPERS
@@ -395,89 +497,6 @@
     // Split out of createPacPlugin() below so that registration, constant
     // attachment, and lifecycle-hook wiring can each be read (and changed)
     // independently as the plugin grows.
-
-    /**
-     * Builds the onComponentCreated/onComponentDestroyed hooks.
-     * @returns {{
-     *   onComponentCreated: function(Object, string, Object): void,
-     *   onComponentDestroyed: function(string): void
-     * }}
-     */
-    function _createLifecycleHooks() {
-        return {
-            /**
-             * Fires for every new wakaPAC component, canvas or not. Only
-             * canvases with data-pac-context="webgl"/"webgl2" are ours —
-             * everything else is ignored.
-             * @param {Object} abstraction
-             * @param {string} pacId
-             * @param {Object} config
-             */
-            onComponentCreated(abstraction, pacId, config) {
-                const container = wakaPAC.getContainerByPacId(pacId);
-
-                if (!(container instanceof HTMLCanvasElement)) {
-                    return;
-                }
-
-                const contextType = container.dataset.pacContext;
-
-                if (contextType !== 'webgl' && contextType !== 'webgl2') {
-                    return;
-                }
-
-                const boundLost = (e) => _handleContextLost(pacId, e);
-                const boundRestored = (e) => _handleContextRestored(pacId, e);
-
-                container.addEventListener('webglcontextlost', boundLost);
-                container.addEventListener('webglcontextrestored', boundRestored);
-
-                const entry = {
-                    container,
-                    boundLost,
-                    boundRestored,
-                    onFirstSize: null,
-                    ready: false,
-                    loopHandle: undefined,
-                    tick: null,
-                    renderRequested: false
-                };
-
-                entry.tick = _createTick(pacId);
-                _canvases.set(pacId, entry);
-
-                _armReadySignal(pacId, container);
-
-                if (config.renderLoop === true) {
-                    _startLoop(pacId);
-                }
-            },
-
-            /**
-             * Fires for every destroyed wakaPAC component, canvas or not.
-             * No-op for components this plugin was never managing.
-             * @param {string} pacId
-             */
-            onComponentDestroyed(pacId) {
-                const entry = _canvases.get(pacId);
-
-                if (!entry) {
-                    return;
-                }
-
-                _stopLoop(pacId);
-
-                entry.container.removeEventListener('webglcontextlost', entry.boundLost);
-                entry.container.removeEventListener('webglcontextrestored', entry.boundRestored);
-
-                if (entry.onFirstSize) {
-                    entry.container.removeEventListener(PAC_EVENT, entry.onFirstSize);
-                }
-
-                _canvases.delete(pacId);
-            }
-        };
-    }
 
     // =========================================================================
     // WAKAD3D
@@ -501,7 +520,7 @@
         createPacPlugin(_pac) {
             return {
                 name: 'WakaD3D',
-                ..._createLifecycleHooks()
+                ...pluginRuntime._createLifecycleHooks()
             };
         },
 
@@ -512,7 +531,7 @@
          * @returns {void}
          */
         requestRender(pacId) {
-            _requestRender(pacId);
+            pluginRuntime._requestRender(pacId);
         },
 
         /**
@@ -539,12 +558,12 @@
                 return;
             }
 
-            if (!_isWebGLContext(destDC)) {
+            if (!pluginRuntime._isWebGLContext(destDC)) {
                 console.warn('wakaD3D.bitBlt: destDC must be a WebGL or WebGL2 context.');
                 return;
             }
 
-            _blitToWebGL(destDC, srcDC.canvas);
+            pluginRuntime._blitToWebGL(destDC, srcDC.canvas);
         }
     };
 
@@ -557,5 +576,4 @@
 
     window.WakaD3D = WakaD3D;
     window.wakaD3D = wakaD3D;
-
 })();

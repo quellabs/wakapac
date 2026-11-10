@@ -76,6 +76,501 @@
 
 (function() {
     'use strict';
+    const pluginRuntime = {
+        createBufferHandle(audioBuffer, options) {
+            const positional = !!options.positional;
+            const volume = Math.max(0, Math.min(100, options.volume ?? 100));
+            const pan = Math.max(-1, Math.min(1, options.pan ?? 0));
+
+            const gainNode = _ctx.createGain();
+            gainNode.gain.value = volume / 100;
+
+            const { panNode, pannerNode } = pluginRuntime.createBufferRouting(gainNode, positional, pan);
+
+            const buf = {
+                _type       : 'buffer',
+                _audioBuffer: audioBuffer,
+                _source     : null,
+                _gainNode   : gainNode,
+                _panNode    : panNode,
+                _pannerNode : pannerNode,
+                _positional : positional,
+                _playing    : false,
+                _volume     : volume,
+                _pan        : pan
+            };
+            return buf;
+        },
+
+        createBufferRouting(gainNode, positional, pan) {
+            let panNode = null;
+            let pannerNode = null;
+
+            if (positional) {
+                // source → gain → panner (3D) → master
+                // HRTF gives head-related transfer function spatialization.
+                // Inverse distance model attenuates naturally with distance.
+                pannerNode = _ctx.createPanner();
+                pannerNode.panningModel = 'HRTF';
+                pannerNode.distanceModel = 'inverse';
+                pannerNode.refDistance = 1;
+                pannerNode.maxDistance = 10000;
+                pannerNode.rolloffFactor = 1;
+                gainNode.connect(pannerNode);
+                pannerNode.connect(_masterGain);
+            } else {
+                // source → gain → stereoPanner → master
+                panNode = _ctx.createStereoPanner();
+                panNode.pan.value = pan;
+                gainNode.connect(panNode);
+                panNode.connect(_masterGain);
+            }
+            return { panNode, pannerNode };
+        },
+
+        /**
+         * Creates the AudioContext and master gain node if not already created.
+         * Safe to call multiple times — idempotent.
+         * @returns {AudioContext}
+         */
+        _ensureContext() {
+            if (_ctx) {
+                return _ctx;
+            }
+
+            // webkitAudioContext is the legacy prefix for Safari < 14.1
+            _ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+            // All audio routes through this node so masterVolume() works globally
+            _masterGain = _ctx.createGain();
+            _masterGain.connect(_ctx.destination);
+            return _ctx;
+        },
+
+        /**
+         * Returns the pacId of the component that owns the handle, or null.
+         * Ownership is determined by a top-level reference equality scan of each
+         * component's abstraction. The search stops at the first match.
+         * @param {Object} handle  Buffer or stream handle
+         * @returns {string|null}
+         */
+        _findOwner(handle) {
+            const findOwnerHandlers = {
+                visitItem(context, pacId) {
+                    const visitItemHandlers = {
+                        someCallback(v) {
+                            const unwrapped = typeof v?.unwrap === 'function' ? v.unwrap() : v;
+                            return unwrapped === handle;
+                        }
+                    };
+
+                    // Stop as soon as we have a match — forEach has no early exit
+                    if (owner) {
+                        return;
+                    }
+
+                    const abstraction = context.abstraction;
+
+                    if (!abstraction) {
+                        return;
+                    }
+
+                    // Values read from the abstraction proxy may themselves be reactive
+                    // proxies wrapping the raw handle. Unwrap via .unwrap() — a method
+                    // injected by wakapac.js into every reactive proxy via proxyGetHandler.
+                    const found = Object.values(abstraction).some(visitItemHandlers.someCallback.bind(this));
+
+                    if (found) {
+                        owner = pacId;
+                    }
+                }
+            };
+
+            if (!_pac || !window.PACRegistry) {
+                return null;
+            }
+
+            let owner = null;
+
+            window.PACRegistry.components.forEach(findOwnerHandlers.visitItem.bind(this));
+
+            return owner;
+        },
+
+        /**
+         * Sends a per-handle message to the owning component, or no-op if the
+         * handle has no registered owner or wakaPAC is unavailable.
+         * @param {Object} handle
+         * @param {number} msg
+         * @param {number} wParam
+         * @param {number} lParam
+         * @param {Object} extended
+         */
+        _sendToOwner(handle, msg, wParam, lParam, extended) {
+            if (!_pac) {
+                return;
+            }
+
+            // Look up which component owns this handle by reference equality
+            const pacId = pluginRuntime._findOwner(handle);
+
+            if (pacId) {
+                _pac.sendMessage(pacId, msg, wParam, lParam, extended);
+            }
+        },
+
+        /**
+         * Wires a new AudioBufferSourceNode for a buffer handle and starts it.
+         * Assumes the AudioContext is running. Called from _playBuffer() only.
+         * @param {Object} buf
+         */
+        _startBuffer(buf) {
+            const startBufferHandlers = {
+                onended() {
+                    if (buf._source === source) {
+                        buf._source = null;
+                        buf._playing = false;
+
+                        pluginRuntime._sendToOwner(buf, MSG_BUFFER_STOPPED, 0, 0, { handle: buf });
+                    }
+                }
+            };
+
+            // AudioBufferSourceNode is single-use — create a fresh one for every play
+            const source = _ctx.createBufferSource();
+            source.buffer = buf._audioBuffer;
+
+            // When the sound ends naturally, mark it stopped and release the node.
+            source.onended = startBufferHandlers.onended;
+
+            // Wire: source → gainNode → panNode|pannerNode → masterGain → destination
+            source.connect(buf._gainNode);
+
+            buf._source = source;
+            buf._playing = true;
+            source.start(0);
+
+            pluginRuntime._sendToOwner(buf, MSG_BUFFER_STARTED, 0, 0, { handle: buf });
+        },
+
+        /**
+         * Stops an active buffer. Updates state immediately — does not rely on onended.
+         * No-op if not playing.
+         * @param {Object} buf
+         */
+        _stopBuffer(buf) {
+            if (!buf._playing) {
+                return;
+            }
+
+            try {
+                buf._source.stop();
+                buf._source.disconnect();
+            } catch (_) {
+                // Already stopped or never started
+            }
+
+            // Clear state immediately — don't wait for onended
+            buf._source = null;
+            buf._playing = false;
+
+            // Send stop event to handle owner
+            pluginRuntime._sendToOwner(buf, MSG_BUFFER_STOPPED, 0, 0, { handle: buf });
+        },
+
+        /**
+         * Plays a buffer handle. No-op if already playing.
+         * @param {Object} buf
+         */
+        _playBuffer(buf) {
+            if (buf._playing) {
+                return;
+            }
+
+            // Resume first if the context was suspended by the browser's autoplay policy,
+            // then start once the promise resolves.
+            if (_ctx.state === 'suspended') {
+                const playBufferHandlers = {
+                    onResolved() { return pluginRuntime._startBuffer(buf); }
+                };
+
+                _ctx.resume().then(playBufferHandlers.onResolved.bind(this));
+            } else {
+                pluginRuntime._startBuffer(buf);
+            }
+        },
+
+        /**
+         * Releases all Web Audio nodes for a buffer handle.
+         * Caller must stop playback first.
+         * @param {Object} buf
+         */
+        _freeBuffer(buf) {
+            // Disconnect all nodes from the audio graph
+            try {
+                buf._gainNode.disconnect();
+                buf._panNode && buf._panNode.disconnect();
+                buf._pannerNode && buf._pannerNode.disconnect();
+            } catch (_) {
+                // Already disconnected
+            }
+
+            // Release references so the AudioBuffer and nodes can be GC'd
+            buf._audioBuffer = null;
+            buf._gainNode = null;
+            buf._panNode = null;
+            buf._pannerNode = null;
+
+            // Poison the handle so any subsequent API calls silently no-op
+            buf._type = null;
+        },
+
+        /**
+         * Attaches all event listeners to stream._el.
+         * Called after initial load and after each internal reload on play().
+         * @param {Object} stream
+         */
+        _wireStreamEl(stream) {
+            const wireStreamElHandlers = {
+                _onUnstalled() {
+                    if (!stream._type || !_stalled) {
+                        return;
+                    }
+
+                    // Clear stalled flag
+                    _stalled = false;
+
+                    // Send ready event to handle owner
+                    pluginRuntime._sendToOwner(stream, MSG_STREAM_READY, 0, 0, { handle: stream });
+                },
+
+                onStalled() {
+                    if (!stream._type) {
+                        return;
+                    }
+
+                    // Set stalled flag
+                    _stalled = true;
+
+                    // Send buffering event to handle owner
+                    pluginRuntime._sendToOwner(stream, MSG_STREAM_BUFFERING, 0, 0, { handle: stream });
+                },
+
+                _onMediaError() {
+                    if (!stream._type) {
+                        return;
+                    }
+
+                    // Clear pending flag
+                    stream._pending = false;
+
+                    // Send error event to handle owner
+                    pluginRuntime._sendToOwner(stream, MSG_STREAM_ERROR, 0, 0, { handle: stream, error: el.error });
+                },
+
+                onEnded() {
+                    if (!stream._type) {
+                        return;
+                    }
+
+                    pluginRuntime._sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
+                }
+            };
+
+            const el = stream._el;
+
+            // Natural end — notify owner but do not free; handle remains valid
+            el.addEventListener('ended', wireStreamElHandlers.onEnded.bind(this));
+
+            // Mid-playback network or decode failure
+            const _onMediaError = wireStreamElHandlers._onMediaError.bind(this);
+
+            el.addEventListener('error', _onMediaError);
+            el.addEventListener('abort', _onMediaError);
+
+            // Track stall state so MSG_STREAM_READY is only sent after an actual stall
+            let _stalled = false;
+
+            el.addEventListener('stalled', wireStreamElHandlers.onStalled.bind(this));
+
+            // Both 'playing' and 'canplay' can indicate recovery from a stall
+            const _onUnstalled = wireStreamElHandlers._onUnstalled.bind(this);
+
+            el.addEventListener('playing', _onUnstalled);
+            el.addEventListener('canplay', _onUnstalled);
+        },
+
+        /**
+         * Replaces stream._el with a fresh Audio element loaded from stream._url.
+         * Resolves true on canplay, false on error.
+         * The old element is already paused and inert by the time this is called.
+         * @param {Object} stream
+         * @returns {Promise<boolean>}
+         */
+        _reloadStreamEl(stream) {
+            const reloadStreamElHandlers = {
+                onResolved(ok) {
+                    if (!ok) {
+                        return false;
+                    }
+
+                    // Wire new element into the existing gain node
+                    const source = _ctx.createMediaElementSource(el);
+                    source.connect(stream._gainNode);
+
+                    stream._el = el;
+                    stream._source = source;
+                    stream._connected = true;
+
+                    // Attach events to the new element
+                    pluginRuntime._wireStreamEl(stream);
+                    return true;
+                },
+
+                execute(resolve) {
+                    const executeHandlers = {
+                        onCanplay() { return resolve(true); },
+
+                        onError() { return resolve(false); }
+                    };
+
+                    el.addEventListener('canplay', executeHandlers.onCanplay.bind(this), { once: true });
+                    el.addEventListener('error', executeHandlers.onError.bind(this), { once: true });
+                    el.src = stream._url;
+                    el.load();
+                }
+            };
+
+            // Tear down the old element so its listeners are released promptly.
+            // Setting src='' and calling load() aborts any pending network activity,
+            // and disconnecting the source node removes it from the audio graph.
+            // Without this the old element and its listeners linger until GC.
+            if (stream._el) {
+                stream._el.src = '';
+                stream._el.load();
+            }
+
+            // Disconnect the old MediaElementSourceNode from the gain node
+            if (stream._source) {
+                try {
+                    stream._source.disconnect();
+                } catch (_) {
+                    // Nothing in here
+                }
+
+                stream._source = null;
+            }
+
+            // Clear stream connected flag
+            stream._connected = false;
+
+            // Create a fresh element — starting from a new element avoids the
+            // decoder-resume click that MediaElementAudioSourceNode produces on resume
+            const el = new Audio();
+            el.preload = 'auto';
+            el.crossOrigin = 'anonymous';
+            el.loop = stream._loop;
+            el.volume = 0;  // start silent; _playStream ramps up after play() resolves
+
+            // Wait for enough data to begin playback before resolving
+            return new Promise(reloadStreamElHandlers.execute.bind(this)).then(reloadStreamElHandlers.onResolved.bind(this));
+        },
+
+        /**
+         * Plays a stream handle. No-op if already playing or a reload is in flight.
+         * The underlying Audio element is replaced with a fresh one on every play()
+         * call — this eliminates the decoder-resume click that occurs when resuming
+         * a paused MediaElementAudioSourceNode.
+         * @param {Object} stream
+         */
+        _playStream(stream) {
+            const playStreamHandlers = {
+                onSettled() {
+                    stream._pending = false;
+                },
+
+                onResolved(ok) {
+                    const onResolvedHandlers = {
+                        onResolved() {
+                            // Raise volume to full now that the element is confirmed playing
+                            stream._el.volume = 1;
+
+                            // Send started event to handle owner
+                            pluginRuntime._sendToOwner(stream, MSG_STREAM_STARTED, 0, 0, { handle: stream });
+                        },
+
+                        onRejected() {}
+                    };
+
+                    if (!ok) {
+                        return;
+                    }
+
+                    // el.volume is 0 from _reloadStreamEl — first frames are silent
+                    return stream._el.play().then(onResolvedHandlers.onResolved.bind(this)).catch(onResolvedHandlers.onRejected.bind(this));
+                },
+
+                reloadStream() { return pluginRuntime._reloadStreamEl(stream); }
+            };
+
+            if (stream._pending || !stream._el.paused) {
+                return;
+            }
+
+            stream._pending = true;
+
+            // Resume the AudioContext first if it was suspended by autoplay policy
+            const resume = _ctx.state === 'suspended' ? _ctx.resume() : Promise.resolve();
+
+            resume.then(playStreamHandlers.reloadStream.bind(this)).then(playStreamHandlers.onResolved.bind(this)).finally(playStreamHandlers.onSettled.bind(this));
+        },
+
+        /**
+         * Stops a stream. Pauses and discards the current Audio element immediately —
+         * no fade needed since _playStream always starts a fresh element from silence.
+         * @param {Object} stream
+         */
+        _stopStream(stream) {
+            // Do nothing if already stopped
+            if (stream._el.paused && !stream._pending) {
+                return;
+            }
+
+            // Pause immediately — no fade needed since _playStream always reloads
+            // a fresh element, so the next play() always starts from clean silence
+            stream._el.pause();
+
+            // Send stop event to handle owner
+            pluginRuntime._sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
+        },
+
+        /**
+         * Releases all resources for a stream handle.
+         * Caller must stop playback first.
+         * @param {Object} stream
+         */
+        _freeStream(stream) {
+            // Abort any pending network activity and release the media element
+            stream._el.src = '';
+            stream._el.load();
+
+            // Disconnect all nodes from the audio graph
+            try {
+                stream._source && stream._source.disconnect();
+                stream._gainNode && stream._gainNode.disconnect();
+            } catch (_) {
+                // Already disconnected
+            }
+
+            // Release references so nodes and the element can be GC'd
+            stream._el = null;
+            stream._source = null;
+            stream._gainNode = null;
+
+            // Poison the handle so any subsequent API calls silently no-op
+            stream._type = null;
+        }
+    };
 
     /** @type {string} */
     const VERSION = '1.0.0';
@@ -118,25 +613,6 @@
     // _ensureContext() creates it lazily on first play() or resume() call.
     // =========================================================================
 
-    /**
-     * Creates the AudioContext and master gain node if not already created.
-     * Safe to call multiple times — idempotent.
-     * @returns {AudioContext}
-     */
-    function _ensureContext() {
-        if (_ctx) {
-            return _ctx;
-        }
-
-        // webkitAudioContext is the legacy prefix for Safari < 14.1
-        _ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-        // All audio routes through this node so masterVolume() works globally
-        _masterGain = _ctx.createGain();
-        _masterGain.connect(_ctx.destination);
-        return _ctx;
-    }
-
     // =========================================================================
     // HANDLE OWNERSHIP LOOKUP
     //
@@ -145,70 +621,6 @@
     // to the owning component via sendMessage rather than broadcastMessage.
     // Returns null if no owner is found or wakaPAC is not available.
     // =========================================================================
-
-    /**
-     * Returns the pacId of the component that owns the handle, or null.
-     * Ownership is determined by a top-level reference equality scan of each
-     * component's abstraction. The search stops at the first match.
-     * @param {Object} handle  Buffer or stream handle
-     * @returns {string|null}
-     */
-    function _findOwner(handle) {
-        if (!_pac || !window.PACRegistry) {
-            return null;
-        }
-
-        let owner = null;
-
-        window.PACRegistry.components.forEach((context, pacId) => {
-            // Stop as soon as we have a match — forEach has no early exit
-            if (owner) {
-                return;
-            }
-
-            const abstraction = context.abstraction;
-
-            if (!abstraction) {
-                return;
-            }
-
-            // Values read from the abstraction proxy may themselves be reactive
-            // proxies wrapping the raw handle. Unwrap via .unwrap() — a method
-            // injected by wakapac.js into every reactive proxy via proxyGetHandler.
-            const found = Object.values(abstraction).some(v => {
-                const unwrapped = typeof v?.unwrap === 'function' ? v.unwrap() : v;
-                return unwrapped === handle;
-            });
-
-            if (found) {
-                owner = pacId;
-            }
-        });
-
-        return owner;
-    }
-
-    /**
-     * Sends a per-handle message to the owning component, or no-op if the
-     * handle has no registered owner or wakaPAC is unavailable.
-     * @param {Object} handle
-     * @param {number} msg
-     * @param {number} wParam
-     * @param {number} lParam
-     * @param {Object} extended
-     */
-    function _sendToOwner(handle, msg, wParam, lParam, extended) {
-        if (!_pac) {
-            return;
-        }
-
-        // Look up which component owns this handle by reference equality
-        const pacId = _findOwner(handle);
-
-        if (pacId) {
-            _pac.sendMessage(pacId, msg, wParam, lParam, extended);
-        }
-    }
 
     // =========================================================================
     // BUFFER HANDLES
@@ -231,104 +643,6 @@
     // be restarted. _startBuffer() always creates a fresh node; _stopBuffer()
     // disconnects it. The buffer handle remains valid across play/stop cycles.
     // =========================================================================
-
-    /**
-     * Wires a new AudioBufferSourceNode for a buffer handle and starts it.
-     * Assumes the AudioContext is running. Called from _playBuffer() only.
-     * @param {Object} buf
-     */
-    function _startBuffer(buf) {
-        // AudioBufferSourceNode is single-use — create a fresh one for every play
-        const source = _ctx.createBufferSource();
-        source.buffer = buf._audioBuffer;
-
-        // When the sound ends naturally, mark it stopped and release the node.
-        source.onended = function() {
-            if (buf._source === source) {
-                buf._source = null;
-                buf._playing = false;
-
-                _sendToOwner(buf, MSG_BUFFER_STOPPED, 0, 0, { handle: buf });
-            }
-        };
-
-        // Wire: source → gainNode → panNode|pannerNode → masterGain → destination
-        source.connect(buf._gainNode);
-
-        buf._source = source;
-        buf._playing = true;
-        source.start(0);
-
-        _sendToOwner(buf, MSG_BUFFER_STARTED, 0, 0, { handle: buf });
-    }
-
-    /**
-     * Stops an active buffer. Updates state immediately — does not rely on onended.
-     * No-op if not playing.
-     * @param {Object} buf
-     */
-    function _stopBuffer(buf) {
-        if (!buf._playing) {
-            return;
-        }
-
-        try {
-            buf._source.stop();
-            buf._source.disconnect();
-        } catch (_) {
-            // Already stopped or never started
-        }
-
-        // Clear state immediately — don't wait for onended
-        buf._source = null;
-        buf._playing = false;
-
-        // Send stop event to handle owner
-        _sendToOwner(buf, MSG_BUFFER_STOPPED, 0, 0, { handle: buf });
-    }
-
-    /**
-     * Plays a buffer handle. No-op if already playing.
-     * @param {Object} buf
-     */
-    function _playBuffer(buf) {
-        if (buf._playing) {
-            return;
-        }
-
-        // Resume first if the context was suspended by the browser's autoplay policy,
-        // then start once the promise resolves.
-        if (_ctx.state === 'suspended') {
-            _ctx.resume().then(() => _startBuffer(buf));
-        } else {
-            _startBuffer(buf);
-        }
-    }
-
-    /**
-     * Releases all Web Audio nodes for a buffer handle.
-     * Caller must stop playback first.
-     * @param {Object} buf
-     */
-    function _freeBuffer(buf) {
-        // Disconnect all nodes from the audio graph
-        try {
-            buf._gainNode.disconnect();
-            buf._panNode && buf._panNode.disconnect();
-            buf._pannerNode && buf._pannerNode.disconnect();
-        } catch (_) {
-            // Already disconnected
-        }
-
-        // Release references so the AudioBuffer and nodes can be GC'd
-        buf._audioBuffer = null;
-        buf._gainNode = null;
-        buf._panNode = null;
-        buf._pannerNode = null;
-
-        // Poison the handle so any subsequent API calls silently no-op
-        buf._type = null;
-    }
 
     // =========================================================================
     // STREAM HANDLES
@@ -358,216 +672,6 @@
     // Streams survive stop() — the handle remains valid and can be played again.
     // Call free() to release all resources when the stream is no longer needed.
     // =========================================================================
-
-    /**
-     * Attaches all event listeners to stream._el.
-     * Called after initial load and after each internal reload on play().
-     * @param {Object} stream
-     */
-    function _wireStreamEl(stream) {
-        const el = stream._el;
-
-        // Natural end — notify owner but do not free; handle remains valid
-        el.addEventListener('ended', () => {
-            if (!stream._type) {
-                return;
-            }
-
-            _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
-        });
-
-        // Mid-playback network or decode failure
-        const _onMediaError = () => {
-            if (!stream._type) {
-                return;
-            }
-
-            // Clear pending flag
-            stream._pending = false;
-
-            // Send error event to handle owner
-            _sendToOwner(stream, MSG_STREAM_ERROR, 0, 0, { handle: stream, error: el.error });
-        };
-
-        el.addEventListener('error', _onMediaError);
-        el.addEventListener('abort', _onMediaError);
-
-        // Track stall state so MSG_STREAM_READY is only sent after an actual stall
-        let _stalled = false;
-
-        el.addEventListener('stalled', () => {
-            if (!stream._type) {
-                return;
-            }
-
-            // Set stalled flag
-            _stalled = true;
-
-            // Send buffering event to handle owner
-            _sendToOwner(stream, MSG_STREAM_BUFFERING, 0, 0, { handle: stream });
-        });
-
-        // Both 'playing' and 'canplay' can indicate recovery from a stall
-        const _onUnstalled = () => {
-            if (!stream._type || !_stalled) {
-                return;
-            }
-
-            // Clear stalled flag
-            _stalled = false;
-
-            // Send ready event to handle owner
-            _sendToOwner(stream, MSG_STREAM_READY, 0, 0, { handle: stream });
-        };
-
-        el.addEventListener('playing', _onUnstalled);
-        el.addEventListener('canplay', _onUnstalled);
-    }
-
-    /**
-     * Replaces stream._el with a fresh Audio element loaded from stream._url.
-     * Resolves true on canplay, false on error.
-     * The old element is already paused and inert by the time this is called.
-     * @param {Object} stream
-     * @returns {Promise<boolean>}
-     */
-    function _reloadStreamEl(stream) {
-        // Tear down the old element so its listeners are released promptly.
-        // Setting src='' and calling load() aborts any pending network activity,
-        // and disconnecting the source node removes it from the audio graph.
-        // Without this the old element and its listeners linger until GC.
-        if (stream._el) {
-            stream._el.src = '';
-            stream._el.load();
-        }
-
-        // Disconnect the old MediaElementSourceNode from the gain node
-        if (stream._source) {
-            try {
-                stream._source.disconnect();
-            } catch (_) {
-                // Nothing in here
-            }
-
-            stream._source = null;
-        }
-
-        // Clear stream connected flag
-        stream._connected = false;
-
-        // Create a fresh element — starting from a new element avoids the
-        // decoder-resume click that MediaElementAudioSourceNode produces on resume
-        const el = new Audio();
-        el.preload = 'auto';
-        el.crossOrigin = 'anonymous';
-        el.loop = stream._loop;
-        el.volume = 0;  // start silent; _playStream ramps up after play() resolves
-
-        // Wait for enough data to begin playback before resolving
-        return new Promise((resolve) => {
-            el.addEventListener('canplay', () => resolve(true), { once: true });
-            el.addEventListener('error', () => resolve(false), { once: true });
-            el.src = stream._url;
-            el.load();
-        }).then((ok) => {
-            if (!ok) {
-                return false;
-            }
-
-            // Wire new element into the existing gain node
-            const source = _ctx.createMediaElementSource(el);
-            source.connect(stream._gainNode);
-
-            stream._el = el;
-            stream._source = source;
-            stream._connected = true;
-
-            // Attach events to the new element
-            _wireStreamEl(stream);
-            return true;
-        });
-    }
-
-    /**
-     * Plays a stream handle. No-op if already playing or a reload is in flight.
-     * The underlying Audio element is replaced with a fresh one on every play()
-     * call — this eliminates the decoder-resume click that occurs when resuming
-     * a paused MediaElementAudioSourceNode.
-     * @param {Object} stream
-     */
-    function _playStream(stream) {
-        if (stream._pending || !stream._el.paused) {
-            return;
-        }
-
-        stream._pending = true;
-
-        // Resume the AudioContext first if it was suspended by autoplay policy
-        const resume = _ctx.state === 'suspended' ? _ctx.resume() : Promise.resolve();
-
-        resume.then(() => _reloadStreamEl(stream)).then((ok) => {
-            if (!ok) {
-                return;
-            }
-
-            // el.volume is 0 from _reloadStreamEl — first frames are silent
-            return stream._el.play().then(() => {
-                // Raise volume to full now that the element is confirmed playing
-                stream._el.volume = 1;
-
-                // Send started event to handle owner
-                _sendToOwner(stream, MSG_STREAM_STARTED, 0, 0, { handle: stream });
-            }).catch(() => {});
-        }).finally(() => {
-            stream._pending = false;
-        });
-    }
-
-    /**
-     * Stops a stream. Pauses and discards the current Audio element immediately —
-     * no fade needed since _playStream always starts a fresh element from silence.
-     * @param {Object} stream
-     */
-    function _stopStream(stream) {
-        // Do nothing if already stopped
-        if (stream._el.paused && !stream._pending) {
-            return;
-        }
-
-        // Pause immediately — no fade needed since _playStream always reloads
-        // a fresh element, so the next play() always starts from clean silence
-        stream._el.pause();
-
-        // Send stop event to handle owner
-        _sendToOwner(stream, MSG_STREAM_STOPPED, 0, 0, { handle: stream });
-    }
-
-    /**
-     * Releases all resources for a stream handle.
-     * Caller must stop playback first.
-     * @param {Object} stream
-     */
-    function _freeStream(stream) {
-        // Abort any pending network activity and release the media element
-        stream._el.src = '';
-        stream._el.load();
-
-        // Disconnect all nodes from the audio graph
-        try {
-            stream._source && stream._source.disconnect();
-            stream._gainNode && stream._gainNode.disconnect();
-        } catch (_) {
-            // Already disconnected
-        }
-
-        // Release references so nodes and the element can be GC'd
-        stream._el = null;
-        stream._source = null;
-        stream._gainNode = null;
-
-        // Poison the handle so any subsequent API calls silently no-op
-        stream._type = null;
-    }
 
     // =========================================================================
     // WAKA DSOUND
@@ -602,7 +706,7 @@
          * @param {number} volume  0–1
          */
         masterVolume(volume) {
-            _ensureContext();
+            pluginRuntime._ensureContext();
             _masterGain.gain.setValueAtTime(
                 Math.max(0, Math.min(100, volume)) / 100,
                 _ctx.currentTime
@@ -626,7 +730,7 @@
          * @returns {Promise<void>}
          */
         async resume() {
-            _ensureContext();
+            pluginRuntime._ensureContext();
 
             if (_ctx.state === 'suspended') {
                 await _ctx.resume();
@@ -654,7 +758,7 @@
                 return null;
             }
 
-            _ensureContext();
+            pluginRuntime._ensureContext();
 
             let audioBuffer;
 
@@ -679,48 +783,7 @@
             }
 
             // Clamp options to valid ranges
-            const positional = !!options.positional;
-            const volume = Math.max(0, Math.min(100, options.volume ?? 100));
-            const pan = Math.max(-1, Math.min(1, options.pan ?? 0));
-
-            const gainNode = _ctx.createGain();
-            gainNode.gain.value = volume / 100;
-
-            let panNode = null;
-            let pannerNode = null;
-
-            if (positional) {
-                // source → gain → panner (3D) → master
-                // HRTF gives head-related transfer function spatialization.
-                // Inverse distance model attenuates naturally with distance.
-                pannerNode = _ctx.createPanner();
-                pannerNode.panningModel = 'HRTF';
-                pannerNode.distanceModel = 'inverse';
-                pannerNode.refDistance = 1;
-                pannerNode.maxDistance = 10000;
-                pannerNode.rolloffFactor = 1;
-                gainNode.connect(pannerNode);
-                pannerNode.connect(_masterGain);
-            } else {
-                // source → gain → stereoPanner → master
-                panNode = _ctx.createStereoPanner();
-                panNode.pan.value = pan;
-                gainNode.connect(panNode);
-                panNode.connect(_masterGain);
-            }
-
-            const buf = {
-                _type: 'buffer',
-                _audioBuffer: audioBuffer,
-                _source: null,
-                _gainNode: gainNode,
-                _panNode: panNode,
-                _pannerNode: pannerNode,
-                _positional: positional,
-                _playing: false,
-                _volume: volume,
-                _pan: pan,
-            };
+            const buf = pluginRuntime.createBufferHandle(audioBuffer, options);
 
             if (_pac) {
                 _pac.broadcastMessage(MSG_BUFFER_LOADED, 0, 0, { url, buffer: buf });
@@ -743,13 +806,28 @@
          * @returns {Promise<Object|null>}  Stream handle, or null on failure
          */
         async loadStream(url, options = {}) {
+            const loadStreamHandlers = {
+                execute(resolve) {
+                    const executeHandlers = {
+                        onError() { return resolve(false); },
+
+                        onCanplay() { return resolve(true); }
+                    };
+
+                    el.addEventListener('canplay', executeHandlers.onCanplay.bind(this), { once: true });
+                    el.addEventListener('error', executeHandlers.onError.bind(this), { once: true });
+                    el.src = url;
+                    el.load();
+                }
+            };
+
             if (!url) {
                 console.warn('WakaDSound.loadStream: url is required');
                 return null;
             }
 
             // Ensure the stream is loaded
-            _ensureContext();
+            pluginRuntime._ensureContext();
 
             // Calculate volume
             const volume = Math.max(0, Math.min(100, options.volume ?? 100));
@@ -762,12 +840,7 @@
 
             // canplay fires as soon as the browser has enough data to begin playback,
             // without waiting for the full file — sufficient for streaming use cases.
-            const loadResult = await new Promise((resolve) => {
-                el.addEventListener('canplay', () => resolve(true), { once: true });
-                el.addEventListener('error', () => resolve(false), { once: true });
-                el.src = url;
-                el.load();
-            });
+            const loadResult = await new Promise(loadStreamHandlers.execute.bind(this));
 
             if (!loadResult) {
                 if (_pac) {
@@ -783,19 +856,19 @@
             gainNode.connect(_masterGain);
 
             const stream = {
-                _type: 'stream',
-                _el: el,
-                _source: null,
-                _gainNode: gainNode,
-                _volume: volume,
-                _url: url,
-                _loop: !!options.loop,
+                _type     : 'stream',
+                _el       : el,
+                _source   : null,
+                _gainNode : gainNode,
+                _volume   : volume,
+                _url      : url,
+                _loop     : !!options.loop,
                 _connected: false,
-                _pending: false,
+                _pending  : false
             };
 
             // Attach events to the initial element
-            _wireStreamEl(stream);
+            pluginRuntime._wireStreamEl(stream);
 
             if (_pac) {
                 _pac.broadcastMessage(MSG_STREAM_LOADED, 0, 0, { url, stream });
@@ -817,9 +890,9 @@
             }
 
             if (handle._type === 'buffer') {
-                _playBuffer(handle);
+                pluginRuntime._playBuffer(handle);
             } else if (handle._type === 'stream') {
-                _playStream(handle);
+                pluginRuntime._playStream(handle);
             }
         },
 
@@ -835,9 +908,9 @@
             }
 
             if (handle._type === 'buffer') {
-                _stopBuffer(handle);
+                pluginRuntime._stopBuffer(handle);
             } else if (handle._type === 'stream') {
-                _stopStream(handle);
+                pluginRuntime._stopStream(handle);
             }
         },
 
@@ -860,7 +933,7 @@
             handle._volume = Math.max(0, Math.min(100, volume));
             handle._gainNode.gain.setValueAtTime(handle._volume / 100, _ctx.currentTime);
 
-            _sendToOwner(handle, MSG_VOLUME_CHANGED, 0, 0, { handle, volume: handle._volume });
+            pluginRuntime._sendToOwner(handle, MSG_VOLUME_CHANGED, 0, 0, { handle, volume: handle._volume });
         },
 
         /**
@@ -897,11 +970,11 @@
             }
 
             if (handle._type === 'buffer') {
-                _stopBuffer(handle);
-                _freeBuffer(handle);
+                pluginRuntime._stopBuffer(handle);
+                pluginRuntime._freeBuffer(handle);
             } else if (handle._type === 'stream') {
-                _stopStream(handle);
-                _freeStream(handle);  // _stopStream no longer frees; this is the sole free path
+                pluginRuntime._stopStream(handle);
+                pluginRuntime._freeStream(handle);  // _stopStream no longer frees; this is the sole free path
             }
         },
 
@@ -922,7 +995,7 @@
             handle._pan = Math.max(-1, Math.min(1, pan));
             handle._panNode.pan.setValueAtTime(handle._pan, _ctx.currentTime);
 
-            _sendToOwner(handle, MSG_PAN_CHANGED, 0, 0, { handle, pan: handle._pan });
+            pluginRuntime._sendToOwner(handle, MSG_PAN_CHANGED, 0, 0, { handle, pan: handle._pan });
         },
 
         // ─── Stream-only ──────────────────────────────────────────────────────
@@ -990,7 +1063,7 @@
          * @param {number} z
          */
         setListenerPosition(x, y, z) {
-            _ensureContext();
+            pluginRuntime._ensureContext();
             const listener = _ctx.listener;
 
             // AudioParam setters are preferred; setPosition() is deprecated
@@ -1013,7 +1086,7 @@
          * @param {number} z  Forward Z component
          */
         setListenerOrientation(x, y, z) {
-            _ensureContext();
+            pluginRuntime._ensureContext();
             const listener = _ctx.listener;
 
             // Use AudioParam setters where available (modern browsers).
@@ -1051,12 +1124,40 @@
          * @returns {Object|null}  Analyser handle, or null if context unavailable
          */
         createAnalyser(callback, options = {}) {
+            const createAnalyserHandlers = {
+                _stop() {
+                    stopped = true;
+                    cancelAnimationFrame(rafId);
+                }
+            };
+
+            const createAnalyserRuntime = {
+                tick() {
+                    if (stopped) {
+                        return;
+                    }
+
+                    // Schedule next frame before doing work so timing stays consistent
+                    rafId = requestAnimationFrame(createAnalyserRuntime.tick);
+
+                    // Skip data collection while suspended — avoids flat-line
+                    // waveforms being delivered to the callback during silence.
+                    if (_ctx.state !== 'running') {
+                        return;
+                    }
+
+                    // Reuse the same Uint8Array to avoid GC pressure at 60fps
+                    node.getByteTimeDomainData(data);
+                    callback(data);
+                }
+            };
+
             if (typeof callback !== 'function') {
                 console.warn('WakaDSound.createAnalyser: callback is required');
                 return null;
             }
 
-            _ensureContext();
+            pluginRuntime._ensureContext();
 
             const node = _ctx.createAnalyser();
             node.fftSize = options.fftSize ?? 2048;
@@ -1073,38 +1174,16 @@
             let stopped = false;
 
             const handle = {
-                _type: 'analyser',
-                _node: node,
+                _type    : 'analyser',
+                _node    : node,
                 _callback: callback,
-                _data: data,
+                _data    : data
             };
 
-            function tick() {
-                if (stopped) {
-                    return;
-                }
-
-                // Schedule next frame before doing work so timing stays consistent
-                rafId = requestAnimationFrame(tick);
-
-                // Skip data collection while suspended — avoids flat-line
-                // waveforms being delivered to the callback during silence.
-                if (_ctx.state !== 'running') {
-                    return;
-                }
-
-                // Reuse the same Uint8Array to avoid GC pressure at 60fps
-                node.getByteTimeDomainData(data);
-                callback(data);
-            }
-
-            rafId = requestAnimationFrame(tick);
+            rafId = requestAnimationFrame(createAnalyserRuntime.tick);
 
             // Expose stop so destroyAnalyser can cancel the RAF loop
-            handle._stop = () => {
-                stopped = true;
-                cancelAnimationFrame(rafId);
-            };
+            handle._stop = createAnalyserHandlers._stop.bind(this);
 
             return handle;
         },
@@ -1164,5 +1243,4 @@
 
     window.WakaDSound = WakaDSound;
     window.wakaDSound = wakaDSound;
-
 })();

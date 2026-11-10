@@ -61,6 +61,513 @@
 (function () {
     "use strict";
 
+    /** Owns the state and lifecycle of one tiny mceplugin. */
+    class TinyMCEPlugin {
+        constructor(owner, pac, options = {}) {
+            this._owner = owner;
+            this._pac = pac;
+            this._options = options;
+        }
+
+        initialize() {
+            const state = this;
+
+            // Resolve the script URL.
+            // CDN mode requires licenseKey. Self-hosted mode requires src.
+            // If window.tinymce is already present neither is strictly needed.
+            if (state._options.src) {
+                _scriptSrc = state._options.src;
+            } else {
+                const key = state._options.licenseKey ?? 'no-license-key';
+                _scriptSrc = `${TINYMCE_CDN_BASE}/${key}/tinymce/${TINYMCE_VERSION}/tinymce.min.js`;
+            }
+
+            // Build plugin-level TinyMCE config defaults.
+            state._defaultEditorConfig = {};
+
+            if (state._options.toolbar !== undefined) {
+                state._defaultEditorConfig.toolbar = state._options.toolbar;
+            }
+
+            if (state._options.plugins !== undefined) {
+                state._defaultEditorConfig.plugins = state._options.plugins;
+            }
+
+            if (state._options.language !== undefined) {
+                // TinyMCE uses 'language' for the UI locale.
+                state._defaultEditorConfig.language = state._options.language;
+            }
+
+            if (state._options.height !== undefined) {
+                state._defaultEditorConfig.height = state._options.height;
+            }
+
+            // Use the public message IDs for delivery as well as comparisons.
+            ({
+                MSG_EDITOR_READY: state._MSG_EDITOR_READY,
+                MSG_EDITOR_ERROR: state._MSG_EDITOR_ERROR
+            } = state._owner);
+
+            state._msgConstants = {
+                MSG_EDITOR_READY: state._MSG_EDITOR_READY,
+                MSG_EDITOR_ERROR: state._MSG_EDITOR_ERROR
+            };
+
+            return state.createDescriptor();
+        }
+
+        createDescriptor() {
+            const state = this;
+
+            return {
+
+                /**
+                 * Called by WakaPAC after a component is created.
+                 * Activates only when the container is a <textarea> with a
+                 * data-tinymce attribute.
+                 * @param {Object} abstraction - The component's reactive abstraction object
+                 * @param {string} pacId       - The data-pac-id of the container
+                 * @param {Object} _config     - Component config
+                 */
+                onComponentCreated(abstraction, pacId, _config) {
+                    const container = state._pac.getContainerByPacId(pacId);
+
+                    if (!container) {
+                        return;
+                    }
+
+                    // Accept either:
+                    //   <textarea data-tinymce …>    — classic attribute-based usage
+                    //   <waka-tinymce …>              — custom element usage
+                    const isCustomElement = container.tagName.toLowerCase() === 'waka-tinymce';
+                    const isTextarea      = container instanceof HTMLTextAreaElement;
+
+                    if (!isTextarea && !isCustomElement) {
+                        return;
+                    }
+
+                    if (isTextarea && !container.hasAttribute('data-tinymce')) {
+                        return;
+                    }
+
+                    // Merge plugin-level defaults with per-instance overrides.
+                    const editorConfig = {
+                        ...state._defaultEditorConfig,
+                        ..._config.tinymce ?? {}
+                    };
+
+                    pluginRuntime.ensureApiLoaded();
+
+                    if (_apiReady) {
+                        pluginRuntime.createEditor(abstraction, pacId, state._pac, state._msgConstants, editorConfig);
+                    } else {
+                        _pendingInits.push({ abstraction, pacId, pac: state._pac, msgConstants: state._msgConstants, editorConfig });
+                    }
+                },
+
+                /**
+                 * Called by WakaPAC when a component is destroyed.
+                 * Removes any pending init from the queue, removes the TinyMCE
+                 * instance, and removes the registry entry.
+                 * @param {string} pacId
+                 */
+                onComponentDestroyed(pacId) {
+                    const onComponentDestroyedHandlers = {
+                        findIndexCallback(p) {
+                            return p.pacId === pacId;
+                        }
+                    };
+
+                    // Pull from the pending queue if destroyed before script loaded.
+                    const pendingIndex = _pendingInits.findIndex(onComponentDestroyedHandlers.findIndexCallback);
+
+                    if (pendingIndex !== -1) {
+                        _pendingInits.splice(pendingIndex, 1);
+                    }
+
+                    const entry = _registry.get(pacId);
+
+                    if (!entry) {
+                        return;
+                    }
+
+                    _registry.delete(pacId);
+
+                    // editor may be null if destroyed while tinymce.init()
+                    // is still in flight — the in-flight init_instance_callback
+                    // checks _registry and will call editor.remove() itself.
+                    if (entry.editor) {
+                        entry.editor.remove();
+                    }
+                }
+            };
+        }
+    }
+
+    const pluginRuntime = {
+        /**
+         * Injects the TinyMCE script and drains the pending queue once it loads.
+         * Safe to call multiple times.
+         *
+         * If window.tinymce is already on the page (externally loaded), injection
+         * is skipped and the queue is drained immediately.
+         */
+        ensureApiLoaded() {
+            const ensureApiLoadedHandlers = {
+                onerror() {
+                    for (const pending of _pendingInits) {
+                        pending.pac.sendMessage(
+                            pending.pacId,
+                            pending.msgConstants.MSG_EDITOR_ERROR,
+                            0, 0,
+                            { message: 'TinyMCE script failed to load' }
+                        );
+                    }
+
+                    _pendingInits.length = 0;
+                },
+
+                onload() {
+                    if (!window.tinymce) {
+                        const msg = 'TinyMCE script loaded but window.tinymce is not defined. ' +
+                                              'Use the official CDN URL or a self-hosted tinymce.min.js build.';
+
+                        for (const pending of _pendingInits) {
+                            pending.pac.sendMessage(
+                                pending.pacId,
+                                pending.msgConstants.MSG_EDITOR_ERROR,
+                                0, 0,
+                                { message: msg }
+                            );
+                        }
+
+                        _pendingInits.length = 0;
+                        return;
+                    }
+
+                    _apiReady = true;
+                    pluginRuntime.drainPendingInits();
+                }
+            };
+
+            if (window.tinymce) {
+                _apiReady = true;
+                pluginRuntime.drainPendingInits();
+                return;
+            }
+
+            if (document.getElementById('waka-tinymce-script')) {
+                // Already injected; the load handler will drain the queue.
+                return;
+            }
+
+            const tag = document.createElement('script');
+            tag.id  = 'waka-tinymce-script';
+            tag.src = _scriptSrc;
+
+            tag.onload = ensureApiLoadedHandlers.onload;
+
+            tag.onerror = ensureApiLoadedHandlers.onerror;
+
+            (document.head ?? document.body).appendChild(tag);
+        },
+
+        /**
+         * Initializes all queued components now that tinymce is available.
+         */
+        drainPendingInits() {
+            for (const pending of _pendingInits) {
+                pluginRuntime.createEditor(
+                    pending.abstraction,
+                    pending.pacId,
+                    pending.pac,
+                    pending.msgConstants,
+                    pending.editorConfig
+                );
+            }
+
+            _pendingInits.length = 0;
+        },
+
+        /**
+         * Builds the MSG_PASTE detail object from a native ClipboardData instance.
+         * @param {DataTransfer|null} clipboardData
+         * @returns {{ 'text/plain': string, 'text/html': string, 'text/rtf': string, 'text/uri-list': string, uris: string[], files: object[], types: string[] }}
+         */
+        buildPasteDetail(clipboardData) {
+            const buildPasteDetailHandlers = {
+                describeFile(f) {
+                    return {name: f.name, size: f.size, type: f.type};
+                },
+
+                matchesItem(line) { return line.length > 0 && !line.startsWith('#'); }
+            };
+
+            if (!clipboardData) {
+                return {'text/plain': '', 'text/html': '', 'text/rtf': '', 'text/uri-list': '', uris: [], files: [], types: []};
+            }
+
+            const types = Array.from(clipboardData.types ?? []);
+            const uriRaw = clipboardData.getData('text/uri-list') ?? '';
+
+            const uris = uriRaw
+                .split(/\r?\n/)
+                .filter(buildPasteDetailHandlers.matchesItem);
+
+            const files = Array.from(clipboardData.files ?? []).map(buildPasteDetailHandlers.describeFile);
+
+            return {
+                'text/plain'   : clipboardData.getData('text/plain') ?? '',
+                'text/html'    : clipboardData.getData('text/html')  ?? '',
+                'text/rtf'     : clipboardData.getData('text/rtf')   ?? '',
+                'text/uri-list': uriRaw,
+                uris,
+                files,
+                types
+            };
+        },
+
+        /**
+         * Instantiates a TinyMCE instance on the container textarea and registers it.
+         *
+         * TinyMCE behavior notes:
+         *
+         *   1. tinymce.init() is asynchronous and resolves with an array of editors.
+         *      We always pass a single target so we take editors[0].
+         *
+         *   2. TinyMCE hides (not removes) the source textarea and inserts its own
+         *      editor UI after it. The textarea is still in the DOM but display:none.
+         *      TinyMCE manages the textarea value natively; no manual sync is needed.
+         *
+         *   3. The 'input' callback fires on every keystroke and content mutation.
+         *      The 'change' callback fires on blur (when content has changed since
+         *      focus). We dispatch MSG_INPUT/MSG_CHANGE from 'input' to mirror the
+         *      CKEditor 5 wrapper's per-mutation behavior.
+         *
+         *   4. Paste interception uses the native 'paste' event on the editor so the
+         *      full ClipboardEvent is available (text, html, rtf, files, uris).
+         *      event.preventDefault() cancels the insertion.
+         *
+         *   5. focus / blur events are available directly on the TinyMCE editor via
+         *      the 'focus' and 'blur' init callbacks.
+         *
+         *   6. Read-only mode uses editor.mode.set('readonly') / editor.mode.set('design').
+         *
+         * @param {Object} abstraction
+         * @param {string} pacId
+         * @param {Object} pac
+         * @param {Object} msgConstants
+         * @param {Object} editorConfig - Merged plugin-level and per-instance config
+         */
+        createEditor(abstraction, pacId, pac, msgConstants, editorConfig) {
+            const createEditorHandlers = {
+                onRejected(error) {
+                    // tinymce.init() rejects if TinyMCE itself throws during setup.
+                    _registry.delete(pacId);
+
+                    pac.sendMessage(pacId, msgConstants.MSG_EDITOR_ERROR, 0, 0, {
+                        message: error?.message ?? 'TinyMCE failed to initialize'
+                    });
+                }
+            };
+
+            const container = pac.getContainerByPacId(pacId);
+
+            // Guard: component may have been destroyed while waiting for the script.
+            if (!container || !container.isConnected) {
+                return;
+            }
+
+            // For the <waka-tinymce> custom element, TinyMCE needs an actual
+            // <textarea> to attach to. resolveTextarea() creates one inside the
+            // custom element the first time and re-uses it on subsequent calls.
+            // For the classic <textarea data-tinymce> pattern this returns the
+            // container itself unchanged.
+            const textarea = pluginRuntime.resolveTextarea(container);
+
+            // Pre-seed the registry entry so onComponentDestroyed can clean up even
+            // if the init promise is still pending.
+            const entry = {
+                pac,
+                editor: null,       // filled once the Promise resolves
+                abstraction,
+                msgConstants
+            };
+
+            _registry.set(pacId, entry);
+
+            // ── tinymce.init() ────────────────────────────────────────────────────
+            // We merge the caller's config with the event callbacks we need.
+            // 'target' is used instead of 'selector' so we bind to the exact element.
+            // The callbacks below are additive — if the caller also passes e.g. an
+            // 'init' callback in their editorConfig, it will be overwritten. For most
+            // use cases this is acceptable; deep-merge is out of scope here.
+            window.tinymce.init({
+                ...editorConfig,
+                target: textarea,
+
+                setup(editor) {
+                    const setupHandlers = {
+                        onInit() {
+                            // Component may have been destroyed while init was in flight.
+                            if (!_registry.has(pacId)) {
+                                editor.remove();
+                                return;
+                            }
+
+                            entry.editor = editor;
+
+                            const initialValue = editor.getContent();
+
+                            if (abstraction) {
+                                abstraction.value = initialValue;
+                            }
+
+                            pac.sendMessage(pacId, msgConstants.MSG_EDITOR_READY, 0, 0, {
+                                value: initialValue
+                            });
+                        },
+
+                        onBlur() {
+                            if (!_registry.has(pacId)) {
+                                return;
+                            }
+
+                            const value = editor.getContent();
+                            pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, { value });
+                            pac.sendMessage(pacId, pac.MSG_KILLFOCUS, 0, 0);
+                        },
+
+                        onFocus() {
+                            pac.sendMessage(pacId, pac.MSG_SETFOCUS, 0, 0);
+                        },
+
+                        onPaste(event) {
+                            if (!_registry.has(pacId)) {
+                                return;
+                            }
+
+                            const clipboardData = event.clipboardData ?? event.originalEvent?.clipboardData;
+                            const detail = pluginRuntime.buildPasteDetail(clipboardData);
+                            const domEvent = event.originalEvent ?? event;
+
+                            const result = pac.sendMessage(
+                                pacId, pac.MSG_PASTE,
+                                (domEvent.ctrlKey  ? pac.MK_CONTROL : 0) |
+                                                                                            (domEvent.shiftKey ? pac.MK_SHIFT   : 0) |
+                                                                                            (domEvent.altKey   ? pac.MK_ALT     : 0),
+                                detail['text/plain'].length,
+                                detail
+                            );
+
+                            if (result === false) {
+                                event.preventDefault();
+                            }
+                        },
+
+                        onChange() {
+                            if (!_registry.has(pacId)) {
+                                return;
+                            }
+
+                            const value = editor.getContent();
+                            pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
+                        },
+
+                        onInput() {
+                            if (!_registry.has(pacId)) {
+                                return;
+                            }
+
+                            const value = editor.getContent();
+                            pac.sendMessage(pacId, pac.MSG_INPUT,  0, 0, { value });
+                            pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
+                        }
+                    };
+
+                    // Allow the caller's own setup hook to run first.
+                    if (typeof editorConfig.setup === 'function') {
+                        editorConfig.setup(editor);
+                    }
+
+                    // ── input: MSG_INPUT + MSG_CHANGE ─────────────────────────────
+                    // Fires on every content mutation (typing, toolbar, setContent).
+                    editor.on('input', setupHandlers.onInput);
+
+                    // TinyMCE's 'change' fires on blur when content has mutated.
+                    // We use it as an additional MSG_CHANGE trigger to catch toolbar
+                    // actions that don't fire 'input' (e.g. insert image via dialog).
+                    editor.on('change', setupHandlers.onChange);
+
+                    // ── Paste interception: MSG_PASTE ─────────────────────────────
+                    // We intercept the native 'paste' event so the full ClipboardEvent
+                    // is available (text, html, rtf, files, uris).
+                    // event.preventDefault() cancels the paste before TinyMCE processes it.
+                    // MSG_INPUT_COMPLETE after paste is covered by the existing blur and
+                    // change listeners, so no PastePostProcess equivalent is needed.
+                    editor.on('paste', setupHandlers.onPaste);
+
+                    // ── focus ─────────────────────────────────────────────────────
+                    editor.on('focus', setupHandlers.onFocus);
+
+                    // ── blur: MSG_INPUT_COMPLETE + MSG_KILLFOCUS ──────────────────
+                    editor.on('blur', setupHandlers.onBlur);
+
+                    // ── init: MSG_EDITOR_READY ────────────────────────────────────
+                    // The 'init' event inside setup() is the reliable TinyMCE 7 way
+                    // to know the editor is fully constructed and the UI is in the DOM.
+                    // init_instance_callback (top-level config) is not reliably called
+                    // in TinyMCE 7 and is avoided here.
+                    editor.on('init', setupHandlers.onInit);
+                }
+            }).catch(createEditorHandlers.onRejected);
+        },
+
+        /**
+         * Resolves the <textarea> that TinyMCE should be initialized on.
+         *
+         * For the classic usage pattern the container IS the textarea, so it is
+         * returned directly. For the <waka-tinymce> custom-element pattern the
+         * container is a generic element; a hidden <textarea> is created inside it
+         * (or the existing one is re-used on subsequent calls) so that TinyMCE has
+         * a proper target and form-submission semantics are preserved.
+         *
+         * @param {Element} container - The element returned by pac.getContainerByPacId()
+         * @returns {HTMLTextAreaElement}
+         */
+        resolveTextarea(container) {
+            // If the container is a textarea, return it
+            if (container instanceof HTMLTextAreaElement) {
+                return container;
+            }
+
+            // Re-use an existing injected textarea if the component is re-created.
+            let ta = container.querySelector('textarea[data-waka-tinymce-proxy]');
+
+            if (!ta) {
+                ta = document.createElement('textarea');
+                ta.setAttribute('data-waka-tinymce-proxy', '');
+
+                // Carry over the name attribute so the field participates in form
+                // submission under the same key as the custom element declares.
+                if (container.hasAttribute('name')) {
+                    ta.name = container.getAttribute('name');
+                }
+
+                // Copy initial content
+                ta.value = container.innerHTML.trim();
+
+                // Remove inner HTML
+                container.innerHTML = '';
+
+                // Add textarea as a child of the custom element
+                container.appendChild(ta);
+            }
+
+            return ta;
+        }
+    };
+
     // Support standalone loading while using the host's plugin base when present.
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
@@ -104,84 +611,6 @@
      */
     let _scriptSrc = null;  // resolved in createPacPlugin once licenseKey is known
 
-    /**
-     * Injects the TinyMCE script and drains the pending queue once it loads.
-     * Safe to call multiple times.
-     *
-     * If window.tinymce is already on the page (externally loaded), injection
-     * is skipped and the queue is drained immediately.
-     */
-    function ensureApiLoaded() {
-        if (window.tinymce) {
-            _apiReady = true;
-            drainPendingInits();
-            return;
-        }
-
-        if (document.getElementById('waka-tinymce-script')) {
-            // Already injected; the load handler will drain the queue.
-            return;
-        }
-
-        const tag = document.createElement('script');
-        tag.id  = 'waka-tinymce-script';
-        tag.src = _scriptSrc;
-
-        tag.onload = function () {
-            if (!window.tinymce) {
-                const msg = 'TinyMCE script loaded but window.tinymce is not defined. ' +
-                    'Use the official CDN URL or a self-hosted tinymce.min.js build.';
-
-                for (const pending of _pendingInits) {
-                    pending.pac.sendMessage(
-                        pending.pacId,
-                        pending.msgConstants.MSG_EDITOR_ERROR,
-                        0, 0,
-                        { message: msg }
-                    );
-                }
-
-                _pendingInits.length = 0;
-                return;
-            }
-
-            _apiReady = true;
-            drainPendingInits();
-        };
-
-        tag.onerror = function () {
-            for (const pending of _pendingInits) {
-                pending.pac.sendMessage(
-                    pending.pacId,
-                    pending.msgConstants.MSG_EDITOR_ERROR,
-                    0, 0,
-                    { message: 'TinyMCE script failed to load' }
-                );
-            }
-
-            _pendingInits.length = 0;
-        };
-
-        (document.head ?? document.body).appendChild(tag);
-    }
-
-    /**
-     * Initializes all queued components now that tinymce is available.
-     */
-    function drainPendingInits() {
-        for (const pending of _pendingInits) {
-            createEditor(
-                pending.abstraction,
-                pending.pacId,
-                pending.pac,
-                pending.msgConstants,
-                pending.editorConfig
-            );
-        }
-
-        _pendingInits.length = 0;
-    }
-
     // =========================================================================
     // Registry
     // =========================================================================
@@ -201,267 +630,13 @@
     // Paste detail helper
     // =========================================================================
 
-    /**
-     * Builds the MSG_PASTE detail object from a native ClipboardData instance.
-     * @param {DataTransfer|null} clipboardData
-     * @returns {{ 'text/plain': string, 'text/html': string, 'text/rtf': string, 'text/uri-list': string, uris: string[], files: object[], types: string[] }}
-     */
-    function buildPasteDetail(clipboardData) {
-        if (!clipboardData) {
-            return {'text/plain': '', 'text/html': '', 'text/rtf': '', 'text/uri-list': '', uris: [], files: [], types: []};
-        }
-
-        const types = Array.from(clipboardData.types ?? []);
-        const uriRaw = clipboardData.getData('text/uri-list') ?? '';
-
-        const uris = uriRaw
-            .split(/\r?\n/)
-            .filter(function (line) { return line.length > 0 && !line.startsWith('#'); });
-
-        const files = Array.from(clipboardData.files ?? []).map(function (f) {
-            return {name: f.name, size: f.size, type: f.type};
-        });
-
-        return {
-            'text/plain':    clipboardData.getData('text/plain') ?? '',
-            'text/html':     clipboardData.getData('text/html')  ?? '',
-            'text/rtf':      clipboardData.getData('text/rtf')   ?? '',
-            'text/uri-list': uriRaw,
-            uris,
-            files,
-            types
-        };
-    }
-
     // =========================================================================
     // Editor construction
     // =========================================================================
 
-    /**
-     * Instantiates a TinyMCE instance on the container textarea and registers it.
-     *
-     * TinyMCE behavior notes:
-     *
-     *   1. tinymce.init() is asynchronous and resolves with an array of editors.
-     *      We always pass a single target so we take editors[0].
-     *
-     *   2. TinyMCE hides (not removes) the source textarea and inserts its own
-     *      editor UI after it. The textarea is still in the DOM but display:none.
-     *      TinyMCE manages the textarea value natively; no manual sync is needed.
-     *
-     *   3. The 'input' callback fires on every keystroke and content mutation.
-     *      The 'change' callback fires on blur (when content has changed since
-     *      focus). We dispatch MSG_INPUT/MSG_CHANGE from 'input' to mirror the
-     *      CKEditor 5 wrapper's per-mutation behavior.
-     *
-     *   4. Paste interception uses the native 'paste' event on the editor so the
-     *      full ClipboardEvent is available (text, html, rtf, files, uris).
-     *      event.preventDefault() cancels the insertion.
-     *
-     *   5. focus / blur events are available directly on the TinyMCE editor via
-     *      the 'focus' and 'blur' init callbacks.
-     *
-     *   6. Read-only mode uses editor.mode.set('readonly') / editor.mode.set('design').
-     *
-     * @param {Object} abstraction
-     * @param {string} pacId
-     * @param {Object} pac
-     * @param {Object} msgConstants
-     * @param {Object} editorConfig - Merged plugin-level and per-instance config
-     */
-    function createEditor(abstraction, pacId, pac, msgConstants, editorConfig) {
-        const container = pac.getContainerByPacId(pacId);
-
-        // Guard: component may have been destroyed while waiting for the script.
-        if (!container || !container.isConnected) {
-            return;
-        }
-
-        // For the <waka-tinymce> custom element, TinyMCE needs an actual
-        // <textarea> to attach to. resolveTextarea() creates one inside the
-        // custom element the first time and re-uses it on subsequent calls.
-        // For the classic <textarea data-tinymce> pattern this returns the
-        // container itself unchanged.
-        const textarea = resolveTextarea(container);
-
-        // Pre-seed the registry entry so onComponentDestroyed can clean up even
-        // if the init promise is still pending.
-        const entry = {
-            pac,
-            editor: null,       // filled once the Promise resolves
-            abstraction,
-            msgConstants
-        };
-
-        _registry.set(pacId, entry);
-
-        // ── tinymce.init() ────────────────────────────────────────────────────
-        // We merge the caller's config with the event callbacks we need.
-        // 'target' is used instead of 'selector' so we bind to the exact element.
-        // The callbacks below are additive — if the caller also passes e.g. an
-        // 'init' callback in their editorConfig, it will be overwritten. For most
-        // use cases this is acceptable; deep-merge is out of scope here.
-        window.tinymce.init({
-            ...editorConfig,
-            target: textarea,
-
-            setup(editor) {
-                // Allow the caller's own setup hook to run first.
-                if (typeof editorConfig.setup === 'function') {
-                    editorConfig.setup(editor);
-                }
-
-                // ── input: MSG_INPUT + MSG_CHANGE ─────────────────────────────
-                // Fires on every content mutation (typing, toolbar, setContent).
-                editor.on('input', function () {
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    const value = editor.getContent();
-                    pac.sendMessage(pacId, pac.MSG_INPUT,  0, 0, { value });
-                    pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
-                });
-
-                // TinyMCE's 'change' fires on blur when content has mutated.
-                // We use it as an additional MSG_CHANGE trigger to catch toolbar
-                // actions that don't fire 'input' (e.g. insert image via dialog).
-                editor.on('change', function () {
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    const value = editor.getContent();
-                    pac.sendMessage(pacId, pac.MSG_CHANGE, 0, 0, { value });
-                });
-
-                // ── Paste interception: MSG_PASTE ─────────────────────────────
-                // We intercept the native 'paste' event so the full ClipboardEvent
-                // is available (text, html, rtf, files, uris).
-                // event.preventDefault() cancels the paste before TinyMCE processes it.
-                // MSG_INPUT_COMPLETE after paste is covered by the existing blur and
-                // change listeners, so no PastePostProcess equivalent is needed.
-                editor.on('paste', function (event) {
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    const clipboardData = event.clipboardData ?? event.originalEvent?.clipboardData;
-                    const detail = buildPasteDetail(clipboardData);
-                    const domEvent = event.originalEvent ?? event;
-
-                    const result = pac.sendMessage(
-                        pacId, pac.MSG_PASTE,
-                        (domEvent.ctrlKey  ? pac.MK_CONTROL : 0) |
-                        (domEvent.shiftKey ? pac.MK_SHIFT   : 0) |
-                        (domEvent.altKey   ? pac.MK_ALT     : 0),
-                        detail['text/plain'].length,
-                        detail
-                    );
-
-                    if (result === false) {
-                        event.preventDefault();
-                    }
-                });
-
-                // ── focus ─────────────────────────────────────────────────────
-                editor.on('focus', function () {
-                    pac.sendMessage(pacId, pac.MSG_SETFOCUS, 0, 0);
-                });
-
-                // ── blur: MSG_INPUT_COMPLETE + MSG_KILLFOCUS ──────────────────
-                editor.on('blur', function () {
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    const value = editor.getContent();
-                    pac.sendMessage(pacId, pac.MSG_INPUT_COMPLETE, 0, 0, { value });
-                    pac.sendMessage(pacId, pac.MSG_KILLFOCUS, 0, 0);
-                });
-
-                // ── init: MSG_EDITOR_READY ────────────────────────────────────
-                // The 'init' event inside setup() is the reliable TinyMCE 7 way
-                // to know the editor is fully constructed and the UI is in the DOM.
-                // init_instance_callback (top-level config) is not reliably called
-                // in TinyMCE 7 and is avoided here.
-                editor.on('init', function () {
-                    // Component may have been destroyed while init was in flight.
-                    if (!_registry.has(pacId)) {
-                        editor.remove();
-                        return;
-                    }
-
-                    entry.editor = editor;
-
-                    const initialValue = editor.getContent();
-
-                    if (abstraction) {
-                        abstraction.value = initialValue;
-                    }
-
-                    pac.sendMessage(pacId, msgConstants.MSG_EDITOR_READY, 0, 0, {
-                        value: initialValue
-                    });
-                });
-            }
-        }).catch(function (error) {
-            // tinymce.init() rejects if TinyMCE itself throws during setup.
-            _registry.delete(pacId);
-
-            pac.sendMessage(pacId, msgConstants.MSG_EDITOR_ERROR, 0, 0, {
-                message: error?.message ?? 'TinyMCE failed to initialize'
-            });
-        });
-    }
-
     // =========================================================================
     // Custom element helper
     // =========================================================================
-
-    /**
-     * Resolves the <textarea> that TinyMCE should be initialized on.
-     *
-     * For the classic usage pattern the container IS the textarea, so it is
-     * returned directly. For the <waka-tinymce> custom-element pattern the
-     * container is a generic element; a hidden <textarea> is created inside it
-     * (or the existing one is re-used on subsequent calls) so that TinyMCE has
-     * a proper target and form-submission semantics are preserved.
-     *
-     * @param {Element} container - The element returned by pac.getContainerByPacId()
-     * @returns {HTMLTextAreaElement}
-     */
-    function resolveTextarea(container) {
-        // If the container is a textarea, return it
-        if (container instanceof HTMLTextAreaElement) {
-            return container;
-        }
-
-        // Re-use an existing injected textarea if the component is re-created.
-        let ta = container.querySelector('textarea[data-waka-tinymce-proxy]');
-
-        if (!ta) {
-            ta = document.createElement('textarea');
-            ta.setAttribute('data-waka-tinymce-proxy', '');
-
-            // Carry over the name attribute so the field participates in form
-            // submission under the same key as the custom element declares.
-            if (container.hasAttribute('name')) {
-                ta.name = container.getAttribute('name');
-            }
-
-            // Copy initial content
-            ta.value = container.innerHTML.trim();
-
-            // Remove inner HTML
-            container.innerHTML = '';
-
-            // Add textarea as a child of the custom element
-            container.appendChild(ta);
-        }
-
-        return ta;
-    }
 
     // =========================================================================
     // Plugin definition
@@ -472,7 +647,6 @@
         MSG_EDITOR_READY: MSG_PLUGIN + 0x500,
         MSG_EDITOR_ERROR: MSG_PLUGIN + 0x501,
 
-
         /**
          * Called on plugin initialization through wakaPAC.use()
          * @param {Object} pac
@@ -480,126 +654,7 @@
          * @returns {{ onComponentCreated(Object, string, Object): void, onComponentDestroyed(string): void }}
          */
         createPacPlugin(pac, options = {}) {
-
-            // Resolve the script URL.
-            // CDN mode requires licenseKey. Self-hosted mode requires src.
-            // If window.tinymce is already present neither is strictly needed.
-            if (options.src) {
-                _scriptSrc = options.src;
-            } else {
-                const key = options.licenseKey ?? 'no-license-key';
-                _scriptSrc = `${TINYMCE_CDN_BASE}/${key}/tinymce/${TINYMCE_VERSION}/tinymce.min.js`;
-            }
-
-            // Build plugin-level TinyMCE config defaults.
-            const _defaultEditorConfig = {};
-
-            if (options.toolbar !== undefined) {
-                _defaultEditorConfig.toolbar = options.toolbar;
-            }
-
-            if (options.plugins !== undefined) {
-                _defaultEditorConfig.plugins = options.plugins;
-            }
-
-            if (options.language !== undefined) {
-                // TinyMCE uses 'language' for the UI locale.
-                _defaultEditorConfig.language = options.language;
-            }
-
-            if (options.height !== undefined) {
-                _defaultEditorConfig.height = options.height;
-            }
-
-            // Use the public message IDs for delivery as well as comparisons.
-            const {
-                MSG_EDITOR_READY,
-                MSG_EDITOR_ERROR
-            } = this;
-
-            const msgConstants = {
-                MSG_EDITOR_READY,
-                MSG_EDITOR_ERROR
-            };
-
-            return {
-
-                /**
-                 * Called by WakaPAC after a component is created.
-                 * Activates only when the container is a <textarea> with a
-                 * data-tinymce attribute.
-                 * @param {Object} abstraction - The component's reactive abstraction object
-                 * @param {string} pacId       - The data-pac-id of the container
-                 * @param {Object} _config     - Component config
-                 */
-                onComponentCreated(abstraction, pacId, _config) {
-                    const container = pac.getContainerByPacId(pacId);
-
-                    if (!container) {
-                        return;
-                    }
-
-                    // Accept either:
-                    //   <textarea data-tinymce …>    — classic attribute-based usage
-                    //   <waka-tinymce …>              — custom element usage
-                    const isCustomElement = container.tagName.toLowerCase() === 'waka-tinymce';
-                    const isTextarea      = container instanceof HTMLTextAreaElement;
-
-                    if (!isTextarea && !isCustomElement) {
-                        return;
-                    }
-
-                    if (isTextarea && !container.hasAttribute('data-tinymce')) {
-                        return;
-                    }
-
-                    // Merge plugin-level defaults with per-instance overrides.
-                    const editorConfig = {
-                        ..._defaultEditorConfig,
-                        ...(_config.tinymce ?? {})
-                    };
-
-                    ensureApiLoaded();
-
-                    if (_apiReady) {
-                        createEditor(abstraction, pacId, pac, msgConstants, editorConfig);
-                    } else {
-                        _pendingInits.push({ abstraction, pacId, pac, msgConstants, editorConfig });
-                    }
-                },
-
-                /**
-                 * Called by WakaPAC when a component is destroyed.
-                 * Removes any pending init from the queue, removes the TinyMCE
-                 * instance, and removes the registry entry.
-                 * @param {string} pacId
-                 */
-                onComponentDestroyed(pacId) {
-                    // Pull from the pending queue if destroyed before script loaded.
-                    const pendingIndex = _pendingInits.findIndex(function (p) {
-                        return p.pacId === pacId;
-                    });
-
-                    if (pendingIndex !== -1) {
-                        _pendingInits.splice(pendingIndex, 1);
-                    }
-
-                    const entry = _registry.get(pacId);
-
-                    if (!entry) {
-                        return;
-                    }
-
-                    _registry.delete(pacId);
-
-                    // editor may be null if destroyed while tinymce.init()
-                    // is still in flight — the in-flight init_instance_callback
-                    // checks _registry and will call editor.remove() itself.
-                    if (entry.editor) {
-                        entry.editor.remove();
-                    }
-                }
-            };
+            return new TinyMCEPlugin(this, pac, options).initialize();
         },
 
         // =====================================================================
@@ -663,5 +718,4 @@
     };
 
     window.wakaTinyMCE = window.WakaTinyMCE;
-
 })();

@@ -41,6 +41,334 @@
 (function () {
     'use strict';
 
+    /** Owns the state and lifecycle of one motion sample. */
+    class MotionSample {
+        constructor(owner, event) {
+            this._owner = owner;
+            this._event = event;
+
+            this.roundValue = this.roundValue.bind(this);
+            this.toDegrees = this.toDegrees.bind(this);
+            this.clampRatio = this.clampRatio.bind(this);
+        }
+
+        initialize() {
+            const state = this;
+
+            // Throttle to MIN_DISPATCH_INTERVAL regardless of sensor rate.
+            // Sensors can fire 60-100+ times/sec; without this every event would
+            // trigger a full reactive broadcast even with threshold filtering.
+            state._now = Date.now();
+            if (state._now - _lastEventTime < MIN_DISPATCH_INTERVAL) {
+                return;
+            }
+
+            _lastEventTime = state._now;
+
+            state._raw = state._event.accelerationIncludingGravity ?? {};
+            state._rot = state._event.rotationRate ?? {};
+
+            state.detectCapabilities();
+
+            state.roundSample();
+
+            // Skip dispatch if all axes are within the dead-zone threshold
+            if (_threshold > 0 && _lastDispatched) {
+                const t = _threshold;
+                const last = _lastDispatched;
+
+                const accChanged =
+                                                                                   Math.abs((state._x     ?? last.x) - last.x) > t ||
+                                                                                   Math.abs((state._y     ?? last.y) - last.y) > t ||
+                                                                                   Math.abs((state._z     ?? last.z) - last.z) > t;
+
+                const rotChanged =
+                                                                                   Math.abs((state._alpha ?? last.alpha) - last.alpha) > t ||
+                                                                                   Math.abs((state._beta  ?? last.beta)  - last.beta)  > t ||
+                                                                                   Math.abs((state._gamma ?? last.gamma) - last.gamma) > t;
+
+                if (!accChanged && !rotChanged) {
+                    return;
+                }
+            }
+
+            if (_threshold > 0) {
+                _lastDispatched = { x: state._x, y: state._y, z: state._z, alpha: state._alpha, beta: state._beta, gamma: state._gamma };
+            }
+
+            state.applyInversion();
+
+            state.publishValues();
+        }
+
+        roundValue(v) {
+            return v != null ? Math.round(v * 100) / 100 : null;
+        }
+
+        toDegrees(v) {
+            return Math.round(v * (180 / Math.PI));
+        }
+
+        clampRatio(v) {
+            return Math.max(-1, Math.min(1, v));
+        }
+
+        publishValues() {
+            const state = this;
+
+            pluginRuntime.broadcastAll({
+                motionAccelerationX: state._ix,
+                motionAccelerationY: state._iy,
+                motionAccelerationZ: state._z,
+                motionRotationAlpha: state._alpha,
+                motionRotationBeta : state._beta,
+                motionRotationGamma: state._gamma,
+                motionTiltX        : state._tiltX,
+                motionTiltY        : state._tiltY
+            });
+        }
+
+        applyInversion() {
+            const state = this;
+
+            // Apply per-axis inversion multipliers
+            state._ix = state._x != null ? state._x * _axisInversion.x : null;
+            state._iy = state._y != null ? state._y * _axisInversion.y : null;
+
+            // Compute tilt angles in whole degrees from horizontal using asin(axis / g).
+            // 0° = flat, +90° = that edge tilted fully upright.
+            // Clamped to [-1, 1] before asin to guard against sensor noise producing NaN.
+            state._G = 9.81;
+
+            state._tiltX = state._ix != null ? state.toDegrees(Math.asin(state.clampRatio(state._ix / state._G))) : null;
+            state._tiltY = state._iy != null ? state.toDegrees(Math.asin(state.clampRatio(state._iy / state._G))) : null;
+        }
+
+        roundSample() {
+            const state = this;
+
+            // Round to 2 decimal places to suppress floating point noise
+
+            state._x = state.roundValue(state._raw.x);
+            state._y = state.roundValue(state._raw.y);
+            state._z = state.roundValue(state._raw.z);
+            state._alpha = state.roundValue(state._rot.alpha);
+            state._beta = state.roundValue(state._rot.beta);
+            state._gamma = state.roundValue(state._rot.gamma);
+        }
+
+        detectCapabilities() {
+            const state = this;
+
+            // Detect sensor capabilities on the first event.
+            // accelerationIncludingGravity can be null on some Android WebViews.
+            // rotationRate is null on devices without a gyroscope.
+            // Once determined these never change, so we only broadcast once.
+            if (_hasAcceleration === null) {
+                _hasAcceleration = state._raw.x != null || state._raw.y != null || state._raw.z != null;
+                pluginRuntime.broadcastAll({ motionHasAcceleration: _hasAcceleration });
+            }
+
+            if (_hasRotationRate === null) {
+                _hasRotationRate = state._rot.alpha != null || state._rot.beta != null || state._rot.gamma != null;
+                pluginRuntime.broadcastAll({ motionHasRotationRate: _hasRotationRate });
+            }
+        }
+    }
+
+    /** Owns the state and lifecycle of one motion calibration. */
+    class MotionCalibration {
+        constructor(owner, { threshold = 4, timeout = 8000 } = {}) {
+            this._owner = owner;
+            this._threshold = threshold;
+            this._timeout = timeout;
+
+            this.setStep = this.setStep.bind(this);
+            this.applyResult = this.applyResult.bind(this);
+            this.detectAxis = this.detectAxis.bind(this);
+            this.detectYAxis = this.detectYAxis.bind(this);
+
+            this.detectAxisCallback = this.detectAxisCallback.bind(this);
+        }
+
+        initialize() {
+            const state = this;
+
+            // Guard against missing registry or re-entrant calls
+            if (!window.PACRegistry || !window.PACRegistry.components) {
+                return;
+            }
+
+            // Fetch step
+            state._currentStep = window.PACRegistry.components[0]?.abstraction?.motionAxisDetectionStep;
+            if (state._currentStep === 'tilt-x' || state._currentStep === 'tilt-y') {
+                return;
+            }
+
+            // Accumulates detected polarity; defaults to 1 (non-inverted)
+            state._result = { x: 1, y: 1 };
+
+            // ─── Detection sequence ───────────────────────────────────────────────
+
+            state.setStep('tilt-x');
+            state.detectAxis('x', state.detectYAxis, state.detectAxisCallback);
+        }
+
+        setStep(step) {
+            const labels = {
+                'tilt-x' : 'Tilt the right edge of the device down',
+                'tilt-y' : 'Tilt the bottom edge of the device down',
+                'done'   : 'Calibration complete',
+                'timeout': 'Timed out — please try again'
+            };
+
+            pluginRuntime.broadcastAll({
+                motionAxisDetectionStep     : step,
+                motionAxisDetectionStepLabel: labels[step] ?? ''
+            });
+        }
+
+        applyResult() {
+            const state = this;
+
+            const inversion = { x: state._result.x, y: state._result.y };
+
+            _axisInversion = inversion;
+            _lastDispatched = null;
+
+            pluginRuntime.broadcast('motionAxisInversion', inversion);
+            state.setStep('done');
+        }
+
+        detectAxis(axis, onDone, onTimeout) {
+            const state = this;
+
+            const detectAxisHandlers = {
+                onTimeout() {
+                    detectAxisRuntime.cleanup();
+                    onTimeout();
+                }
+            };
+
+            const detectAxisRuntime = {
+                handler(event) {
+                    const gravity = event.accelerationIncludingGravity;
+
+                    // Guard against null or incomplete events from some Android WebViews
+                    if (!gravity) {
+                        return;
+                    }
+
+                    const val = axis === 'x' ? gravity.x : gravity.y;
+
+                    if (val == null || Math.abs(val) < state._threshold) {
+                        return;
+                    }
+
+                    // First sample exceeding threshold determines polarity
+                    state._result[axis] = val > 0 ? 1 : -1;
+
+                    detectAxisRuntime.cleanup();
+                    onDone();
+                },
+
+                cleanup() {
+                    window.removeEventListener('devicemotion', detectAxisRuntime.handler);
+                    clearTimeout(timer);
+                }
+            };
+
+            let timer = null;
+
+            window.addEventListener('devicemotion', detectAxisRuntime.handler);
+
+            timer = setTimeout(detectAxisHandlers.onTimeout, state._timeout);
+        }
+
+        detectYAxis() {
+            const state = this;
+
+            const detectYAxisHandlers = {
+                onTimeout() {
+                    const onTimeoutHandlers = {
+                        detectAxisCallback() { state.setStep('timeout'); }
+                    };
+
+                    state.detectAxis('y', state.applyResult, onTimeoutHandlers.detectAxisCallback);
+                }
+            };
+
+            state.setStep('tilt-y');
+
+            setTimeout(detectYAxisHandlers.onTimeout, 1000);
+        }
+
+        detectAxisCallback() {
+            const state = this;
+            state.setStep('timeout');
+        }
+    }
+
+    const pluginRuntime = {
+        /**
+         * Broadcast a property update to all registered components.
+         * @param {string} prop
+         * @param {*} value
+         */
+        broadcast(prop, value) {
+            const broadcastHandlers = {
+                visitItem(context) {
+                    context.abstraction[prop] = value;
+                }
+            };
+
+            if (!window.PACRegistry || !window.PACRegistry.components) {
+                return;
+            }
+
+            window.PACRegistry.components.forEach(broadcastHandlers.visitItem);
+        },
+
+        /**
+         * Broadcast multiple properties to all registered components.
+         * @param {object} props
+         */
+        broadcastAll(props) {
+            const broadcastAllHandlers = {
+                visitItem(context) {
+                    Object.assign(context.abstraction, props);
+                }
+            };
+
+            if (!window.PACRegistry || !window.PACRegistry.components) {
+                return;
+            }
+
+            window.PACRegistry.components.forEach(broadcastAllHandlers.visitItem);
+        },
+
+        /**
+         * Attaches the devicemotion event listener.
+         * Called automatically on non-iOS, or after iOS permission is granted.
+         * Guards against double-registration.
+         */
+        attachListener() {
+            const attachListenerHandlers = {
+                onDevicemotion(event) {
+                    return new MotionSample(this, event).initialize();
+                }
+            };
+
+            if (_listenerAttached) {
+                return;
+            }
+
+            _listenerAttached = true;
+
+            window.addEventListener('devicemotion', attachListenerHandlers.onDevicemotion);
+        }
+    };
+
     /** @type {string} */
     const VERSION = '1.0.0';
 
@@ -88,133 +416,9 @@
     // Helpers
     // ============================================================================
 
-    /**
-     * Broadcast a property update to all registered components.
-     * @param {string} prop
-     * @param {*} value
-     */
-    function broadcast(prop, value) {
-        if (!window.PACRegistry || !window.PACRegistry.components) {
-            return;
-        }
-
-        window.PACRegistry.components.forEach(function (context) {
-            context.abstraction[prop] = value;
-        });
-    }
-
-    /**
-     * Broadcast multiple properties to all registered components.
-     * @param {object} props
-     */
-    function broadcastAll(props) {
-        if (!window.PACRegistry || !window.PACRegistry.components) {
-            return;
-        }
-
-        window.PACRegistry.components.forEach(function (context) {
-            Object.assign(context.abstraction, props);
-        });
-    }
-
     // ============================================================================
     // Motion listener
     // ============================================================================
-
-    /**
-     * Attaches the devicemotion event listener.
-     * Called automatically on non-iOS, or after iOS permission is granted.
-     * Guards against double-registration.
-     */
-    function attachListener() {
-        if (_listenerAttached) {
-            return;
-        }
-
-        _listenerAttached = true;
-
-        window.addEventListener('devicemotion', function (event) {
-            // Throttle to MIN_DISPATCH_INTERVAL regardless of sensor rate.
-            // Sensors can fire 60-100+ times/sec; without this every event would
-            // trigger a full reactive broadcast even with threshold filtering.
-            const now = Date.now();
-            if (now - _lastEventTime < MIN_DISPATCH_INTERVAL) {
-                return;
-            }
-
-            _lastEventTime = now;
-
-            const raw = event.accelerationIncludingGravity ?? {};
-            const rot = event.rotationRate ?? {};
-
-            // Detect sensor capabilities on the first event.
-            // accelerationIncludingGravity can be null on some Android WebViews.
-            // rotationRate is null on devices without a gyroscope.
-            // Once determined these never change, so we only broadcast once.
-            if (_hasAcceleration === null) {
-                _hasAcceleration = raw.x != null || raw.y != null || raw.z != null;
-                broadcastAll({ motionHasAcceleration: _hasAcceleration });
-            }
-
-            if (_hasRotationRate === null) {
-                _hasRotationRate = rot.alpha != null || rot.beta != null || rot.gamma != null;
-                broadcastAll({ motionHasRotationRate: _hasRotationRate });
-            }
-
-            // Round to 2 decimal places to suppress floating point noise
-            const r2 = function (v) { return v != null ? Math.round(v * 100) / 100 : null; };
-            const x = r2(raw.x), y = r2(raw.y), z = r2(raw.z);
-            const alpha = r2(rot.alpha), beta = r2(rot.beta), gamma = r2(rot.gamma);
-
-            // Skip dispatch if all axes are within the dead-zone threshold
-            if (_threshold > 0 && _lastDispatched) {
-                const t = _threshold;
-                const last = _lastDispatched;
-
-                const accChanged =
-                    Math.abs((x     ?? last.x) - last.x) > t ||
-                    Math.abs((y     ?? last.y) - last.y) > t ||
-                    Math.abs((z     ?? last.z) - last.z) > t;
-
-                const rotChanged =
-                    Math.abs((alpha ?? last.alpha) - last.alpha) > t ||
-                    Math.abs((beta  ?? last.beta)  - last.beta)  > t ||
-                    Math.abs((gamma ?? last.gamma) - last.gamma) > t;
-
-                if (!accChanged && !rotChanged) {
-                    return;
-                }
-            }
-
-            if (_threshold > 0) {
-                _lastDispatched = { x, y, z, alpha, beta, gamma };
-            }
-
-            // Apply per-axis inversion multipliers
-            const ix = x != null ? x * _axisInversion.x : null;
-            const iy = y != null ? y * _axisInversion.y : null;
-
-            // Compute tilt angles in whole degrees from horizontal using asin(axis / g).
-            // 0° = flat, +90° = that edge tilted fully upright.
-            // Clamped to [-1, 1] before asin to guard against sensor noise producing NaN.
-            const G = 9.81;
-            const toDeg = function (v) { return Math.round(v * (180 / Math.PI)); };
-            const clamp = function (v) { return Math.max(-1, Math.min(1, v)); };
-            const tiltX = ix != null ? toDeg(Math.asin(clamp(ix / G))) : null;
-            const tiltY = iy != null ? toDeg(Math.asin(clamp(iy / G))) : null;
-
-            broadcastAll({
-                motionAccelerationX:   ix,
-                motionAccelerationY:   iy,
-                motionAccelerationZ:   z,
-                motionRotationAlpha:   alpha,
-                motionRotationBeta:    beta,
-                motionRotationGamma:   gamma,
-                motionTiltX:           tiltX,
-                motionTiltY:           tiltY,
-            });
-        });
-    }
 
     // ============================================================================
     // Plugin descriptor
@@ -239,7 +443,7 @@
             // On iOS it is deferred until requestMotionPermission() is called from a tap handler.
             if (typeof DeviceMotionEvent !== 'undefined' &&
                 typeof DeviceMotionEvent.requestPermission !== 'function') {
-                attachListener();
+                pluginRuntime.attachListener();
             }
 
             return {
@@ -314,7 +518,7 @@
             // On iOS the listener is deferred until requestMotionPermission() is called.
             if (active && typeof DeviceMotionEvent !== 'undefined' &&
                 typeof DeviceMotionEvent.requestPermission !== 'function') {
-                attachListener();
+                pluginRuntime.attachListener();
             }
         },
 
@@ -336,8 +540,8 @@
                 const result = await DeviceMotionEvent.requestPermission();
 
                 if (result === 'granted') {
-                    attachListener();
-                    broadcast('motionPermissionGranted', true);
+                    pluginRuntime.attachListener();
+                    pluginRuntime.broadcast('motionPermissionGranted', true);
                 }
 
                 return result;
@@ -386,10 +590,10 @@
          */
         getMotionCapabilities() {
             return {
-                hasDeviceMotion:    typeof DeviceMotionEvent !== 'undefined',
+                hasDeviceMotion   : typeof DeviceMotionEvent !== 'undefined',
                 requiresPermission: typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function',
-                hasAcceleration:    _hasAcceleration,
-                hasRotationRate:    _hasRotationRate
+                hasAcceleration   : _hasAcceleration,
+                hasRotationRate   : _hasRotationRate
             };
         },
 
@@ -418,115 +622,7 @@
          * @returns {void}
          */
         detectMotionAxisInversion({ threshold = 4, timeout = 8000 } = {}) {
-
-            // Guard against missing registry or re-entrant calls
-            if (!window.PACRegistry || !window.PACRegistry.components) {
-                return;
-            }
-
-            // Fetch step
-            const currentStep = window.PACRegistry.components[0]?.abstraction?.motionAxisDetectionStep;
-            if (currentStep === 'tilt-x' || currentStep === 'tilt-y') {
-                return;
-            }
-
-            // Accumulates detected polarity; defaults to 1 (non-inverted)
-            const result = { x: 1, y: 1 };
-
-            /**
-             * Broadcast a detection step to all components, including the human-readable label.
-             * @param {'tilt-x'|'tilt-y'|'done'|'timeout'} step
-             */
-            function setStep(step) {
-                const labels = {
-                    'tilt-x':  'Tilt the right edge of the device down',
-                    'tilt-y':  'Tilt the bottom edge of the device down',
-                    'done':    'Calibration complete',
-                    'timeout': 'Timed out — please try again'
-                };
-
-                broadcastAll({
-                    motionAxisDetectionStep:      step,
-                    motionAxisDetectionStepLabel: labels[step] ?? ''
-                });
-            }
-
-            /**
-             * Apply and broadcast the completed inversion result.
-             * Clears _lastDispatched so the next event bypasses the deduplication guard.
-             */
-            function applyResult() {
-                const inversion = { x: result.x, y: result.y };
-
-                _axisInversion = inversion;
-                _lastDispatched = null;
-
-                broadcast('motionAxisInversion', inversion);
-                setStep('done');
-            }
-
-            /**
-             * Listen for a single deliberate tilt on the given axis.
-             * Uses accelerationIncludingGravity — available without extra permissions and
-             * provides a reliable gravity component when the device is tilted.
-             * @param {'x'|'y'} axis
-             * @param {function} onDone
-             * @param {function} onTimeout
-             */
-            function detectAxis(axis, onDone, onTimeout) {
-                let timer = null;
-
-                function handler(event) {
-                    const gravity = event.accelerationIncludingGravity;
-
-                    // Guard against null or incomplete events from some Android WebViews
-                    if (!gravity) {
-                        return;
-                    }
-
-                    const val = axis === 'x' ? gravity.x : gravity.y;
-
-                    if (val == null || Math.abs(val) < threshold) {
-                        return;
-                    }
-
-                    // First sample exceeding threshold determines polarity
-                    result[axis] = val > 0 ? 1 : -1;
-
-                    cleanup();
-                    onDone();
-                }
-
-                function cleanup() {
-                    window.removeEventListener('devicemotion', handler);
-                    clearTimeout(timer);
-                }
-
-                window.addEventListener('devicemotion', handler);
-
-                timer = setTimeout(function () {
-                    cleanup();
-                    onTimeout();
-                }, timeout);
-            }
-
-            /**
-             * Start Y axis detection after X has been confirmed.
-             * A settling delay prevents residual X acceleration from immediately
-             * satisfying the Y listener before the device returns to flat.
-             */
-            function detectYAxis() {
-                setStep('tilt-y');
-
-                setTimeout(function () {
-                    detectAxis('y', applyResult, function () { setStep('timeout'); });
-                }, 1000);
-            }
-
-            // ─── Detection sequence ───────────────────────────────────────────────
-
-            setStep('tilt-x');
-            detectAxis('x', detectYAxis, function () { setStep('timeout'); });
+            return new MotionCalibration(this, { threshold: threshold, timeout: timeout }).initialize();
         }
     };
 
@@ -534,7 +630,11 @@
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = { wakaMotion };
     } else if (typeof define === 'function' && define.amd) {
-        define(function () { return { wakaMotion }; });
+        const wakamotionHandlers = {
+            defineCallback() { return { wakaMotion }; }
+        };
+
+        define(wakamotionHandlers.defineCallback);
     } else if (typeof window !== 'undefined') {
         window.wakaMotion = wakaMotion;
     }

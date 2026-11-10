@@ -68,6 +68,430 @@
 (function () {
     "use strict";
 
+    /** Owns the state and lifecycle of one you tube plugin. */
+    class YouTubePlugin {
+        constructor(owner, pac, _options = {}) {
+            this._owner = owner;
+            this._pac = pac;
+            this._options = _options;
+        }
+
+        initialize() {
+            const state = this;
+
+            // Plugin-level playerVars defaults, set via wakaPAC.use(WakaYouTube, { ... }).
+            // Per-instance config passed as the third argument to wakaPAC() under the
+            // 'youtube' key overrides these on a property-by-property basis.
+            // enablejsapi is always forced to 1 — the plugin cannot function without it.
+            state._defaultPlayerVars = {
+                controls: state._options.controls ?? 0,
+                rel     : state._options.rel ?? 0
+            };
+
+            // Use the public message IDs for delivery as well as comparisons.
+            ({
+                MSG_VIDEO_PLAY: state._MSG_VIDEO_PLAY,
+                MSG_VIDEO_PAUSE: state._MSG_VIDEO_PAUSE,
+                MSG_VIDEO_ENDED: state._MSG_VIDEO_ENDED,
+                MSG_VIDEO_SEEK: state._MSG_VIDEO_SEEK,
+                MSG_VIDEO_LOADED: state._MSG_VIDEO_LOADED,
+                MSG_VIDEO_ERROR: state._MSG_VIDEO_ERROR,
+                MSG_VIDEO_VOLUME_CHANGE: state._MSG_VIDEO_VOLUME_CHANGE,
+                MSG_VIDEO_WAITING: state._MSG_VIDEO_WAITING,
+                MSG_VIDEO_CANPLAY: state._MSG_VIDEO_CANPLAY,
+                MSG_VIDEO_TIMEUPDATE: state._MSG_VIDEO_TIMEUPDATE
+            } = state._owner);
+
+            state._msgConstants = {
+                MSG_VIDEO_PLAY         : state._MSG_VIDEO_PLAY,
+                MSG_VIDEO_PAUSE        : state._MSG_VIDEO_PAUSE,
+                MSG_VIDEO_ENDED        : state._MSG_VIDEO_ENDED,
+                MSG_VIDEO_SEEK         : state._MSG_VIDEO_SEEK,
+                MSG_VIDEO_LOADED       : state._MSG_VIDEO_LOADED,
+                MSG_VIDEO_ERROR        : state._MSG_VIDEO_ERROR,
+                MSG_VIDEO_VOLUME_CHANGE: state._MSG_VIDEO_VOLUME_CHANGE,
+                MSG_VIDEO_WAITING      : state._MSG_VIDEO_WAITING,
+                MSG_VIDEO_CANPLAY      : state._MSG_VIDEO_CANPLAY,
+                MSG_VIDEO_TIMEUPDATE   : state._MSG_VIDEO_TIMEUPDATE
+            };
+
+            return state.createDescriptor();
+        }
+
+        createDescriptor() {
+            const state = this;
+
+            return {
+
+                /**
+                 * Called by WakaPAC after a component is created.
+                 * Activates only when the container is a <div> with a data-youtube-id
+                 * attribute. Injects the IFrame API script on first use and either
+                 * creates the player immediately (API already ready) or queues it.
+                 *
+                 * @param {Object} abstraction - The component's reactive abstraction object
+                 * @param {string} pacId       - The data-pac-id of the container
+                 * @param {Object} _config     - Component config (unused)
+                 */
+                onComponentCreated(abstraction, pacId, _config) {
+                    const container = state._pac.getContainerByPacId(pacId);
+
+                    if (!container) {
+                        return;
+                    }
+
+                    // Accept either:
+                    //   <div data-youtube-id="…">          — classic attribute-based usage
+                    //   <waka-youtube data-youtube-id="…"> — custom element usage
+                    const tag = container.tagName.toLowerCase();
+
+                    if (!(container instanceof HTMLDivElement) && tag !== 'waka-youtube') {
+                        return;
+                    }
+
+                    // Fetch the video ID
+                    const videoId = container.dataset.youtubeId;
+
+                    if (!videoId) {
+                        return;
+                    }
+
+                    // Merge plugin-level defaults with per-instance overrides.
+                    // Per-instance config is passed as the third argument to wakaPAC()
+                    // under the 'youtube' key: wakaPAC('id', { msgProc }, { youtube: { controls: 1 } })
+                    // enablejsapi is always forced to 1 regardless of either config.
+                    const playerVars = {
+                        ...state._defaultPlayerVars,
+                        ..._config.youtube ?? {},
+                        enablejsapi: 1
+                    };
+
+                    // Seed the abstraction with a neutral initial value before the
+                    // player is ready, so bindings have something to render.
+                    abstraction.duration = NaN;
+
+                    // Inject the API script if not already done, then create the player
+                    pluginRuntime.ensureApiLoaded();
+
+                    if (_apiReady) {
+                        pluginRuntime.createPlayer(abstraction, pacId, videoId, state._pac, state._msgConstants, playerVars);
+                    } else {
+                        _pendingInits.push({abstraction, pacId, videoId, pac: state._pac, msgConstants: state._msgConstants, playerVars});
+                    }
+                },
+
+                /**
+                 * Called by WakaPAC when a component is destroyed.
+                 * Removes any pending init from the queue, stops the currentTime
+                 * polling interval, destroys the YT.Player instance, and removes
+                 * the registry entry.
+                 * @param {string} pacId
+                 */
+                onComponentDestroyed(pacId) {
+                    const onComponentDestroyedHandlers = {
+                        findIndexCallback(p) { return p.pacId === pacId; }
+                    };
+
+                    // If destroyed while still waiting for the API, pull it from
+                    // the queue so createPlayer is never called for it.
+                    const pendingIndex = _pendingInits.findIndex(onComponentDestroyedHandlers.findIndexCallback.bind(this));
+
+                    if (pendingIndex !== -1) {
+                        _pendingInits.splice(pendingIndex, 1);
+                    }
+
+                    const entry = _registry.get(pacId);
+
+                    if (!entry) {
+                        return;
+                    }
+
+                    // Stop the rAF loop
+                    pluginRuntime.stopPolling(entry);
+
+                    // Destroy the YouTube player instance
+                    entry.player.destroy();
+
+                    // Unregister the component
+                    _registry.delete(pacId);
+                }
+            };
+        }
+    }
+
+    const pluginRuntime = {
+        /**
+         * Injects the YouTube IFrame API script tag and wires up the global ready
+         * callback. Safe to call multiple times — only injects the tag once.
+         * Chains onto any pre-existing onYouTubeIframeAPIReady the page may have set.
+         */
+        ensureApiLoaded() {
+            const ensureApiLoadedHandlers = {
+                onerror() {
+                    // Script failed to load (network error, CSP block, etc.).
+                    // Notify each queued component via MSG_VIDEO_ERROR so msgProc can
+                    // react rather than silently waiting forever.
+                    for (const pending of _pendingInits) {
+                        pending.pac.sendMessage(
+                            pending.pacId,
+                            pending.msgConstants.MSG_VIDEO_ERROR,
+                            0, 0,
+                            {message: 'YouTube IFrame API failed to load'}
+                        );
+                    }
+
+                    _pendingInits.length = 0;
+                },
+
+                onYouTubeIframeAPIReady() {
+                    // Honour any pre-existing ready callback first so that scripts which
+                    // registered before us complete their initialization before we start
+                    // constructing players. Initialization ordering is preserved.
+                    if (typeof existing === 'function') {
+                        existing();
+                    }
+
+                    _apiReady = true;
+
+                    // Drain the queue of components that were created before the API loaded.
+                    for (const pending of _pendingInits) {
+                        pluginRuntime.createPlayer(
+                            pending.abstraction,
+                            pending.pacId,
+                            pending.videoId,
+                            pending.pac,
+                            pending.msgConstants,
+                            pending.playerVars
+                        );
+                    }
+
+                    _pendingInits.length = 0;
+                }
+            };
+
+            // Already injected; the ready callback will fire in due course.
+            if (document.getElementById('waka-youtube-api-script')) {
+                return;
+            }
+
+            // Create a player
+            const existing = window.onYouTubeIframeAPIReady;
+
+            window.onYouTubeIframeAPIReady = ensureApiLoadedHandlers.onYouTubeIframeAPIReady;
+
+            const tag = document.createElement('script');
+            tag.id = 'waka-youtube-api-script';
+            tag.src = 'https://www.youtube.com/iframe_api';
+
+            tag.onerror = ensureApiLoadedHandlers.onerror;
+
+            (document.head ?? document.body).appendChild(tag);
+        },
+
+        /**
+         * Advances currentTime on the abstraction once per animation frame while
+         * the player is playing. Self-terminates when rafHandle is cleared.
+         * @param pacId
+         * @param {Object} entry
+         */
+        rafTick(pacId, entry) {
+            const rafTickHandlers = {
+                onAnimationFrame() { return pluginRuntime.rafTick(pacId, entry); }
+            };
+
+            // Stop the loop if it was cancelled
+            if (entry.rafHandle === null) {
+                return;
+            }
+
+            const t = entry.player.getCurrentTime();
+
+            // Notify msgProc of the current playback position
+            entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_TIMEUPDATE, Math.trunc(t * 1000), 0, {
+                currentTime: t
+            });
+
+            // Schedule the next tick
+            entry.rafHandle = requestAnimationFrame(rafTickHandlers.onAnimationFrame.bind(this));
+        },
+
+        /**
+         * Starts the rAF loop. No-op if already running.
+         * @param pacId
+         * @param {Object} entry
+         */
+        startPolling(pacId, entry) {
+            const startPollingHandlers = {
+                onAnimationFrame() { return pluginRuntime.rafTick(pacId, entry); }
+            };
+
+            if (entry.rafHandle !== null) {
+                return;
+            }
+
+            entry.rafHandle = requestAnimationFrame(startPollingHandlers.onAnimationFrame.bind(this));
+        },
+
+        /**
+         * Stops the rAF loop. No-op if not running.
+         * @param {Object} entry
+         */
+        stopPolling(entry) {
+            if (entry.rafHandle !== null) {
+                cancelAnimationFrame(entry.rafHandle);
+                entry.rafHandle = null;
+            }
+        },
+
+        /**
+         * Fires MSG_VIDEO_LOADED for the entry if it has not already fired for the
+         * current video load. Reads duration, volume, and muted from the player at
+         * the point of calling so values are always current.
+         * @param {string} pacId
+         * @param {Object} entry
+         */
+        maybeFireLoaded(pacId, entry) {
+            if (entry.loadedFired) {
+                return;
+            }
+
+            entry.loadedFired = true;
+
+            const {pac, player, abstraction, msgConstants} = entry;
+
+            // Update the abstraction
+            abstraction.duration = player.getDuration();
+
+            // Notify msgProc
+            pac.sendMessage(pacId, msgConstants.MSG_VIDEO_LOADED, 0, 0, {
+                duration: abstraction.duration
+            });
+        },
+
+        /**
+         * Handles a player state change event from the IFrame API.
+         * Maps YT states to WakaPAC messages, manages the polling interval, and
+         * fires MSG_VIDEO_LOADED on the first cued/playing transition per video load.
+         * @param {string} pacId
+         * @param {Object} entry
+         * @param {number} newState
+         */
+        onStateChange(pacId, entry, newState) {
+            const {pac, msgConstants} = entry;
+
+            switch (newState) {
+                case YT_PLAYING:
+                    pluginRuntime.maybeFireLoaded(pacId, entry);
+
+                    // When recovering from buffering, emit CANPLAY before PLAY so
+                    // msgProc can distinguish a buffering recovery from a fresh play.
+                    if (entry.prevState === YT_BUFFERING) {
+                        pac.sendMessage(pacId, msgConstants.MSG_VIDEO_CANPLAY, 0, 0);
+                    }
+
+                    // Start the rAF loop to drive MSG_VIDEO_TIMEUPDATE
+                    pluginRuntime.startPolling(pacId, entry);
+
+                    // Notify msgProc
+                    pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PLAY, 0, 0);
+                    break;
+
+                case YT_PAUSED:
+                    // Stop the rAF loop
+                    pluginRuntime.stopPolling(entry);
+
+                    // Notify msgProc
+                    pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PAUSE, 0, 0);
+                    break;
+
+                case YT_ENDED:
+                    // Stop the rAF loop
+                    pluginRuntime.stopPolling(entry);
+
+                    // Notify msgProc
+                    pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ENDED, 0, 0);
+                    break;
+
+                case YT_BUFFERING:
+                    // Stop the rAF loop while buffering
+                    pluginRuntime.stopPolling(entry);
+
+                    // Notify msgProc
+                    pac.sendMessage(pacId, msgConstants.MSG_VIDEO_WAITING, 0, 0);
+                    break;
+
+                case YT_VIDEO_CUED:
+                    // Video is loaded and ready to play but not yet started.
+                    // Fire MSG_VIDEO_LOADED here so the host can read duration before
+                    // the user ever presses play.
+                    pluginRuntime.maybeFireLoaded(pacId, entry);
+                    break;
+
+                case YT_UNSTARTED:
+                    // Player was reset (e.g. loadVideoById called on an existing player).
+                    // Allow MSG_VIDEO_LOADED to fire again for the incoming video.
+                    entry.loadedFired = false;
+                    break;
+            }
+
+            entry.prevState = newState;
+        },
+
+        /**
+         * Instantiates a YT.Player for the given container and registers it.
+         * Called immediately if the IFrame API is already ready, or deferred via
+         * _pendingInits if called before onYouTubeIframeAPIReady has fired.
+         * @param {Object} abstraction
+         * @param {string} pacId
+         * @param {string} videoId
+         * @param {Object} pac
+         * @param {Object} msgConstants
+         * @param {Object} playerVars - Merged plugin-level and per-instance playerVars
+         */
+        createPlayer(abstraction, pacId, videoId, pac, msgConstants, playerVars) {
+            const container = pac.getContainerByPacId(pacId);
+
+            // Guard: the component may have been destroyed while waiting for the API,
+            // or the container may have been detached from the DOM in the meantime.
+            if (!container || !container.isConnected) {
+                return;
+            }
+
+            // Register the component; player is assigned below once YT.Player is constructed
+            const entry = {
+                pac,
+                player     : null,
+                abstraction,
+                msgConstants,
+                rafHandle  : null,
+                prevState  : YT_UNSTARTED,
+                loadedFired: false
+            };
+
+            _registry.set(pacId, entry);
+
+            // Instantiate the YouTube player in the container
+            entry.player = new YT.Player(container, {
+                // host must be at the top level of the config object, not inside
+                // playerVars — YouTube ignores it there.
+                host  : 'https://www.youtube-nocookie.com',
+                videoId,
+                playerVars,
+                events: {
+                    onStateChange(event) {
+                        pluginRuntime.onStateChange(pacId, entry, event.data);
+                    },
+                    onError(event) {
+                        // Notify msgProc
+                        pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, event.data, 0, {
+                            message: YT_ERROR_MESSAGES[event.data] ?? 'Unknown YouTube error'
+                        });
+                    }
+                }
+            });
+        }
+    };
+
     // Support standalone loading while using the host's plugin base when present.
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
@@ -92,68 +516,6 @@
      * @type {Array<{ abstraction: Object, pacId: string, videoId: string, pac: Object, msgConstants: Object, playerVars: Object }>}
      */
     const _pendingInits = [];
-
-    /**
-     * Injects the YouTube IFrame API script tag and wires up the global ready
-     * callback. Safe to call multiple times — only injects the tag once.
-     * Chains onto any pre-existing onYouTubeIframeAPIReady the page may have set.
-     */
-    function ensureApiLoaded() {
-        // Already injected; the ready callback will fire in due course.
-        if (document.getElementById('waka-youtube-api-script')) {
-            return;
-        }
-
-        // Create a player
-        const existing = window.onYouTubeIframeAPIReady;
-
-        window.onYouTubeIframeAPIReady = function () {
-            // Honour any pre-existing ready callback first so that scripts which
-            // registered before us complete their initialization before we start
-            // constructing players. Initialization ordering is preserved.
-            if (typeof existing === 'function') {
-                existing();
-            }
-
-            _apiReady = true;
-
-            // Drain the queue of components that were created before the API loaded.
-            for (const pending of _pendingInits) {
-                createPlayer(
-                    pending.abstraction,
-                    pending.pacId,
-                    pending.videoId,
-                    pending.pac,
-                    pending.msgConstants,
-                    pending.playerVars
-                );
-            }
-
-            _pendingInits.length = 0;
-        };
-
-        const tag = document.createElement('script');
-        tag.id = 'waka-youtube-api-script';
-        tag.src = 'https://www.youtube.com/iframe_api';
-
-        tag.onerror = function () {
-            // Script failed to load (network error, CSP block, etc.).
-            // Notify each queued component via MSG_VIDEO_ERROR so msgProc can
-            // react rather than silently waiting forever.
-            for (const pending of _pendingInits) {
-                pending.pac.sendMessage(
-                    pending.pacId,
-                    pending.msgConstants.MSG_VIDEO_ERROR,
-                    0, 0,
-                    {message: 'YouTube IFrame API failed to load'}
-                );
-            }
-
-            _pendingInits.length = 0;
-        };
-
-        (document.head ?? document.body).appendChild(tag);
-    }
 
     // =========================================================================
     // Registry
@@ -182,53 +544,6 @@
     // The rAF loop self-terminates when the player is no longer playing.
     // =========================================================================
 
-    /**
-     * Advances currentTime on the abstraction once per animation frame while
-     * the player is playing. Self-terminates when rafHandle is cleared.
-     * @param pacId
-     * @param {Object} entry
-     */
-    function rafTick(pacId, entry) {
-        // Stop the loop if it was cancelled
-        if (entry.rafHandle === null) {
-            return;
-        }
-
-        const t = entry.player.getCurrentTime();
-
-        // Notify msgProc of the current playback position
-        entry.pac.sendMessage(pacId, entry.msgConstants.MSG_VIDEO_TIMEUPDATE, Math.trunc(t * 1000), 0, {
-            currentTime: t
-        });
-
-        // Schedule the next tick
-        entry.rafHandle = requestAnimationFrame(() => rafTick(pacId, entry));
-    }
-
-    /**
-     * Starts the rAF loop. No-op if already running.
-     * @param pacId
-     * @param {Object} entry
-     */
-    function startPolling(pacId, entry) {
-        if (entry.rafHandle !== null) {
-            return;
-        }
-
-        entry.rafHandle = requestAnimationFrame(() => rafTick(pacId, entry));
-    }
-
-    /**
-     * Stops the rAF loop. No-op if not running.
-     * @param {Object} entry
-     */
-    function stopPolling(entry) {
-        if (entry.rafHandle !== null) {
-            cancelAnimationFrame(entry.rafHandle);
-            entry.rafHandle = null;
-        }
-    }
-
     // =========================================================================
     // Player state → messages
     // =========================================================================
@@ -250,8 +565,8 @@
      * @type {Object<number, string>}
      */
     const YT_ERROR_MESSAGES = {
-        2: 'Invalid video ID or parameter',
-        5: 'HTML5 playback error',
+        2  : 'Invalid video ID or parameter',
+        5  : 'HTML5 playback error',
         100: 'Video not found or has been removed',
         101: 'Embedding not allowed for this video',
         150: 'Embedding not allowed for this video'
@@ -265,158 +580,9 @@
     // changes made through the player UI — only changes made through setVolume()
     // and setMuted() will be tracked.
 
-    /**
-     * Fires MSG_VIDEO_LOADED for the entry if it has not already fired for the
-     * current video load. Reads duration, volume, and muted from the player at
-     * the point of calling so values are always current.
-     * @param {string} pacId
-     * @param {Object} entry
-     */
-    function maybeFireLoaded(pacId, entry) {
-        if (entry.loadedFired) {
-            return;
-        }
-
-        entry.loadedFired = true;
-
-        const {pac, player, abstraction, msgConstants} = entry;
-
-        // Update the abstraction
-        abstraction.duration = player.getDuration();
-
-        // Notify msgProc
-        pac.sendMessage(pacId, msgConstants.MSG_VIDEO_LOADED, 0, 0, {
-            duration: abstraction.duration
-        });
-    }
-
-    /**
-     * Handles a player state change event from the IFrame API.
-     * Maps YT states to WakaPAC messages, manages the polling interval, and
-     * fires MSG_VIDEO_LOADED on the first cued/playing transition per video load.
-     * @param {string} pacId
-     * @param {Object} entry
-     * @param {number} newState
-     */
-    function onStateChange(pacId, entry, newState) {
-        const {pac, msgConstants} = entry;
-
-        switch (newState) {
-
-            case YT_PLAYING:
-                maybeFireLoaded(pacId, entry);
-
-                // When recovering from buffering, emit CANPLAY before PLAY so
-                // msgProc can distinguish a buffering recovery from a fresh play.
-                if (entry.prevState === YT_BUFFERING) {
-                    pac.sendMessage(pacId, msgConstants.MSG_VIDEO_CANPLAY, 0, 0);
-                }
-
-                // Start the rAF loop to drive MSG_VIDEO_TIMEUPDATE
-                startPolling(pacId, entry);
-
-                // Notify msgProc
-                pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PLAY, 0, 0);
-                break;
-
-            case YT_PAUSED:
-                // Stop the rAF loop
-                stopPolling(entry);
-
-                // Notify msgProc
-                pac.sendMessage(pacId, msgConstants.MSG_VIDEO_PAUSE, 0, 0);
-                break;
-
-            case YT_ENDED:
-                // Stop the rAF loop
-                stopPolling(entry);
-
-                // Notify msgProc
-                pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ENDED, 0, 0);
-                break;
-
-            case YT_BUFFERING:
-                // Stop the rAF loop while buffering
-                stopPolling(entry);
-
-                // Notify msgProc
-                pac.sendMessage(pacId, msgConstants.MSG_VIDEO_WAITING, 0, 0);
-                break;
-
-            case YT_VIDEO_CUED:
-                // Video is loaded and ready to play but not yet started.
-                // Fire MSG_VIDEO_LOADED here so the host can read duration before
-                // the user ever presses play.
-                maybeFireLoaded(pacId, entry);
-                break;
-
-            case YT_UNSTARTED:
-                // Player was reset (e.g. loadVideoById called on an existing player).
-                // Allow MSG_VIDEO_LOADED to fire again for the incoming video.
-                entry.loadedFired = false;
-                break;
-        }
-
-        entry.prevState = newState;
-    }
-
     // =========================================================================
     // Player construction
     // =========================================================================
-
-    /**
-     * Instantiates a YT.Player for the given container and registers it.
-     * Called immediately if the IFrame API is already ready, or deferred via
-     * _pendingInits if called before onYouTubeIframeAPIReady has fired.
-     * @param {Object} abstraction
-     * @param {string} pacId
-     * @param {string} videoId
-     * @param {Object} pac
-     * @param {Object} msgConstants
-     * @param {Object} playerVars - Merged plugin-level and per-instance playerVars
-     */
-    function createPlayer(abstraction, pacId, videoId, pac, msgConstants, playerVars) {
-        const container = pac.getContainerByPacId(pacId);
-
-        // Guard: the component may have been destroyed while waiting for the API,
-        // or the container may have been detached from the DOM in the meantime.
-        if (!container || !container.isConnected) {
-            return;
-        }
-
-        // Register the component; player is assigned below once YT.Player is constructed
-        const entry = {
-            pac,
-            player: null,
-            abstraction,
-            msgConstants,
-            rafHandle: null,
-            prevState: YT_UNSTARTED,
-            loadedFired: false
-        };
-
-        _registry.set(pacId, entry);
-
-        // Instantiate the YouTube player in the container
-        entry.player = new YT.Player(container, {
-            // host must be at the top level of the config object, not inside
-            // playerVars — YouTube ignores it there.
-            host: 'https://www.youtube-nocookie.com',
-            videoId,
-            playerVars,
-            events: {
-                onStateChange(event) {
-                    onStateChange(pacId, entry, event.data);
-                },
-                onError(event) {
-                    // Notify msgProc
-                    pac.sendMessage(pacId, msgConstants.MSG_VIDEO_ERROR, event.data, 0, {
-                        message: YT_ERROR_MESSAGES[event.data] ?? 'Unknown YouTube error'
-                    });
-                }
-            }
-        });
-    }
 
     // =========================================================================
     // Plugin definition
@@ -435,136 +601,8 @@
         MSG_VIDEO_CANPLAY      : MSG_PLUGIN + 0x10B,
         MSG_VIDEO_TIMEUPDATE   : MSG_PLUGIN + 0x10C,
 
-
         createPacPlugin(pac, _options = {}) {
-
-            // Plugin-level playerVars defaults, set via wakaPAC.use(WakaYouTube, { ... }).
-            // Per-instance config passed as the third argument to wakaPAC() under the
-            // 'youtube' key overrides these on a property-by-property basis.
-            // enablejsapi is always forced to 1 — the plugin cannot function without it.
-            const _defaultPlayerVars = {
-                controls: _options.controls ?? 0,
-                rel: _options.rel ?? 0
-            };
-
-            // Use the public message IDs for delivery as well as comparisons.
-            const {
-                MSG_VIDEO_PLAY,
-                MSG_VIDEO_PAUSE,
-                MSG_VIDEO_ENDED,
-                MSG_VIDEO_SEEK,
-                MSG_VIDEO_LOADED,
-                MSG_VIDEO_ERROR,
-                MSG_VIDEO_VOLUME_CHANGE,
-                MSG_VIDEO_WAITING,
-                MSG_VIDEO_CANPLAY,
-                MSG_VIDEO_TIMEUPDATE
-            } = this;
-
-            const msgConstants = {
-                MSG_VIDEO_PLAY,
-                MSG_VIDEO_PAUSE,
-                MSG_VIDEO_ENDED,
-                MSG_VIDEO_SEEK,
-                MSG_VIDEO_LOADED,
-                MSG_VIDEO_ERROR,
-                MSG_VIDEO_VOLUME_CHANGE,
-                MSG_VIDEO_WAITING,
-                MSG_VIDEO_CANPLAY,
-                MSG_VIDEO_TIMEUPDATE
-            };
-
-            return {
-
-                /**
-                 * Called by WakaPAC after a component is created.
-                 * Activates only when the container is a <div> with a data-youtube-id
-                 * attribute. Injects the IFrame API script on first use and either
-                 * creates the player immediately (API already ready) or queues it.
-                 *
-                 * @param {Object} abstraction - The component's reactive abstraction object
-                 * @param {string} pacId       - The data-pac-id of the container
-                 * @param {Object} _config     - Component config (unused)
-                 */
-                onComponentCreated(abstraction, pacId, _config) {
-                    const container = pac.getContainerByPacId(pacId);
-
-                    if (!container) {
-                        return;
-                    }
-
-                    // Accept either:
-                    //   <div data-youtube-id="…">          — classic attribute-based usage
-                    //   <waka-youtube data-youtube-id="…"> — custom element usage
-                    const tag = container.tagName.toLowerCase();
-
-                    if (!(container instanceof HTMLDivElement) && tag !== 'waka-youtube') {
-                        return;
-                    }
-
-                    // Fetch the video ID
-                    const videoId = container.dataset.youtubeId;
-
-                    if (!videoId) {
-                        return;
-                    }
-
-                    // Merge plugin-level defaults with per-instance overrides.
-                    // Per-instance config is passed as the third argument to wakaPAC()
-                    // under the 'youtube' key: wakaPAC('id', { msgProc }, { youtube: { controls: 1 } })
-                    // enablejsapi is always forced to 1 regardless of either config.
-                    const playerVars = {
-                        ..._defaultPlayerVars,
-                        ...(_config.youtube ?? {}),
-                        enablejsapi: 1
-                    };
-
-                    // Seed the abstraction with a neutral initial value before the
-                    // player is ready, so bindings have something to render.
-                    abstraction.duration = NaN;
-
-                    // Inject the API script if not already done, then create the player
-                    ensureApiLoaded();
-
-                    if (_apiReady) {
-                        createPlayer(abstraction, pacId, videoId, pac, msgConstants, playerVars);
-                    } else {
-                        _pendingInits.push({abstraction, pacId, videoId, pac, msgConstants, playerVars});
-                    }
-                },
-
-                /**
-                 * Called by WakaPAC when a component is destroyed.
-                 * Removes any pending init from the queue, stops the currentTime
-                 * polling interval, destroys the YT.Player instance, and removes
-                 * the registry entry.
-                 * @param {string} pacId
-                 */
-                onComponentDestroyed(pacId) {
-                    // If destroyed while still waiting for the API, pull it from
-                    // the queue so createPlayer is never called for it.
-                    const pendingIndex = _pendingInits.findIndex(p => p.pacId === pacId);
-
-                    if (pendingIndex !== -1) {
-                        _pendingInits.splice(pendingIndex, 1);
-                    }
-
-                    const entry = _registry.get(pacId);
-
-                    if (!entry) {
-                        return;
-                    }
-
-                    // Stop the rAF loop
-                    stopPolling(entry);
-
-                    // Destroy the YouTube player instance
-                    entry.player.destroy();
-
-                    // Unregister the component
-                    _registry.delete(pacId);
-                }
-            };
+            return new YouTubePlugin(this, pac, _options).initialize();
         },
 
         // =====================================================================
@@ -651,7 +689,7 @@
                 muted,
                 {
                     volume: clamped,
-                    muted: Boolean(muted)
+                    muted : Boolean(muted)
                 }
             );
         },
@@ -689,5 +727,4 @@
     };
 
     window.wakaYouTube = window.WakaYouTube;
-
 })();

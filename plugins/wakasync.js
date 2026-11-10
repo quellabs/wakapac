@@ -20,6 +20,222 @@
 (function () {
     "use strict";
 
+    /** Owns the state and lifecycle of one http plugin. */
+    class HttpPlugin {
+        constructor(owner, pac) {
+            this._owner = owner;
+            this._pac = pac;
+
+            this.request = this.request.bind(this);
+            this.createHandle = this.createHandle.bind(this);
+        }
+
+        initialize() {
+            const state = this;
+
+            state._self = state._owner;
+            state._nextRequestId = 0;
+
+            // Use the public message IDs for delivery as well as comparisons.
+            ({
+                MSG_HTTP_SUCCESS: state._MSG_HTTP_SUCCESS,
+                MSG_HTTP_ERROR: state._MSG_HTTP_ERROR,
+                MSG_HTTP_ABORT: state._MSG_HTTP_ABORT
+            } = WakaSync);
+
+            return state.createDescriptor();
+        }
+
+        request(pacId, method, url, opts) {
+            const state = this;
+
+            const requestHandlers = {
+                onResolved(data) {
+                    const endTime = Date.now();
+
+                    state._pac.postMessage(pacId, state._MSG_HTTP_SUCCESS, requestId, 0, {
+                        data  : data,
+                        url   : url,
+                        method: method,
+                        timing: {
+                            startTime: startTime,
+                            endTime  : endTime,
+                            duration : endTime - startTime
+                        }
+                    });
+                },
+
+                onRejected(error) {
+                    if (state._self.isCancellationError(error)) {
+                        state._pac.postMessage(pacId, state._MSG_HTTP_ABORT, requestId, 0, {
+                            error : error,
+                            url   : url,
+                            method: method
+                        });
+                    } else {
+                        const status = error.response && error.response.status
+                            ? error.response.status
+                            : 0;
+
+                        state._pac.postMessage(pacId, state._MSG_HTTP_ERROR, requestId, status, {
+                            error : error,
+                            url   : url,
+                            method: method,
+                            status: status,
+                            code  : error.code || null
+                        });
+                    }
+                }
+            };
+
+            opts = opts || {};
+
+            const requestId = ++state._nextRequestId;
+            const startTime = Date.now();
+            const groupKey = opts.groupKey !== undefined ? opts.groupKey : pacId;
+
+            state._self.request(url, Object.assign({}, opts, {
+                method  : method,
+                groupKey: groupKey
+            })).then(requestHandlers.onResolved).catch(requestHandlers.onRejected);
+
+            return requestId;
+        }
+
+        createHandle(pacId, defaults) {
+            const state = this;
+
+            const createHandleRuntime = {
+                /**
+                 * Merges component defaults with per-request options.
+                 * Per-request options take precedence over component defaults.
+                 * Headers are deep-merged so both layers contribute.
+                 * @param {Object} [opts] - Per-request options
+                 * @returns {Object} Merged options
+                 */
+                mergeOpts(opts) {
+                    return Object.assign({}, defaults, opts, {
+                        headers: Object.assign({}, defaults.headers, opts && opts.headers)
+                    });
+                },
+
+                /**
+                 * Merges component defaults with per-request options,
+                 * adding a request body.
+                 * Headers are deep-merged so both layers contribute.
+                 * @param {*} data - Request body
+                 * @param {Object} [opts] - Per-request options
+                 * @returns {Object} Merged options with data
+                 */
+                mergeOptsWithData(data, opts) {
+                    return Object.assign(createHandleRuntime.mergeOpts(opts), { data });
+                }
+            };
+
+            defaults = defaults || {};
+
+            return {
+                /**
+                 * Sends a GET request.
+                 * @param {string} url - Request URL
+                 * @param {Object} [opts] - WakaSync request options
+                 * @returns {number} Request ID
+                 */
+                get(url, opts) {
+                    return state.request(pacId, 'GET', url, createHandleRuntime.mergeOpts(opts));
+                },
+
+                /**
+                 * Sends a POST request.
+                 * @param {string} url - Request URL
+                 * @param {*} data - Request body
+                 * @param {Object} [opts] - WakaSync request options
+                 * @returns {number} Request ID
+                 */
+                post(url, data, opts) {
+                    return state.request(pacId, 'POST', url, createHandleRuntime.mergeOptsWithData(data, opts));
+                },
+
+                /**
+                 * Sends a PUT request.
+                 * @param {string} url - Request URL
+                 * @param {*} data - Request body
+                 * @param {Object} [opts] - WakaSync request options
+                 * @returns {number} Request ID
+                 */
+                put(url, data, opts) {
+                    return state.request(pacId, 'PUT', url, createHandleRuntime.mergeOptsWithData(data, opts));
+                },
+
+                /**
+                 * Sends a PATCH request.
+                 * @param {string} url - Request URL
+                 * @param {*} data - Request body
+                 * @param {Object} [opts] - WakaSync request options
+                 * @returns {number} Request ID
+                 */
+                patch(url, data, opts) {
+                    return state.request(pacId, 'PATCH', url, createHandleRuntime.mergeOptsWithData(data, opts));
+                },
+
+                /**
+                 * Sends a DELETE request.
+                 * @param {string} url - Request URL
+                 * @param {Object} [opts] - WakaSync request options
+                 * @returns {number} Request ID
+                 */
+                delete(url, opts) {
+                    return state.request(pacId, 'DELETE', url, createHandleRuntime.mergeOpts(opts));
+                },
+
+                /**
+                 * Sends a HEAD request.
+                 * @param {string} url - Request URL
+                 * @param {Object} [opts] - WakaSync request options
+                 * @returns {number} Request ID
+                 */
+                head(url, opts) {
+                    return state.request(pacId, 'HEAD', url, createHandleRuntime.mergeOpts(opts));
+                },
+
+                /**
+                 * Cancels all in-flight requests for this component.
+                 * Uses the default groupKey (pacId) set by the bridge.
+                 */
+                cancel() {
+                    state._self.cancelGroup(pacId);
+                }
+            };
+        }
+
+        createDescriptor() {
+            const state = this;
+
+            return {
+                /**
+                 * Called for each new component after construction but before init().
+                 * Injects a scoped HTTP handle as this._http on the abstraction.
+                 * @param {Object} abstraction - The component's reactive abstraction
+                 * @param {string} pacId - The component's data-pac-id
+                 * @param config
+                 */
+                onComponentCreated(abstraction, pacId, config) {
+                    const key = config.wakaSync?.property ?? '_http';
+                    abstraction[key] = state.createHandle(pacId, config.wakaSync);
+                },
+
+                /**already
+                 * Called when a component is removed from the DOM.
+                 * Cancels all in-flight requests scoped to this component.
+                 * @param {string} pacId - The component's data-pac-id
+                 */
+                onComponentDestroyed(pacId) {
+                    state._self.cancelGroup(pacId);
+                }
+            };
+        }
+    }
+
     // Support standalone loading while using the host's plugin base when present.
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
@@ -41,22 +257,22 @@
         // Interceptors with id tracking for eject support
         this._interceptorId = 0;
         this.interceptors = {
-            request: [],
+            request : [],
             response: []
         };
 
         // Default configuration
         this.config = {
-            timeout: 30000,
-            retries: 0,
-            retryDelay: 1000,
-            retryBackoff: 'exponential',      // 'fixed', 'exponential', or 'linear'
+            timeout        : 30000,
+            retries        : 0,
+            retryDelay     : 1000,
+            retryBackoff   : 'exponential',      // 'fixed', 'exponential', or 'linear'
             retryBackoffMax: 30000,            // Cap for exponential backoff
-            validateStatus: function (response) {
+            validateStatus(response) {
                 return response.ok;
             },
             responseType: 'auto',
-            headers: {}
+            headers     : {}
         };
     }
 
@@ -89,206 +305,7 @@
          * @returns {Object} Plugin descriptor with install, onComponentCreated, onComponentDestroyed
          */
         createPacPlugin(pac) {
-            const self = this;
-            let nextRequestId = 0;
-
-            // Use the public message IDs for delivery as well as comparisons.
-            const {
-                MSG_HTTP_SUCCESS,
-                MSG_HTTP_ERROR,
-                MSG_HTTP_ABORT
-            } = WakaSync;
-
-            /**
-             * Initiates an HTTP request and delivers the result as a message
-             * to the specified component's msgProc.
-             * @param {string} pacId - Target component's data-pac-id
-             * @param {string} method - HTTP method
-             * @param {string} url - Request URL
-             * @param {Object} [opts] - WakaSync request options
-             * @returns {number} Request ID for correlation via event.wParam
-             */
-            function request(pacId, method, url, opts) {
-                opts = opts || {};
-
-                const requestId = ++nextRequestId;
-                const startTime = Date.now();
-                const groupKey = opts.groupKey !== undefined ? opts.groupKey : pacId;
-
-                self.request(url, Object.assign({}, opts, {
-                    method: method,
-                    groupKey: groupKey
-                })).then(function (data) {
-                    const endTime = Date.now();
-
-                    pac.postMessage(pacId, MSG_HTTP_SUCCESS, requestId, 0, {
-                        data: data,
-                        url: url,
-                        method: method,
-                        timing: {
-                            startTime: startTime,
-                            endTime: endTime,
-                            duration: endTime - startTime
-                        }
-                    });
-                }).catch(function (error) {
-                    if (self.isCancellationError(error)) {
-                        pac.postMessage(pacId, MSG_HTTP_ABORT, requestId, 0, {
-                            error: error,
-                            url: url,
-                            method: method
-                        });
-                    } else {
-                        const status = (error.response && error.response.status)
-                            ? error.response.status
-                            : 0;
-
-                        pac.postMessage(pacId, MSG_HTTP_ERROR, requestId, status, {
-                            error: error,
-                            url: url,
-                            method: method,
-                            status: status,
-                            code: error.code || null
-                        });
-                    }
-                });
-
-                return requestId;
-            }
-
-            /**
-             * Creates a component-scoped HTTP handle with optional per-component defaults.
-             * @param {string} pacId - Component's data-pac-id
-             * @param {Object} [defaults] - Per-component default options from wakaPAC config
-             * @returns {Object} Bound handle with get, post, put, patch, delete, head, cancel
-             */
-            function createHandle(pacId, defaults) {
-                defaults = defaults || {};
-
-                /**
-                 * Merges component defaults with per-request options.
-                 * Per-request options take precedence over component defaults.
-                 * Headers are deep-merged so both layers contribute.
-                 * @param {Object} [opts] - Per-request options
-                 * @returns {Object} Merged options
-                 */
-                function mergeOpts(opts) {
-                    return Object.assign({}, defaults, opts, {
-                        headers: Object.assign({}, defaults.headers, opts && opts.headers)
-                    });
-                }
-
-                /**
-                 * Merges component defaults with per-request options,
-                 * adding a request body.
-                 * Headers are deep-merged so both layers contribute.
-                 * @param {*} data - Request body
-                 * @param {Object} [opts] - Per-request options
-                 * @returns {Object} Merged options with data
-                 */
-                function mergeOptsWithData(data, opts) {
-                    return Object.assign({}, defaults, opts, {
-                        headers: Object.assign({}, defaults.headers, opts && opts.headers),
-                        data: data
-                    });
-                }
-
-                return {
-                    /**
-                     * Sends a GET request.
-                     * @param {string} url - Request URL
-                     * @param {Object} [opts] - WakaSync request options
-                     * @returns {number} Request ID
-                     */
-                    get: function (url, opts) {
-                        return request(pacId, 'GET', url, mergeOpts(opts));
-                    },
-
-                    /**
-                     * Sends a POST request.
-                     * @param {string} url - Request URL
-                     * @param {*} data - Request body
-                     * @param {Object} [opts] - WakaSync request options
-                     * @returns {number} Request ID
-                     */
-                    post: function (url, data, opts) {
-                        return request(pacId, 'POST', url, mergeOptsWithData(data, opts));
-                    },
-
-                    /**
-                     * Sends a PUT request.
-                     * @param {string} url - Request URL
-                     * @param {*} data - Request body
-                     * @param {Object} [opts] - WakaSync request options
-                     * @returns {number} Request ID
-                     */
-                    put: function (url, data, opts) {
-                        return request(pacId, 'PUT', url, mergeOptsWithData(data, opts));
-                    },
-
-                    /**
-                     * Sends a PATCH request.
-                     * @param {string} url - Request URL
-                     * @param {*} data - Request body
-                     * @param {Object} [opts] - WakaSync request options
-                     * @returns {number} Request ID
-                     */
-                    patch: function (url, data, opts) {
-                        return request(pacId, 'PATCH', url, mergeOptsWithData(data, opts));
-                    },
-
-                    /**
-                     * Sends a DELETE request.
-                     * @param {string} url - Request URL
-                     * @param {Object} [opts] - WakaSync request options
-                     * @returns {number} Request ID
-                     */
-                    delete: function (url, opts) {
-                        return request(pacId, 'DELETE', url, mergeOpts(opts));
-                    },
-
-                    /**
-                     * Sends a HEAD request.
-                     * @param {string} url - Request URL
-                     * @param {Object} [opts] - WakaSync request options
-                     * @returns {number} Request ID
-                     */
-                    head: function (url, opts) {
-                        return request(pacId, 'HEAD', url, mergeOpts(opts));
-                    },
-
-                    /**
-                     * Cancels all in-flight requests for this component.
-                     * Uses the default groupKey (pacId) set by the bridge.
-                     */
-                    cancel: function () {
-                        self.cancelGroup(pacId);
-                    }
-                };
-            }
-
-            return {
-                /**
-                 * Called for each new component after construction but before init().
-                 * Injects a scoped HTTP handle as this._http on the abstraction.
-                 * @param {Object} abstraction - The component's reactive abstraction
-                 * @param {string} pacId - The component's data-pac-id
-                 * @param config
-                 */
-                onComponentCreated(abstraction, pacId, config) {
-                    const key = config.wakaSync?.property ?? '_http';
-                    abstraction[key] = createHandle(pacId, config.wakaSync);
-                },
-
-                /**already
-                 * Called when a component is removed from the DOM.
-                 * Cancels all in-flight requests scoped to this component.
-                 * @param {string} pacId - The component's data-pac-id
-                 */
-                onComponentDestroyed: function (pacId) {
-                    self.cancelGroup(pacId);
-                }
-            };
+            return new HttpPlugin(this, pac).initialize();
         },
 
         /**
@@ -300,6 +317,15 @@
          * @returns {Function} Unsubscribe function
          */
         _addInterceptor(list, fn) {
+            const addInterceptorHandlers = {
+                removeInterceptor() {
+                    const idx = list.indexOf(entry);
+                    if (idx !== -1) {
+                        list.splice(idx, 1);
+                    }
+                }
+            };
+
             if (typeof fn !== 'function') {
                 throw new Error('Interceptor must be a function');
             }
@@ -307,12 +333,7 @@
             const entry = {id: ++this._interceptorId, fn};
             list.push(entry);
 
-            return () => {
-                const idx = list.indexOf(entry);
-                if (idx !== -1) {
-                    list.splice(idx, 1);
-                }
-            };
+            return addInterceptorHandlers.removeInterceptor.bind(this);
         },
 
         /**
@@ -335,6 +356,46 @@
          */
         addResponseInterceptor(fn) {
             return this._addInterceptor(this.interceptors.response, fn);
+        },
+
+        _setupRequestTimeout(interceptedConfig, requestState) {
+            let timeoutId = null;
+
+            if (interceptedConfig.timeout > 0) {
+                const setupRequestTimeoutHandlers = {
+                    onAbort() {
+                        clearTimeout(timeoutId);
+                    },
+
+                    onTimeout() {
+                        if (!requestState.controller.signal.aborted) {
+                            requestState.timedOut = true;
+                            requestState.controller.abort();
+                        }
+                    }
+                };
+
+                timeoutId = setTimeout(setupRequestTimeoutHandlers.onTimeout.bind(this), interceptedConfig.timeout);
+
+                // Clear timeout if controller is aborted by something else
+                requestState.controller.signal.addEventListener('abort', setupRequestTimeoutHandlers.onAbort.bind(this), {once: true});
+            }
+            return timeoutId;
+        },
+
+        _handleRequestFailure(error, requestState, interceptedConfig) {
+            // Convert generic abort into timeout error if timeout triggered it.
+            // Check both AbortError (from fetch) and CancellationError (from
+            // delayWithAbortCheck during retries).
+            if (requestState.timedOut && (error.name === 'AbortError' || error.name === 'CancellationError')) {
+                const timeoutError = this.createTaggedCancellationError(
+                    `Request timeout after ${interceptedConfig.timeout}ms`,
+                    'timeout'
+                );
+                return this.handleError(timeoutError, interceptedConfig);
+            }
+
+            return this.handleError(error, interceptedConfig);
         },
 
         /**
@@ -402,21 +463,7 @@
             const requestState = this.setupRequestState(interceptedConfig);
 
             // Setup timeout that aborts the controller directly
-            let timeoutId = null;
-
-            if (interceptedConfig.timeout > 0) {
-                timeoutId = setTimeout(() => {
-                    if (!requestState.controller.signal.aborted) {
-                        requestState.timedOut = true;
-                        requestState.controller.abort();
-                    }
-                }, interceptedConfig.timeout);
-
-                // Clear timeout if controller is aborted by something else
-                requestState.controller.signal.addEventListener('abort', () => {
-                    clearTimeout(timeoutId);
-                }, {once: true});
-            }
+            const timeoutId = this._setupRequestTimeout(interceptedConfig, requestState);
 
             try {
                 let response = await this.executeWithRetry(interceptedConfig, requestState);
@@ -447,18 +494,7 @@
 
                 return this.handleSuccess(data, interceptedConfig, requestState);
             } catch (error) {
-                // Convert generic abort into timeout error if timeout triggered it.
-                // Check both AbortError (from fetch) and CancellationError (from
-                // delayWithAbortCheck during retries).
-                if (requestState.timedOut && (error.name === 'AbortError' || error.name === 'CancellationError')) {
-                    const timeoutError = this.createTaggedCancellationError(
-                        `Request timeout after ${interceptedConfig.timeout}ms`,
-                        'timeout'
-                    );
-                    return this.handleError(timeoutError, interceptedConfig);
-                }
-
-                return this.handleError(error, interceptedConfig);
+                return this._handleRequestFailure(error, requestState, interceptedConfig);
             } finally {
                 if (timeoutId !== null) {
                     clearTimeout(timeoutId);
@@ -556,14 +592,14 @@
                 ...defaultConfig,
                 headers: {
                     ...this.config.headers,
-                    ...(defaultConfig.headers || {})
+                    ...defaultConfig.headers || {}
                 }
             };
 
             // Optionally copy interceptors (shallow copy of entry references)
             if (options.copyInterceptors) {
                 instance.interceptors = {
-                    request: [...this.interceptors.request],
+                    request : [...this.interceptors.request],
                     response: [...this.interceptors.response]
                 };
             }
@@ -595,11 +631,15 @@
          * @public
          */
         cancelAll() {
-            this._requestGroups.forEach(function (group) {
-                if (group.controller && !group.controller.signal.aborted) {
-                    group.controller.abort();
+            const cancelAllHandlers = {
+                visitItem(group) {
+                    if (group.controller && !group.controller.signal.aborted) {
+                        group.controller.abort();
+                    }
                 }
-            });
+            };
+
+            this._requestGroups.forEach(cancelAllHandlers.visitItem);
 
             this._requestGroups.clear();
         },
@@ -610,13 +650,17 @@
          * @returns {number} Number of active requests
          */
         getActiveRequestCount() {
+            const getActiveRequestCountHandlers = {
+                visitItem(group) {
+                    if (group.controller && !group.controller.signal.aborted) {
+                        count++;
+                    }
+                }
+            };
+
             let count = 0;
 
-            this._requestGroups.forEach(function (group) {
-                if (group.controller && !group.controller.signal.aborted) {
-                    count++;
-                }
-            });
+            this._requestGroups.forEach(getActiveRequestCountHandlers.visitItem);
 
             return count;
         },
@@ -628,6 +672,10 @@
          * @returns {Object} Normalized configuration
          */
         validateAndNormalizeConfig(url, opts) {
+            const validateAndNormalizeConfigHandlers = {
+                acceptResponse(response) { return response.ok; }
+            };
+
             // Validate required URL parameter
             if (!url || typeof url !== 'string') {
                 const error = new Error('URL must be a non-empty string');
@@ -641,7 +689,7 @@
                 ...opts,
                 headers: {
                     ...this.config.headers,
-                    ...(opts.headers || {})
+                    ...opts.headers || {}
                 }
             };
 
@@ -668,21 +716,21 @@
                 body,
                 groupKey,
                 fetchOptions,
-                timeout: Math.max(0, parseInt(merged.timeout) || 30000),
-                ignoreAbort: !!merged.ignoreAbort,
-                validateStatus: merged.validateStatus || ((response) => response.ok),
-                responseType: merged.responseType || 'auto',
-                onSuccess: merged.onSuccess,
-                onError: merged.onError,
-                onProgress: merged.onProgress,
+                timeout        : Math.max(0, parseInt(merged.timeout) || 30000),
+                ignoreAbort    : !!merged.ignoreAbort,
+                validateStatus : merged.validateStatus || validateAndNormalizeConfigHandlers.acceptResponse.bind(this),
+                responseType   : merged.responseType || 'auto',
+                onSuccess      : merged.onSuccess,
+                onError        : merged.onError,
+                onProgress     : merged.onProgress,
                 abortController: merged.abortController,
-                retries: Math.max(0, parseInt(merged.retries) || 0),
-                retryDelay: Math.max(0, parseInt(merged.retryDelay) || 1000),
-                retryBackoff: merged.retryBackoff || 'exponential',
+                retries        : Math.max(0, parseInt(merged.retries) || 0),
+                retryDelay     : Math.max(0, parseInt(merged.retryDelay) || 1000),
+                retryBackoff   : merged.retryBackoff || 'exponential',
                 retryBackoffMax: Math.max(0, parseInt(merged.retryBackoffMax) || 30000),
-                shouldRetry: merged.shouldRetry,
-                urlNormalizer: merged.urlNormalizer,
-                baseUrl: merged.baseUrl
+                shouldRetry    : merged.shouldRetry,
+                urlNormalizer  : merged.urlNormalizer,
+                baseUrl        : merged.baseUrl
             };
         },
 
@@ -765,6 +813,14 @@
          * @returns {Headers} Headers object
          */
         buildHeaders(opts, body, bodyIsJson) {
+            const buildHeadersHandlers = {
+                visitItem([key, value]) {
+                    headers.set(key, value);
+                },
+
+                someCallback(key) { return key.toLowerCase() === 'accept'; }
+            };
+
             const headers = new Headers();
 
             // Add content type based on body
@@ -784,16 +840,14 @@
 
             // Add Accept header if not provided
             const userHeaders = opts.headers || {};
-            const hasAccept = Object.keys(userHeaders).some(key => key.toLowerCase() === 'accept');
+            const hasAccept = Object.keys(userHeaders).some(buildHeadersHandlers.someCallback.bind(this));
 
             if (!hasAccept) {
                 headers.set('Accept', 'application/json, text/plain, */*');
             }
 
             // Add user headers (override defaults)
-            Object.entries(userHeaders).forEach(([key, value]) => {
-                headers.set(key, value);
-            });
+            Object.entries(userHeaders).forEach(buildHeadersHandlers.visitItem.bind(this));
 
             return headers;
         },
@@ -804,17 +858,28 @@
          * @returns {Object} Fetch options
          */
         buildFetchPassthrough(opts) {
+            const buildFetchPassthroughHandlers = {
+                visitItem(key) {
+                    if (opts[key] !== undefined) {
+                        fetchOptions[key] = opts[key];
+                    }
+                }
+            };
+
             const fetchOptions = {};
             const passthroughKeys = [
-                'credentials', 'mode', 'cache', 'redirect', 'referrer',
-                'referrerPolicy', 'integrity', 'keepalive', 'priority'
+                'credentials',
+                'mode',
+                'cache',
+                'redirect',
+                'referrer',
+                'referrerPolicy',
+                'integrity',
+                'keepalive',
+                'priority'
             ];
 
-            passthroughKeys.forEach(key => {
-                if (opts[key] !== undefined) {
-                    fetchOptions[key] = opts[key];
-                }
-            });
+            passthroughKeys.forEach(buildFetchPassthroughHandlers.visitItem.bind(this));
 
             return fetchOptions;
         },
@@ -843,6 +908,19 @@
          */
         normalizeUrlForGrouping(url, baseUrl) {
             try {
+                const normalizeUrlForGroupingHandlers = {
+                    visitItem(key) {
+                        const visitItemHandlers = {
+                            visitItem(value) {
+                                sortedParams.append(key, value);
+                            }
+                        };
+
+                        // Preserve original insertion order of values for this key
+                        params.getAll(key).forEach(visitItemHandlers.visitItem.bind(this));
+                    }
+                };
+
                 let defaultBase;
 
                 if (typeof globalThis !== 'undefined' && globalThis.location) {
@@ -858,12 +936,7 @@
                 const params = new URLSearchParams(urlObj.search);
                 const sortedParams = new URLSearchParams();
 
-                Array.from(new Set(params.keys())).sort().forEach(key => {
-                    // Preserve original insertion order of values for this key
-                    params.getAll(key).forEach(value => {
-                        sortedParams.append(key, value);
-                    });
-                });
+                Array.from(new Set(params.keys())).sort().forEach(normalizeUrlForGroupingHandlers.visitItem.bind(this));
 
                 urlObj.search = sortedParams.toString();
                 return urlObj.toString();
@@ -920,16 +993,20 @@
 
             // If AbortSignal.any is supported, combine signals cleanly
             if (typeof AbortSignal.any === 'function') {
+                const createCombinedControllerHandlers = {
+                    onAbort() {
+                        if (!internal.signal.aborted) {
+                            internal.abort(anySignal.reason);
+                        }
+                    }
+                };
+
                 const anySignal = AbortSignal.any([
                     internal.signal,
                     config.abortController.signal
                 ]);
 
-                anySignal.addEventListener('abort', () => {
-                    if (!internal.signal.aborted) {
-                        internal.abort(anySignal.reason);
-                    }
-                }, {once: true});
+                anySignal.addEventListener('abort', createCombinedControllerHandlers.onAbort.bind(this), {once: true});
 
                 return internal;
             }
@@ -938,11 +1015,15 @@
             if (config.abortController.signal.aborted) {
                 internal.abort();
             } else {
-                config.abortController.signal.addEventListener('abort', () => {
-                    if (!internal.signal.aborted) {
-                        internal.abort();
+                const createCombinedControllerHandlers = {
+                    onAbort() {
+                        if (!internal.signal.aborted) {
+                            internal.abort();
+                        }
                     }
-                }, {once: true});
+                };
+
+                config.abortController.signal.addEventListener('abort', createCombinedControllerHandlers.onAbort.bind(this), {once: true});
             }
 
             return internal;
@@ -1075,26 +1156,36 @@
          * @returns {Promise} Delay promise
          */
         delayWithAbortCheck(ms, controller) {
+            const delayWithAbortCheckHandlers = {
+                execute(resolve, reject) {
+                    const executeHandlers = {
+                        onTimeout() {
+                            controller.signal.removeEventListener('abort', pluginRuntime.onAbort);
+                            resolve();
+                        }
+                    };
+
+                    const pluginRuntime = {
+                        onAbort() {
+                            clearTimeout(timeoutId);
+                            reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
+                        }
+                    };
+
+                    if (controller.signal.aborted) {
+                        reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
+                        return;
+                    }
+
+                    const timeoutId = setTimeout(executeHandlers.onTimeout, ms);
+
+                    controller.signal.addEventListener('abort', pluginRuntime.onAbort, {once: true});
+                }
+            };
+
             const self = this;
 
-            return new Promise(function (resolve, reject) {
-                if (controller.signal.aborted) {
-                    reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
-                    return;
-                }
-
-                function onAbort() {
-                    clearTimeout(timeoutId);
-                    reject(self.createTaggedCancellationError('Request was cancelled during retry delay', 'cancelled'));
-                }
-
-                const timeoutId = setTimeout(function () {
-                    controller.signal.removeEventListener('abort', onAbort);
-                    resolve();
-                }, ms);
-
-                controller.signal.addEventListener('abort', onAbort, {once: true});
-            });
+            return new Promise(delayWithAbortCheckHandlers.execute);
         },
 
         /**
@@ -1109,10 +1200,10 @@
             }
 
             const fetchOptions = {
-                method: config.method,
+                method : config.method,
                 headers: config.headers,
-                body: config.body,
-                signal: requestState.controller.signal,
+                body   : config.body,
+                signal : requestState.controller.signal,
                 ...config.fetchOptions
             };
 
@@ -1240,6 +1331,10 @@
 
                 // Use streaming reader to avoid reading entire body
                 if (clone.body && typeof clone.body.getReader === 'function') {
+                    const safeGetResponseTextHandlers = {
+                        decodeChunk(c) { return decoder.decode(c, {stream: true}); }
+                    };
+
                     const reader = clone.body.getReader();
                     const chunks = [];
                     let totalBytes = 0;
@@ -1271,7 +1366,7 @@
                     }
 
                     const decoder = new TextDecoder('utf-8', {fatal: false});
-                    const text = chunks.map(c => decoder.decode(c, {stream: true})).join('') + decoder.decode();  // flush any remaining bytes
+                    const text = chunks.map(safeGetResponseTextHandlers.decodeChunk.bind(this)).join('') + decoder.decode();  // flush any remaining bytes
                     return text.slice(0, 200);
                 }
 
@@ -1409,9 +1504,13 @@
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {WakaSync, wakaSync};
     } else if (typeof define === 'function' && define.amd) {
-        define(function () {
-            return {WakaSync, wakaSync};
-        });
+        const wakasyncHandlers = {
+            defineCallback() {
+                return {WakaSync, wakaSync};
+            }
+        };
+
+        define(wakasyncHandlers.defineCallback);
     } else if (typeof window !== 'undefined') {
         window.WakaSync = WakaSync;
         window.wakaSync = wakaSync;

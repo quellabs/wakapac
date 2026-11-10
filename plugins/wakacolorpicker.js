@@ -47,6 +47,505 @@
 (function() {
     "use strict";
 
+    /** Owns the state and lifecycle of one color picker widget. */
+    class ColorPickerWidget {
+        constructor(owner, input, options = {}) {
+            this._owner = owner;
+            this._input = input;
+            this._options = options;
+
+            this.syncInputs = this.syncInputs.bind(this);
+            this.buildSwatches = this.buildSwatches.bind(this);
+            this.selectCell = this.selectCell.bind(this);
+            this.applyColor = this.applyColor.bind(this);
+            this.selectColor = this.selectColor.bind(this);
+            this.onNativeInput = this.onNativeInput.bind(this);
+            this.onTextInput = this.onTextInput.bind(this);
+            this.onTextKeydown = this.onTextKeydown.bind(this);
+            this.onSwatchClick = this.onSwatchClick.bind(this);
+        }
+
+        initialize() {
+            const state = this;
+
+            ({ onChange: state._onChange } = state._options);
+
+            // Hide the original input — it keeps its name and value for form submission
+            state._originalType = state._input.type;
+            state._input.type = 'hidden';
+
+            state.createWidget();
+
+            // ── State ─────────────────────────────────────────────────────────────
+
+            /** @type {string|null} Currently selected color as a 6-char hex string without '#'. */
+            state._currentHex = null;
+
+            /** @type {HTMLElement|null} The currently highlighted swatch cell. */
+            state._selectedCell = null;
+
+            // ── Helpers ───────────────────────────────────────────────────────────
+
+            // ── Init ──────────────────────────────────────────────────────────────
+
+            // Seed from the input's existing value, defaulting to white
+            state.applyColor(window.WakaColorPicker.normalizeHex(state._input.value) || 'ffffff');
+
+            state.attachListeners();
+
+            // ── Public API ────────────────────────────────────────────────────────
+
+            return state.createDescriptor();
+        }
+
+        syncInputs(hex) {
+            const state = this;
+
+            state._input.value = '#' + hex;
+
+            state._textInput.value = '#' + hex;
+            state._nativePicker.value = '#' + hex;
+
+            state._trigger.style.backgroundColor = '#' + hex;
+            state._textInput.classList.remove('wcp-invalid');
+
+            state._input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        buildSwatches(hex) {
+            const state = this;
+
+            state._swatchesEl.innerHTML = '';
+            state._selectedCell = null;
+
+            for (const h of pluginRuntime.generateGradient(hex)) {
+                const cell = pluginRuntime.el('div', 'wcp-cell');
+                cell.style.backgroundColor = '#' + h;
+                cell.dataset.hex = h;
+                cell.title = '#' + h;
+                state._swatchesEl.appendChild(cell);
+
+                // Re-apply selection highlight if this stop matches the current color
+                if (h === state._currentHex) {
+                    cell.classList.add('wcp-selected');
+                    state._selectedCell = cell;
+                }
+            }
+        }
+
+        selectCell(cell) {
+            const state = this;
+
+            state._selectedCell?.classList.remove('wcp-selected');
+            state._selectedCell = cell;
+            cell?.classList.add('wcp-selected');
+        }
+
+        applyColor(hex) {
+            const state = this;
+
+            if (hex === state._currentHex) {
+                return;
+            }
+
+            state._currentHex = hex;
+
+            state.syncInputs(hex);
+            state.buildSwatches(hex);
+
+            state._onChange?.('#' + hex);
+        }
+
+        selectColor(hex, cell) {
+            const state = this;
+
+            if (hex === state._currentHex) {
+                return;
+            }
+
+            state._currentHex = hex;
+
+            state.syncInputs(hex);
+            state.selectCell(cell);
+
+            state._onChange?.('#' + hex);
+        }
+
+        onNativeInput() {
+            const state = this;
+
+            const hex = window.WakaColorPicker.normalizeHex(state._nativePicker.value);
+
+            if (hex) {
+                state.applyColor(hex);
+            }
+        }
+
+        onTextInput() {
+            const session = this;
+
+            const hex = window.WakaColorPicker.normalizeHex(session._textInput.value);
+
+            if (hex) {
+                session._textInput.classList.remove('wcp-invalid');
+                session.applyColor(hex);
+            } else {
+                // Invalid mid-typing — show error state but don't discard the text
+                session._textInput.classList.add('wcp-invalid');
+            }
+        }
+
+        onTextKeydown(e) {
+            const state = this;
+
+            if (e.key === 'Escape') {
+                state._textInput.blur();
+            }
+        }
+
+        onSwatchClick(e) {
+            const state = this;
+
+            const cell = e.target.closest('.wcp-cell');
+
+            if (cell) {
+                state.selectColor(cell.dataset.hex, cell);
+            }
+        }
+
+        createDescriptor() {
+            const state = this;
+
+            return {
+                /**
+                 * Removes all event listeners, restores the original input type,
+                 * and removes the widget from the DOM.
+                 */
+                destroy() {
+                    state._nativePicker.removeEventListener('input', state.onNativeInput);
+                    state._textInput.removeEventListener('input', state.onTextInput);
+                    state._textInput.removeEventListener('keydown', state.onTextKeydown);
+                    state._swatchesEl.removeEventListener('click', state.onSwatchClick);
+                    state._input.type = state._originalType;
+                    state._widget.parentNode?.removeChild(state._widget);
+                },
+
+                /**
+                 * Programmatically sets the active color.
+                 * Rebuilds the swatch row and syncs all inputs.
+                 *
+                 * @param {string} hex - Any valid hex color string (with or without '#').
+                 */
+                setColor(hex) {
+                    const n = window.WakaColorPicker.normalizeHex(hex);
+
+                    if (n) {
+                        state.applyColor(n);
+                    }
+                },
+
+                /**
+                 * Returns the current active color as a '#rrggbb' string.
+                 *
+                 * @returns {string}
+                 */
+                getColor() {
+                    return '#' + (state._currentHex || 'ffffff');
+                }
+            };
+        }
+
+        attachListeners() {
+            const state = this;
+
+            // ── Events ────────────────────────────────────────────────────────────
+
+            state._nativePicker.addEventListener('input', state.onNativeInput);
+            state._textInput.addEventListener('input', state.onTextInput);
+            state._textInput.addEventListener('keydown', state.onTextKeydown);
+            state._swatchesEl.addEventListener('click', state.onSwatchClick);
+        }
+
+        createWidget() {
+            const state = this;
+
+            // ── Build DOM ─────────────────────────────────────────────────────────
+
+            state._widget = pluginRuntime.el('span', 'wcp-widget');
+            state._swatchesEl = pluginRuntime.el('span', 'wcp-swatches');
+            state._textInput = Object.assign(pluginRuntime.el('input', 'wcp-text-input'), {
+                type      : 'text',
+                spellcheck: false,
+                maxLength : 7
+            });
+            state._trigger = pluginRuntime.el('span', 'wcp-color-trigger');
+            state._nativePicker = Object.assign(pluginRuntime.el('input'), { type: 'color' });
+
+            // Native picker sits invisibly inside the trigger — clicking the trigger opens it
+            state._trigger.appendChild(state._nativePicker);
+            state._widget.append(state._swatchesEl, state._textInput, state._trigger);
+
+            // Insert widget right after the hidden input in the DOM
+            state._input.parentNode.insertBefore(state._widget, state._input.nextSibling);
+        }
+    }
+
+    /** Owns the state and lifecycle of one color picker plugin. */
+    class ColorPickerPlugin {
+        constructor(owner, pac, options = {}) {
+            this._owner = owner;
+            this._pac = pac;
+            this._options = options;
+        }
+
+        initialize() {
+            const state = this;
+
+            if (state._options.injectCSS !== false) {
+                pluginRuntime.injectCSS();
+            }
+
+            return state.createDescriptor();
+        }
+
+        createDescriptor() {
+            const state = this;
+
+            return {
+                /**
+                 * Called by WakaPAC after a component is created.
+                 *
+                 * Activates the color picker if the component element is either:
+                 *   - A <waka-colorpicker> element (custom element form), or
+                 *   - An <input> element carrying the data-wcp attribute (legacy form).
+                 * Sets up:
+                 *   - abstraction.value    — reactive hex color property
+                 *
+                 * External changes to abstraction.value are picked up via the
+                 * pac:change event on the container element.
+                 *
+                 * @param {object} abstraction - The reactive component abstraction.
+                 * @param {string} pacId       - The component's unique PAC identifier.
+                 * @param {object} config      - The component configuration object.
+                 */
+                onComponentCreated(abstraction, pacId, _config) {
+                    const componentLifecycleHandlers = {
+                        unlistenChange() { return container.removeEventListener('pac:change', componentLifecycle.onPacChange); }
+                    };
+
+                    const componentLifecycle = {
+                        /**
+                         * Listens for external changes to abstraction.value.
+                         * WakaPAC fires 'pac:change' on the container element whenever a
+                         * reactive property is set. We filter for path[0] === 'value' and
+                         * forward valid hex values into the widget.
+                         *
+                         * @param {CustomEvent} e - pac:change event with detail.path and detail.newValue.
+                         */
+                        onPacChange(e) {
+                            if (e.detail?.path?.[0] === 'value') {
+                                const hex = window.WakaColorPicker.normalizeHex(e.detail.newValue);
+
+                                if (hex) {
+                                    _pickers.get(pacId)?.setColor(hex);
+                                }
+                            }
+                        }
+                    };
+
+                    const container = state._pac.getContainerByPacId(pacId);
+
+                    if (!container) {
+                        console.warn(`[WakaColorPicker] container for pacId "${pacId}" not found`);
+                        return;
+                    }
+
+                    let input;
+
+                    if (container.tagName === 'WAKA-COLORPICKER') {
+                        // Custom element path — create a hidden input inside the container
+                        // to carry name/value for form submission, seeded from the value attribute
+                        input = Object.assign(pluginRuntime.el('input'), {
+                            type : 'hidden',
+                            name : container.getAttribute('name') || '',
+                            value: container.getAttribute('value') || ''
+                        });
+                        container.appendChild(input);
+                    } else if (container.tagName === 'INPUT' && container.hasAttribute('data-wcp')) {
+                        // Legacy path — use the input element directly
+                        input = container;
+                    } else {
+                        return;
+                    }
+
+                    // Store the picker handle in the module-level map, keyed by pacId
+                    _pickers.set(pacId, pluginRuntime.bindPicker(input, {
+                        onChange(hex) {
+                            // Push the new color into the reactive abstraction so DOM bindings
+                            // and any data-pac-bind expressions on 'value' update automatically
+                            abstraction.value = hex;
+
+                            // Notify the component via the WakaPAC message system
+                            if (typeof state._pac?.sendMessage === 'function') {
+                                state._pac.sendMessage(pacId, MSG_COLOR_CHANGED, window.WakaColorPicker.hexToColorRef(hex.slice(1)), 0, { hex });
+                            }
+                        }
+                    }));
+
+                    // Seed abstraction.value with the initial color from the widget
+                    abstraction.value = _pickers.get(pacId).getColor();
+
+                    // Listen to change events
+                    container.addEventListener('pac:change', componentLifecycle.onPacChange);
+
+                    // Store the unlisten function in the module-level map, keyed by pacId
+                    _unlisteners.set(pacId, componentLifecycleHandlers.unlistenChange.bind(this));
+                },
+
+                /**
+                 * Called by WakaPAC just before a component is destroyed.
+                 * Removes the pac:change listener and tears down the widget.
+                 *
+                 * @param {string} pacId - The component's unique PAC identifier.
+                 */
+                onComponentDestroyed(pacId) {
+                    _unlisteners.get(pacId)?.();
+                    _unlisteners.delete(pacId);
+                    _pickers.get(pacId)?.destroy();
+                    _pickers.delete(pacId);
+                }
+            };
+        }
+    }
+
+    const pluginRuntime = {
+        /**
+         * Computes the 12-entry lightness distribution array for the Tailwind palette
+         * algorithm, given the lightness of the base color.
+         *
+         * The distribution spreads lighter stops toward 100% and darker stops toward
+         * 0%, with equal step sizes on each side. Matches the PHP implementation of
+         * ImageProcessing::createDistributionValues() with lMin=0, lMax=100.
+         *
+         * @param {number} L - Lightness of the base color (0–100).
+         * @returns {number[]} Array of 12 rounded lightness values.
+         */
+        createDistributionValues(L) {
+            // Step size toward white (lighter half)
+            const hi = Math.round((100 - L) / 5 * 100) / 100;
+
+            // Step size toward black (darker half)
+            const lo = Math.round(L / 5 * 100) / 100;
+
+            // Create list of distribution values
+            return [
+                Math.round(L + hi * 5),
+                Math.round(L + hi * 4.5),
+                Math.round(L + hi * 4),
+                Math.round(L + hi * 3),
+                Math.round(L + hi * 2),
+                Math.round(L + hi),
+                Math.round(L),                                  // stop 500 = base color
+                Math.round(L - lo),
+                Math.round(L - lo * 2),
+                Math.round(L - lo * 3),
+                Math.round(L - lo * 4),
+                Math.round(L - lo * 5)
+            ];
+        },
+
+        /**
+         * Generates a 10-stop Tailwind-style color gradient for the given normalized hex.
+         *
+         * First checks the preset index for a hand-crafted Tailwind palette match.
+         * Falls back to computing a synthetic gradient via HSL lightness distribution
+         * if no preset matches.
+         *
+         * @param {string} hex - Normalized 6-char hex string without '#'.
+         * @returns {string[]} Array of 10 hex strings (stops 50–900) without '#'.
+         */
+        generateGradient(hex) {
+            const generateGradientHandlers = {
+                createGradientStop(stop, i) {
+                    // preserve exact base color at midpoint
+                    if (stop === 500) {
+                        return hex;
+                    }
+
+                    const { r, g, b } = window.WakaColorPicker.hslToRgb(hsl.H, Math.min(hsl.S, 100), dist[i + 1]);
+                    return window.WakaColorPicker.rgbToHex(r, g, b);
+                }
+            };
+
+            // Return a copy of the preset so callers can't mutate the cached array
+            const preset = _presetIndex.get(hex);
+
+            if (preset) {
+                return [...preset];
+            }
+
+            // Compute synthetic gradient via HSL lightness distribution
+            const rgb = window.WakaColorPicker.hexToRgb(hex);
+            const hsl = window.WakaColorPicker.rgbToHsl(rgb.r, rgb.g, rgb.b);
+            const dist = pluginRuntime.createDistributionValues(hsl.L);
+
+            // Map stops 50–900 (STOPS without first and last synthetic entries).
+            // i+1 aligns each stop to the correct dist[] index after the slice.
+            return STOPS.slice(1, -1).map(generateGradientHandlers.createGradientStop.bind(this));
+        },
+
+        /**
+         * Creates a DOM element with an optional CSS class name.
+         *
+         * @param {string} tag  - HTML tag name (e.g. 'div', 'span', 'input').
+         * @param {string} [cls] - Optional class name to assign.
+         * @returns {HTMLElement}
+         */
+        el(tag, cls) {
+            const e = document.createElement(tag);
+
+            if (cls) {
+                e.className = cls;
+            }
+
+            return e;
+        },
+
+        /**
+         * Binds the color picker widget to a given <input> element.
+         *
+         * The original input is hidden (type="hidden") so its name/value continue to
+         * participate in form submission. The widget is inserted immediately after it
+         * in the DOM and consists of:
+         *   - A row of 10 color swatches (the gradient for the current color)
+         *   - A hex text field for direct keyboard entry
+         *   - A colored trigger square that opens the native browser color picker
+         *
+         * @param {HTMLInputElement} input   - The target input element.
+         * @param {object}           options
+         * @param {function}         [options.onChange] - Called with '#rrggbb' whenever the color changes.
+         * @returns {{ destroy: function, setColor: function, getColor: function }}
+         */
+        bindPicker(input, options = {}) {
+            return new ColorPickerWidget(this, input, options).initialize();
+        },
+
+        /**
+         * Injects the plugin stylesheet into <head> if it hasn't been added yet.
+         * Guarded by a unique element ID so multiple wakaPAC instances on the same
+         * page don't duplicate the rules.
+         */
+        injectCSS() {
+            if (document.getElementById('waka-color-picker-styles')) {
+                return;
+            }
+            const style = document.createElement('style');
+            style.id = 'waka-color-picker-styles';
+            style.textContent = CSS;
+            document.head.appendChild(style);
+        }
+    };
+
     // Support standalone loading while using the host's plugin base when present.
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
@@ -167,7 +666,7 @@
         ['f9fafb', 'f3f4f6', 'e5e7eb', 'd1d5db', '9ca3af', '6b7280', '4b5563', '374151', '1f2937', '111827'],
         ['fafafa', 'f4f4f5', 'e4e4e7', 'd4d4d8', 'a1a1aa', '71717a', '52525b', '3f3f46', '27272a', '18181b'],
         ['fafafa', 'f5f5f5', 'e5e5e5', 'd4d4d4', 'a3a3a3', '737373', '525252', '404040', '262626', '171717'],
-        ['fafaf9', 'f5f5f4', 'e7e5e4', 'd6d3d1', 'a8a29e', '78716c', '57534e', '44403c', '292524', '1c1917'],
+        ['fafaf9', 'f5f5f4', 'e7e5e4', 'd6d3d1', 'a8a29e', '78716c', '57534e', '44403c', '292524', '1c1917']
     ];
 
     /**
@@ -185,7 +684,6 @@
 
     // ─── Color utilities ──────────────────────────────────────────────────────
 
-
     // ─── Tailwind palette generator ───────────────────────────────────────────
     // Ported 1:1 from ImageProcessing::generateGradient / createSwatches.
     // Default palette tweak = 0, so hue and saturation scales are all zero.
@@ -198,365 +696,11 @@
      */
     const STOPS = [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
 
-    /**
-     * Computes the 12-entry lightness distribution array for the Tailwind palette
-     * algorithm, given the lightness of the base color.
-     *
-     * The distribution spreads lighter stops toward 100% and darker stops toward
-     * 0%, with equal step sizes on each side. Matches the PHP implementation of
-     * ImageProcessing::createDistributionValues() with lMin=0, lMax=100.
-     *
-     * @param {number} L - Lightness of the base color (0–100).
-     * @returns {number[]} Array of 12 rounded lightness values.
-     */
-    function createDistributionValues(L) {
-        // Step size toward white (lighter half)
-        const hi = Math.round((100 - L) / 5 * 100) / 100;
-
-        // Step size toward black (darker half)
-        const lo = Math.round(L / 5 * 100) / 100;
-
-        // Create list of distribution values
-        return [
-            Math.round(L + hi * 5), Math.round(L + hi * 4.5), Math.round(L + hi * 4),
-            Math.round(L + hi * 3), Math.round(L + hi * 2), Math.round(L + hi),
-            Math.round(L),                                  // stop 500 = base color
-            Math.round(L - lo), Math.round(L - lo * 2), Math.round(L - lo * 3),
-            Math.round(L - lo * 4), Math.round(L - lo * 5),
-        ];
-    }
-
-    /**
-     * Generates a 10-stop Tailwind-style color gradient for the given normalized hex.
-     *
-     * First checks the preset index for a hand-crafted Tailwind palette match.
-     * Falls back to computing a synthetic gradient via HSL lightness distribution
-     * if no preset matches.
-     *
-     * @param {string} hex - Normalized 6-char hex string without '#'.
-     * @returns {string[]} Array of 10 hex strings (stops 50–900) without '#'.
-     */
-    function generateGradient(hex) {
-        // Return a copy of the preset so callers can't mutate the cached array
-        const preset = _presetIndex.get(hex);
-
-        if (preset) {
-            return [...preset];
-        }
-
-        // Compute synthetic gradient via HSL lightness distribution
-        const rgb = window.WakaColorPicker.hexToRgb(hex);
-        const hsl = window.WakaColorPicker.rgbToHsl(rgb.r, rgb.g, rgb.b);
-        const dist = createDistributionValues(hsl.L);
-
-        // Map stops 50–900 (STOPS without first and last synthetic entries).
-        // i+1 aligns each stop to the correct dist[] index after the slice.
-        return STOPS.slice(1, -1).map((stop, i) => {
-            // preserve exact base color at midpoint
-            if (stop === 500) {
-                return hex;
-            }
-
-            const { r, g, b } = window.WakaColorPicker.hslToRgb(hsl.H, Math.min(hsl.S, 100), dist[i + 1]);
-            return window.WakaColorPicker.rgbToHex(r, g, b);
-        });
-    }
-
     // ─── DOM helper ───────────────────────────────────────────────────────────
-
-    /**
-     * Creates a DOM element with an optional CSS class name.
-     *
-     * @param {string} tag  - HTML tag name (e.g. 'div', 'span', 'input').
-     * @param {string} [cls] - Optional class name to assign.
-     * @returns {HTMLElement}
-     */
-    function el(tag, cls) {
-        const e = document.createElement(tag);
-
-        if (cls) {
-            e.className = cls;
-        }
-
-        return e;
-    }
 
     // ─── Widget factory ───────────────────────────────────────────────────────
 
-    /**
-     * Binds the color picker widget to a given <input> element.
-     *
-     * The original input is hidden (type="hidden") so its name/value continue to
-     * participate in form submission. The widget is inserted immediately after it
-     * in the DOM and consists of:
-     *   - A row of 10 color swatches (the gradient for the current color)
-     *   - A hex text field for direct keyboard entry
-     *   - A colored trigger square that opens the native browser color picker
-     *
-     * @param {HTMLInputElement} input   - The target input element.
-     * @param {object}           options
-     * @param {function}         [options.onChange] - Called with '#rrggbb' whenever the color changes.
-     * @returns {{ destroy: function, setColor: function, getColor: function }}
-     */
-    function bindPicker(input, options = {}) {
-        const { onChange } = options;
-
-        // Hide the original input — it keeps its name and value for form submission
-        const originalType = input.type;
-        input.type = 'hidden';
-
-        // ── Build DOM ─────────────────────────────────────────────────────────
-
-        const widget = el('span', 'wcp-widget');
-        const swatchesEl = el('span', 'wcp-swatches');
-        const textInput = Object.assign(el('input', 'wcp-text-input'), {
-            type: 'text',
-            spellcheck: false,
-            maxLength: 7
-        });
-        const trigger = el('span', 'wcp-color-trigger');
-        const nativePicker = Object.assign(el('input'), { type: 'color' });
-
-        // Native picker sits invisibly inside the trigger — clicking the trigger opens it
-        trigger.appendChild(nativePicker);
-        widget.append(swatchesEl, textInput, trigger);
-
-        // Insert widget right after the hidden input in the DOM
-        input.parentNode.insertBefore(widget, input.nextSibling);
-
-        // ── State ─────────────────────────────────────────────────────────────
-
-        /** @type {string|null} Currently selected color as a 6-char hex string without '#'. */
-        let currentHex = null;
-
-        /** @type {HTMLElement|null} The currently highlighted swatch cell. */
-        let selectedCell = null;
-
-        // ── Helpers ───────────────────────────────────────────────────────────
-
-        /**
-         * Synchronizes all visible representations of the color (text field,
-         * native picker, trigger background, hidden input value) to the given hex.
-         * Also dispatches an 'input' event on the hidden input so any external
-         * listeners stay in sync.
-         *
-         * @param {string} hex - 6-char hex string without '#'.
-         */
-        function syncInputs(hex) {
-            input.value = '#' + hex;
-
-            textInput.value = '#' + hex;
-            nativePicker.value = '#' + hex;
-
-            trigger.style.backgroundColor = '#' + hex;
-            textInput.classList.remove('wcp-invalid');
-
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-
-        /**
-         * Rebuilds the swatch row for the given hex color.
-         * Clears the existing cells, generates a fresh 10-stop gradient,
-         * and re-applies the selected highlight if the current color is present.
-         *
-         * @param {string} hex - 6-char hex string without '#'.
-         */
-        function buildSwatches(hex) {
-            swatchesEl.innerHTML = '';
-            selectedCell = null;
-
-            for (const h of generateGradient(hex)) {
-                const cell = el('div', 'wcp-cell');
-                cell.style.backgroundColor = '#' + h;
-                cell.dataset.hex = h;
-                cell.title = '#' + h;
-                swatchesEl.appendChild(cell);
-
-                // Re-apply selection highlight if this stop matches the current color
-                if (h === currentHex) {
-                    cell.classList.add('wcp-selected');
-                    selectedCell = cell;
-                }
-            }
-        }
-
-        /**
-         * Moves the selection highlight from the previous cell to the given cell.
-         * Passing null deselects without selecting anything.
-         *
-         * @param {HTMLElement|null} cell - The cell to highlight, or null to deselect.
-         */
-        function selectCell(cell) {
-            selectedCell?.classList.remove('wcp-selected');
-            selectedCell = cell;
-            cell?.classList.add('wcp-selected');
-        }
-
-        /**
-         * Applies a new color as the active selection.
-         * Rebuilds the swatch row and syncs all inputs. Fires onChange.
-         * No-ops if the color is identical to the current one.
-         *
-         * @param {string} hex - 6-char hex string without '#'.
-         */
-        function applyColor(hex) {
-            if (hex === currentHex) {
-                return;
-            }
-
-            currentHex = hex;
-
-            syncInputs(hex);
-            buildSwatches(hex);
-
-            onChange?.('#' + hex);
-        }
-
-        /**
-         * Selects a swatch cell without rebuilding the gradient row.
-         * Used when the user clicks a swatch — the palette stays the same,
-         * only the active color and highlight change.
-         * No-ops if the color is identical to the current one.
-         *
-         * @param {string}      hex  - 6-char hex string without '#'.
-         * @param {HTMLElement} cell - The swatch cell that was clicked.
-         */
-        function selectColor(hex, cell) {
-            if (hex === currentHex) {
-                return;
-            }
-
-            currentHex = hex;
-
-            syncInputs(hex);
-            selectCell(cell);
-
-            onChange?.('#' + hex);
-        }
-
-        // ── Init ──────────────────────────────────────────────────────────────
-
-        // Seed from the input's existing value, defaulting to white
-        applyColor(window.WakaColorPicker.normalizeHex(input.value) || 'ffffff');
-
-        // ── Events ────────────────────────────────────────────────────────────
-
-        /**
-         * Handles color selection via the native browser color picker.
-         * Fires continuously while the user drags the picker UI.
-         */
-        function onNativeInput() {
-            const hex = window.WakaColorPicker.normalizeHex(nativePicker.value);
-
-            if (hex) {
-                applyColor(hex);
-            }
-        }
-
-        /**
-         * Handles live typing in the hex text field.
-         * Rebuilds swatches on each valid keystroke; marks the field invalid otherwise.
-         */
-        function onTextInput() {
-            const hex = window.WakaColorPicker.normalizeHex(textInput.value);
-
-            if (hex) {
-                textInput.classList.remove('wcp-invalid');
-                applyColor(hex);
-            } else {
-                // Invalid mid-typing — show error state but don't discard the text
-                textInput.classList.add('wcp-invalid');
-            }
-        }
-
-        /**
-         * Handles keyboard shortcuts in the hex text field.
-         * Escape dismisses the field by removing focus.
-         *
-         * @param {KeyboardEvent} e
-         */
-        function onTextKeydown(e) {
-            if (e.key === 'Escape') {
-                textInput.blur();
-            }
-        }
-
-        /**
-         * Handles click events on the swatch row via event delegation.
-         * Selects the clicked cell without rebuilding the gradient.
-         *
-         * @param {MouseEvent} e
-         */
-        function onSwatchClick(e) {
-            const cell = e.target.closest('.wcp-cell');
-
-            if (cell) {
-                selectColor(cell.dataset.hex, cell);
-            }
-        }
-
-        nativePicker.addEventListener('input', onNativeInput);
-        textInput.addEventListener('input', onTextInput);
-        textInput.addEventListener('keydown', onTextKeydown);
-        swatchesEl.addEventListener('click', onSwatchClick);
-
-        // ── Public API ────────────────────────────────────────────────────────
-
-        return {
-            /**
-             * Removes all event listeners, restores the original input type,
-             * and removes the widget from the DOM.
-             */
-            destroy() {
-                nativePicker.removeEventListener('input', onNativeInput);
-                textInput.removeEventListener('input', onTextInput);
-                textInput.removeEventListener('keydown', onTextKeydown);
-                swatchesEl.removeEventListener('click', onSwatchClick);
-                input.type = originalType;
-                widget.parentNode?.removeChild(widget);
-            },
-
-            /**
-             * Programmatically sets the active color.
-             * Rebuilds the swatch row and syncs all inputs.
-             *
-             * @param {string} hex - Any valid hex color string (with or without '#').
-             */
-            setColor(hex) {
-                const n = window.WakaColorPicker.normalizeHex(hex);
-
-                if (n) {
-                    applyColor(n);
-                }
-            },
-
-            /**
-             * Returns the current active color as a '#rrggbb' string.
-             *
-             * @returns {string}
-             */
-            getColor() {
-                return '#' + (currentHex || 'ffffff');
-            },
-        };
-    }
-
     // ─── CSS injection ────────────────────────────────────────────────────────
-
-    /**
-     * Injects the plugin stylesheet into <head> if it hasn't been added yet.
-     * Guarded by a unique element ID so multiple wakaPAC instances on the same
-     * page don't duplicate the rules.
-     */
-    function injectCSS() {
-        if (document.getElementById('waka-color-picker-styles')) {
-            return;
-        }
-        const style = document.createElement('style');
-        style.id = 'waka-color-picker-styles';
-        style.textContent = CSS;
-        document.head.appendChild(style);
-    }
 
     // ─── Plugin ───────────────────────────────────────────────────────────────
 
@@ -580,108 +724,7 @@
          * @returns {{ onComponentCreated: function, onComponentDestroyed: function }}
          */
         createPacPlugin(pac, options = {}) {
-            if (options.injectCSS !== false) {
-                injectCSS();
-            }
-
-            return {
-                /**
-                 * Called by WakaPAC after a component is created.
-                 *
-                 * Activates the color picker if the component element is either:
-                 *   - A <waka-colorpicker> element (custom element form), or
-                 *   - An <input> element carrying the data-wcp attribute (legacy form).
-                 * Sets up:
-                 *   - abstraction.value    — reactive hex color property
-                 *
-                 * External changes to abstraction.value are picked up via the
-                 * pac:change event on the container element.
-                 *
-                 * @param {object} abstraction - The reactive component abstraction.
-                 * @param {string} pacId       - The component's unique PAC identifier.
-                 * @param {object} config      - The component configuration object.
-                 */
-                onComponentCreated(abstraction, pacId, _config) {
-                    const container = pac.getContainerByPacId(pacId);
-
-                    if (!container) {
-                        console.warn(`[WakaColorPicker] container for pacId "${pacId}" not found`);
-                        return;
-                    }
-
-                    let input;
-
-                    if (container.tagName === 'WAKA-COLORPICKER') {
-                        // Custom element path — create a hidden input inside the container
-                        // to carry name/value for form submission, seeded from the value attribute
-                        input = Object.assign(el('input'), {
-                            type: 'hidden',
-                            name: container.getAttribute('name') || '',
-                            value: container.getAttribute('value') || '',
-                        });
-                        container.appendChild(input);
-                    } else if (container.tagName === 'INPUT' && container.hasAttribute('data-wcp')) {
-                        // Legacy path — use the input element directly
-                        input = container;
-                    } else {
-                        return;
-                    }
-
-                    // Store the picker handle in the module-level map, keyed by pacId
-                    _pickers.set(pacId, bindPicker(input, {
-                        onChange(hex) {
-                            // Push the new color into the reactive abstraction so DOM bindings
-                            // and any data-pac-bind expressions on 'value' update automatically
-                            abstraction.value = hex;
-
-                            // Notify the component via the WakaPAC message system
-                            if (typeof pac?.sendMessage === 'function') {
-                                pac.sendMessage(pacId, MSG_COLOR_CHANGED, window.WakaColorPicker.hexToColorRef(hex.slice(1)), 0, { hex });
-                            }
-                        }
-                    }));
-
-                    // Seed abstraction.value with the initial color from the widget
-                    abstraction.value = _pickers.get(pacId).getColor();
-
-                    /**
-                     * Listens for external changes to abstraction.value.
-                     * WakaPAC fires 'pac:change' on the container element whenever a
-                     * reactive property is set. We filter for path[0] === 'value' and
-                     * forward valid hex values into the widget.
-                     *
-                     * @param {CustomEvent} e - pac:change event with detail.path and detail.newValue.
-                     */
-                    function onPacChange(e) {
-                        if (e.detail?.path?.[0] === 'value') {
-                            const hex = window.WakaColorPicker.normalizeHex(e.detail.newValue);
-
-                            if (hex) {
-                                _pickers.get(pacId)?.setColor(hex);
-                            }
-                        }
-                    }
-
-                    // Listen to change events
-                    container.addEventListener('pac:change', onPacChange);
-
-                    // Store the unlisten function in the module-level map, keyed by pacId
-                    _unlisteners.set(pacId, () => container.removeEventListener('pac:change', onPacChange));
-                },
-
-                /**
-                 * Called by WakaPAC just before a component is destroyed.
-                 * Removes the pac:change listener and tears down the widget.
-                 *
-                 * @param {string} pacId - The component's unique PAC identifier.
-                 */
-                onComponentDestroyed(pacId) {
-                    _unlisteners.get(pacId)?.();
-                    _unlisteners.delete(pacId);
-                    _pickers.get(pacId)?.destroy();
-                    _pickers.delete(pacId);
-                }
-            };
+            return new ColorPickerPlugin(this, pac, options).initialize();
         }
     };
 
@@ -696,7 +739,7 @@
      * @param {string} pacId - The pacId of the target component.
      * @param {string} hex   - Any valid hex color string (with or without '#').
      */
-    window.WakaColorPicker.setColor = function(pacId, hex) {
+    window.WakaColorPicker.setColor = function setColor(pacId, hex) {
         const n = window.WakaColorPicker.normalizeHex(hex);
         const context = window.PACRegistry?.get(pacId);
 
@@ -712,7 +755,7 @@
      * @param {*} hex - Input value to normalize.
      * @returns {string|null} 6-char lowercase hex, or null if invalid.
      */
-    window.WakaColorPicker.normalizeHex = function(hex) {
+    window.WakaColorPicker.normalizeHex = function normalizeHex(hex) {
         if (typeof hex !== 'string') {
             return null;
         }
@@ -733,11 +776,11 @@
      * @param {string} hex - 6-char lowercase hex string without '#'.
      * @returns {{ r: number, g: number, b: number }}
      */
-    window.WakaColorPicker.hexToRgb = function(hex) {
+    window.WakaColorPicker.hexToRgb = function hexToRgb(hex) {
         return {
             r: parseInt(hex.slice(0, 2), 16),
             g: parseInt(hex.slice(2, 4), 16),
-            b: parseInt(hex.slice(4, 6), 16),
+            b: parseInt(hex.slice(4, 6), 16)
         };
     };
 
@@ -748,7 +791,7 @@
      * @param {number} b - Blue channel (0–255).
      * @returns {string} 6-char lowercase hex string without '#'.
      */
-    window.WakaColorPicker.rgbToHex = function(r, g, b) {
+    window.WakaColorPicker.rgbToHex = function rgbToHex(r, g, b) {
         return `${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
     };
 
@@ -761,7 +804,7 @@
      * @param {number} b - Blue channel (0–255).
      * @returns {{ H: number, S: number, L: number }}
      */
-    window.WakaColorPicker.rgbToHsl = function(r, g, b) {
+    window.WakaColorPicker.rgbToHsl = function rgbToHsl(r, g, b) {
         // Normalise channels to 0–1
         r /= 255;
         g /= 255;
@@ -811,7 +854,7 @@
      * @param {number} l - Lightness (0–100).
      * @returns {{ r: number, g: number, b: number }}
      */
-    window.WakaColorPicker.hslToRgb = function(h, s, l) {
+    window.WakaColorPicker.hslToRgb = function hslToRgb(h, s, l) {
         s /= 100;
         l /= 100;
 
@@ -837,7 +880,7 @@
      * @param {string} hex - 6-char lowercase hex string without '#'.
      * @returns {number} 24-bit integer: (R << 16) | (G << 8) | B.
      */
-    window.WakaColorPicker.hexToColorRef = function(hex) {
+    window.WakaColorPicker.hexToColorRef = function hexToColorRef(hex) {
         const { r, g, b } = window.WakaColorPicker.hexToRgb(hex);
         return (r << 16) | (g << 8) | b;
     };
@@ -847,10 +890,9 @@
      * @param {number} colorRef - 24-bit integer: (R << 16) | (G << 8) | B.
      * @returns {string} '#rrggbb' hex color string.
      */
-    window.WakaColorPicker.colorRefToHex = function(colorRef) {
+    window.WakaColorPicker.colorRefToHex = function colorRefToHex(colorRef) {
         return '#' + window.WakaColorPicker.rgbToHex((colorRef >> 16) & 0xFF, (colorRef >> 8) & 0xFF, colorRef & 0xFF);
     };
 
     window.wakaColorPicker = window.WakaColorPicker;
-
 })();

@@ -66,6 +66,354 @@
 (function() {
     "use strict";
 
+    /** Owns the state and lifecycle of one gallery plugin. */
+    class GalleryPlugin {
+        constructor(owner, pac, options = {}) {
+            this._owner = owner;
+            this._pac = pac;
+            this._options = options;
+
+            this.createGallery = this.createGallery.bind(this);
+            this.drainPendingInits = this.drainPendingInits.bind(this);
+        }
+
+        initialize() {
+            const state = this;
+
+            // Allow the host page to supply its own builds or self-hosted copies.
+            if (state._options.src) {
+                _scriptSrc = state._options.src;
+            }
+
+            if (state._options.cssSrc) {
+                _cssSrc = state._options.cssSrc;
+            }
+
+            // Plugin-level lightGallery defaults, overridable per-instance
+            // via the 'lightgallery' key in the component config object.
+            //
+            // 'plugins' is an array of pre-loaded lgPlugin objects (e.g. lgZoom,
+            // lgThumbnail). The host page must load those plugin scripts separately
+            // before or alongside this plugin since we can't know which are wanted.
+            state._defaultGalleryConfig = {
+                speed  : 400,
+                plugins: state._options.plugins ?? []
+            };
+
+            // Use the public message IDs for delivery as well as comparisons.
+            ({
+                MSG_GALLERY_READY: state._MSG_GALLERY_READY,
+                MSG_GALLERY_ERROR: state._MSG_GALLERY_ERROR,
+                MSG_BEFORE_OPEN: state._MSG_BEFORE_OPEN,
+                MSG_AFTER_OPEN: state._MSG_AFTER_OPEN,
+                MSG_BEFORE_CLOSE: state._MSG_BEFORE_CLOSE,
+                MSG_AFTER_CLOSE: state._MSG_AFTER_CLOSE,
+                MSG_BEFORE_SLIDE: state._MSG_BEFORE_SLIDE,
+                MSG_AFTER_SLIDE: state._MSG_AFTER_SLIDE
+            } = state._owner);
+
+            // =====================================================================
+            // Pending init queue
+            // =====================================================================
+            // Components created before the lightGallery script has finished loading
+            // are queued here and drained once the script is ready.
+            // =====================================================================
+
+            /**
+             * @type {Array<{ pacId: string, pac: Object, galleryConfig: Object, MSG_GALLERY_ERROR: number }>}
+             */
+            state._pendingInits = [];
+
+            // =====================================================================
+            // Gallery construction
+            // =====================================================================
+
+            return state.createDescriptor();
+        }
+
+        createGallery(pacId, galleryConfig) {
+            const state = this;
+
+            const createGalleryHandlers = {
+                onLgAfterSlide(event) {
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Extract details
+                    const { index, prevIndex } = event.detail;
+
+                    // Send event to container
+                    state._pac.sendMessage(pacId, state._MSG_AFTER_SLIDE, index, prevIndex, { index, prevIndex });
+                },
+
+                onLgBeforeSlide(event) {
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Extract details
+                    const { index, prevIndex } = event.detail;
+
+                    // Send event to container
+                    state._pac.sendMessage(pacId, state._MSG_BEFORE_SLIDE, index, prevIndex, { index, prevIndex });
+                },
+
+                onLgAfterClose() {
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Send event to container
+                    state._pac.sendMessage(pacId, state._MSG_AFTER_CLOSE, 0, 0);
+                },
+
+                onLgBeforeClose() {
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Send event to container
+                    state._pac.sendMessage(pacId, state._MSG_BEFORE_CLOSE, 0, 0);
+                },
+
+                onLgAfterOpen() {
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Send event to container
+                    state._pac.sendMessage(pacId, state._MSG_AFTER_OPEN, 0, 0);
+                },
+
+                onLgBeforeOpen() {
+                    // Check if pacId is registered
+                    if (!_registry.has(pacId)) {
+                        return;
+                    }
+
+                    // Send event to container
+                    state._pac.sendMessage(pacId, state._MSG_BEFORE_OPEN, 0, 0);
+                },
+
+                onLgInit(event) {
+                    // Add pacId to registry
+                    _registry.set(pacId, {
+                        pac     : state._pac,
+                        instance: event.detail.instance
+                    });
+
+                    // Send event to container
+                    state._pac.sendMessage(pacId, state._MSG_GALLERY_READY, 0, 0);
+                }
+            };
+
+            const container = state._pac.getContainerByPacId(pacId);
+
+            if (!container) {
+                return;
+            }
+
+            // -----------------------------------------------------------------
+            // Attach DOM event listeners BEFORE calling lightGallery() so that
+            // lgInit (fired synchronously during init) is not missed.
+            // -----------------------------------------------------------------
+            container.addEventListener('lgInit', createGalleryHandlers.onLgInit);
+
+            container.addEventListener('lgBeforeOpen', createGalleryHandlers.onLgBeforeOpen);
+
+            container.addEventListener('lgAfterOpen', createGalleryHandlers.onLgAfterOpen);
+
+            container.addEventListener('lgBeforeClose', createGalleryHandlers.onLgBeforeClose);
+
+            container.addEventListener('lgAfterClose', createGalleryHandlers.onLgAfterClose);
+
+            container.addEventListener('lgBeforeSlide', createGalleryHandlers.onLgBeforeSlide);
+
+            container.addEventListener('lgAfterSlide', createGalleryHandlers.onLgAfterSlide);
+
+            // -----------------------------------------------------------------
+            // Initialize lightGallery.
+            // -----------------------------------------------------------------
+            window.lightGallery(container, galleryConfig);
+        }
+
+        drainPendingInits() {
+            const state = this;
+
+            for (const pending of state._pendingInits) {
+                state.createGallery(pending.pacId, pending.galleryConfig);
+            }
+            state._pendingInits.length = 0;
+        }
+
+        createDescriptor() {
+            const state = this;
+
+            return {
+
+                /**
+                 * Called by WakaPAC after a component is created.
+                 * Activates only when the container is a <waka-lightgallery> element.
+                 * @param {Object} abstraction - The component's reactive abstraction object
+                 * @param {string} pacId       - The data-pac-id of the container
+                 * @param {Object} _config     - Component config
+                 */
+                onComponentCreated(abstraction, pacId, _config) {
+                    const container = state._pac.getContainerByPacId(pacId);
+
+                    if (!container) {
+                        return;
+                    }
+
+                    // Only activate on <waka-lightgallery> custom elements.
+                    if (container.tagName.toLowerCase() !== 'waka-lightgallery') {
+                        return;
+                    }
+
+                    // Merge plugin-level defaults with per-instance overrides.
+                    const galleryConfig = {
+                        ...state._defaultGalleryConfig,
+                        ..._config.lightgallery ?? {}
+                    };
+
+                    // Always inject CSS (one-shot).
+                    pluginRuntime.ensureCssLoaded();
+
+                    // Load the JS and initialize when ready.
+                    pluginRuntime.ensureApiLoaded(state.drainPendingInits, state._pendingInits);
+
+                    if (_apiReady) {
+                        state.createGallery(pacId, galleryConfig);
+                    } else {
+                        state._pendingInits.push({ pacId, pac: state._pac, galleryConfig, MSG_GALLERY_ERROR: state._MSG_GALLERY_ERROR });
+                    }
+                },
+
+                /**
+                 * Called by WakaPAC when a component is destroyed.
+                 * Removes any pending init from the queue, destroys the lightGallery
+                 * instance, and removes the registry entry.
+                 *
+                 * @param {string} pacId
+                 */
+                onComponentDestroyed(pacId) {
+                    const onComponentDestroyedHandlers = {
+                        findIndexCallback(p) {
+                            return p.pacId === pacId;
+                        }
+                    };
+
+                    // Pull from the pending queue if destroyed before the script loaded.
+                    const pendingIndex = state._pendingInits.findIndex(onComponentDestroyedHandlers.findIndexCallback);
+
+                    if (pendingIndex !== -1) {
+                        state._pendingInits.splice(pendingIndex, 1);
+                    }
+
+                    const entry = _registry.get(pacId);
+
+                    if (!entry) {
+                        return;
+                    }
+
+                    // destroy() closes the gallery if open and tears down all
+                    // DOM modifications made by lightGallery. It returns a
+                    // Promise that resolves once the close animation completes,
+                    // but we don't need to await it here since WakaPAC's
+                    // teardown is synchronous and the animation is cosmetic.
+                    entry.instance.destroy();
+
+                    // Remove from registry
+                    _registry.delete(pacId);
+                }
+            };
+        }
+    }
+
+    const pluginRuntime = {
+        /**
+         * Injects the lightGallery CSS <link> once.
+         * Idempotent — safe to call multiple times.
+         */
+        ensureCssLoaded() {
+            if (_cssInjected) {
+                return;
+            }
+
+            // Don't inject if a matching <link> already exists on the page.
+            if (document.querySelector('link[data-waka-lightgallery-css]')) {
+                _cssInjected = true;
+                return;
+            }
+
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = _cssSrc;
+            link.setAttribute('data-waka-lightgallery-css', '');
+            (document.head ?? document.body).appendChild(link);
+            _cssInjected = true;
+        },
+
+        /**
+         * Injects the lightGallery JS <script> once and drains the pending queue
+         * once it loads. Safe to call multiple times — only injects once.
+         * If window.lightGallery already exists, drains immediately.
+         * @param {Function} drainFn - The drainPendingInits closure from createPacPlugin.
+         * @param {Array}    queue   - The _pendingInits array from createPacPlugin.
+         */
+        ensureApiLoaded(drainFn, queue) {
+            const ensureApiLoadedHandlers = {
+                onerror() {
+                    for (const pending of queue) {
+                        pending.pac.sendMessage(
+                            pending.pacId,
+                            pending.MSG_GALLERY_ERROR,
+                            0, 0,
+                            { message: 'lightGallery script failed to load from: ' + _scriptSrc }
+                        );
+                    }
+
+                    queue.length = 0;
+                },
+
+                onload() {
+                    _apiReady = true;
+                    drainFn();
+                }
+            };
+
+            // Already available on the page (externally loaded or previously injected).
+            if (window.lightGallery) {
+                _apiReady = true;
+                drainFn();
+                return;
+            }
+
+            // Script tag already injected; the load handler will drain the queue.
+            if (_scriptInjecting || document.getElementById('waka-lightgallery-script')) {
+                return;
+            }
+
+            _scriptInjecting = true;
+
+            const tag = document.createElement('script');
+            tag.id = 'waka-lightgallery-script';
+            tag.src = _scriptSrc;
+
+            tag.onload = ensureApiLoadedHandlers.onload;
+
+            tag.onerror = ensureApiLoadedHandlers.onerror;
+
+            (document.head ?? document.body).appendChild(tag);
+        }
+    };
+
     // Support standalone loading while using the host's plugin base when present.
     const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
 
@@ -77,7 +425,7 @@
     // =========================================================================
 
     const LG_CDN = {
-        js: 'https://cdnjs.cloudflare.com/ajax/libs/lightgallery/2.8.3/lightgallery.umd.min.js',
+        js : 'https://cdnjs.cloudflare.com/ajax/libs/lightgallery/2.8.3/lightgallery.umd.min.js',
         css: 'https://cdnjs.cloudflare.com/ajax/libs/lightgallery/2.8.3/css/lightgallery.min.css'
     };
 
@@ -128,76 +476,6 @@
     // Script + CSS bootstrap
     // =========================================================================
 
-    /**
-     * Injects the lightGallery CSS <link> once.
-     * Idempotent — safe to call multiple times.
-     */
-    function ensureCssLoaded() {
-        if (_cssInjected) {
-            return;
-        }
-
-        // Don't inject if a matching <link> already exists on the page.
-        if (document.querySelector('link[data-waka-lightgallery-css]')) {
-            _cssInjected = true;
-            return;
-        }
-
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = _cssSrc;
-        link.setAttribute('data-waka-lightgallery-css', '');
-        (document.head ?? document.body).appendChild(link);
-        _cssInjected = true;
-    }
-
-    /**
-     * Injects the lightGallery JS <script> once and drains the pending queue
-     * once it loads. Safe to call multiple times — only injects once.
-     * If window.lightGallery already exists, drains immediately.
-     * @param {Function} drainFn - The drainPendingInits closure from createPacPlugin.
-     * @param {Array}    queue   - The _pendingInits array from createPacPlugin.
-     */
-    function ensureApiLoaded(drainFn, queue) {
-        // Already available on the page (externally loaded or previously injected).
-        if (window.lightGallery) {
-            _apiReady = true;
-            drainFn();
-            return;
-        }
-
-        // Script tag already injected; the load handler will drain the queue.
-        if (_scriptInjecting || document.getElementById('waka-lightgallery-script')) {
-            return;
-        }
-
-        _scriptInjecting = true;
-
-        const tag = document.createElement('script');
-        tag.id = 'waka-lightgallery-script';
-        tag.src = _scriptSrc;
-
-        tag.onload = function() {
-            _apiReady = true;
-            drainFn();
-        };
-
-        tag.onerror = function() {
-            for (const pending of queue) {
-                pending.pac.sendMessage(
-                    pending.pacId,
-                    pending.MSG_GALLERY_ERROR,
-                    0, 0,
-                    { message: 'lightGallery script failed to load from: ' + _scriptSrc }
-                );
-            }
-
-            queue.length = 0;
-        };
-
-        (document.head ?? document.body).appendChild(tag);
-    }
-
     // =========================================================================
     // Plugin definition
     // =========================================================================
@@ -213,7 +491,6 @@
         MSG_BEFORE_SLIDE : MSG_PLUGIN + 0x306,
         MSG_AFTER_SLIDE  : MSG_PLUGIN + 0x307,
 
-
         /**
          * Called on plugin initialization through wakaPAC.use().
          * @param {Object} pac
@@ -221,240 +498,7 @@
          * @returns {{ onComponentCreated(Object, string, Object): void, onComponentDestroyed(string): void }}
          */
         createPacPlugin(pac, options = {}) {
-
-            // Allow the host page to supply its own builds or self-hosted copies.
-            if (options.src) {
-                _scriptSrc = options.src;
-            }
-
-            if (options.cssSrc) {
-                _cssSrc = options.cssSrc;
-            }
-
-            // Plugin-level lightGallery defaults, overridable per-instance
-            // via the 'lightgallery' key in the component config object.
-            //
-            // 'plugins' is an array of pre-loaded lgPlugin objects (e.g. lgZoom,
-            // lgThumbnail). The host page must load those plugin scripts separately
-            // before or alongside this plugin since we can't know which are wanted.
-            const _defaultGalleryConfig = {
-                speed: 400,
-                plugins: options.plugins ?? []
-            };
-
-            // Use the public message IDs for delivery as well as comparisons.
-            const {
-                MSG_GALLERY_READY,
-                MSG_GALLERY_ERROR,
-                MSG_BEFORE_OPEN,
-                MSG_AFTER_OPEN,
-                MSG_BEFORE_CLOSE,
-                MSG_AFTER_CLOSE,
-                MSG_BEFORE_SLIDE,
-                MSG_AFTER_SLIDE
-            } = this;
-
-            // =====================================================================
-            // Pending init queue
-            // =====================================================================
-            // Components created before the lightGallery script has finished loading
-            // are queued here and drained once the script is ready.
-            // =====================================================================
-
-            /**
-             * @type {Array<{ pacId: string, pac: Object, galleryConfig: Object, MSG_GALLERY_ERROR: number }>}
-             */
-            const _pendingInits = [];
-
-            // =====================================================================
-            // Gallery construction
-            // =====================================================================
-
-            /**
-             * Instantiates a lightGallery v2 instance on the container element and
-             * registers it. Called immediately when the API is available, or deferred
-             * via _pendingInits while the script is still loading.
-             * @param {string} pacId
-             * @param {Object} galleryConfig - Merged plugin-level and per-instance config
-             */
-            function createGallery(pacId, galleryConfig) {
-                const container = pac.getContainerByPacId(pacId);
-
-                if (!container) {
-                    return;
-                }
-
-                // -----------------------------------------------------------------
-                // Attach DOM event listeners BEFORE calling lightGallery() so that
-                // lgInit (fired synchronously during init) is not missed.
-                // -----------------------------------------------------------------
-                container.addEventListener('lgInit', function(event) {
-                    // Add pacId to registry
-                    _registry.set(pacId, {
-                        pac,
-                        instance: event.detail.instance
-                    });
-
-                    // Send event to container
-                    pac.sendMessage(pacId, MSG_GALLERY_READY, 0, 0);
-                });
-
-                container.addEventListener('lgBeforeOpen', function() {
-                    // Check if pacId is registered
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    // Send event to container
-                    pac.sendMessage(pacId, MSG_BEFORE_OPEN, 0, 0);
-                });
-
-                container.addEventListener('lgAfterOpen', function() {
-                    // Check if pacId is registered
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    // Send event to container
-                    pac.sendMessage(pacId, MSG_AFTER_OPEN, 0, 0);
-                });
-
-                container.addEventListener('lgBeforeClose', function() {
-                    // Check if pacId is registered
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    // Send event to container
-                    pac.sendMessage(pacId, MSG_BEFORE_CLOSE, 0, 0);
-                });
-
-                container.addEventListener('lgAfterClose', function() {
-                    // Check if pacId is registered
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    // Send event to container
-                    pac.sendMessage(pacId, MSG_AFTER_CLOSE, 0, 0);
-                });
-
-                container.addEventListener('lgBeforeSlide', function(event) {
-                    // Check if pacId is registered
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    // Extract details
-                    const { index, prevIndex } = event.detail;
-
-                    // Send event to container
-                    pac.sendMessage(pacId, MSG_BEFORE_SLIDE, index, prevIndex, { index, prevIndex });
-                });
-
-                container.addEventListener('lgAfterSlide', function(event) {
-                    // Check if pacId is registered
-                    if (!_registry.has(pacId)) {
-                        return;
-                    }
-
-                    // Extract details
-                    const { index, prevIndex } = event.detail;
-
-                    // Send event to container
-                    pac.sendMessage(pacId, MSG_AFTER_SLIDE, index, prevIndex, { index, prevIndex });
-                });
-
-                // -----------------------------------------------------------------
-                // Initialize lightGallery.
-                // -----------------------------------------------------------------
-                window.lightGallery(container, galleryConfig);
-            }
-
-            /**
-             * Initializes all queued components now that window.lightGallery is available.
-             */
-            function drainPendingInits() {
-                for (const pending of _pendingInits) {
-                    createGallery(pending.pacId, pending.galleryConfig);
-                }
-                _pendingInits.length = 0;
-            }
-
-            return {
-
-                /**
-                 * Called by WakaPAC after a component is created.
-                 * Activates only when the container is a <waka-lightgallery> element.
-                 * @param {Object} abstraction - The component's reactive abstraction object
-                 * @param {string} pacId       - The data-pac-id of the container
-                 * @param {Object} _config     - Component config
-                 */
-                onComponentCreated(abstraction, pacId, _config) {
-                    const container = pac.getContainerByPacId(pacId);
-
-                    if (!container) {
-                        return;
-                    }
-
-                    // Only activate on <waka-lightgallery> custom elements.
-                    if (container.tagName.toLowerCase() !== 'waka-lightgallery') {
-                        return;
-                    }
-
-                    // Merge plugin-level defaults with per-instance overrides.
-                    const galleryConfig = {
-                        ..._defaultGalleryConfig,
-                        ...(_config.lightgallery ?? {})
-                    };
-
-                    // Always inject CSS (one-shot).
-                    ensureCssLoaded();
-
-                    // Load the JS and initialize when ready.
-                    ensureApiLoaded(drainPendingInits, _pendingInits);
-
-                    if (_apiReady) {
-                        createGallery(pacId, galleryConfig);
-                    } else {
-                        _pendingInits.push({ pacId, pac, galleryConfig, MSG_GALLERY_ERROR });
-                    }
-                },
-
-                /**
-                 * Called by WakaPAC when a component is destroyed.
-                 * Removes any pending init from the queue, destroys the lightGallery
-                 * instance, and removes the registry entry.
-                 *
-                 * @param {string} pacId
-                 */
-                onComponentDestroyed(pacId) {
-                    // Pull from the pending queue if destroyed before the script loaded.
-                    const pendingIndex = _pendingInits.findIndex(function(p) {
-                        return p.pacId === pacId;
-                    });
-
-                    if (pendingIndex !== -1) {
-                        _pendingInits.splice(pendingIndex, 1);
-                    }
-
-                    const entry = _registry.get(pacId);
-
-                    if (!entry) {
-                        return;
-                    }
-
-                    // destroy() closes the gallery if open and tears down all
-                    // DOM modifications made by lightGallery. It returns a
-                    // Promise that resolves once the close animation completes,
-                    // but we don't need to await it here since WakaPAC's
-                    // teardown is synchronous and the animation is cosmetic.
-                    entry.instance.destroy();
-
-                    // Remove from registry
-                    _registry.delete(pacId);
-                }
-            };
+            return new GalleryPlugin(this, pac, options).initialize();
         },
 
         // =====================================================================
@@ -516,5 +560,4 @@
 
     // Uppercase alias for consistency with WakaCKEditor / wakaCKEditor convention.
     window.WakaLightGallery = window.wakaLightGallery;
-
 })();
