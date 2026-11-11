@@ -155,8 +155,8 @@
 
     /**
      * Matches a plain property path: an identifier, optionally followed by
-     * `.identifier` or `[digits]` segments. Used to recognize when the "then"
-     * branch of a ternary `foreach:` source is itself a resolvable path.
+     * `.identifier` or `[digits]` segments. Used to recognize when a ternary
+     * `foreach:` source's active branch is itself a resolvable path.
      * @type {RegExp}
      */
     const SIMPLE_PATH_PATTERN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[\d+])*$/;
@@ -6878,16 +6878,21 @@
     };
 
     /**
-     * Extracts the "then" branch of a simple ternary `foreach:` source
-     * expression (`cond ? path : fallback`), when that branch is itself a
-     * plain property path. Only the "then" branch is ever iterated — the
-     * "else" branch (typically `[]`) never contributes items — so it's the
-     * only one `inferArrayRoot()` needs to resolve against.
+     * Resolves which branch of a simple ternary `foreach:` source expression
+     * (`cond ? thenPath : elsePath`) is actually active, by evaluating `cond`
+     * for real against the foreach element's own scope. Evaluating `cond` is
+     * required (rather than always preferring one branch) because either
+     * branch can be the one actually iterated, and `cond` itself can reference
+     * a per-item scoped variable (e.g. `row`) that only resolves correctly
+     * relative to that specific element.
      * @param {string} expression - Raw `foreach:` binding expression.
-     * @returns {string|null} The "then" branch path, or null if `expression`
-     *   isn't a simple ternary, or its "then" branch isn't a plain path.
+     * @param {Element} foreachElement - The foreach element, used to resolve
+     *   `cond` against the correct (possibly nested) scope.
+     * @returns {string|null} The active branch's path, or null if `expression`
+     *   isn't a simple ternary, `cond` couldn't be evaluated, or the active
+     *   branch isn't itself a plain path.
      */
-    Runtime.extractTernaryThenPath = function(expression) {
+    Runtime.prototype.resolveTernaryForeachPath = function(expression, foreachElement) {
         const questionIndex = expression.indexOf('?');
 
         if (questionIndex === -1) {
@@ -6900,13 +6905,25 @@
             return null;
         }
 
+        const condition = expression.slice(0, questionIndex).trim();
         const thenBranch = expression.slice(questionIndex + 1, colonIndex).trim();
+        const elseBranch = expression.slice(colonIndex + 1).trim();
 
-        if (!SIMPLE_PATH_PATTERN.test(thenBranch)) {
+        let conditionValue;
+
+        try {
+            conditionValue = this.evalInScope(condition, foreachElement);
+        } catch (_error) {
             return null;
         }
 
-        return thenBranch;
+        const activeBranch = conditionValue ? thenBranch : elseBranch;
+
+        if (!SIMPLE_PATH_PATTERN.test(activeBranch)) {
+            return null;
+        }
+
+        return activeBranch;
     };
 
     /**
@@ -6923,16 +6940,22 @@
      * (untransformed) value — see issue #198.
      *
      * `computedName` is also, in practice, whatever raw expression a `foreach:`
-     * binding used — including a ternary guard (`cond ? path : []`), which is
-     * not a computed/data name at all. Resolving that case to its "then" branch
-     * (see `extractTernaryThenPath()`) keeps the rest of this method working
-     * against a plain path instead of corrupting it — see issue with nested
-     * `{{ }}` interpolation inside a ternary-sourced nested `foreach`.
+     * binding used — including a ternary guard (`cond ? path : fallback`),
+     * which is not a computed/data name at all. Resolving that case against
+     * whichever branch is actually active (see `resolveTernaryForeachPath()`)
+     * keeps the rest of this method working against a plain path instead of
+     * corrupting it — see issue with nested `{{ }}` interpolation inside a
+     * ternary-sourced nested `foreach`.
      * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`),
      *   or a `foreach:` binding's raw source expression.
+     * @param {Element} [foreachElement] - The foreach element, needed to resolve
+     *   a ternary source's condition against the correct scope.
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
-    Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
+    Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName, foreachElement) {
+        const activeBranch = this.resolveTernaryForeachPath(computedName, foreachElement);
+        const lookupName = activeBranch !== null ? activeBranch : computedName;
+
         // Whether a computed's current output is identity-preserving can depend on
         // its data (e.g. a computed that branches between .map() and .filter()), so
         // the answer is only safe to cache within a single reactive-update pass, not
@@ -6942,14 +6965,16 @@
         // rebuild within the same pass (renderForeach replaces innerHTML wholesale)
         // — without this cache, the identity check below would otherwise re-run,
         // and re-evaluate the computed itself, once per outer item per outer render.
+        //
+        // Cached by lookupName, not computedName: a ternary's raw expression text
+        // can resolve to a different active branch per item (same text, different
+        // scope), so only the already-resolved branch path is safe to reuse across
+        // sibling items within the pass.
         const cache = this.arrayRootCache;
 
-        if (cache.has(computedName)) {
-            return cache.get(computedName);
+        if (cache.has(lookupName)) {
+            return cache.get(lookupName);
         }
-
-        const thenPath = Runtime.extractTernaryThenPath(computedName);
-        const lookupName = thenPath !== null ? thenPath : computedName;
 
         // Step 1: Try dependency map (cheap and reliable if set up correctly).
         let result = lookupName; // Fallback if nothing matches below
@@ -6980,7 +7005,7 @@
             }
         }
 
-        cache.set(computedName, result);
+        cache.set(lookupName, result);
         return result;
     };
 
@@ -9264,7 +9289,7 @@
             // resolution, change-detection matching) see the same fresh value.
             // For filtered/sorted expressions the foreach may render a subset of a larger
             // array — fall back to the evaluated array itself when no root can be found.
-            const sourceRootName = this.inferArrayRoot(mappingData.foreachExpr);
+            const sourceRootName = this.inferArrayRoot(mappingData.foreachExpr, foreachElement);
             mappingData.sourceArray = sourceRootName;
             const sourceRootArray = sourceRootName && this.abstraction[sourceRootName];
             const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;

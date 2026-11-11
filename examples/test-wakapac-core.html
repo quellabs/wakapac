@@ -751,6 +751,44 @@
                 c.destroy();
             });
 
+            await test('nested foreach whose ternary source has real items on both branches resolves whichever branch is actually active per row', async function () {
+                // Unlike the "[] guard" case above, both branches here contain real
+                // items. inferArrayRoot() must evaluate the condition for each row
+                // to find the branch that's actually iterated — always preferring
+                // the "then" branch would mis-scope a row whose condition is false,
+                // silently pointing nested bindings at the unrendered branch instead
+                // of the one actually on screen.
+                const c = mount(
+                    '<ul data-pac-bind="foreach: rows" data-pac-item="row">' +
+                    '<li>{{row.name}}' +
+                    '<ul data-pac-bind="foreach: row.useA ? row.listA.lines : row.listB.lines" data-pac-item="line">' +
+                    '<li class="line">{{line.label}}</li>' +
+                    '</ul></li></ul>',
+                    {
+                        rows: [
+                            { name: 'Row 0', useA: true, listA: { lines: [{ label: 'A0' }] }, listB: { lines: [{ label: 'B0' }] } },
+                            { name: 'Row 1', useA: false, listA: { lines: [{ label: 'A1' }] }, listB: { lines: [{ label: 'B1' }] } }
+                        ]
+                    }
+                );
+                await tick();
+
+                const lines = c.container.querySelectorAll('.line');
+                assertEqual(lines.length, 2);
+                assertEqual(lines[0].textContent, 'A0', 'row 0\'s condition is true, so it must resolve against listA, not listB');
+                assertEqual(lines[1].textContent, 'B1', 'row 1\'s condition is false, so it must resolve against listB, not listA');
+
+                // Flip which branch is active on row 0 — its rendered item should
+                // switch from listA's to listB's, not stay pinned to listA.
+                c.abstraction.rows[0].useA = false;
+                await tick();
+
+                const flipped = c.container.querySelectorAll('.line');
+                assertEqual(flipped[0].textContent, 'B0', 'once useA turns false, row 0 must resolve against listB instead of staying pinned to listA');
+
+                c.destroy();
+            });
+
             await test('nested foreach with default item/$index names does not log "No foreach binding found" on a normal initial render (issue #214)', async function () {
                 const originalWarn = console.warn;
                 const warnings = [];
