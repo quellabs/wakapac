@@ -4565,6 +4565,55 @@
         },
 
         /**
+         * Reduces an AST node down to the single addressable path it refers
+         * to, when it refers to one at all — e.g. the AST for `row.detail.lines`
+         * or `items[0].name` becomes that same dotted/bracketed string. A
+         * `ternary` node reduces to whichever branch is actually active,
+         * evaluating its condition the same way `evaluate()`'s own `case
+         * 'ternary'` does, then recursing into that branch — so a ternary
+         * guarding a path (`cond ? a.b : c.d`) is just one more reducible
+         * shape here, not a case the caller needs to special-case itself.
+         * @param {Object} node - AST node.
+         * @param {Object} [context] - Data context, needed only to evaluate a
+         *   `ternary` node's condition.
+         * @param {Object|null} [scope] - Scope resolver, needed only to
+         *   evaluate a `ternary` node's condition.
+         * @returns {string|null} The path string, or null if `node` doesn't
+         *   reduce to one (e.g. it contains a method call, computed index, or
+         *   operator).
+         */
+        nodeToPlainPath(node, context, scope) {
+            if (node.type === 'identifier') {
+                return node.name;
+            }
+
+            if (node.type === 'member') {
+                const objectPath = this.nodeToPlainPath(node.object, context, scope);
+                return objectPath === null ? null : `${objectPath}.${node.property}`;
+            }
+
+            if (node.type === 'index' && node.index.type === 'literal' && typeof node.index.value === 'number') {
+                const objectPath = this.nodeToPlainPath(node.object, context, scope);
+                return objectPath === null ? null : `${objectPath}[${node.index.value}]`;
+            }
+
+            if (node.type === 'ternary') {
+                let conditionValue;
+
+                try {
+                    conditionValue = this.evaluate(node.condition, context, scope);
+                } catch (_error) {
+                    return null;
+                }
+
+                const activeNode = conditionValue ? node.trueValue : node.falseValue;
+                return this.nodeToPlainPath(activeNode, context, scope);
+            }
+
+            return null;
+        },
+
+        /**
          * Checks if current token matches any of the given types
          * @param {...string} types - Token types to match
          * @returns {boolean} True if current token matches any type
@@ -6881,10 +6930,27 @@
      * brand-new elements that aren't part of the root array at all, so
      * treating the root as the source there would bind `item` to the wrong
      * (untransformed) value — see issue #198.
-     * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`).
+     *
+     * `computedName` is also, in practice, whatever raw expression a `foreach:`
+     * binding used — including a ternary guard (`cond ? path : fallback`),
+     * which is not a computed/data name at all. Reducing it via
+     * `ExpressionParser.nodeToPlainPath()` first — the same reducer used for
+     * any other path-shaped node — resolves a ternary source against
+     * whichever branch is actually active, keeping the rest of this method
+     * working against a plain path instead of corrupting it — see issue with
+     * nested `{{ }}` interpolation inside a ternary-sourced nested `foreach`.
+     * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`),
+     *   or a `foreach:` binding's raw source expression.
+     * @param {Element} [foreachElement] - The foreach element, needed to resolve
+     *   a ternary source's condition against the correct scope.
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
-    Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
+    Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName, foreachElement) {
+        const node = ExpressionCache.parseExpression(computedName);
+        const scope = foreachElement ? this.makeScopeResolverFor(foreachElement) : null;
+        const resolvedPath = node ? ExpressionParser.nodeToPlainPath(node, this.abstraction, scope) : null;
+        const lookupName = resolvedPath !== null ? resolvedPath : computedName;
+
         // Whether a computed's current output is identity-preserving can depend on
         // its data (e.g. a computed that branches between .map() and .filter()), so
         // the answer is only safe to cache within a single reactive-update pass, not
@@ -6894,24 +6960,29 @@
         // rebuild within the same pass (renderForeach replaces innerHTML wholesale)
         // — without this cache, the identity check below would otherwise re-run,
         // and re-evaluate the computed itself, once per outer item per outer render.
+        //
+        // Cached by lookupName, not computedName: a ternary's raw expression text
+        // can resolve to a different active branch per item (same text, different
+        // scope), so only the already-resolved branch path is safe to reuse across
+        // sibling items within the pass.
         const cache = this.arrayRootCache;
 
-        if (cache.has(computedName)) {
-            return cache.get(computedName);
+        if (cache.has(lookupName)) {
+            return cache.get(lookupName);
         }
 
         // Step 1: Try dependency map (cheap and reliable if set up correctly).
-        let result = computedName; // Fallback if nothing matches below
+        let result = lookupName; // Fallback if nothing matches below
 
         for (const [rootProperty, dependentList] of this.dependencies) {
             const rootValue = this.abstraction[rootProperty];
             const isArrayRoot = Array.isArray(rootValue);
 
-            if (dependentList.has(computedName) && isArrayRoot) {
+            if (dependentList.has(lookupName) && isArrayRoot) {
                 let computedValue;
 
                 try {
-                    computedValue = this.abstraction[computedName];
+                    computedValue = this.abstraction[lookupName];
                 } catch (_error) {
                     continue;
                 }
@@ -6929,7 +7000,7 @@
             }
         }
 
-        cache.set(computedName, result);
+        cache.set(lookupName, result);
         return result;
     };
 
@@ -9213,7 +9284,7 @@
             // resolution, change-detection matching) see the same fresh value.
             // For filtered/sorted expressions the foreach may render a subset of a larger
             // array — fall back to the evaluated array itself when no root can be found.
-            const sourceRootName = this.inferArrayRoot(mappingData.foreachExpr);
+            const sourceRootName = this.inferArrayRoot(mappingData.foreachExpr, foreachElement);
             mappingData.sourceArray = sourceRootName;
             const sourceRootArray = sourceRootName && this.abstraction[sourceRootName];
             const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;

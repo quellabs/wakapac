@@ -711,6 +711,84 @@
                 c.destroy();
             });
 
+            await test('nested foreach whose source is a ternary guard (cond ? path : []) resolves inner item properties correctly', async function () {
+                // A foreach guarded against a possibly-null nested object (a very
+                // common idiom: "row.detail ? row.detail.lines : []") is not a
+                // plain property path. inferArrayRoot() used to fall back to
+                // treating the raw ternary text itself as the source path,
+                // which corrupted the inner item's scope — every {{ }} inside
+                // the inner foreach rendered empty, even though the array
+                // itself iterated the correct number of times.
+                const c = mount(
+                    '<ul data-pac-bind="foreach: rows" data-pac-item="row">' +
+                    '<li>{{row.name}}' +
+                    '<ul data-pac-bind="foreach: row.detail ? row.detail.lines : []" data-pac-item="line">' +
+                    '<li class="line">{{line.label}} - {{line.amount}}</li>' +
+                    '</ul></li></ul>',
+                    {
+                        rows: [
+                            { name: 'With detail', detail: { lines: [{ label: 'Alpha', amount: 100 }, { label: 'Beta', amount: 200 }] } },
+                            { name: 'No detail yet', detail: null }
+                        ]
+                    }
+                );
+                await tick();
+
+                const lines = c.container.querySelectorAll('.line');
+                assertEqual(lines.length, 2, 'only the first row (whose ternary condition is truthy) contributes lines');
+                assertEqual(lines[0].textContent, 'Alpha - 100', 'inner item properties resolve against the ternary\'s "then" branch, not the raw ternary text');
+                assertEqual(lines[1].textContent, 'Beta - 200');
+
+                // Reactive update: filling in the second row's detail should
+                // render its lines too, still resolving correctly.
+                c.abstraction.rows[1].detail = { lines: [{ label: 'Gamma', amount: 300 }] };
+                await tick();
+
+                const updatedLines = c.container.querySelectorAll('.line');
+                assertEqual(updatedLines.length, 3, 'the second row\'s lines render once its ternary condition turns truthy');
+                assertEqual(updatedLines[2].textContent, 'Gamma - 300');
+
+                c.destroy();
+            });
+
+            await test('nested foreach whose ternary source has real items on both branches resolves whichever branch is actually active per row', async function () {
+                // Unlike the "[] guard" case above, both branches here contain real
+                // items. inferArrayRoot() must evaluate the condition for each row
+                // to find the branch that's actually iterated — always preferring
+                // the "then" branch would mis-scope a row whose condition is false,
+                // silently pointing nested bindings at the unrendered branch instead
+                // of the one actually on screen.
+                const c = mount(
+                    '<ul data-pac-bind="foreach: rows" data-pac-item="row">' +
+                    '<li>{{row.name}}' +
+                    '<ul data-pac-bind="foreach: row.useA ? row.listA.lines : row.listB.lines" data-pac-item="line">' +
+                    '<li class="line">{{line.label}}</li>' +
+                    '</ul></li></ul>',
+                    {
+                        rows: [
+                            { name: 'Row 0', useA: true, listA: { lines: [{ label: 'A0' }] }, listB: { lines: [{ label: 'B0' }] } },
+                            { name: 'Row 1', useA: false, listA: { lines: [{ label: 'A1' }] }, listB: { lines: [{ label: 'B1' }] } }
+                        ]
+                    }
+                );
+                await tick();
+
+                const lines = c.container.querySelectorAll('.line');
+                assertEqual(lines.length, 2);
+                assertEqual(lines[0].textContent, 'A0', 'row 0\'s condition is true, so it must resolve against listA, not listB');
+                assertEqual(lines[1].textContent, 'B1', 'row 1\'s condition is false, so it must resolve against listB, not listA');
+
+                // Flip which branch is active on row 0 — its rendered item should
+                // switch from listA's to listB's, not stay pinned to listA.
+                c.abstraction.rows[0].useA = false;
+                await tick();
+
+                const flipped = c.container.querySelectorAll('.line');
+                assertEqual(flipped[0].textContent, 'B0', 'once useA turns false, row 0 must resolve against listB instead of staying pinned to listA');
+
+                c.destroy();
+            });
+
             await test('nested foreach with default item/$index names does not log "No foreach binding found" on a normal initial render (issue #214)', async function () {
                 const originalWarn = console.warn;
                 const warnings = [];
