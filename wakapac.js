@@ -154,14 +154,6 @@
     const DOTS_AND_BRACKETS_PATTERN = /[.[\]]+/;
 
     /**
-     * Matches a plain property path: an identifier, optionally followed by
-     * `.identifier` or `[digits]` segments. Used to recognize when a ternary
-     * `foreach:` source's active branch is itself a resolvable path.
-     * @type {RegExp}
-     */
-    const SIMPLE_PATH_PATTERN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[\d+])*$/;
-
-    /**
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
@@ -4573,6 +4565,55 @@
         },
 
         /**
+         * Reduces an AST node down to the single addressable path it refers
+         * to, when it refers to one at all — e.g. the AST for `row.detail.lines`
+         * or `items[0].name` becomes that same dotted/bracketed string. A
+         * `ternary` node reduces to whichever branch is actually active,
+         * evaluating its condition the same way `evaluate()`'s own `case
+         * 'ternary'` does, then recursing into that branch — so a ternary
+         * guarding a path (`cond ? a.b : c.d`) is just one more reducible
+         * shape here, not a case the caller needs to special-case itself.
+         * @param {Object} node - AST node.
+         * @param {Object} [context] - Data context, needed only to evaluate a
+         *   `ternary` node's condition.
+         * @param {Object|null} [scope] - Scope resolver, needed only to
+         *   evaluate a `ternary` node's condition.
+         * @returns {string|null} The path string, or null if `node` doesn't
+         *   reduce to one (e.g. it contains a method call, computed index, or
+         *   operator).
+         */
+        nodeToPlainPath(node, context, scope) {
+            if (node.type === 'identifier') {
+                return node.name;
+            }
+
+            if (node.type === 'member') {
+                const objectPath = this.nodeToPlainPath(node.object, context, scope);
+                return objectPath === null ? null : `${objectPath}.${node.property}`;
+            }
+
+            if (node.type === 'index' && node.index.type === 'literal' && typeof node.index.value === 'number') {
+                const objectPath = this.nodeToPlainPath(node.object, context, scope);
+                return objectPath === null ? null : `${objectPath}[${node.index.value}]`;
+            }
+
+            if (node.type === 'ternary') {
+                let conditionValue;
+
+                try {
+                    conditionValue = this.evaluate(node.condition, context, scope);
+                } catch (_error) {
+                    return null;
+                }
+
+                const activeNode = conditionValue ? node.trueValue : node.falseValue;
+                return this.nodeToPlainPath(activeNode, context, scope);
+            }
+
+            return null;
+        },
+
+        /**
          * Checks if current token matches any of the given types
          * @param {...string} types - Token types to match
          * @returns {boolean} True if current token matches any type
@@ -6878,55 +6919,6 @@
     };
 
     /**
-     * Resolves which branch of a simple ternary `foreach:` source expression
-     * (`cond ? thenPath : elsePath`) is actually active, by evaluating `cond`
-     * for real against the foreach element's own scope. Evaluating `cond` is
-     * required (rather than always preferring one branch) because either
-     * branch can be the one actually iterated, and `cond` itself can reference
-     * a per-item scoped variable (e.g. `row`) that only resolves correctly
-     * relative to that specific element.
-     * @param {string} expression - Raw `foreach:` binding expression.
-     * @param {Element} foreachElement - The foreach element, used to resolve
-     *   `cond` against the correct (possibly nested) scope.
-     * @returns {string|null} The active branch's path, or null if `expression`
-     *   isn't a simple ternary, `cond` couldn't be evaluated, or the active
-     *   branch isn't itself a plain path.
-     */
-    Runtime.prototype.resolveTernaryForeachPath = function(expression, foreachElement) {
-        const questionIndex = expression.indexOf('?');
-
-        if (questionIndex === -1) {
-            return null;
-        }
-
-        const colonIndex = expression.indexOf(':', questionIndex);
-
-        if (colonIndex === -1) {
-            return null;
-        }
-
-        const condition = expression.slice(0, questionIndex).trim();
-        const thenBranch = expression.slice(questionIndex + 1, colonIndex).trim();
-        const elseBranch = expression.slice(colonIndex + 1).trim();
-
-        let conditionValue;
-
-        try {
-            conditionValue = this.evalInScope(condition, foreachElement);
-        } catch (_error) {
-            return null;
-        }
-
-        const activeBranch = conditionValue ? thenBranch : elseBranch;
-
-        if (!SIMPLE_PATH_PATTERN.test(activeBranch)) {
-            return null;
-        }
-
-        return activeBranch;
-    };
-
-    /**
      * Try to infer which array property in the abstraction is the "source" array
      * behind a given computed property (for example, linking `filteredTodos` back to `todos`).
      *
@@ -6941,11 +6933,12 @@
      *
      * `computedName` is also, in practice, whatever raw expression a `foreach:`
      * binding used — including a ternary guard (`cond ? path : fallback`),
-     * which is not a computed/data name at all. Resolving that case against
-     * whichever branch is actually active (see `resolveTernaryForeachPath()`)
-     * keeps the rest of this method working against a plain path instead of
-     * corrupting it — see issue with nested `{{ }}` interpolation inside a
-     * ternary-sourced nested `foreach`.
+     * which is not a computed/data name at all. Reducing it via
+     * `ExpressionParser.nodeToPlainPath()` first — the same reducer used for
+     * any other path-shaped node — resolves a ternary source against
+     * whichever branch is actually active, keeping the rest of this method
+     * working against a plain path instead of corrupting it — see issue with
+     * nested `{{ }}` interpolation inside a ternary-sourced nested `foreach`.
      * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`),
      *   or a `foreach:` binding's raw source expression.
      * @param {Element} [foreachElement] - The foreach element, needed to resolve
@@ -6953,8 +6946,10 @@
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
     Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName, foreachElement) {
-        const activeBranch = this.resolveTernaryForeachPath(computedName, foreachElement);
-        const lookupName = activeBranch !== null ? activeBranch : computedName;
+        const node = ExpressionCache.parseExpression(computedName);
+        const scope = foreachElement ? this.makeScopeResolverFor(foreachElement) : null;
+        const resolvedPath = node ? ExpressionParser.nodeToPlainPath(node, this.abstraction, scope) : null;
+        const lookupName = resolvedPath !== null ? resolvedPath : computedName;
 
         // Whether a computed's current output is identity-preserving can depend on
         // its data (e.g. a computed that branches between .map() and .filter()), so
