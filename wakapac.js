@@ -154,6 +154,14 @@
     const DOTS_AND_BRACKETS_PATTERN = /[.[\]]+/;
 
     /**
+     * Matches a plain property path: an identifier, optionally followed by
+     * `.identifier` or `[digits]` segments. Used to recognize when the "then"
+     * branch of a ternary `foreach:` source is itself a resolvable path.
+     * @type {RegExp}
+     */
+    const SIMPLE_PATH_PATTERN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[\d+])*$/;
+
+    /**
      * HTML attributes that are boolean (present = true, absent = false)
      * @constant {string[]}
      */
@@ -6870,6 +6878,38 @@
     };
 
     /**
+     * Extracts the "then" branch of a simple ternary `foreach:` source
+     * expression (`cond ? path : fallback`), when that branch is itself a
+     * plain property path. Only the "then" branch is ever iterated — the
+     * "else" branch (typically `[]`) never contributes items — so it's the
+     * only one `inferArrayRoot()` needs to resolve against.
+     * @param {string} expression - Raw `foreach:` binding expression.
+     * @returns {string|null} The "then" branch path, or null if `expression`
+     *   isn't a simple ternary, or its "then" branch isn't a plain path.
+     */
+    Runtime.extractTernaryThenPath = function(expression) {
+        const questionIndex = expression.indexOf('?');
+
+        if (questionIndex === -1) {
+            return null;
+        }
+
+        const colonIndex = expression.indexOf(':', questionIndex);
+
+        if (colonIndex === -1) {
+            return null;
+        }
+
+        const thenBranch = expression.slice(questionIndex + 1, colonIndex).trim();
+
+        if (!SIMPLE_PATH_PATTERN.test(thenBranch)) {
+            return null;
+        }
+
+        return thenBranch;
+    };
+
+    /**
      * Try to infer which array property in the abstraction is the "source" array
      * behind a given computed property (for example, linking `filteredTodos` back to `todos`).
      *
@@ -6881,7 +6921,15 @@
      * brand-new elements that aren't part of the root array at all, so
      * treating the root as the source there would bind `item` to the wrong
      * (untransformed) value — see issue #198.
-     * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`).
+     *
+     * `computedName` is also, in practice, whatever raw expression a `foreach:`
+     * binding used — including a ternary guard (`cond ? path : []`), which is
+     * not a computed/data name at all. Resolving that case to its "then" branch
+     * (see `extractTernaryThenPath()`) keeps the rest of this method working
+     * against a plain path instead of corrupting it — see issue with nested
+     * `{{ }}` interpolation inside a ternary-sourced nested `foreach`.
+     * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`),
+     *   or a `foreach:` binding's raw source expression.
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
     Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
@@ -6900,18 +6948,21 @@
             return cache.get(computedName);
         }
 
+        const thenPath = Runtime.extractTernaryThenPath(computedName);
+        const lookupName = thenPath !== null ? thenPath : computedName;
+
         // Step 1: Try dependency map (cheap and reliable if set up correctly).
-        let result = computedName; // Fallback if nothing matches below
+        let result = lookupName; // Fallback if nothing matches below
 
         for (const [rootProperty, dependentList] of this.dependencies) {
             const rootValue = this.abstraction[rootProperty];
             const isArrayRoot = Array.isArray(rootValue);
 
-            if (dependentList.has(computedName) && isArrayRoot) {
+            if (dependentList.has(lookupName) && isArrayRoot) {
                 let computedValue;
 
                 try {
-                    computedValue = this.abstraction[computedName];
+                    computedValue = this.abstraction[lookupName];
                 } catch (_error) {
                     continue;
                 }
