@@ -91,6 +91,368 @@
 
 (function() {
     'use strict';
+    const pluginRuntime = {
+        renderSceneRegion(context, scene, primary, sprites, dirtyRectangle) {
+            const rectangle = dirtyRectangle.full
+                ? { x: 0, y: 0, w: primary.width, h: primary.height }
+                : pluginRuntime._clampRect(dirtyRectangle.x, dirtyRectangle.y, dirtyRectangle.w, dirtyRectangle.h, primary.width, primary.height);
+
+            if (!rectangle) {
+                return;
+            }
+
+            context.fillStyle = scene._background;
+            context.fillRect(rectangle.x, rectangle.y, rectangle.w, rectangle.h);
+
+            for (const sprite of sprites) {
+                pluginRuntime.renderSceneSprite(context, sprite, rectangle);
+            }
+        },
+
+        renderSceneSprite(context, sprite, rectangle) {
+            if (!sprite.visible) {
+                return;
+            }
+
+            const bounds = pluginRuntime._spriteBounds(sprite);
+            const { x, y, w, h } = rectangle;
+            if (!pluginRuntime._rectsOverlap(bounds.x, bounds.y, bounds.w, bounds.h, x, y, w, h)) {
+                return;
+            }
+
+            const source = sprite._rect;
+            const sourceX = source ? source.x ?? source.left ?? 0 : 0;
+            const sourceY = source ? source.y ?? source.top ?? 0 : 0;
+            const width = source ? source.width : sprite._surface.width;
+            const height = source ? source.height : sprite._surface.height;
+            const clipX = Math.max(bounds.x, x);
+            const clipY = Math.max(bounds.y, y);
+            const clipWidth = Math.min(bounds.x + bounds.w, x + w) - clipX;
+            const clipHeight = Math.min(bounds.y + bounds.h, y + h) - clipY;
+
+            // Restrict 'copy' compositing to the sprite intersection so smaller
+            // sprites cannot erase the background or previously drawn sprites.
+            context.save();
+            context.beginPath();
+            context.rect(clipX, clipY, clipWidth, clipHeight);
+            context.clip();
+            context.globalCompositeOperation = sprite._surface.colorKey !== null ? 'source-over' : 'copy';
+            context.drawImage(sprite._surface._ctx.canvas, sourceX, sourceY, width, height, sprite.x, sprite.y, width, height);
+            context.restore();
+        },
+
+        /**
+         * Creates a 2D canvas context of the given dimensions.
+         * Falls back to a regular HTMLCanvasElement if OffscreenCanvas is unavailable.
+         * @param {number} width
+         * @param {number} height
+         * @returns {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D}
+         */
+        _create2DContext(width, height) {
+            if (typeof OffscreenCanvas !== 'undefined') {
+                return new OffscreenCanvas(width, height).getContext('2d');
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            return canvas.getContext('2d');
+        },
+
+        /**
+         * Parses a CSS color string (#rgb, #rrggbb, rgb(), rgba()) into {r, g, b}.
+         * Returns null if the color cannot be parsed.
+         * @param {string} color
+         * @returns {{r:number, g:number, b:number}|null}
+         */
+        _parseColor(color) {
+            if (!color) {
+                return null;
+            }
+
+            color = color.trim();
+
+            // Expand #rgb to #rrggbb
+            if (/^#[0-9a-fA-F]{3}$/.test(color)) {
+                color = '#' + color[1] + color[1] + color[2] + color[2] + color[3] + color[3];
+            }
+
+            if (/^#[0-9a-fA-F]{6}$/.test(color)) {
+                return {
+                    r: parseInt(color.slice(1, 3), 16),
+                    g: parseInt(color.slice(3, 5), 16),
+                    b: parseInt(color.slice(5, 7), 16)
+                };
+            }
+
+            const m = color.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+            return m ? { r: +m[1], g: +m[2], b: +m[3] } : null;
+        },
+
+        /**
+         * Applies a color key to a canvas context in-place.
+         * Pixels whose RGB matches the key are set to alpha=0.
+         *
+         * This is O(pixels) — call once after loading or bulk pixel operations,
+         * never per frame. Repeated calls on an already-keyed surface are harmless
+         * but wasteful.
+         *
+         * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
+         * @param {string} colorKey
+         */
+        _applyColorKey(ctx, colorKey) {
+            const key = pluginRuntime._parseColor(colorKey);
+
+            if (!key) {
+                console.warn(`WakaDDraw: could not parse colorKey "${colorKey}"`);
+                return;
+            }
+
+            const { width, height } = ctx.canvas;
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const data = imageData.data;
+
+            for (let i = 0; i < data.length; i += 4) {
+                if (data[i] === key.r && data[i + 1] === key.g && data[i + 2] === key.b) {
+                    data[i + 3] = 0;
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+        },
+
+        /**
+         * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
+         * @param {string|null} colorKey
+         * @param {boolean}     offscreen
+         * @returns {Surface}
+         */
+        _buildSurface(ctx, colorKey, offscreen) {
+            return {
+                _ctx  : ctx,
+                width : ctx.canvas.width,
+                height: ctx.canvas.height,
+                offscreen,
+                colorKey
+            };
+        },
+
+        /**
+         * Returns true if two rectangles overlap. Touching edges do not count.
+         *
+         * @param {number} ax @param {number} ay @param {number} aw @param {number} ah
+         * @param {number} bx @param {number} by @param {number} bw @param {number} bh
+         * @returns {boolean}
+         */
+        _rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+            return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+        },
+
+        /**
+         * Clamps a rectangle to fit within a bounding box.
+         * Returns null if the result has zero or negative area.
+         *
+         * @param {number} x @param {number} y @param {number} w @param {number} h
+         * @param {number} bw Bounding width @param {number} bh Bounding height
+         * @returns {{x:number, y:number, w:number, h:number}|null}
+         */
+        _clampRect(x, y, w, h, bw, bh) {
+            const cx = Math.max(x, 0);
+            const cy = Math.max(y, 0);
+            const cw = Math.min(x + w, bw) - cx;
+            const ch = Math.min(y + h, bh) - cy;
+
+            if (cw <= 0 || ch <= 0) {
+                return null;
+            }
+
+            return { x: cx, y: cy, w: cw, h: ch };
+        },
+
+        /**
+         * Subtracts rectangle B from rectangle A, returning the non-overlapping
+         * fragments of A. Returns 0–4 rects.
+         * @param {number} ax @param {number} ay @param {number} aw @param {number} ah
+         * @param {number} bx @param {number} by @param {number} bw @param {number} bh
+         * @returns {Array<{x:number, y:number, w:number, h:number}>}
+         */
+        _subtractRect(ax, ay, aw, ah, bx, by, bw, bh) {
+            const ix = Math.max(ax, bx);
+            const iy = Math.max(ay, by);
+            const ix2 = Math.min(ax + aw, bx + bw);
+            const iy2 = Math.min(ay + ah, by + bh);
+
+            // Not split needed
+            if (ix >= ix2 || iy >= iy2) {
+                return [{ x: ax, y: ay, w: aw, h: ah }];
+            }
+
+            // Split the rect
+            const frags = [];
+
+            if (ix > ax) {
+                frags.push({ x: ax, y: ay, w: ix - ax, h: ah });
+            }
+
+            if (ix2 < ax + aw) {
+                frags.push({ x: ix2, y: ay, w: (ax + aw) - ix2, h: ah });
+            }
+
+            if (iy > ay) {
+                frags.push({ x: ix, y: ay, w: ix2 - ix, h: iy - ay });
+            }
+
+            if (iy2 < ay + ah) {
+                frags.push({ x: ix, y: iy2, w: ix2 - ix, h: (ay + ah) - iy2 });
+            }
+
+            return frags;
+        },
+
+        /**
+         * Adds a dirty rect to a scene's list, splitting it against existing rects
+         * so the list remains non-overlapping. Collapses to a full-redraw sentinel
+         * when the list exceeds MAX_DIRTY_RECTS.
+         * @param {Object} scene
+         * @param {number} x @param {number} y @param {number} w @param {number} h
+         */
+        _sceneDirtyRect(scene, x, y, w, h) {
+            // If already collapsed to full-redraw, nothing to do
+            if (scene._dirty.length === 1 && scene._dirty[0].full) {
+                return;
+            }
+
+            // If the dirty list is at capacity, collapse to a full redraw.
+            // Prevents O(n²) fragmentation in scenes with many moving sprites.
+            if (scene._dirty.length >= MAX_DIRTY_RECTS) {
+                scene._dirty = [{ full: true }];
+                return;
+            }
+
+            let candidates = [{ x, y, w, h }];
+
+            for (const existing of scene._dirty) {
+                if (candidates.length === 0) {
+                    break;
+                }
+
+                const next = [];
+
+                for (const c of candidates) {
+                    for (const f of pluginRuntime._subtractRect(c.x, c.y, c.w, c.h, existing.x, existing.y, existing.w, existing.h)) {
+                        next.push(f);
+                    }
+                }
+
+                candidates = next;
+            }
+
+            for (const c of candidates) {
+                scene._dirty.push(c);
+            }
+        },
+
+        /**
+         * Creates a Sprite object backed by a surface.
+         * @param {Surface}     surface
+         * @param {Object|null} rect     Source rect (DOMRect conventions), or null for full surface
+         * @param {number}      z        Z-order
+         * @returns {Sprite}
+         */
+        _createSpriteObject(surface, rect, z) {
+            return {
+                _scene  : null,
+                _surface: surface,
+                _rect   : rect ? { ...rect } : null,
+                _z      : z,
+                _zSeq   : _spriteSeq++,
+                x       : 0,
+                y       : 0,
+                visible : true,
+
+                moveTo(nx, ny) {
+                    nx = Math.round(nx);
+                    ny = Math.round(ny);
+                    if (this.x === nx && this.y === ny) {
+                        return;
+                    }
+                    pluginRuntime._spriteDirty(this);          // dirty old position
+                    this.x = nx;
+                    this.y = ny;
+                    pluginRuntime._spriteDirty(this);          // dirty new position
+                },
+
+                setRect(rect) {
+                    this._rect = rect ? { ...rect } : null;
+                    pluginRuntime._spriteDirty(this);
+                },
+
+                setZ(z) {
+                    this._z = z;
+                    this._zSeq = _spriteSeq++;
+                    if (this._scene) {
+                        pluginRuntime._sceneSortSprites(this._scene);
+                    }
+                    pluginRuntime._spriteDirty(this);
+                },
+
+                show() {
+                    if (this.visible) {
+                        return;
+                    }
+                    this.visible = true;
+                    pluginRuntime._spriteDirty(this);
+                },
+
+                hide() {
+                    if (!this.visible) {
+                        return;
+                    }
+                    pluginRuntime._spriteDirty(this);
+                    this.visible = false;
+                }
+            };
+        },
+
+        /**
+         * Returns the bounding rect of a sprite in scene space.
+         * @param {Sprite} sprite
+         * @returns {{x:number, y:number, w:number, h:number}}
+         */
+        _spriteBounds(sprite) {
+            const r = sprite._rect;
+            const w = r ? r.width : sprite._surface.width;
+            const h = r ? r.height : sprite._surface.height;
+            return { x: sprite.x, y: sprite.y, w, h };
+        },
+
+        /**
+         * Marks the sprite's current bounding rect dirty on its parent scene.
+         * No-op if the sprite has no scene or is hidden.
+         * @param {Sprite} sprite
+         */
+        _spriteDirty(sprite) {
+            if (!sprite._scene || !sprite.visible) {
+                return;
+            }
+
+            const b = pluginRuntime._spriteBounds(sprite);
+            pluginRuntime._sceneDirtyRect(sprite._scene, b.x, b.y, b.w, b.h);
+        },
+
+        /**
+         * Sorts the scene's sprite list by z ascending, using insertion sequence
+         * as a stable tiebreaker.
+         * @param {Object} scene
+         */
+        _sceneSortSprites(scene) {
+            const sceneSortSpritesHandlers = {
+                compareItems(a, b) { return a._z !== b._z ? a._z - b._z : a._zSeq - b._zSeq; }
+            };
+
+            scene._sprites.sort(sceneSortSpritesHandlers.compareItems.bind(this));
+        }
+    };
 
     const VERSION = '1.0.1';
 
@@ -112,91 +474,11 @@
      */
     const MAX_DIRTY_RECTS = 64;
 
-    /**
-     * Creates a 2D canvas context of the given dimensions.
-     * Falls back to a regular HTMLCanvasElement if OffscreenCanvas is unavailable.
-     * @param {number} width
-     * @param {number} height
-     * @returns {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D}
-     */
-    function _create2DContext(width, height) {
-        if (typeof OffscreenCanvas !== 'undefined') {
-            return new OffscreenCanvas(width, height).getContext('2d');
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        return canvas.getContext('2d');
-    }
-
     // =========================================================================
     // COLOR KEY
     // =========================================================================
 
     const DEFAULT_COLOR_KEY = null;
-
-    /**
-     * Parses a CSS color string (#rgb, #rrggbb, rgb(), rgba()) into {r, g, b}.
-     * Returns null if the color cannot be parsed.
-     * @param {string} color
-     * @returns {{r:number, g:number, b:number}|null}
-     */
-    function _parseColor(color) {
-        if (!color) {
-            return null;
-        }
-
-        color = color.trim();
-
-        // Expand #rgb to #rrggbb
-        if (/^#[0-9a-fA-F]{3}$/.test(color)) {
-            color = '#' + color[1] + color[1] + color[2] + color[2] + color[3] + color[3];
-        }
-
-        if (/^#[0-9a-fA-F]{6}$/.test(color)) {
-            return {
-                r: parseInt(color.slice(1, 3), 16),
-                g: parseInt(color.slice(3, 5), 16),
-                b: parseInt(color.slice(5, 7), 16)
-            };
-        }
-
-        const m = color.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-        return m ? { r: +m[1], g: +m[2], b: +m[3] } : null;
-    }
-
-    /**
-     * Applies a color key to a canvas context in-place.
-     * Pixels whose RGB matches the key are set to alpha=0.
-     *
-     * This is O(pixels) — call once after loading or bulk pixel operations,
-     * never per frame. Repeated calls on an already-keyed surface are harmless
-     * but wasteful.
-     *
-     * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
-     * @param {string} colorKey
-     */
-    function _applyColorKey(ctx, colorKey) {
-        const key = _parseColor(colorKey);
-
-        if (!key) {
-            console.warn(`WakaDDraw: could not parse colorKey "${colorKey}"`);
-            return;
-        }
-
-        const { width, height } = ctx.canvas;
-        const imageData = ctx.getImageData(0, 0, width, height);
-        const data = imageData.data;
-
-        for (let i = 0; i < data.length; i += 4) {
-            if (data[i] === key.r && data[i + 1] === key.g && data[i + 2] === key.b) {
-                data[i + 3] = 0;
-            }
-        }
-
-        ctx.putImageData(imageData, 0, 0);
-    }
 
     // =========================================================================
     // SURFACE
@@ -214,140 +496,9 @@
      * }} Surface
      */
 
-    /**
-     * @param {CanvasRenderingContext2D|OffscreenCanvasRenderingContext2D} ctx
-     * @param {string|null} colorKey
-     * @param {boolean}     offscreen
-     * @returns {Surface}
-     */
-    function _buildSurface(ctx, colorKey, offscreen) {
-        return {
-            _ctx: ctx,
-            width: ctx.canvas.width,
-            height: ctx.canvas.height,
-            offscreen,
-            colorKey
-        };
-    }
-
     // =========================================================================
     // RECT HELPERS (scene system)
     // =========================================================================
-
-    /**
-     * Returns true if two rectangles overlap. Touching edges do not count.
-     *
-     * @param {number} ax @param {number} ay @param {number} aw @param {number} ah
-     * @param {number} bx @param {number} by @param {number} bw @param {number} bh
-     * @returns {boolean}
-     */
-    function _rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
-        return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
-    }
-
-    /**
-     * Clamps a rectangle to fit within a bounding box.
-     * Returns null if the result has zero or negative area.
-     *
-     * @param {number} x @param {number} y @param {number} w @param {number} h
-     * @param {number} bw Bounding width @param {number} bh Bounding height
-     * @returns {{x:number, y:number, w:number, h:number}|null}
-     */
-    function _clampRect(x, y, w, h, bw, bh) {
-        const cx = Math.max(x, 0);
-        const cy = Math.max(y, 0);
-        const cw = Math.min(x + w, bw) - cx;
-        const ch = Math.min(y + h, bh) - cy;
-
-        if (cw <= 0 || ch <= 0) {
-            return null;
-        }
-
-        return { x: cx, y: cy, w: cw, h: ch };
-    }
-
-    /**
-     * Subtracts rectangle B from rectangle A, returning the non-overlapping
-     * fragments of A. Returns 0–4 rects.
-     * @param {number} ax @param {number} ay @param {number} aw @param {number} ah
-     * @param {number} bx @param {number} by @param {number} bw @param {number} bh
-     * @returns {Array<{x:number, y:number, w:number, h:number}>}
-     */
-    function _subtractRect(ax, ay, aw, ah, bx, by, bw, bh) {
-        const ix = Math.max(ax, bx);
-        const iy = Math.max(ay, by);
-        const ix2 = Math.min(ax + aw, bx + bw);
-        const iy2 = Math.min(ay + ah, by + bh);
-
-        // Not split needed
-        if (ix >= ix2 || iy >= iy2) {
-            return [{ x: ax, y: ay, w: aw, h: ah }];
-        }
-
-        // Split the rect
-        const frags = [];
-
-        if (ix > ax) {
-            frags.push({ x: ax, y: ay, w: ix - ax, h: ah });
-        }
-
-        if (ix2 < ax + aw) {
-            frags.push({ x: ix2, y: ay, w: (ax + aw) - ix2, h: ah });
-        }
-
-        if (iy > ay) {
-            frags.push({ x: ix, y: ay, w: ix2 - ix, h: iy - ay });
-        }
-
-        if (iy2 < ay + ah) {
-            frags.push({ x: ix, y: iy2, w: ix2 - ix, h: (ay + ah) - iy2 });
-        }
-
-        return frags;
-    }
-
-    /**
-     * Adds a dirty rect to a scene's list, splitting it against existing rects
-     * so the list remains non-overlapping. Collapses to a full-redraw sentinel
-     * when the list exceeds MAX_DIRTY_RECTS.
-     * @param {Object} scene
-     * @param {number} x @param {number} y @param {number} w @param {number} h
-     */
-    function _sceneDirtyRect(scene, x, y, w, h) {
-        // If already collapsed to full-redraw, nothing to do
-        if (scene._dirty.length === 1 && scene._dirty[0].full) {
-            return;
-        }
-
-        // If the dirty list is at capacity, collapse to a full redraw.
-        // Prevents O(n²) fragmentation in scenes with many moving sprites.
-        if (scene._dirty.length >= MAX_DIRTY_RECTS) {
-            scene._dirty = [{ full: true }];
-            return;
-        }
-
-        let candidates = [{ x, y, w, h }];
-
-        for (const existing of scene._dirty) {
-            if (candidates.length === 0) {
-                break;
-            }
-
-            const next = [];
-
-            for (const c of candidates) {
-                for (const f of _subtractRect(c.x, c.y, c.w, c.h, existing.x, existing.y, existing.w, existing.h)) {
-                    next.push(f);
-                }
-            }
-
-            candidates = next;
-        }
-
-        for (const c of candidates) {
-            scene._dirty.push(c);
-        }
-    }
 
     // =========================================================================
     // SPRITE (scene system)
@@ -372,103 +523,6 @@
      */
 
     let _spriteSeq = 0;
-
-    /**
-     * Creates a Sprite object backed by a surface.
-     * @param {Surface}     surface
-     * @param {Object|null} rect     Source rect (DOMRect conventions), or null for full surface
-     * @param {number}      z        Z-order
-     * @returns {Sprite}
-     */
-    function _createSpriteObject(surface, rect, z) {
-        return {
-            _scene: null,
-            _surface: surface,
-            _rect: rect ? { ...rect } : null,
-            _z: z,
-            _zSeq: _spriteSeq++,
-            x: 0,
-            y: 0,
-            visible: true,
-
-            moveTo(nx, ny) {
-                nx = Math.round(nx);
-                ny = Math.round(ny);
-                if (this.x === nx && this.y === ny) {
-                    return;
-                }
-                _spriteDirty(this);          // dirty old position
-                this.x = nx;
-                this.y = ny;
-                _spriteDirty(this);          // dirty new position
-            },
-
-            setRect(rect) {
-                this._rect = rect ? { ...rect } : null;
-                _spriteDirty(this);
-            },
-
-            setZ(z) {
-                this._z = z;
-                this._zSeq = _spriteSeq++;
-                if (this._scene) {
-                    _sceneSortSprites(this._scene);
-                }
-                _spriteDirty(this);
-            },
-
-            show() {
-                if (this.visible) {
-                    return;
-                }
-                this.visible = true;
-                _spriteDirty(this);
-            },
-
-            hide() {
-                if (!this.visible) {
-                    return;
-                }
-                _spriteDirty(this);
-                this.visible = false;
-            }
-        };
-    }
-
-    /**
-     * Returns the bounding rect of a sprite in scene space.
-     * @param {Sprite} sprite
-     * @returns {{x:number, y:number, w:number, h:number}}
-     */
-    function _spriteBounds(sprite) {
-        const r = sprite._rect;
-        const w = r ? r.width : sprite._surface.width;
-        const h = r ? r.height : sprite._surface.height;
-        return { x: sprite.x, y: sprite.y, w, h };
-    }
-
-    /**
-     * Marks the sprite's current bounding rect dirty on its parent scene.
-     * No-op if the sprite has no scene or is hidden.
-     * @param {Sprite} sprite
-     */
-    function _spriteDirty(sprite) {
-        if (!sprite._scene || !sprite.visible) {
-            return;
-        }
-
-        const b = _spriteBounds(sprite);
-        _sceneDirtyRect(sprite._scene, b.x, b.y, b.w, b.h);
-    }
-
-    /**
-     * Sorts the scene's sprite list by z ascending, using insertion sequence
-     * as a stable tiebreaker.
-     * @param {Object} scene
-     */
-    function _sceneSortSprites(scene) {
-        scene._sprites.sort((a, b) => a._z !== b._z ? a._z - b._z : a._zSeq - b._zSeq);
-    }
 
     // =========================================================================
     // WAKADDRAW — continued
@@ -524,7 +578,7 @@
                 throw new Error(`WakaDDraw.getSurface: could not get 2d context for pacId "${pacId}"`);
             }
 
-            return _buildSurface(ctx, null, false);
+            return pluginRuntime._buildSurface(ctx, null, false);
         },
 
         /**
@@ -542,9 +596,9 @@
             }
 
             const colorKey = Object.prototype.hasOwnProperty.call(opts, 'colorKey') ? opts.colorKey : DEFAULT_COLOR_KEY;
-            const ctx = _create2DContext(width, height);
+            const ctx = pluginRuntime._create2DContext(width, height);
 
-            return _buildSurface(ctx, colorKey, true);
+            return pluginRuntime._buildSurface(ctx, colorKey, true);
         },
 
         /**
@@ -586,7 +640,7 @@
             surface._ctx.drawImage(bitmap.canvas, 0, 0);
 
             if (surface.colorKey !== null) {
-                _applyColorKey(surface._ctx, surface.colorKey);
+                pluginRuntime._applyColorKey(surface._ctx, surface.colorKey);
             }
         },
 
@@ -615,8 +669,8 @@
                 throw new Error('WakaDDraw.bltFast: src is required');
             }
 
-            const sx = rect ? (rect.x ?? rect.left ?? 0) : 0;
-            const sy = rect ? (rect.y ?? rect.top ?? 0) : 0;
+            const sx = rect ? rect.x ?? rect.left ?? 0 : 0;
+            const sy = rect ? rect.y ?? rect.top ?? 0 : 0;
             const sw = rect ? rect.width : src.width;
             const sh = rect ? rect.height : src.height;
 
@@ -684,7 +738,7 @@
                 return;
             }
 
-            _applyColorKey(surface._ctx, surface.colorKey);
+            pluginRuntime._applyColorKey(surface._ctx, surface.colorKey);
         },
 
         /**
@@ -754,8 +808,8 @@
          */
         sceneCreate(opts = {}) {
             return {
-                _sprites: [],
-                _dirty: [],
+                _sprites   : [],
+                _dirty     : [],
                 _background: opts.background ?? '#000'
             };
         },
@@ -814,8 +868,8 @@
 
             sprite._scene = scene;
             scene._sprites.push(sprite);
-            _sceneSortSprites(scene);
-            _spriteDirty(sprite);
+            pluginRuntime._sceneSortSprites(scene);
+            pluginRuntime._spriteDirty(sprite);
         },
 
         /**
@@ -828,7 +882,7 @@
                 return;
             }
 
-            _spriteDirty(sprite);
+            pluginRuntime._spriteDirty(sprite);
 
             const idx = scene._sprites.indexOf(sprite);
 
@@ -858,7 +912,7 @@
                 throw new Error('WakaDDraw.createSprite: surface is required');
             }
 
-            return _createSpriteObject(surface, rect, z);
+            return pluginRuntime._createSpriteObject(surface, rect, z);
         },
 
         // ─── Scene render ─────────────────────────────────────────────────────
@@ -889,59 +943,8 @@
             const sprites = scene._sprites;   // z-sorted ascending
             const dirty = scene._dirty;
 
-            for (const dr of dirty) {
-                const { x, y, w, h } = dr.full
-                    ? { x: 0, y: 0, w: primary.width, h: primary.height }
-                    : (_clampRect(dr.x, dr.y, dr.w, dr.h, primary.width, primary.height) ?? {});
-
-                if (w === undefined) {
-                    continue;
-                }
-
-                // Step 1: restore background color into this region
-                ctx.fillStyle = scene._background;
-                ctx.fillRect(x, y, w, h);
-
-                // Step 2: blt all visible sprites that intersect this rect,
-                // bottom to top (z ascending = correct painter's order)
-                for (const sprite of sprites) {
-                    if (!sprite.visible) {
-                        continue;
-                    }
-
-                    const b = _spriteBounds(sprite);
-
-                    if (!_rectsOverlap(b.x, b.y, b.w, b.h, x, y, w, h)) {
-                        continue;
-                    }
-
-                    const sr = sprite._rect;
-                    const sx = sr ? (sr.x ?? sr.left ?? 0) : 0;
-                    const sy = sr ? (sr.y ?? sr.top ?? 0) : 0;
-                    const sw = sr ? sr.width : sprite._surface.width;
-                    const sh = sr ? sr.height : sprite._surface.height;
-
-                    const useColorKey = sprite._surface.colorKey !== null;
-
-                    // Clip to the intersection of the dirty rect and this sprite's own
-                    // bounds, not the dirty rect alone. 'copy' compositing (used below for
-                    // colorKey:null sprites) replaces every pixel within the clip that the
-                    // new image does not cover with fully transparent — clipping to the
-                    // whole dirty rect would let a sprite smaller than that rect erase the
-                    // background fill and any other sprite already painted beneath it.
-                    const clipX = Math.max(b.x, x);
-                    const clipY = Math.max(b.y, y);
-                    const clipW = Math.min(b.x + b.w, x + w) - clipX;
-                    const clipH = Math.min(b.y + b.h, y + h) - clipY;
-
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.rect(clipX, clipY, clipW, clipH);
-                    ctx.clip();
-                    ctx.globalCompositeOperation = useColorKey ? 'source-over' : 'copy';
-                    ctx.drawImage(sprite._surface._ctx.canvas, sx, sy, sw, sh, sprite.x, sprite.y, sw, sh);
-                    ctx.restore();
-                }
+            for (const rectangle of dirty) {
+                pluginRuntime.renderSceneRegion(ctx, scene, primary, sprites, rectangle);
             }
 
             scene._dirty = [];
@@ -963,6 +966,10 @@
          * @param {string} pacId
          */
         requestFullscreen(pacId) {
+            const requestFullscreenHandlers = {
+                onRejected(err) { return console.warn('WakaDDraw.requestFullscreen:', err); }
+            };
+
             const surface = this.getSurface(pacId);
             const canvas = surface._ctx.canvas;
 
@@ -970,7 +977,7 @@
                 ?? canvas.webkitRequestFullscreen?.()
                 ?? Promise.reject(new Error('WakaDDraw.requestFullscreen: Fullscreen API not supported in this browser'));
 
-            request.catch(err => console.warn('WakaDDraw.requestFullscreen:', err));
+            request.catch(requestFullscreenHandlers.onRejected.bind(this));
         },
 
         /**
@@ -979,12 +986,16 @@
          * the transition completes.
          */
         exitFullscreen() {
+            const exitFullscreenHandlers = {
+                onRejected(err) { return console.warn('WakaDDraw.exitFullscreen:', err); }
+            };
+
             if (!document.fullscreenElement && !document.webkitFullscreenElement) {
                 return;
             }
 
             const exit = document.exitFullscreen?.() ?? document.webkitExitFullscreen?.();
-            exit?.catch(err => console.warn('WakaDDraw.exitFullscreen:', err));
+            exit?.catch(exitFullscreenHandlers.onRejected.bind(this));
         },
 
         /**
@@ -1119,7 +1130,7 @@
                     }
                 }
             };
-        },
+        }
     };
 
     WakaDDraw.VERSION = VERSION;
@@ -1133,5 +1144,4 @@
 
     window.WakaDDraw = WakaDDraw;
     window.wakaDDraw = wakaDDraw;
-
 })();

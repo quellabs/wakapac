@@ -80,6 +80,32 @@ Optional, drop-in scripts that extend WakaPAC's message pipeline into specific d
 - **WakaMask** — live input masking (phone numbers, dates, custom codes) driven by a token pattern, running entirely on WakaPAC's message pipeline
 - **WakaSync** — full-featured HTTP client with request grouping, cancellation, retries, and interceptors
 
+WakaSync's HTTP message constants (`MSG_HTTP_SUCCESS`, `MSG_HTTP_ERROR`, and
+`MSG_HTTP_ABORT`) are available on both `WakaSync` and `wakaSync` before plugin
+installation. After `wakaPAC.use(wakaSync)`, component-bound `this._http` request
+methods return a numeric request ID, with results delivered through `msgProc`
+and the ID in `event.wParam`. Standalone `wakaSync` request methods return
+Promises instead.
+
+Plugin message IDs use offsets from `MSG_PLUGIN`, reserving separate ranges for
+unrelated events. Plugins read `wakaPAC.MSG_PLUGIN` when loaded, using the standard
+`0x2000` base when loaded standalone.
+
+| Events | Offsets from `MSG_PLUGIN` |
+| --- | --- |
+| Routing | `0x000`–`0x001` |
+| Video, Vimeo, YouTube | `0x100`–`0x10C` |
+| HTTP | `0x200`–`0x202` |
+| LightGallery | `0x300`–`0x307` |
+| Mask | `0x400`–`0x401` |
+| CKEditor 4/5, TinyMCE, Jodit | `0x500`–`0x501` |
+| ColorPicker | `0x600` |
+
+Equivalent video events share IDs across video plugins by design; equivalent
+editor events also share IDs across editor plugins. Mask, editor, and ColorPicker
+IDs have changed to remove collisions. Use the exported `MSG_*` constants instead
+of numeric literals, and update source and minified plugin bundles together.
+
 **Navigation & Sensors**
 - **WakaRoute** — client-side router delivering navigation events through `msgProc`
 - **WakaMotion** — device motion and orientation sensors as reactive properties

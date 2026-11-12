@@ -102,9 +102,141 @@
 
 (function() {
     'use strict';
+    const pluginRuntime = {
+        /**
+         * Broadcasts MSG_FONT_LOADED to all components when a font finishes loading.
+         * @param {string} alias   - The registered alias name
+         * @param {string} family  - The resolved CSS family name
+         */
+        _broadcastFontLoaded(alias, family) {
+            if (!_pac) {
+                return;
+            }
+
+            _pac.broadcastMessage(MSG_FONT_LOADED, alias, { alias, family });
+        },
+
+        /**
+         * Broadcasts MSG_FONT_FAILED to all components when a font fails to load.
+         * @param {string} alias  - The registered alias name
+         * @param {string} url    - The URL that failed
+         */
+        _broadcastFontFailed(alias, url) {
+            if (!_pac) {
+                return;
+            }
+
+            _pac.broadcastMessage(MSG_FONT_FAILED, alias, { alias, url });
+        },
+
+        /**
+         * Resolves a brush descriptor to a canvas-compatible fillStyle value.
+         * Called by selectBrush() for live DC targets only — MetaFile targets
+         * use the fallback color directly.
+         *
+         * @param {CanvasRenderingContext2D} dc
+         * @param {string|Object} brush
+         * @returns {string|CanvasGradient|CanvasPattern}
+         */
+        _resolveBrush(dc, brush) {
+            if (typeof brush === 'string') {
+                return brush;
+            }
+
+            if (brush._type === 'linear') {
+                const resolveBrushHandlers = {
+                    visitItem(s) { return g.addColorStop(s.offset, s.color); }
+                };
+
+                const g = dc.createLinearGradient(brush.x1, brush.y1, brush.x2, brush.y2);
+                brush._stops.forEach(resolveBrushHandlers.visitItem.bind(this));
+                return g;
+            }
+
+            if (brush._type === 'radial') {
+                const resolveBrushHandlers = {
+                    visitItem(s) { return g.addColorStop(s.offset, s.color); }
+                };
+
+                const g = dc.createRadialGradient(brush.x1, brush.y1, brush.r1, brush.x2, brush.y2, brush.r2);
+                brush._stops.forEach(resolveBrushHandlers.visitItem.bind(this));
+                return g;
+            }
+
+            if (brush._type === 'pattern') {
+                // Accept HTMLImageElement, HTMLCanvasElement, or wakaPAC bitmap handle
+                const src = brush.source instanceof CanvasRenderingContext2D ? brush.source.canvas : brush.source;
+                return dc.createPattern(src, brush.repetition) ?? brush._fallback;
+            }
+
+            return brush._fallback ?? '#000';
+        },
+
+        /**
+         * Returns true if the point is inside the rectangle
+         * @returns {boolean}
+         * @private
+         */
+        _ptInRect(px, py, x, y, w, h) {
+            return px >= x && px <= x + w && py >= y && py <= y + h;
+        },
+
+        /**
+         * Returns true if the point is inside the circle
+         * @returns {boolean}
+         * @private
+         */
+        _ptInCircle(px, py, cx, cy, r) {
+            const dx = px - cx;
+            const dy = py - cy;
+            return dx * dx + dy * dy <= r * r;
+        },
+
+        /**
+         * Point-in-polygon using ray casting (even-odd rule).
+         * Works for convex and concave polygons.
+         * @returns {boolean}
+         * @private
+         */
+        _ptInPolygon(px, py, points) {
+            let inside = false;
+            const n = points.length;
+
+            for (let i = 0, j = n - 1; i < n; j = i++) {
+                const xi = points[i].x, yi = points[i].y;
+                const xj = points[j].x, yj = points[j].y;
+
+                if (((yi > py) !== (yj > py)) &&
+                                (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+                    inside = !inside;
+                }
+            }
+
+            return inside;
+        },
+
+        /**
+         * Returns true if dc is a wakaPAC MetaFile instance.
+         * @param {*} dc
+         * @returns {boolean}
+         */
+        _isMetaFile(dc) {
+            return dc !== null &&
+                            typeof dc === 'object' &&
+                            Array.isArray(dc._ops) &&
+                            typeof dc.build === 'function';
+        }
+    };
 
     /** @type {string} */
     const VERSION = '1.0.0';
+
+    // Support standalone loading while using the host's plugin base when present.
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+
+    // =========================================================================
+    // MESSAGES
+    // =========================================================================
 
     /**
      * Message broadcast to all components when a font finishes loading.
@@ -112,7 +244,7 @@
      * lParam: { alias: string, family: string }
      * @type {number}
      */
-    const MSG_FONT_LOADED = 0xC001;
+    const MSG_FONT_LOADED = MSG_PLUGIN + 0x700;
 
     /**
      * Message broadcast to all components when a font fails to load.
@@ -120,8 +252,7 @@
      * lParam: { alias: string, url: string }
      * @type {number}
      */
-    const MSG_FONT_FAILED = 0xC002;
-
+    const MSG_FONT_FAILED = MSG_PLUGIN + 0x701;
 
     // =========================================================================
     // FONT REGISTRY
@@ -142,32 +273,6 @@
 
     /** Cached wakaPAC reference, set in createPacPlugin(). @type {Object|null} */
     let _pac = null;
-
-    /**
-     * Broadcasts MSG_FONT_LOADED to all components when a font finishes loading.
-     * @param {string} alias   - The registered alias name
-     * @param {string} family  - The resolved CSS family name
-     */
-    function _broadcastFontLoaded(alias, family) {
-        if (!_pac) {
-            return;
-        }
-
-        _pac.broadcastMessage(MSG_FONT_LOADED, alias, { alias, family });
-    }
-
-    /**
-     * Broadcasts MSG_FONT_FAILED to all components when a font fails to load.
-     * @param {string} alias  - The registered alias name
-     * @param {string} url    - The URL that failed
-     */
-    function _broadcastFontFailed(alias, url) {
-        if (!_pac) {
-            return;
-        }
-
-        _pac.broadcastMessage(MSG_FONT_FAILED, alias, { alias, url });
-    }
 
     // =========================================================================
     // GOOGLE FONTS RESOLUTION
@@ -228,6 +333,28 @@
          * @returns {{ family: string, url: string } | null}
          */
         parseCSS(css, weight) {
+            const parseCSSHandlers = {
+                findItem(block) { return /\/\*\s*latin\s*\*\//.test(block); },
+
+                matchesItem(block) {
+                    const w = this.extractProp(block, 'font-weight');
+
+                    // No weight declared — treat as normal
+                    if (!w) {
+                        return targetWeight === 'normal' || targetWeight === '400';
+                    }
+
+                    // Google may declare a range e.g. "400 700" for variable fonts
+                    if (w.includes(' ')) {
+                        const [lo, hi] = w.split(/\s+/).map(Number);
+                        const t = parseInt(targetWeight, 10);
+                        return !isNaN(t) && t >= lo && t <= hi;
+                    }
+
+                    return w === targetWeight;
+                }
+            };
+
             const targetWeight = String(weight ?? 'normal');
             const blocks = css.split('@font-face').slice(1);
 
@@ -236,29 +363,13 @@
             }
 
             // Filter blocks by weight
-            const weightMatches = blocks.filter((block) => {
-                const w = this.extractProp(block, 'font-weight');
-
-                // No weight declared — treat as normal
-                if (!w) {
-                    return targetWeight === 'normal' || targetWeight === '400';
-                }
-
-                // Google may declare a range e.g. "400 700" for variable fonts
-                if (w.includes(' ')) {
-                    const [lo, hi] = w.split(/\s+/).map(Number);
-                    const t = parseInt(targetWeight, 10);
-                    return !isNaN(t) && t >= lo && t <= hi;
-                }
-
-                return w === targetWeight;
-            });
+            const weightMatches = blocks.filter(parseCSSHandlers.matchesItem.bind(this));
 
             // Fall back to all blocks if weight filter yields nothing
             const candidates = weightMatches.length > 0 ? weightMatches : blocks;
 
             // Prefer latin subset — Google Fonts marks it with a '/* latin */' comment
-            const latinBlock = candidates.find((block) => /\/\*\s*latin\s*\*\//.test(block));
+            const latinBlock = candidates.find(parseCSSHandlers.findItem.bind(this));
             const winner = latinBlock ?? candidates[0];
 
             // Extract data from the Google result
@@ -324,41 +435,6 @@
      * @typedef {{ _type: 'pattern', source: HTMLImageElement|HTMLCanvasElement|CanvasRenderingContext2D, repetition: string, _fallback: string }} PatternBrush
      */
 
-    /**
-     * Resolves a brush descriptor to a canvas-compatible fillStyle value.
-     * Called by selectBrush() for live DC targets only — MetaFile targets
-     * use the fallback color directly.
-     *
-     * @param {CanvasRenderingContext2D} dc
-     * @param {string|Object} brush
-     * @returns {string|CanvasGradient|CanvasPattern}
-     */
-    function _resolveBrush(dc, brush) {
-        if (typeof brush === 'string') {
-            return brush;
-        }
-
-        if (brush._type === 'linear') {
-            const g = dc.createLinearGradient(brush.x1, brush.y1, brush.x2, brush.y2);
-            brush._stops.forEach(s => g.addColorStop(s.offset, s.color));
-            return g;
-        }
-
-        if (brush._type === 'radial') {
-            const g = dc.createRadialGradient(brush.x1, brush.y1, brush.r1, brush.x2, brush.y2, brush.r2);
-            brush._stops.forEach(s => g.addColorStop(s.offset, s.color));
-            return g;
-        }
-
-        if (brush._type === 'pattern') {
-            // Accept HTMLImageElement, HTMLCanvasElement, or wakaPAC bitmap handle
-            const src = brush.source instanceof CanvasRenderingContext2D ? brush.source.canvas : brush.source;
-            return dc.createPattern(src, brush.repetition) ?? brush._fallback;
-        }
-
-        return brush._fallback ?? '#000';
-    }
-
     // =========================================================================
     // NULL BRUSH / NULL PEN TRACKING
     //
@@ -395,64 +471,9 @@
     // GEOMETRY HELPERS
     // =========================================================================
 
-    /**
-     * Returns true if the point is inside the rectangle
-     * @returns {boolean}
-     * @private
-     */
-    function _ptInRect(px, py, x, y, w, h) {
-        return px >= x && px <= x + w && py >= y && py <= y + h;
-    }
-
-    /**
-     * Returns true if the point is inside the circle
-     * @returns {boolean}
-     * @private
-     */
-    function _ptInCircle(px, py, cx, cy, r) {
-        const dx = px - cx;
-        const dy = py - cy;
-        return dx * dx + dy * dy <= r * r;
-    }
-
-    /**
-     * Point-in-polygon using ray casting (even-odd rule).
-     * Works for convex and concave polygons.
-     * @returns {boolean}
-     * @private
-     */
-    function _ptInPolygon(px, py, points) {
-        let inside = false;
-        const n = points.length;
-
-        for (let i = 0, j = n - 1; i < n; j = i++) {
-            const xi = points[i].x, yi = points[i].y;
-            const xj = points[j].x, yj = points[j].y;
-
-            if (((yi > py) !== (yj > py)) &&
-                (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
-                inside = !inside;
-            }
-        }
-
-        return inside;
-    }
-
     // =========================================================================
     // DC / METAFILE DETECTION
     // =========================================================================
-
-    /**
-     * Returns true if dc is a wakaPAC MetaFile instance.
-     * @param {*} dc
-     * @returns {boolean}
-     */
-    function _isMetaFile(dc) {
-        return dc !== null &&
-            typeof dc === 'object' &&
-            Array.isArray(dc._ops) &&
-            typeof dc.build === 'function';
-    }
 
     // =========================================================================
     // WAKA CANVAS
@@ -463,6 +484,9 @@
      * @constructor
      */
     function WakaCanvas() {
+        // Available before plugin installation, matching the constructor statics.
+        this.MSG_FONT_LOADED = WakaCanvas.MSG_FONT_LOADED;
+        this.MSG_FONT_FAILED = WakaCanvas.MSG_FONT_FAILED;
     }
 
     WakaCanvas.prototype = {
@@ -544,7 +568,7 @@
 
             try {
                 const face = new FontFace(family, `url(${binaryUrl})`, {
-                    weight: String(weight),
+                    weight : String(weight),
                     style,
                     display: descriptors.display ?? 'swap'
                 });
@@ -555,12 +579,12 @@
                 entry.face = face;
                 entry.ready = true;
 
-                _broadcastFontLoaded(name, family);
+                pluginRuntime._broadcastFontLoaded(name, family);
                 return true;
             } catch (err) {
                 console.warn(`WakaCanvas.loadFont: failed to load "${name}" from "${binaryUrl}"`, err);
                 _fonts.delete(name);
-                _broadcastFontFailed(name, binaryUrl);
+                pluginRuntime._broadcastFontFailed(name, binaryUrl);
                 return false;
             }
         },
@@ -612,7 +636,7 @@
          * @param {CanvasRenderingContext2D|Object} dc
          */
         beginPaint(dc) {
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 _nullBrush.add(dc);
                 _nullPen.delete(dc);
                 dc.setStrokeStyle('#000');
@@ -672,10 +696,14 @@
             const entry = _fonts.get(name);
             const weight = opts.weight ?? entry?.weight ?? 'normal';
             const style = opts.style ?? entry?.style ?? 'normal';
-            const family = (entry && entry.ready) ? entry.family : (entry ? 'sans-serif' : name);
+            let family = name;
+
+            if (entry) {
+                family = entry.ready ? entry.family : 'sans-serif';
+            }
             const str = `${style} ${weight} ${size}px ${family}`;
 
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 dc.setFont(str);
                 return;
             }
@@ -708,12 +736,12 @@
             _nullBrush.delete(dc);
 
             // Resolve brush descriptor to a canvas fillStyle value
-            const fillStyle = _isMetaFile(dc) ? null : _resolveBrush(dc, brush);
+            const fillStyle = pluginRuntime._isMetaFile(dc) ? null : pluginRuntime._resolveBrush(dc, brush);
 
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 // Gradients and patterns cannot be serialised to a MetaFile —
                 // emit the fallback solid color so the display list remains valid.
-                const fallback = (typeof brush === 'string') ? brush : (brush._fallback ?? '#000');
+                const fallback = typeof brush === 'string' ? brush : brush._fallback ?? '#000';
                 dc.setFillStyle(fallback);
                 return;
             }
@@ -735,7 +763,13 @@
          */
         linearGradient(x1, y1, x2, y2, fallback = '#000') {
             return {
-                _type: 'linear', x1, y1, x2, y2, _stops: [], _fallback: fallback,
+                _type    : 'linear',
+                x1,
+                y1,
+                x2,
+                y2,
+                _stops   : [],
+                _fallback: fallback,
                 addColorStop(offset, color) {
                     this._stops.push({ offset, color });
                     return this;
@@ -759,7 +793,15 @@
          */
         radialGradient(x1, y1, r1, x2, y2, r2, fallback = '#000') {
             return {
-                _type: 'radial', x1, y1, r1, x2, y2, r2, _stops: [], _fallback: fallback,
+                _type    : 'radial',
+                x1,
+                y1,
+                r1,
+                x2,
+                y2,
+                r2,
+                _stops   : [],
+                _fallback: fallback,
                 addColorStop(offset, color) {
                     this._stops.push({ offset, color });
                     return this;
@@ -804,7 +846,7 @@
 
             _nullPen.delete(dc);
 
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 dc.setStrokeStyle(color);
                 dc.setLineWidth(width);
                 dc.setLineCap(opts.lineCap ?? 'butt');
@@ -825,7 +867,7 @@
          * @param {number} alpha  0–1
          */
         selectAlpha(dc, alpha) {
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 dc.setGlobalAlpha(alpha);
                 return;
             }
@@ -844,7 +886,7 @@
          * @param {number} [offsetY=0]
          */
         selectShadow(dc, color, blur = 0, offsetX = 0, offsetY = 0) {
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 dc.setShadow(
                     color ?? 'transparent',
                     color ? blur : 0,
@@ -867,7 +909,7 @@
          * @param {number[]|null} pattern
          */
         selectLineDash(dc, pattern) {
-            const dash = (pattern && pattern.length > 0) ? pattern : [];
+            const dash = pattern && pattern.length > 0 ? pattern : [];
             dc.setLineDash(dash);
         },
 
@@ -878,7 +920,7 @@
          * @param {string} align  'left'|'center'|'right'|'start'|'end'
          */
         selectTextAlign(dc, align) {
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 dc.setTextAlign(align);
                 return;
             }
@@ -892,7 +934,7 @@
          * @param {string} baseline  'top'|'middle'|'bottom'|'alphabetic'|'hanging'|'ideographic'
          */
         selectTextBaseline(dc, baseline) {
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 dc.setTextBaseline(baseline);
                 return;
             }
@@ -920,7 +962,7 @@
             const a = t.a ?? 1, b = t.b ?? 0, c = t.c ?? 0;
             const d = t.d ?? 1, e = t.e ?? 0, f = t.f ?? 0;
 
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 dc.setTransform(a, b, c, d, e, f);
                 return;
             }
@@ -934,7 +976,7 @@
          * @param {CanvasRenderingContext2D|Object} dc
          */
         resetTransform(dc) {
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 dc.setTransform(1, 0, 0, 1, 0, 0);
                 return;
             }
@@ -1015,21 +1057,21 @@
 
                 switch (area.shape) {
                     case 'rect':
-                        if (_ptInRect(x, y, area.x, area.y, area.w, area.h)) {
+                        if (pluginRuntime._ptInRect(x, y, area.x, area.y, area.w, area.h)) {
                             return area.data;
                         }
 
                         break;
 
                     case 'circle':
-                        if (_ptInCircle(x, y, area.cx, area.cy, area.r)) {
+                        if (pluginRuntime._ptInCircle(x, y, area.cx, area.cy, area.r)) {
                             return area.data;
                         }
 
                         break;
 
                     case 'polygon':
-                        if (_ptInPolygon(x, y, area.points)) {
+                        if (pluginRuntime._ptInPolygon(x, y, area.points)) {
                             return area.data;
                         }
 
@@ -1274,17 +1316,17 @@
          * @returns {{ width: number, ascent: number, descent: number, height: number } | null}
          */
         measureText(dc, text) {
-            if (_isMetaFile(dc)) {
+            if (pluginRuntime._isMetaFile(dc)) {
                 return null;
             }
 
             const m = dc.measureText(text);
 
             return {
-                width: m.width,
-                ascent: m.actualBoundingBoxAscent,
+                width  : m.width,
+                ascent : m.actualBoundingBoxAscent,
                 descent: m.actualBoundingBoxDescent,
-                height: m.actualBoundingBoxAscent + m.actualBoundingBoxDescent
+                height : m.actualBoundingBoxAscent + m.actualBoundingBoxDescent
             };
         }
     };
@@ -1306,5 +1348,4 @@
 
     window.WakaCanvas = WakaCanvas;
     window.wakaCanvas = wakaCanvas;
-
 })();
