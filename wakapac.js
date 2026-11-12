@@ -2729,6 +2729,93 @@
                 // Dispatch structured submit message
                 self.dispatchToContainer(container, customEvent);
             });
+
+            // A `change:`-bound text control inside a `foreach` item can
+            // never fire natively: a two-way-bound value's own keystroke
+            // rebuilds the item's DOM (renderForeach replaces it wholesale),
+            // and the browser's implicit `change` from destroying the old,
+            // focused, edited node arrives before the replacement is
+            // registered — then the replacement itself, built with the
+            // just-typed value already baked in, never looks "changed since
+            // focus" either. These two listeners reimplement that check
+            // independently, via a per-node baseline (Utils.getPacCache)
+            // that restoreForeachFocus carries across each rebuild, so a
+            // real blur still fires `change` once, with the final value. A
+            // top-level control's native `change` already works and needs
+            // none of this.
+            //
+            // `self` here is the shared dispatcher, not a component — the
+            // owning Runtime is looked up via the nearest [data-pac-id]
+            // container, same as dispatchToContainer does.
+            function resolveOwningRuntime(target) {
+                const container = target.closest ? target.closest(CONTAINER_SEL) : null;
+                return container ? window.PACRegistry.get(Utils.getPacId(container)) : null;
+            }
+
+            // Checkbox/radio/etc. commit atomically on click, before any
+            // rebuild can interfere, so their native `change` already works —
+            // re-checking them here would just fire `change:` twice.
+            function isTextLikeControl(target) {
+                return target.tagName === 'TEXTAREA' ||
+                    (target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type));
+            }
+
+            document.addEventListener('focusin', function(event) {
+                const target = event.target;
+
+                if (!isTextLikeControl(target)) {
+                    return;
+                }
+
+                const runtime = resolveOwningRuntime(target);
+
+                if (!runtime) {
+                    return;
+                }
+
+                const mappingData = runtime.interpolationMap.get(target);
+
+                if (!mappingData || !mappingData.bindings.change || !runtime.extractClosestForeachContext(target)) {
+                    return;
+                }
+
+                // Seed only on a genuinely fresh focus; restoreForeachFocus
+                // already carries a baseline over for a rebuild-driven one.
+                const cache = Utils.getPacCache(target);
+
+                if (cache.changeBaselineValue === undefined) {
+                    cache.changeBaselineValue = target.value;
+                }
+            });
+
+            document.addEventListener('focusout', function(event) {
+                const target = event.target;
+
+                if (!isTextLikeControl(target)) {
+                    return;
+                }
+
+                const runtime = resolveOwningRuntime(target);
+
+                if (!runtime) {
+                    return;
+                }
+
+                const mappingData = runtime.interpolationMap.get(target);
+
+                if (!mappingData || !mappingData.bindings.change || !runtime.extractClosestForeachContext(target)) {
+                    return;
+                }
+
+                const cache = Utils.getPacCache(target);
+
+                if (typeof cache.changeBaselineValue === 'string' && target.value !== cache.changeBaselineValue) {
+                    // Same path a genuine native `change` would take.
+                    runtime.handleDomChange(event);
+                }
+
+                delete cache.changeBaselineValue;
+            });
         },
 
         /**
@@ -9158,6 +9245,9 @@
         // "no snapshot was available" in restoreForeachFocus.
         const hasItem = Array.isArray(previousArray) && context.index < previousArray.length;
 
+        // Carried onto the replacement by restoreForeachFocus — see _setupFormEvents.
+        const activeCache = active._pacCache;
+
         return {
             foreachId: context.foreachId,
             index: context.index,
@@ -9165,7 +9255,8 @@
             item: hasItem ? previousArray[context.index] : undefined,
             path: path,
             selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
-            selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
+            selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+            changeBaselineValue: activeCache && typeof activeCache.changeBaselineValue === 'string' ? activeCache.changeBaselineValue : undefined
         };
     };
 
@@ -9175,7 +9266,7 @@
      * longer exists (e.g. it was removed by the change that triggered this
      * rebuild).
      * @param {Element} foreachElement - The just-rebuilt foreach container
-     * @param {?{foreachId: string, index: number, hasItem: boolean, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}} snapshot
+     * @param {?{foreachId: string, index: number, hasItem: boolean, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null), changeBaselineValue: (string|undefined)}} snapshot
      *   The value returned by captureForeachFocus, or null.
      * @param {Array} [sourceArray] - The bound array's current contents, used
      *   to relocate a captured item by identity; falls back to the captured
@@ -9219,6 +9310,12 @@
 
         if (!target || typeof target.focus !== 'function') {
             return;
+        }
+
+        // Carry the baseline (see _setupFormEvents) onto the replacement
+        // before its own focusin fires, so that handler leaves it alone.
+        if (snapshot.changeBaselineValue !== undefined) {
+            Utils.getPacCache(target).changeBaselineValue = snapshot.changeBaselineValue;
         }
 
         target.focus();
