@@ -2730,92 +2730,102 @@
                 self.dispatchToContainer(container, customEvent);
             });
 
-            // A `change:`-bound text control inside a `foreach` item can
-            // never fire natively: a two-way-bound value's own keystroke
-            // rebuilds the item's DOM (renderForeach replaces it wholesale),
-            // and the browser's implicit `change` from destroying the old,
-            // focused, edited node arrives before the replacement is
-            // registered — then the replacement itself, built with the
-            // just-typed value already baked in, never looks "changed since
-            // focus" either. These two listeners reimplement that check
-            // independently, via a per-node baseline (Utils.getPacCache)
-            // that restoreForeachFocus carries across each rebuild, so a
-            // real blur still fires `change` once, with the final value. A
-            // top-level control's native `change` already works and needs
-            // none of this.
-            //
-            // `self` here is the shared dispatcher, not a component — the
-            // owning Runtime is looked up via the nearest [data-pac-id]
-            // container, same as dispatchToContainer does.
-            function resolveOwningRuntime(target) {
-                const container = target.closest ? target.closest(CONTAINER_SEL) : null;
-                return container ? window.PACRegistry.get(Utils.getPacId(container)) : null;
+            // See handleForeachChangeFocusIn/Out: a foreach rebuild defeats
+            // native `change` tracking for a text control bound inside it.
+            document.addEventListener('focusin', this.handleForeachChangeFocusIn.bind(this));
+            document.addEventListener('focusout', this.handleForeachChangeFocusOut.bind(this));
+        },
+
+        /**
+         * Resolves the Runtime owning `target`, via its nearest
+         * [data-pac-id] container — `this` is the shared dispatcher, not a
+         * component instance.
+         * @param {Element} target
+         * @returns {Object|null}
+         */
+        resolveOwningRuntime(target) {
+            const container = target.closest ? target.closest(CONTAINER_SEL) : null;
+
+            return container ? window.PACRegistry.get(Utils.getPacId(container)) : null;
+        },
+
+        /**
+         * True for text-like inputs/textareas, the only controls where a
+         * foreach rebuild can defeat native `change` tracking. Checkbox/
+         * radio/etc. commit atomically on click and need no help.
+         * @param {Element} target
+         * @returns {boolean}
+         */
+        isTextLikeChangeTarget(target) {
+            return target.tagName === 'TEXTAREA' ||
+                (target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type));
+        },
+
+        /**
+         * Seeds the "changed since focus" baseline for a foreach-bound text
+         * control. Skipped if restoreForeachFocus already carried one over.
+         * @param {FocusEvent} event
+         * @returns {void}
+         */
+        handleForeachChangeFocusIn(event) {
+            const target = event.target;
+
+            if (!this.isTextLikeChangeTarget(target)) {
+                return;
             }
 
-            // Checkbox/radio/etc. commit atomically on click, before any
-            // rebuild can interfere, so their native `change` already works —
-            // re-checking them here would just fire `change:` twice.
-            function isTextLikeControl(target) {
-                return target.tagName === 'TEXTAREA' ||
-                    (target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type));
+            const runtime = this.resolveOwningRuntime(target);
+
+            if (!runtime) {
+                return;
             }
 
-            document.addEventListener('focusin', function(event) {
-                const target = event.target;
+            const mappingData = runtime.interpolationMap.get(target);
 
-                if (!isTextLikeControl(target)) {
-                    return;
-                }
+            if (!mappingData || !mappingData.bindings.change || !runtime.extractClosestForeachContext(target)) {
+                return;
+            }
 
-                const runtime = resolveOwningRuntime(target);
+            const cache = Utils.getPacCache(target);
 
-                if (!runtime) {
-                    return;
-                }
+            if (cache.changeBaselineValue === undefined) {
+                cache.changeBaselineValue = target.value;
+            }
+        },
 
-                const mappingData = runtime.interpolationMap.get(target);
+        /**
+         * Fires `change:` for a foreach text control whose value differs
+         * from its focus-time baseline, since native `change` can't detect
+         * this itself once the control has been rebuilt mid-edit.
+         * @param {FocusEvent} event
+         * @returns {void}
+         */
+        handleForeachChangeFocusOut(event) {
+            const target = event.target;
 
-                if (!mappingData || !mappingData.bindings.change || !runtime.extractClosestForeachContext(target)) {
-                    return;
-                }
+            if (!this.isTextLikeChangeTarget(target)) {
+                return;
+            }
 
-                // Seed only on a genuinely fresh focus; restoreForeachFocus
-                // already carries a baseline over for a rebuild-driven one.
-                const cache = Utils.getPacCache(target);
+            const runtime = this.resolveOwningRuntime(target);
 
-                if (cache.changeBaselineValue === undefined) {
-                    cache.changeBaselineValue = target.value;
-                }
-            });
+            if (!runtime) {
+                return;
+            }
 
-            document.addEventListener('focusout', function(event) {
-                const target = event.target;
+            const mappingData = runtime.interpolationMap.get(target);
 
-                if (!isTextLikeControl(target)) {
-                    return;
-                }
+            if (!mappingData || !mappingData.bindings.change || !runtime.extractClosestForeachContext(target)) {
+                return;
+            }
 
-                const runtime = resolveOwningRuntime(target);
+            const cache = Utils.getPacCache(target);
 
-                if (!runtime) {
-                    return;
-                }
+            if (typeof cache.changeBaselineValue === 'string' && target.value !== cache.changeBaselineValue) {
+                runtime.handleDomChange(event);
+            }
 
-                const mappingData = runtime.interpolationMap.get(target);
-
-                if (!mappingData || !mappingData.bindings.change || !runtime.extractClosestForeachContext(target)) {
-                    return;
-                }
-
-                const cache = Utils.getPacCache(target);
-
-                if (typeof cache.changeBaselineValue === 'string' && target.value !== cache.changeBaselineValue) {
-                    // Same path a genuine native `change` would take.
-                    runtime.handleDomChange(event);
-                }
-
-                delete cache.changeBaselineValue;
-            });
+            delete cache.changeBaselineValue;
         },
 
         /**
@@ -9312,8 +9322,7 @@
             return;
         }
 
-        // Carry the baseline (see _setupFormEvents) onto the replacement
-        // before its own focusin fires, so that handler leaves it alone.
+        // Carries the baseline over — see handleForeachChangeFocusIn.
         if (snapshot.changeBaselineValue !== undefined) {
             Utils.getPacCache(target).changeBaselineValue = snapshot.changeBaselineValue;
         }
