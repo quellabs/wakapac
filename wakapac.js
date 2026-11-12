@@ -182,6 +182,10 @@
     // Non-text input types that commit values via the change event.
     const CHANGE_INPUT_TYPES = new Set(['checkbox', 'radio', 'color', 'range', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
 
+    // Matches a `foreach:` binding anywhere in a foreach item's own template
+    // (see rebuildForeachesForBatch's leaf-item-mutation exception).
+    const NESTED_FOREACH_RE = /data-pac-bind\s*=\s*["'][^"']*\bforeach\s*:/;
+
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
      * Populated on first use to avoid repeated reflection on wakaPAC.
@@ -7901,30 +7905,31 @@
         this.triggerWatcher(rootProperty, newParentObject, oldParentObject);
     };
 
+
     /**
-     * Handles foreach rebuilds triggered by a batch of reactive property changes
-     * flushed together (see flushReactiveChanges). A foreach element needs
-     * rebuilding when any change in the batch satisfies any of the following:
-     *   1. Its bound array is exactly the array path that changed, is nested
-     *      under it (e.g. `foreach: todos` when `todos` was mutated, or
-     *      `foreach: rows[1].cells` when `rows[1].cells[3]` changed), or is
-     *      an ancestor of it (e.g. `foreach: data.items` when `data` itself
-     *      was reassigned, replacing the array wholesale).
-     *   2. Its foreach expression is a computed property that depends on the
-     *      changed property (e.g. changing `filter` — or mutating `todos`,
-     *      which `filteredTodos` reads — rebuilds `foreach: filteredTodos`).
-     *   3. The changed property is used as a dynamic bracket key inside the
-     *      foreach expression (e.g. changing `region` rebuilds
-     *      `foreach: cities[country][region]`).
-     * Each matching element is rebuilt exactly once per batch, no matter how
-     * many changes or rules matched it — e.g. a computed foreach over an array
-     * that was itself directly mutated (rules 1 and 2 both match), or two
-     * unrelated changes in the same batch touching the same foreach.
-     * @param {Object[]} changes - The batch's queued changes (each a former
-     *   pac:change event's `detail`: {path, oldValue, newValue})
+     * Rebuilds foreach elements affected by a batch of reactive changes
+     * (see flushReactiveChanges). A rebuild is triggered when:
+     *
+     * 1. The changed path matches, contains, or is nested within the
+     *    foreach array path (e.g. changing `data` affects `data.items`).
+     * 2. A computed foreach expression depends on the changed property
+     *    (e.g. changing `filter` or `todos` affects `filteredTodos`).
+     * 3. A dynamic bracket key changes (e.g. `region` in
+     *    `foreach: cities[country][region]`).
+     *
+     * Exception: A bare `foreach: todos` skips rebuilds for nested item
+     * changes like `todos[0].done`. Structural array changes are reported
+     * at the array's own path, while item bindings update independently.
+     * This optimization excludes computed expressions and templates with
+     * nested foreach loops, which require outer rebuilds.
+     *
+     * Each affected foreach element is rebuilt at most once per batch,
+     * even when multiple changes or conditions match.
+     *
+     * @param {Object[]} changes - Queued changes ({path, oldValue, newValue}).
      */
     Runtime.prototype.rebuildForeachesForBatch = function(changes) {
-        // element -> { directMatch: boolean, previousArray, previousArraySet: boolean }
+        // element -> { directMatch: boolean, needsRebuild: boolean, previousArray, previousArraySet: boolean }
         const matched = new Map();
 
         for (const change of changes) {
@@ -7983,7 +7988,7 @@
                 let info = matched.get(element);
 
                 if (!info) {
-                    info = { directMatch: false, previousArray: undefined, previousArraySet: false };
+                    info = { directMatch: false, needsRebuild: false, previousArray: undefined, previousArraySet: false };
                     matched.set(element, info);
                 }
 
@@ -7994,6 +7999,21 @@
                 // the batch is enough to prefer evaluateForeachArray.
                 if (directMatch) {
                     info.directMatch = true;
+                }
+
+                // A bare `foreach: rows` only needs rebuilding for structural array changes,
+                // which are always reported at the array's own path. Nested item changes
+                // cannot affect membership or order, and bindings update independently.
+                // This optimization excludes computed expressions (unknown dependencies)
+                // and nested `foreach` templates (which rely on outer rebuilds to re-scan).
+                const isBareArrayIdentifier = /^[A-Za-z_$][\w$]*$/.test(mappingData.foreachExpr) && mappingData.foreachExpr === mappingData.sourceArray;
+                const hasNestedForeach = NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
+                const isLeafItemMutation = directMatch && isBareArrayIdentifier && !hasNestedForeach &&
+                    pathString !== mappingData.foreachExpr &&
+                    (pathString.startsWith(mappingData.foreachExpr + '.') || pathString.startsWith(mappingData.foreachExpr + '['));
+
+                if (computedMatch || bracketMatch || (directMatch && !isLeafItemMutation)) {
+                    info.needsRebuild = true;
                 }
 
                 // oldValue is only "this array before the change" when the
@@ -8009,8 +8029,14 @@
         }
 
         // Render each matched element exactly once, after the whole batch has
-        // been scanned.
+        // been scanned. Skips an element whose only matches were leaf item
+        // mutations on a plain array reference (see above) — nothing about
+        // what it renders could have changed.
         for (const [element, info] of matched) {
+            if (!info.needsRebuild) {
+                continue;
+            }
+
             const array = info.directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
             this.renderForeach(element, array, info.previousArray);
         }
