@@ -938,106 +938,72 @@
                 c.destroy();
             });
 
-            suite('change: binding on a foreach item survives a mid-edit rebuild');
+            suite('foreach leaf-item mutation skips the destructive rebuild');
 
-            await test('change: fires once, on blur, with the final value — not per keystroke, not at all without this fix', async function () {
-                let changeCount = 0;
-                let lastValue = null;
-
+            // Native `change` firing after a real rebuild-surviving edit is
+            // not verifiable via synthetic .value/dispatchEvent — Chromium
+            // never sets its "changed since focus" flag for those (true even
+            // outside any foreach, see tests/foreach-change-event.spec.js,
+            // which drives real keystrokes instead). These tests check only
+            // what synthetic dispatch can: the input node itself survives a
+            // leaf-item write, and the two-way binding stays correct.
+            await test('a plain foreach item input is not replaced by a leaf-property write on its own item', async function () {
                 const c = mount(
                     '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
-                    '<li><input class="val-input" data-pac-bind="value: item.value, change: onValueChange"></li></ul>',
-                    {
-                        items: [{ value: '' }],
-                        onValueChange(event) {
-                            changeCount++;
-                            lastValue = event.target.value;
-                        }
-                    }
-                );
-                await tick();
-
-                let input = c.container.querySelector('.val-input');
-                input.focus();
-
-                // Two keystrokes, each rebuilding the row (replacing `input`
-                // with a fresh node) before the next lands, like real typing.
-                input.value = '5';
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                await tick();
-
-                input = c.container.querySelector('.val-input');
-                input.value = '50';
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                await tick();
-
-                assertEqual(changeCount, 0, 'change: has not fired yet — only on blur, not per keystroke');
-
-                input = c.container.querySelector('.val-input');
-                input.blur();
-                await tick();
-
-                assertEqual(changeCount, 1, 'change: fired exactly once, on blur');
-                assertEqual(lastValue, '50', 'change: carried the final committed value');
-                assertEqual(c.abstraction.items[0].value, '50', 'the two-way value binding itself was already correct throughout (unaffected by this bug)');
-
-                c.destroy();
-            });
-
-            await test('change: does not fire from a focus/blur with no edit in between', async function () {
-                let changeCount = 0;
-
-                const c = mount(
-                    '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
-                    '<li><input class="val-input" data-pac-bind="value: item.value, change: onValueChange"></li></ul>',
-                    {
-                        items: [{ value: 'unchanged' }],
-                        onValueChange() { changeCount++; }
-                    }
+                    '<li><input class="val-input" data-pac-bind="value: item.value"></li></ul>',
+                    { items: [{ value: '' }] }
                 );
                 await tick();
 
                 const input = c.container.querySelector('.val-input');
                 input.focus();
-                input.blur();
+                input.value = '5';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
                 await tick();
 
-                assertEqual(changeCount, 0, 'no edit happened, so change: must not fire');
+                assert(c.container.querySelector('.val-input') === input, 'same input node after the write — no rebuild happened');
+                assert(document.activeElement === input, 'focus was therefore never disturbed');
+                assertEqual(c.abstraction.items[0].value, '5', 'the two-way value binding still updated correctly');
 
                 c.destroy();
             });
 
-            await test('change: fires again on a second edit/blur session, not just the first', async function () {
-                let changeCount = 0;
-
+            await test('a foreach item input IS replaced when the array itself is restructured (push)', async function () {
                 const c = mount(
                     '<ul data-pac-bind="foreach: items" data-pac-item="item">' +
-                    '<li><input class="val-input" data-pac-bind="value: item.value, change: onValueChange"></li></ul>',
-                    {
-                        items: [{ value: '' }],
-                        onValueChange() { changeCount++; }
-                    }
+                    '<li><input class="val-input" data-pac-bind="value: item.value"></li></ul>',
+                    { items: [{ value: 'first' }] }
                 );
                 await tick();
 
-                for (const typed of ['first', 'second']) {
-                    let input = c.container.querySelector('.val-input');
-                    input.focus();
-                    input.value = typed;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    await tick();
+                const inputBefore = c.container.querySelector('.val-input');
+                c.abstraction.items.push({ value: 'second' });
+                await tick();
 
-                    input = c.container.querySelector('.val-input');
-                    input.blur();
-                    await tick();
-                }
-
-                assertEqual(changeCount, 2, 'change: fired once per edit session, not just the first');
+                assertEqual(c.container.querySelectorAll('.val-input').length, 2, 'the new item rendered');
+                assert(c.container.querySelector('.val-input') !== inputBefore, 'a structural change still rebuilds, unlike a leaf-item write');
 
                 c.destroy();
             });
 
-            await test('change: on a foreach checkbox still fires exactly once (not twice) — the fix above is scoped to text-like controls only', async function () {
+            await test('a nested foreach inside an item template still re-renders from a leaf-item write on the outer array', async function () {
+                const c = mount(
+                    '<ul data-pac-bind="foreach: rows" data-pac-item="row">' +
+                    '<li>{{row.name}}<ul data-pac-bind="foreach: row.lines" data-pac-item="line">' +
+                    '<li class="line">{{line.label}}</li></ul></li></ul>',
+                    { rows: [{ name: 'A', lines: [{ label: 'a1' }] }] }
+                );
+                await tick();
+
+                c.abstraction.rows[0].lines = [{ label: 'a1' }, { label: 'a2' }];
+                await tick();
+
+                assertEqual(c.container.querySelectorAll('.line').length, 2, 'the nested foreach picked up the replacement array');
+
+                c.destroy();
+            });
+
+            await test('change: on a foreach checkbox fires exactly once', async function () {
                 let changeCount = 0;
 
                 const c = mount(
@@ -1057,7 +1023,7 @@
                 input.blur();
                 await tick();
 
-                assertEqual(changeCount, 1, 'a checkbox commits atomically on click, before any rebuild — its native change: already worked, and must not now fire twice');
+                assertEqual(changeCount, 1, 'a checkbox commits atomically on click — change: must fire exactly once, never duplicated');
 
                 c.destroy();
             });

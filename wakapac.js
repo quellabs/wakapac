@@ -182,6 +182,10 @@
     // Non-text input types that commit values via the change event.
     const CHANGE_INPUT_TYPES = new Set(['checkbox', 'radio', 'color', 'range', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
 
+    // Matches a `foreach:` binding anywhere in a foreach item's own template
+    // (see rebuildForeachesForBatch's leaf-item-mutation exception).
+    const NESTED_FOREACH_RE = /data-pac-bind\s*=\s*["'][^"']*\bforeach\s*:/;
+
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
      * Populated on first use to avoid repeated reflection on wakaPAC.
@@ -2730,102 +2734,6 @@
                 self.dispatchToContainer(container, customEvent);
             });
 
-            // See handleForeachChangeFocusIn/Out: a foreach rebuild defeats
-            // native `change` tracking for a text control bound inside it.
-            document.addEventListener('focusin', this.handleForeachChangeFocusIn.bind(this));
-            document.addEventListener('focusout', this.handleForeachChangeFocusOut.bind(this));
-        },
-
-        /**
-         * Resolves the Runtime owning `target`, via its nearest
-         * [data-pac-id] container — `this` is the shared dispatcher, not a
-         * component instance.
-         * @param {Element} target
-         * @returns {Object|null}
-         */
-        resolveOwningRuntime(target) {
-            const container = target.closest ? target.closest(CONTAINER_SEL) : null;
-
-            return container ? window.PACRegistry.get(Utils.getPacId(container)) : null;
-        },
-
-        /**
-         * True for text-like inputs/textareas, the only controls where a
-         * foreach rebuild can defeat native `change` tracking. Checkbox/
-         * radio/etc. commit atomically on click and need no help.
-         * @param {Element} target
-         * @returns {boolean}
-         */
-        isTextLikeChangeTarget(target) {
-            return target.tagName === 'TEXTAREA' ||
-                (target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type));
-        },
-
-        /**
-         * Seeds the "changed since focus" baseline for a foreach-bound text
-         * control. Skipped if restoreForeachFocus already carried one over.
-         * @param {FocusEvent} event
-         * @returns {void}
-         */
-        handleForeachChangeFocusIn(event) {
-            const target = event.target;
-
-            if (!this.isTextLikeChangeTarget(target)) {
-                return;
-            }
-
-            const runtime = this.resolveOwningRuntime(target);
-
-            if (!runtime) {
-                return;
-            }
-
-            const mappingData = runtime.interpolationMap.get(target);
-
-            if (!mappingData || !mappingData.bindings.change || !runtime.extractClosestForeachContext(target)) {
-                return;
-            }
-
-            const cache = Utils.getPacCache(target);
-
-            if (cache.changeBaselineValue === undefined) {
-                cache.changeBaselineValue = target.value;
-            }
-        },
-
-        /**
-         * Fires `change:` for a foreach text control whose value differs
-         * from its focus-time baseline, since native `change` can't detect
-         * this itself once the control has been rebuilt mid-edit.
-         * @param {FocusEvent} event
-         * @returns {void}
-         */
-        handleForeachChangeFocusOut(event) {
-            const target = event.target;
-
-            if (!this.isTextLikeChangeTarget(target)) {
-                return;
-            }
-
-            const runtime = this.resolveOwningRuntime(target);
-
-            if (!runtime) {
-                return;
-            }
-
-            const mappingData = runtime.interpolationMap.get(target);
-
-            if (!mappingData || !mappingData.bindings.change || !runtime.extractClosestForeachContext(target)) {
-                return;
-            }
-
-            const cache = Utils.getPacCache(target);
-
-            if (typeof cache.changeBaselineValue === 'string' && target.value !== cache.changeBaselineValue) {
-                runtime.handleDomChange(event);
-            }
-
-            delete cache.changeBaselineValue;
         },
 
         /**
@@ -8003,16 +7911,22 @@
      * flushed together (see flushReactiveChanges). A foreach element needs
      * rebuilding when any change in the batch satisfies any of the following:
      *   1. Its bound array is exactly the array path that changed, is nested
-     *      under it (e.g. `foreach: todos` when `todos` was mutated, or
-     *      `foreach: rows[1].cells` when `rows[1].cells[3]` changed), or is
-     *      an ancestor of it (e.g. `foreach: data.items` when `data` itself
-     *      was reassigned, replacing the array wholesale).
+     *      under it (e.g. `foreach: rows[1].cells` when `rows[1].cells[3]`
+     *      changed), or is an ancestor of it (e.g. `foreach: data.items` when
+     *      `data` itself was reassigned, replacing the array wholesale).
      *   2. Its foreach expression is a computed property that depends on the
      *      changed property (e.g. changing `filter` — or mutating `todos`,
      *      which `filteredTodos` reads — rebuilds `foreach: filteredTodos`).
      *   3. The changed property is used as a dynamic bracket key inside the
      *      foreach expression (e.g. changing `region` rebuilds
      *      `foreach: cities[country][region]`).
+     * Exception to rule 1: a bare `foreach: todos` (not computed, filtered,
+     * ternary-sourced, or nested) skips the rebuild when the match is only a
+     * leaf mutation on an existing item (`todos[0].done = true`) — every
+     * structural array change reports at the array's own path instead (see
+     * createReactiveArrayMethod/handleArrayLengthSet), so this can't be one,
+     * and every bound sub-value already updates on its own regardless (see
+     * updateElementBindings/updateTextInterpolations).
      * Each matching element is rebuilt exactly once per batch, no matter how
      * many changes or rules matched it — e.g. a computed foreach over an array
      * that was itself directly mutated (rules 1 and 2 both match), or two
@@ -8021,7 +7935,7 @@
      *   pac:change event's `detail`: {path, oldValue, newValue})
      */
     Runtime.prototype.rebuildForeachesForBatch = function(changes) {
-        // element -> { directMatch: boolean, previousArray, previousArraySet: boolean }
+        // element -> { directMatch: boolean, needsRebuild: boolean, previousArray, previousArraySet: boolean }
         const matched = new Map();
 
         for (const change of changes) {
@@ -8080,7 +7994,7 @@
                 let info = matched.get(element);
 
                 if (!info) {
-                    info = { directMatch: false, previousArray: undefined, previousArraySet: false };
+                    info = { directMatch: false, needsRebuild: false, previousArray: undefined, previousArraySet: false };
                     matched.set(element, info);
                 }
 
@@ -8091,6 +8005,35 @@
                 // the batch is enough to prefer evaluateForeachArray.
                 if (directMatch) {
                     info.directMatch = true;
+                }
+
+                // A bare `foreach: rows` — not a computed/filtered/ternary
+                // expression, nested `row.cells`, or anything else resolved
+                // indirectly — can only change what renders via the array
+                // itself — every structural mutation (push/splice/sort/
+                // length/reassignment) reports its change at the array's own
+                // path, never nested (see createReactiveArrayMethod/
+                // handleArrayLengthSet). A leaf mutation on an existing item
+                // (nested under that path, not equal to it) can't affect
+                // membership or order then, and every bound sub-value
+                // updates on its own regardless (see updateElementBindings/
+                // updateTextInterpolations in flushReactiveChanges) — so it
+                // needs no rebuild here. Restricted to a bare identifier so
+                // this never has to reason about what a resolved/computed
+                // expression's actual source turned out to be, and excludes
+                // any item template containing its own nested `foreach:` —
+                // a nested foreach's correctness currently depends on being
+                // freshly re-scanned by the outer rebuild, independent of
+                // whether its own match rules would also catch the change.
+                const isBareArrayIdentifier = /^[A-Za-z_$][\w$]*$/.test(mappingData.foreachExpr) &&
+                    mappingData.foreachExpr === mappingData.sourceArray;
+                const hasNestedForeach = NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
+                const isLeafItemMutation = directMatch && isBareArrayIdentifier && !hasNestedForeach &&
+                    pathString !== mappingData.foreachExpr &&
+                    (pathString.startsWith(mappingData.foreachExpr + '.') || pathString.startsWith(mappingData.foreachExpr + '['));
+
+                if (computedMatch || bracketMatch || (directMatch && !isLeafItemMutation)) {
+                    info.needsRebuild = true;
                 }
 
                 // oldValue is only "this array before the change" when the
@@ -8106,8 +8049,14 @@
         }
 
         // Render each matched element exactly once, after the whole batch has
-        // been scanned.
+        // been scanned. Skips an element whose only matches were leaf item
+        // mutations on a plain array reference (see above) — nothing about
+        // what it renders could have changed.
         for (const [element, info] of matched) {
+            if (!info.needsRebuild) {
+                continue;
+            }
+
             const array = info.directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
             this.renderForeach(element, array, info.previousArray);
         }
@@ -9255,9 +9204,6 @@
         // "no snapshot was available" in restoreForeachFocus.
         const hasItem = Array.isArray(previousArray) && context.index < previousArray.length;
 
-        // Carried onto the replacement by restoreForeachFocus — see _setupFormEvents.
-        const activeCache = active._pacCache;
-
         return {
             foreachId: context.foreachId,
             index: context.index,
@@ -9265,8 +9211,7 @@
             item: hasItem ? previousArray[context.index] : undefined,
             path: path,
             selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
-            selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
-            changeBaselineValue: activeCache && typeof activeCache.changeBaselineValue === 'string' ? activeCache.changeBaselineValue : undefined
+            selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
         };
     };
 
@@ -9276,7 +9221,7 @@
      * longer exists (e.g. it was removed by the change that triggered this
      * rebuild).
      * @param {Element} foreachElement - The just-rebuilt foreach container
-     * @param {?{foreachId: string, index: number, hasItem: boolean, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null), changeBaselineValue: (string|undefined)}} snapshot
+     * @param {?{foreachId: string, index: number, hasItem: boolean, item: *, path: number[], selectionStart: (number|null), selectionEnd: (number|null)}} snapshot
      *   The value returned by captureForeachFocus, or null.
      * @param {Array} [sourceArray] - The bound array's current contents, used
      *   to relocate a captured item by identity; falls back to the captured
@@ -9320,11 +9265,6 @@
 
         if (!target || typeof target.focus !== 'function') {
             return;
-        }
-
-        // Carries the baseline over — see handleForeachChangeFocusIn.
-        if (snapshot.changeBaselineValue !== undefined) {
-            Utils.getPacCache(target).changeBaselineValue = snapshot.changeBaselineValue;
         }
 
         target.focus();
