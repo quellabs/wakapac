@@ -182,6 +182,10 @@
     // Non-text input types that commit values via the change event.
     const CHANGE_INPUT_TYPES = new Set(['checkbox', 'radio', 'color', 'range', 'date', 'datetime-local', 'month', 'week', 'time', 'file']);
 
+    // Matches a `foreach:` binding anywhere in a foreach item's own template
+    // (see rebuildForeachesForBatch's leaf-item-mutation exception).
+    const NESTED_FOREACH_RE = /data-pac-bind\s*=\s*["'][^"']*\bforeach\s*:/;
+
     /**
      * Reverse mapping cache from virtual-key codes to human-readable names.
      * Populated on first use to avoid repeated reflection on wakaPAC.
@@ -2826,18 +2830,28 @@
                     // The DOM element whose size changed
                     const container = entry.target;
 
-                    // Resolve the reactive abstraction for this element
-                    const abstraction = self._getObservedAbstraction(container);
+                    // Resolve the owning component (not just its abstraction —
+                    // applyContainerMetrics is a Runtime method)
+                    const component = window.PACRegistry.getByElement(container);
 
-                    // Only proceed if a valid abstraction layer exists
-                    if (abstraction) {
-                        // Normalize reported size to integer pixels
+                    // Only proceed if a valid component/abstraction exists
+                    if (component && component.abstraction) {
+                        // Refresh containerWidth/Height and the scroll-derived
+                        // fields through the same path as every other geometry
+                        // trigger (scroll, window resize, deferred post-mutation
+                        // re-measure), so they all agree on one box model
+                        // (clientWidth/clientHeight) instead of this callback
+                        // writing its own contentRect-based reading.
+                        component.applyContainerMetrics(Runtime.measureContainer(container));
+
+                        // Normalize reported size to integer pixels for the
+                        // MSG_SIZE message below — this intentionally keeps
+                        // reporting the raw ResizeObserver contentRect reading,
+                        // distinct from the clientWidth-based containerWidth/
+                        // Height above, since it's relaying what the observer
+                        // actually fired with, borderBoxSize/contentBoxSize included
                         const width = Math.round(entry.contentRect.width);
                         const height = Math.round(entry.contentRect.height);
-
-                        // Persist latest container dimensions on the abstraction
-                        abstraction.containerWidth = width;
-                        abstraction.containerHeight = height;
 
                         // Determine logical size state used by the message system
                         let sizeType;
@@ -4555,6 +4569,55 @@
         },
 
         /**
+         * Reduces an AST node down to the single addressable path it refers
+         * to, when it refers to one at all — e.g. the AST for `row.detail.lines`
+         * or `items[0].name` becomes that same dotted/bracketed string. A
+         * `ternary` node reduces to whichever branch is actually active,
+         * evaluating its condition the same way `evaluate()`'s own `case
+         * 'ternary'` does, then recursing into that branch — so a ternary
+         * guarding a path (`cond ? a.b : c.d`) is just one more reducible
+         * shape here, not a case the caller needs to special-case itself.
+         * @param {Object} node - AST node.
+         * @param {Object} [context] - Data context, needed only to evaluate a
+         *   `ternary` node's condition.
+         * @param {Object|null} [scope] - Scope resolver, needed only to
+         *   evaluate a `ternary` node's condition.
+         * @returns {string|null} The path string, or null if `node` doesn't
+         *   reduce to one (e.g. it contains a method call, computed index, or
+         *   operator).
+         */
+        nodeToPlainPath(node, context, scope) {
+            if (node.type === 'identifier') {
+                return node.name;
+            }
+
+            if (node.type === 'member') {
+                const objectPath = this.nodeToPlainPath(node.object, context, scope);
+                return objectPath === null ? null : `${objectPath}.${node.property}`;
+            }
+
+            if (node.type === 'index' && node.index.type === 'literal' && typeof node.index.value === 'number') {
+                const objectPath = this.nodeToPlainPath(node.object, context, scope);
+                return objectPath === null ? null : `${objectPath}[${node.index.value}]`;
+            }
+
+            if (node.type === 'ternary') {
+                let conditionValue;
+
+                try {
+                    conditionValue = this.evaluate(node.condition, context, scope);
+                } catch (_error) {
+                    return null;
+                }
+
+                const activeNode = conditionValue ? node.trueValue : node.falseValue;
+                return this.nodeToPlainPath(activeNode, context, scope);
+            }
+
+            return null;
+        },
+
+        /**
          * Checks if current token matches any of the given types
          * @param {...string} types - Token types to match
          * @returns {boolean} True if current token matches any type
@@ -5800,6 +5863,75 @@
         }
     };
 
+    // =============================================================================
+    // Layout metrics scheduler
+    // =============================================================================
+
+    /**
+     * Batches layout measurements across Runtime instances into one flush,
+     * avoiding redundant reflows from DOM mutations in the same frame.
+     * Reads are deferred to a setTimeout after the next rAF, not a nested
+     * rAF, so another component's own binding scan can't still sneak a DOM
+     * write in before our read and force the reflow back.
+     */
+    const LayoutMetricsScheduler = {
+        /** @type {Set<Runtime>} Runtimes queued for re-measurement */
+        pending: new Set(),
+
+        /** @type {boolean} Whether a flush is already queued */
+        scheduled: false,
+
+        /**
+         * Queues a runtime for a batched layout re-measure once the current
+         * frame has finished rendering, coalescing repeated calls (e.g.
+         * multiple binding scans in the same tick) into a single flush.
+         * @param {Runtime} runtime - The runtime whose container needs re-measuring
+         */
+        schedule(runtime) {
+            this.pending.add(runtime);
+
+            if (this.scheduled) {
+                return;
+            }
+
+            this.scheduled = true;
+            requestAnimationFrame(() => setTimeout(() => this.flush(), 0));
+        },
+
+        /**
+         * Measures every queued runtime's container, then applies the results.
+         * Measurements are gathered before any are applied, since applying one
+         * runtime's result can itself change the DOM and invalidate layout for
+         * a runtime measured later in the same pass.
+         */
+        flush() {
+            const runtimes = Array.from(this.pending).filter(item => !item.destroyed);
+            this.pending.clear();
+            this.scheduled = false;
+
+            if (!runtimes.length) {
+                return;
+            }
+
+            const documentWidth = document.documentElement.scrollWidth;
+            const documentHeight = document.documentElement.scrollHeight;
+            const measurements = runtimes.map(item => ({
+                runtime: item,
+                ...Runtime.measureContainer(item.container)
+            }));
+
+            measurements.forEach(({ runtime, ...metrics }) => {
+                if (runtime.destroyed) {
+                    return;
+                }
+
+                runtime.abstraction.browserContentWidth = documentWidth;
+                runtime.abstraction.browserContentHeight = documentHeight;
+                runtime.applyContainerMetrics(metrics);
+            });
+        }
+    };
+
     // ========================================================================
     // COMPONENT RUNTIME
     // ========================================================================
@@ -5952,14 +6084,27 @@
                 return;
             }
 
+            // Skip the write when the DOM is already at this position. Without this guard,
+            // code that observes the current scroll position and mirrors it back onto the
+            // abstraction (e.g. scroll/resize state sync) causes a redundant scrollTo/scrollLeft
+            // write every tick, which invalidates layout and forces a synchronous reflow on the
+            // next geometry read.
             if (prop === 'containerScrollX' && container) {
-                container.scrollLeft = newValue;
+                if (container.scrollLeft !== newValue) {
+                    container.scrollLeft = newValue;
+                }
             } else if (prop === 'containerScrollY' && container) {
-                container.scrollTop = newValue;
+                if (container.scrollTop !== newValue) {
+                    container.scrollTop = newValue;
+                }
             } else if (prop === 'browserScrollX') {
-                window.scrollTo(newValue, window.scrollY);
+                if (window.scrollX !== newValue) {
+                    window.scrollTo(newValue, window.scrollY);
+                }
             } else if (prop === 'browserScrollY') {
-                window.scrollTo(window.scrollX, newValue);
+                if (window.scrollY !== newValue) {
+                    window.scrollTo(window.scrollX, newValue);
+                }
             }
         }
 
@@ -6333,6 +6478,14 @@
 
         // 2D canvases perform an initial synchronous paint and require no further setup.
         if (this.contextType === '2d') {
+            // containerWidth/Height are normally populated by the deferred,
+            // batched LayoutMetricsScheduler flush (see scheduleLayoutMetricsUpdate)
+            // to avoid forcing a reflow on every binding scan. But this paint is
+            // itself synchronous by design, so measure synchronously here too —
+            // otherwise msgProc's first MSG_PAINT would run with containerWidth/
+            // Height still at their 0 defaults.
+            this.applyContainerMetrics(Runtime.measureContainer(this.container));
+
             DomUpdateTracker.invalidateRect(this.abstraction.pacId);
             DomUpdateTracker.flushPaintQueue();
         }
@@ -6494,27 +6647,51 @@
     // =============================================================================
 
     /**
+     * Reads the current geometry of a container element in the single shape
+     * every container-metrics trigger (scroll, ResizeObserver, window resize,
+     * deferred post-mutation re-measure) feeds into applyContainerMetrics, so
+     * they all agree on one box model (clientWidth/clientHeight) instead of
+     * each picking its own.
+     * @param {Element} container
+     * @returns {{scrollX: number, scrollY: number, clientWidth: number, clientHeight: number, contentWidth: number, contentHeight: number}}
+     */
+    Runtime.measureContainer = function(container) {
+        return {
+            scrollX: container.scrollLeft,
+            scrollY: container.scrollTop,
+            clientWidth: container.clientWidth,
+            clientHeight: container.clientHeight,
+            contentWidth: container.scrollWidth,
+            contentHeight: container.scrollHeight
+        };
+    };
+
+    /**
      * Callback to update container scroll state
      */
     Runtime.prototype.updateContainerScrollState = function() {
-        // Get scroll measurements
-        const scrollX = this.container.scrollLeft;
-        const scrollY = this.container.scrollTop;
-        const clientWidth = this.container.clientWidth;
-        const clientHeight = this.container.clientHeight;
-        const scrollContentWidth = this.container.scrollWidth;
-        const scrollContentHeight = this.container.scrollHeight;
+        this.applyContainerMetrics(Runtime.measureContainer(this.container));
+    }
 
-        // Calculate scrollable state (use existing containerWidth/Height for visible dimensions)
-        const isScrollable =
-            scrollContentWidth > this.abstraction.containerWidth ||
-            scrollContentHeight > this.abstraction.containerHeight;
+    /**
+     * Applies a Runtime.measureContainer() reading to the reactive abstraction.
+     * The single place that writes containerWidth/Height and the scroll-derived
+     * fields, so every trigger that re-measures the container (scroll,
+     * ResizeObserver, window resize, deferred post-mutation re-measure) updates
+     * them together and consistently rather than each writing its own subset.
+     * @param {Object} metrics - A Runtime.measureContainer() reading
+     */
+    Runtime.prototype.applyContainerMetrics = function(metrics) {
+        const { scrollX, scrollY, clientWidth, clientHeight, contentWidth, contentHeight } = metrics;
+        const isScrollable = contentWidth > clientWidth || contentHeight > clientHeight;
 
         // Update individual properties
+        this.abstraction.containerWidth = clientWidth;
+        this.abstraction.containerHeight = clientHeight;
         this.abstraction.containerScrollX = scrollX;
         this.abstraction.containerScrollY = scrollY;
-        this.abstraction.containerContentWidth = scrollContentWidth;
-        this.abstraction.containerContentHeight = scrollContentHeight;
+        this.abstraction.containerContentWidth = contentWidth;
+        this.abstraction.containerContentHeight = contentHeight;
         this.abstraction.containerIsScrollable = isScrollable;
 
         // Update scroll window object
@@ -6595,7 +6772,7 @@
         // foreach items rendered, etc.) — recompute scroll metrics now, tied to
         // the actual DOM mutation rather than an independently-timed check that
         // could fire before or after rendering completes.
-        self.updateContainerScrollState();
+        LayoutMetricsScheduler.schedule(self);
     };
 
     /**
@@ -6757,10 +6934,27 @@
      * brand-new elements that aren't part of the root array at all, so
      * treating the root as the source there would bind `item` to the wrong
      * (untransformed) value — see issue #198.
-     * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`).
+     *
+     * `computedName` is also, in practice, whatever raw expression a `foreach:`
+     * binding used — including a ternary guard (`cond ? path : fallback`),
+     * which is not a computed/data name at all. Reducing it via
+     * `ExpressionParser.nodeToPlainPath()` first — the same reducer used for
+     * any other path-shaped node — resolves a ternary source against
+     * whichever branch is actually active, keeping the rest of this method
+     * working against a plain path instead of corrupting it — see issue with
+     * nested `{{ }}` interpolation inside a ternary-sourced nested `foreach`.
+     * @param {string} computedName - Name of the computed getter (e.g. `"filteredTodos"`),
+     *   or a `foreach:` binding's raw source expression.
+     * @param {Element} [foreachElement] - The foreach element, needed to resolve
+     *   a ternary source's condition against the correct scope.
      * @returns {string|null} The source array property name (e.g. `"todos"`) or null if not found.
      */
-    Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName) {
+    Runtime.prototype.inferArrayRoot = function inferArrayRoot(computedName, foreachElement) {
+        const node = ExpressionCache.parseExpression(computedName);
+        const scope = foreachElement ? this.makeScopeResolverFor(foreachElement) : null;
+        const resolvedPath = node ? ExpressionParser.nodeToPlainPath(node, this.abstraction, scope) : null;
+        const lookupName = resolvedPath !== null ? resolvedPath : computedName;
+
         // Whether a computed's current output is identity-preserving can depend on
         // its data (e.g. a computed that branches between .map() and .filter()), so
         // the answer is only safe to cache within a single reactive-update pass, not
@@ -6770,24 +6964,29 @@
         // rebuild within the same pass (renderForeach replaces innerHTML wholesale)
         // — without this cache, the identity check below would otherwise re-run,
         // and re-evaluate the computed itself, once per outer item per outer render.
+        //
+        // Cached by lookupName, not computedName: a ternary's raw expression text
+        // can resolve to a different active branch per item (same text, different
+        // scope), so only the already-resolved branch path is safe to reuse across
+        // sibling items within the pass.
         const cache = this.arrayRootCache;
 
-        if (cache.has(computedName)) {
-            return cache.get(computedName);
+        if (cache.has(lookupName)) {
+            return cache.get(lookupName);
         }
 
         // Step 1: Try dependency map (cheap and reliable if set up correctly).
-        let result = computedName; // Fallback if nothing matches below
+        let result = lookupName; // Fallback if nothing matches below
 
         for (const [rootProperty, dependentList] of this.dependencies) {
             const rootValue = this.abstraction[rootProperty];
             const isArrayRoot = Array.isArray(rootValue);
 
-            if (dependentList.has(computedName) && isArrayRoot) {
+            if (dependentList.has(lookupName) && isArrayRoot) {
                 let computedValue;
 
                 try {
-                    computedValue = this.abstraction[computedName];
+                    computedValue = this.abstraction[lookupName];
                 } catch (_error) {
                     continue;
                 }
@@ -6805,7 +7004,7 @@
             }
         }
 
-        cache.set(computedName, result);
+        cache.set(lookupName, result);
         return result;
     };
 
@@ -7706,30 +7905,31 @@
         this.triggerWatcher(rootProperty, newParentObject, oldParentObject);
     };
 
+
     /**
-     * Handles foreach rebuilds triggered by a batch of reactive property changes
-     * flushed together (see flushReactiveChanges). A foreach element needs
-     * rebuilding when any change in the batch satisfies any of the following:
-     *   1. Its bound array is exactly the array path that changed, is nested
-     *      under it (e.g. `foreach: todos` when `todos` was mutated, or
-     *      `foreach: rows[1].cells` when `rows[1].cells[3]` changed), or is
-     *      an ancestor of it (e.g. `foreach: data.items` when `data` itself
-     *      was reassigned, replacing the array wholesale).
-     *   2. Its foreach expression is a computed property that depends on the
-     *      changed property (e.g. changing `filter` — or mutating `todos`,
-     *      which `filteredTodos` reads — rebuilds `foreach: filteredTodos`).
-     *   3. The changed property is used as a dynamic bracket key inside the
-     *      foreach expression (e.g. changing `region` rebuilds
-     *      `foreach: cities[country][region]`).
-     * Each matching element is rebuilt exactly once per batch, no matter how
-     * many changes or rules matched it — e.g. a computed foreach over an array
-     * that was itself directly mutated (rules 1 and 2 both match), or two
-     * unrelated changes in the same batch touching the same foreach.
-     * @param {Object[]} changes - The batch's queued changes (each a former
-     *   pac:change event's `detail`: {path, oldValue, newValue})
+     * Rebuilds foreach elements affected by a batch of reactive changes
+     * (see flushReactiveChanges). A rebuild is triggered when:
+     *
+     * 1. The changed path matches, contains, or is nested within the
+     *    foreach array path (e.g. changing `data` affects `data.items`).
+     * 2. A computed foreach expression depends on the changed property
+     *    (e.g. changing `filter` or `todos` affects `filteredTodos`).
+     * 3. A dynamic bracket key changes (e.g. `region` in
+     *    `foreach: cities[country][region]`).
+     *
+     * Exception: A bare `foreach: todos` skips rebuilds for nested item
+     * changes like `todos[0].done`. Structural array changes are reported
+     * at the array's own path, while item bindings update independently.
+     * This optimization excludes computed expressions and templates with
+     * nested foreach loops, which require outer rebuilds.
+     *
+     * Each affected foreach element is rebuilt at most once per batch,
+     * even when multiple changes or conditions match.
+     *
+     * @param {Object[]} changes - Queued changes ({path, oldValue, newValue}).
      */
     Runtime.prototype.rebuildForeachesForBatch = function(changes) {
-        // element -> { directMatch: boolean, previousArray, previousArraySet: boolean }
+        // element -> { directMatch: boolean, needsRebuild: boolean, previousArray, previousArraySet: boolean }
         const matched = new Map();
 
         for (const change of changes) {
@@ -7788,7 +7988,7 @@
                 let info = matched.get(element);
 
                 if (!info) {
-                    info = { directMatch: false, previousArray: undefined, previousArraySet: false };
+                    info = { directMatch: false, needsRebuild: false, previousArray: undefined, previousArraySet: false };
                     matched.set(element, info);
                 }
 
@@ -7799,6 +7999,21 @@
                 // the batch is enough to prefer evaluateForeachArray.
                 if (directMatch) {
                     info.directMatch = true;
+                }
+
+                // A bare `foreach: rows` only needs rebuilding for structural array changes,
+                // which are always reported at the array's own path. Nested item changes
+                // cannot affect membership or order, and bindings update independently.
+                // This optimization excludes computed expressions (unknown dependencies)
+                // and nested `foreach` templates (which rely on outer rebuilds to re-scan).
+                const isBareArrayIdentifier = /^[A-Za-z_$][\w$]*$/.test(mappingData.foreachExpr) && mappingData.foreachExpr === mappingData.sourceArray;
+                const hasNestedForeach = NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
+                const isLeafItemMutation = directMatch && isBareArrayIdentifier && !hasNestedForeach &&
+                    pathString !== mappingData.foreachExpr &&
+                    (pathString.startsWith(mappingData.foreachExpr + '.') || pathString.startsWith(mappingData.foreachExpr + '['));
+
+                if (computedMatch || bracketMatch || (directMatch && !isLeafItemMutation)) {
+                    info.needsRebuild = true;
                 }
 
                 // oldValue is only "this array before the change" when the
@@ -7814,8 +8029,14 @@
         }
 
         // Render each matched element exactly once, after the whole batch has
-        // been scanned.
+        // been scanned. Skips an element whose only matches were leaf item
+        // mutations on a plain array reference (see above) — nothing about
+        // what it renders could have changed.
         for (const [element, info] of matched) {
+            if (!info.needsRebuild) {
+                continue;
+            }
+
             const array = info.directMatch ? this.evaluateForeachArray(element) : this.getChangedForeachArray(element);
             this.renderForeach(element, array, info.previousArray);
         }
@@ -7888,13 +8109,17 @@
                 this.abstraction.browserScrollX = stateData.scrollX;
                 this.abstraction.browserScrollY = stateData.scrollY;
 
-                // Get bounding rect
-                const rect = this.container.getBoundingClientRect();
+                // Refresh containerWidth/Height and the scroll-derived fields
+                // through the same path as every other geometry trigger
+                // (scroll, ResizeObserver, deferred post-mutation re-measure),
+                // so they all agree on one box model (clientWidth/clientHeight)
+                // instead of this handler writing its own getBoundingClientRect
+                // reading.
+                this.applyContainerMetrics(Runtime.measureContainer(this.container));
 
-                // Set dimensions
-                this.abstraction.containerClientRect = Utils.domRectToSimpleObject(rect);
-                this.abstraction.containerWidth = rect.width;
-                this.abstraction.containerHeight = rect.height;
+                // containerClientRect is its own distinct snapshot (border-box,
+                // includes transforms) — unrelated to the box model above
+                this.abstraction.containerClientRect = Utils.domRectToSimpleObject(this.container.getBoundingClientRect());
 
                 // Use Utils for consistent visibility calculation
                 this.abstraction.containerVisible = Utils.isElementVisible(this.container);
@@ -8723,15 +8948,15 @@
 
         // Initialize total document width/height including content outside the viewport
         // Useful for calculating scroll percentages or infinite scroll triggers
-        abstraction.browserContentWidth = document.documentElement.scrollWidth;
-        abstraction.browserContentHeight = document.documentElement.scrollHeight;
+        abstraction.browserContentWidth = window.innerWidth;
+        abstraction.browserContentHeight = window.innerHeight;
 
         // Container scroll properties
         abstraction.containerIsScrollable = false;                         // Can scroll in any direction
-        abstraction.containerScrollX = this.container.scrollLeft;           // Current horizontal scroll position
-        abstraction.containerScrollY = this.container.scrollTop;            // Current vertical scroll position
-        abstraction.containerContentWidth = this.container.scrollWidth;     // Total scrollable content width
-        abstraction.containerContentHeight = this.container.scrollHeight;   // Total scrollable content height
+        abstraction.containerScrollX = 0; // Filled after the first layout pass
+        abstraction.containerScrollY = 0;
+        abstraction.containerContentWidth = 0;
+        abstraction.containerContentHeight = 0;
         abstraction.containerScrollWindow = {
             top: 0,        // scrollTop
             left: 0,       // scrollLeft
@@ -8752,8 +8977,8 @@
         abstraction.containerFocus = Utils.isElementDirectlyFocused(this.container);
         abstraction.containerFocusWithin = Utils.isElementFocusWithin(this.container);
         abstraction.containerClientRect = { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
-        abstraction.containerWidth = this.container.clientWidth;
-        abstraction.containerHeight = this.container.clientHeight;
+        abstraction.containerWidth = 0;
+        abstraction.containerHeight = 0;
 
         // Screen orientation
         abstraction.browserOrientationAngle = screen.orientation ? screen.orientation.angle : 0;
@@ -9085,7 +9310,7 @@
             // resolution, change-detection matching) see the same fresh value.
             // For filtered/sorted expressions the foreach may render a subset of a larger
             // array — fall back to the evaluated array itself when no root can be found.
-            const sourceRootName = this.inferArrayRoot(mappingData.foreachExpr);
+            const sourceRootName = this.inferArrayRoot(mappingData.foreachExpr, foreachElement);
             mappingData.sourceArray = sourceRootName;
             const sourceRootArray = sourceRootName && this.abstraction[sourceRootName];
             const sourceArray = Array.isArray(sourceRootArray) ? sourceRootArray : array;
