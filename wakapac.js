@@ -7184,13 +7184,8 @@
      * @returns {void}
      */
     Runtime.prototype.handlePacEvent = function(event) {
-        // MSG_INPUT_COMPLETE exists specifically to hand msgProc the settled,
-        // post-mutation value (see handleDomInputComplete) — unlike every other
-        // message here, it isn't in CANCELLABLE_MESSAGES, so msgProc never gets
-        // a say in whether this sync happens. Doing it before msgProc runs, instead
-        // of after via the switch below, is what makes a bound property like
-        // `this.someValue` already reflect the just-typed character inside msgProc,
-        // rather than the previous keystroke's value.
+        // Sync the settled value first so msgProc sees it — MSG_INPUT_COMPLETE
+        // isn't in CANCELLABLE_MESSAGES, so msgProc can't veto this anyway.
         if (event.message === MSG_INPUT_COMPLETE) {
             this.handleDomInputComplete(event);
         }

@@ -1,9 +1,6 @@
-// Regression coverage for issue #232: MSG_INPUT_COMPLETE exists to give
-// msgProc the settled, post-mutation value of a value-bound input (see
-// handleDomInputComplete's docblock). Previously msgProc ran before that
-// sync, so a msgProc reading the bound reactive property for the element
-// that triggered the event always saw the *previous* keystroke's value,
-// not the one that was just typed.
+// Regression coverage for #232: msgProc used to run before the value-bound
+// property was synced for MSG_INPUT_COMPLETE, so it always saw the previous
+// keystroke's value instead of the one just typed.
 
 const { test, expect } = require('@playwright/test');
 
