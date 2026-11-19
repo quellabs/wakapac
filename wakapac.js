@@ -7184,6 +7184,12 @@
      * @returns {void}
      */
     Runtime.prototype.handlePacEvent = function(event) {
+        // Sync the settled value first so msgProc sees it — MSG_INPUT_COMPLETE
+        // isn't in CANCELLABLE_MESSAGES, so msgProc can't veto this anyway.
+        if (event.message === MSG_INPUT_COMPLETE) {
+            this.handleDomInputComplete(event);
+        }
+
         // Call user's message handler (msgProc) before framework processes the event
         // This allows user code to intercept and handle messages first, Win32-style
         let preventDefault = false;
@@ -7237,8 +7243,7 @@
                 break;
 
             case MSG_INPUT_COMPLETE:
-                // Post-mutation input (input event - value is updated)
-                this.handleDomInputComplete(event);
+                // Already synced above, before msgProc ran — nothing left to do.
                 break;
 
             default: {
