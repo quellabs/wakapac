@@ -964,6 +964,18 @@
         },
 
         /**
+         * Checks whether a path is the same as, or nested under, a base path.
+         * A genuine descendant path always starts with base + '.' (property)
+         * or base + '[' (index) — see pathArrayToString.
+         * @param {string} base - The candidate ancestor path.
+         * @param {string} candidate - The path to test against base.
+         * @returns {boolean} True if candidate equals or is nested under base.
+         */
+        isDescendantPath(base, candidate) {
+            return candidate === base || candidate.startsWith(base + '.') || candidate.startsWith(base + '[');
+        },
+
+        /**
          * Determines if an element belongs to the specified PAC container.
          * An element belongs to a container if that container is its immediate PAC parent.
          * @param {Element} container - The PAC container element with data-pac-id attribute
@@ -8021,15 +8033,23 @@
                 }
 
                 // A bare `foreach: rows` only needs rebuilding for structural array changes,
-                // which are always reported at the array's own path. Nested item changes
-                // cannot affect membership or order, and bindings update independently.
+                // which are always reported at the array's own path. Nested property
+                // changes within an item (e.g. `todos[0].done`) cannot affect membership
+                // or order, and bindings update independently. Replacing a whole item
+                // (e.g. `todos[0] = x`) is NOT such a leaf mutation — the path ends right
+                // after the index, with nothing nested beneath it — so it still rebuilds.
                 // This optimization excludes computed expressions (unknown dependencies)
                 // and nested `foreach` templates (which rely on outer rebuilds to re-scan).
                 const isBareArrayIdentifier = /^[A-Za-z_$][\w$]*$/.test(mappingData.foreachExpr) && mappingData.foreachExpr === mappingData.sourceArray;
-                const hasNestedForeach = NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
-                const isLeafItemMutation = directMatch && isBareArrayIdentifier && !hasNestedForeach &&
-                    pathString !== mappingData.foreachExpr &&
-                    (pathString.startsWith(mappingData.foreachExpr + '.') || pathString.startsWith(mappingData.foreachExpr + '['));
+                // Cached on mappingData: the template never changes after creation.
+                mappingData._hasNestedForeach ??= NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
+                const indexPrefix = mappingData.foreachExpr + '[';
+                let isLeafItemMutation = false;
+
+                if (directMatch && isBareArrayIdentifier && !mappingData._hasNestedForeach && pathString.startsWith(indexPrefix)) {
+                    const closeBracketIndex = pathString.indexOf(']', indexPrefix.length);
+                    isLeafItemMutation = closeBracketIndex !== -1 && closeBracketIndex + 1 < pathString.length;
+                }
 
                 if (computedMatch || bracketMatch || (directMatch && !isLeafItemMutation)) {
                     info.needsRebuild = true;
@@ -9779,15 +9799,10 @@
             // Fetch the foreach expression and source array
             const { foreachExpr, sourceArray } = mappingData;
 
-            // A genuine descendant path always starts with base + '.' (property)
-            // or base + '[' (index) — see Utils.pathArrayToString.
-            const isDescendant = (base, candidate) =>
-                candidate === base || candidate.startsWith(base + '.') || candidate.startsWith(base + '[');
-
             // Matches if the changed path is the bound path, nested under it
             // (e.g. an item mutated), or an ancestor of it (e.g. its parent
             // object was reassigned, replacing the array).
-            const matches = (expr) => !!expr && (isDescendant(expr, arrayPath) || isDescendant(arrayPath, expr));
+            const matches = (expr) => !!expr && (Utils.isDescendantPath(expr, arrayPath) || Utils.isDescendantPath(arrayPath, expr));
 
             // Try the raw expressions first — no allocation needed
             if (matches(foreachExpr) || matches(sourceArray)) {
