@@ -6017,6 +6017,20 @@
         }
 
         /**
+         * Determines whether an object/array value should itself be wrapped in a
+         * reactive proxy. DOM nodes and other host objects or class instances are
+         * left untouched: they are not application data structures this runtime
+         * needs to track, and wrapping one in a Proxy breaks any native method on
+         * it that requires the real object as `this` (e.g. Node.prototype.closest
+         * throws "Illegal invocation" on a Proxy receiver).
+         * @param {*} value - The value being assigned or read
+         * @returns {boolean} True if the value is a plain object or array
+         */
+        function shouldWrapValue(value) {
+            return Array.isArray(value) || Utils.isPlainObject(value);
+        }
+
+        /**
          * Creates a wrapped array method that handles reactivity
          * @param {Array} target - The array being proxied
          * @param {string} methodName - The array method name (push, pop, etc.)
@@ -6037,7 +6051,7 @@
                 // Re-proxy all items with correct indices after the operation
                 // This ensures all objects have the proper path references
                 newArray.forEach((item, index) => {
-                    if (item && typeof item === 'object' && !item._isReactive) {
+                    if (item && typeof item === 'object' && !item._isReactive && shouldWrapValue(item)) {
                         const correctPath = currentPath.concat([index]);
                         newArray[index] = createProxy(item, correctPath);
                         newArray[index]._isReactive = true;
@@ -6155,7 +6169,7 @@
             }
 
             // If the value is an object/array and not already reactive, wrap it in a proxy
-            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop)) {
+            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop) && shouldWrapValue(val)) {
                 // Return raw value if the data is already proxied
                 if (val._externalProxy) {
                     return val;
@@ -6212,7 +6226,7 @@
             }
 
             // Wrap objects and arrays in proxies when they're assigned
-            if (newValue && typeof newValue === 'object') {
+            if (newValue && typeof newValue === 'object' && shouldWrapValue(newValue)) {
                 target[prop] = createProxy(newValue, propertyPath);
                 target[prop]._isReactive = true;
             } else {
@@ -7197,6 +7211,12 @@
      * @returns {void}
      */
     Runtime.prototype.handlePacEvent = function(event) {
+        // Sync the settled value first so msgProc sees it — MSG_INPUT_COMPLETE
+        // isn't in CANCELLABLE_MESSAGES, so msgProc can't veto this anyway.
+        if (event.message === MSG_INPUT_COMPLETE) {
+            this.handleDomInputComplete(event);
+        }
+
         // Call user's message handler (msgProc) before framework processes the event
         // This allows user code to intercept and handle messages first, Win32-style
         let preventDefault = false;
@@ -7250,8 +7270,7 @@
                 break;
 
             case MSG_INPUT_COMPLETE:
-                // Post-mutation input (input event - value is updated)
-                this.handleDomInputComplete(event);
+                // Already synced above, before msgProc ran — nothing left to do.
                 break;
 
             default: {

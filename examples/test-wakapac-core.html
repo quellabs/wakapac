@@ -234,6 +234,40 @@
                 c.destroy();
             });
 
+            suite('Reactive proxy and host-object values');
+
+            await test('a DOM element assigned to a reactive property is stored unwrapped', async function () {
+                const c = mount('<p id="out"></p>', { activeInput: null });
+                await tick();
+                const realInput = document.createElement('input');
+                c.abstraction.activeInput = realInput;
+                assert(c.abstraction.activeInput === realInput, 'the raw element is returned, not a Proxy wrapper around it');
+                c.destroy();
+            });
+
+            await test('a native DOM method still works on an element held by a reactive property', async function () {
+                const c = mount('<p id="out"></p>', { activeInput: null });
+                await tick();
+                const wrapper = document.createElement('div');
+                const realInput = document.createElement('input');
+                wrapper.appendChild(realInput);
+                c.abstraction.activeInput = realInput;
+                // Before this fix, reading the element back off a reactive property wrapped it
+                // in a Proxy, and native DOM methods throw "Illegal invocation" when called with
+                // a Proxy (rather than the real element) as the receiver.
+                assert(c.abstraction.activeInput.closest('div') === wrapper, 'closest() runs without throwing and returns the right element');
+                c.destroy();
+            });
+
+            await test('plain objects and arrays assigned to a reactive property are still wrapped reactively', async function () {
+                const c = mount('<p id="out">{{item.label}}</p>', { item: { label: 'a' } });
+                await tick();
+                c.abstraction.item = { label: 'b' };
+                await tick();
+                assertEqual(c.container.querySelector('#out').textContent, 'b', 'plain-object assignment still triggers a DOM update');
+                c.destroy();
+            });
+
             suite('Array reactivity (foreach)');
 
             await test('foreach renders one element per array item', async function () {
